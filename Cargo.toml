@@ -1,0 +1,61 @@
+[package]
+name = "jmap-server"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+backend_rocksdb = { path = "components/backend_rocksdb" }
+nlp = { path = "components/nlp" }
+
+[workspace]
+resolver = "2"
+members = [
+    "components/backend_rocksdb",
+    "components/nlp"
+]
+
+[profile.dev]
+opt-level = 0
+debug = 1
+codegen-units = 4
+lto = false
+incremental = true
+panic = 'unwind'
+debug-assertions = true
+overflow-checks = false
+rpath = false
+
+[profile.release]
+opt-level = 3
+debug = false
+codegen-units = 1
+lto = "thin"
+incremental = false
+panic = 'unwind'
+debug-assertions = false
+overflow-checks = false
+rpath = false
+
+#[profile.release.package.server]
+#opt-level = 1
+#codegen-units = 4
+
+[profile.test]
+opt-level = 0
+debug = 1
+codegen-units = 16
+lto = false
+incremental = true
+debug-assertions = true
+overflow-checks = true
+rpath = false
+
+[profile.bench]
+opt-level = 3
+debug = false
+codegen-units = 1
+lto = 'thin'
+incremental = false
+debug-assertions = false
+overflow-checks = false
+rpath = false

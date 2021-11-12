@@ -1,0 +1,13 @@
+[package]
+name = "nlp"
+version = "0.1.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+fst = "0.4.7" # FST
+whatlang = "0.12" # Language detection
+rust-stemmers = "1.2" # Stemmers
+tinysegmenter = "0.1" # Japanese stemmer
+jieba-rs = "0.6" # Chinese stemmer
+lz4_flex = { version = "0.9.0", default-features = false, features = ["checked-decode"] }
