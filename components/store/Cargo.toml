@@ -1,0 +1,10 @@
+[package]
+name = "store"
+version = "0.1.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+nlp = { path = "../nlp" }
+fst = "0.4.7" # FST
+lz4_flex = { version = "0.9.2", default-features = false, features = ["checked-decode"] }
