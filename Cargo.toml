@@ -4,14 +4,18 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-backend_rocksdb = { path = "components/backend_rocksdb" }
 nlp = { path = "components/nlp" }
+jmap_mail = { path = "components/jmap_mail" }
+store = { path = "components/store" }
+store_rocksdb = { path = "components/store_rocksdb" }
 
 [workspace]
 resolver = "2"
 members = [
-    "components/backend_rocksdb",
-    "components/nlp"
+    "components/nlp",
+    "components/jmap_mail",
+    "components/store",
+    "components/store_rocksdb",
 ]
 
 [profile.dev]

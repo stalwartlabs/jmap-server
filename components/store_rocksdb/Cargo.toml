@@ -1,9 +1,10 @@
 [package]
-name = "backend_rocksdb"
+name = "store_rocksdb"
 version = "0.1.0"
 edition = "2018"
 publish = false
 
 [dependencies]
+store = { path = "../store" }
 rocksdb = "0.17"
-roaring = "0.8"
+roaring = "0.8.1"

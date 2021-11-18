@@ -1,26 +1,29 @@
-pub mod object_builder;
-//pub mod search_snippet;
-//pub mod token_map;
+pub mod document;
+pub mod search_snippet;
+pub mod serialize;
+pub mod term_index;
 
-use object_builder::JMAPObjectBuilder;
+use document::DocumentBuilder;
 
 #[derive(Debug)]
-pub enum JMAPStoreError {
+pub enum StoreError {
+    InternalError(String),
     DataCorruption,
     NotFound,
     InvalidArgument,
 }
 
-pub type Result<T> = std::result::Result<T, JMAPStoreError>;
+pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub type AccountId = u32;
 pub type CollectionId = u8;
-pub type ObjectId = u64;
+pub type DocumentId = u32;
 pub type FieldId = u8;
 pub type TagId = u8;
 pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
+pub type ArrayPos = u16;
 
 pub enum FieldValue<'x> {
     Text(&'x str),
@@ -31,8 +34,8 @@ pub enum FieldValue<'x> {
 }
 
 pub enum Tag<'x> {
-    Static(u8),
-    Id(ObjectId),
+    Static(TagId),
+    Id(DocumentId),
     Text(&'x str),
 }
 
@@ -42,7 +45,7 @@ pub enum Filter<'x> {
     GreaterThan(FieldValue<'x>),
     GreaterEqualThan(FieldValue<'x>),
     Equal(FieldValue<'x>),
-    MatchAll(Vec<FieldValue<'x>>),
+    EqualMany(Vec<FieldValue<'x>>),
 }
 
 pub struct FilterCondition<'x> {
@@ -66,24 +69,65 @@ pub struct FilterOperator<'x> {
     pub conditions: Vec<Condition<'x>>,
 }
 
-pub trait JMAPStore {
-    fn set_tag(&mut self, account: AccountId, collection: CollectionId, tag: Tag) -> Result<()>;
-    fn clear_tag(&mut self, account: AccountId, collection: CollectionId, tag: Tag) -> Result<()>;
+pub struct OrderBy {
+    pub field: FieldId,
+    pub ascending: bool,
+}
+
+pub trait Store {
+    fn insert(
+        &self,
+        account: &AccountId,
+        collection: &CollectionId,
+        document: DocumentBuilder,
+    ) -> Result<DocumentId>;
+
+    fn get_value(
+        &self,
+        account: &AccountId,
+        collection: &CollectionId,
+        document: &DocumentId,
+        field: &FieldId,
+    ) -> Result<Option<Vec<u8>>>;
+    fn get_value_by_pos(
+        &self,
+        account: &AccountId,
+        collection: &CollectionId,
+        document: &DocumentId,
+        field: &FieldId,
+        pos: &ArrayPos,
+    ) -> Result<Option<Vec<u8>>>;
+
+    fn set_tag(
+        &mut self,
+        account: &AccountId,
+        collection: &CollectionId,
+        document: &DocumentId,
+        field: &FieldId,
+        tag: &Tag,
+    ) -> Result<()>;
+    fn clear_tag(
+        &mut self,
+        account: &AccountId,
+        collection: &CollectionId,
+        document: &DocumentId,
+        field: &FieldId,
+        tag: &Tag,
+    ) -> Result<()>;
+    fn has_tag(
+        &mut self,
+        account: &AccountId,
+        collection: &CollectionId,
+        document: &DocumentId,
+        field: &FieldId,
+        tag: &Tag,
+    ) -> Result<bool>;
 
     fn search(
         &self,
-        account: AccountId,
-        collection: CollectionId,
-        filter: Filter,
-    ) -> Result<Vec<ObjectId>>;
-    fn iterate(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        field: FieldId,
-        seek_to: Option<FilterCondition>,
-        ascending: bool,
-    ) -> Result<Vec<ObjectId>>;
-
-    fn index(&self, object: JMAPObjectBuilder) -> Result<ObjectId>;
+        account: &AccountId,
+        collection: &CollectionId,
+        filter: &Filter,
+        order_by: &[OrderBy],
+    ) -> Result<Vec<DocumentId>>;
 }

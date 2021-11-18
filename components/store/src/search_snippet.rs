@@ -1,4 +1,4 @@
-use nlp::tokenizers::Token;
+use crate::term_index::Term;
 
 fn escape_char(c: char, string: &mut String) {
     match c {
@@ -12,13 +12,13 @@ fn escape_char(c: char, string: &mut String) {
     }
 }
 
-pub fn generate_snippet(tokens: &[Token], parts: &[&str]) -> Option<Vec<String>> {
+pub fn generate_snippet(terms: &[Term], parts: &[&str]) -> Option<Vec<String>> {
     let mut result = Vec::new();
-    let mut tokens = tokens.iter().peekable();
+    let mut terms = terms.iter().peekable();
 
     for part in parts {
         let mut snippet = String::with_capacity(parts.len());
-        let start_offset = tokens.peek()?.offset as usize;
+        let start_offset = terms.peek()?.offset as usize;
 
         if start_offset > 0 {
             let mut word_count = 0;
@@ -44,28 +44,28 @@ pub fn generate_snippet(tokens: &[Token], parts: &[&str]) -> Option<Vec<String>>
             }
         }
 
-        while let Some(token) = tokens.next() {
+        while let Some(term) = terms.next() {
             snippet.push_str("<mark>");
             snippet.push_str(
-                part.get(token.offset as usize..token.offset as usize + token.len as usize)?,
+                part.get(term.offset as usize..term.offset as usize + term.len as usize)?,
             );
             snippet.push_str("</mark>");
 
-            let (next_offset, next_part_id) = if let Some(next_token) = tokens.peek() {
+            let (next_offset, next_field_num) = if let Some(next_term) = terms.peek() {
                 (
-                    if next_token.part_id == token.part_id {
-                        next_token.offset as usize
+                    if next_term.field_num == term.field_num {
+                        next_term.offset as usize
                     } else {
                         part.len()
                     },
-                    next_token.part_id,
+                    next_term.field_num,
                 )
             } else {
                 (part.len(), u16::MAX)
             };
 
             for char in part
-                .get(token.offset as usize + token.len as usize..next_offset)?
+                .get(term.offset as usize + term.len as usize..next_offset)?
                 .chars()
             {
                 if snippet.len() + 3 > 255 {
@@ -74,14 +74,14 @@ pub fn generate_snippet(tokens: &[Token], parts: &[&str]) -> Option<Vec<String>>
                 escape_char(char, &mut snippet);
             }
 
-            if next_part_id != token.part_id {
+            if next_field_num != term.field_num {
                 break;
             } else if snippet.len() + 3 > 255 {
-                while let Some(next_token) = tokens.peek() {
-                    if next_token.part_id != token.part_id {
+                while let Some(next_term) = terms.peek() {
+                    if next_term.field_num != term.field_num {
                         break;
                     }
-                    tokens.next();
+                    terms.next();
                 }
             }
         }
@@ -96,10 +96,7 @@ pub fn generate_snippet(tokens: &[Token], parts: &[&str]) -> Option<Vec<String>>
 mod tests {
     use nlp::{tokenizers::tokenize, Language};
 
-    use crate::{
-        object_builder::JMAPObjectBuilder,
-        token_map::{build_token_map, TokenMap},
-    };
+    use crate::term_index::{TermIndex, TermIndexBuilder};
 
     use super::*;
 
@@ -196,22 +193,25 @@ mod tests {
         ];
 
         for (parts, tests) in inputs {
-            let mut map_builder = JMAPObjectBuilder::new(0, 0);
-            for (part_num, part) in parts.iter().enumerate() {
-                for mut token in tokenize(part, Language::English, 40) {
-                    token.part_id = part_num as u16;
-                    map_builder.add_text_token(if part_num == 0 { 0 } else { 1 }, token);
+            let mut term_builder = TermIndexBuilder::new();
+            for (field_num, part) in parts.iter().enumerate() {
+                for token in tokenize(part, Language::English, 40) {
+                    term_builder.add_term(
+                        if field_num == 0 { 0 } else { 1 },
+                        field_num as u16,
+                        token,
+                    );
                 }
             }
-            let (raw_map, raw_pos) = build_token_map(&map_builder).unwrap();
-            let map = TokenMap::new(&raw_map, &raw_pos).unwrap();
+            let (raw_map, raw_pos) = term_builder.serialize().unwrap();
+            let map = TermIndex::new(&raw_map, &raw_pos).unwrap();
 
             for test in tests {
                 let results = map.search_any(&test.0, None).unwrap();
 
                 let snippet = generate_snippet(
                     &results,
-                    if results[0].part_id == 0 {
+                    if results[0].field_num == 0 {
                         &parts
                     } else {
                         &parts[1..]

@@ -8,26 +8,15 @@ use crate::Language;
 #[derive(Debug, PartialEq)]
 pub struct Token<'x> {
     pub word: Cow<'x, str>,
-    pub offset: u32,         // Word offset in the message part
-    pub len: u8,             // Word length
-    pub pos: u32,            // Word position in the message part
-    pub part_id: u16,        // Message part number 0 = Subject, 1 = Body #1, etc.
-    pub part_type: PartType, // Whether this token was found in the Subject, Body or Attachments
-    pub is_exact: bool,      // True if the token is an exact match
-}
-
-#[derive(Debug, PartialEq, Copy, Clone)]
-#[repr(u8)]
-pub enum PartType {
-    Subject = 0x00,
-    Body = 0x01,
-    Attachment = 0x02,
-    Any = 0x04,
+    pub offset: u32,    // Word offset in the text part
+    pub len: u8,        // Word length
+    pub pos: u32,       // Word position in the text part
+    pub is_exact: bool, // True if the token is an exact match
 }
 
 impl<'x> Token<'x> {
     pub fn new(pos: usize, offset: usize, len: usize, word: Cow<'x, str>) -> Token<'x> {
-        debug_assert!(pos < (1 << 29) as usize); // Max 536.870.912 tokens per part
+        debug_assert!(pos < (1 << 24) as usize); // Max 16.777.216 tokens per part
         debug_assert!(offset <= u32::max_value() as usize);
         debug_assert!(len <= u8::max_value() as usize);
         Token {
@@ -35,8 +24,6 @@ impl<'x> Token<'x> {
             offset: offset as u32,
             len: len as u8,
             word,
-            part_id: 0,
-            part_type: PartType::Body,
             is_exact: true,
         }
     }

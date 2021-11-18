@@ -1,9 +1,8 @@
 pub mod lang;
-pub mod tokenizers;
 pub mod stemmer;
-pub mod token_map;
+pub mod tokenizers;
 
-#[derive (Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Hash, Eq)]
 pub enum Language {
     Esperanto = 0,
     English = 1,

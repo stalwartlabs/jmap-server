@@ -1,0 +1,11 @@
+[package]
+name = "jmap_mail"
+version = "0.1.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+nlp = { path = "../nlp" }
+store = { path = "../store" }
+mail-parser = { path = "/vagrant/Code/stalwart/" }
+chrono = "0.4"

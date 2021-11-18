@@ -16,7 +16,7 @@ impl Stemmer {
         .into()
     }
 
-    pub fn stem<'x>(&self, token: &Token<'x>) -> Option<Token> {
+    pub fn stem<'x>(&self, token: &Token<'x>) -> Option<Token<'x>> {
         if let Cow::Owned(text) = self.stemmer.stem(&token.word) {
             if text.len() != token.len as usize || text != token.word {
                 Some(Token {
@@ -24,8 +24,6 @@ impl Stemmer {
                     pos: token.pos,
                     len: token.len,
                     offset: token.offset,
-                    part_id: token.part_id,
-                    part_type: token.part_type,
                     is_exact: false,
                 })
             } else {

@@ -1,10 +1,14 @@
-use std::{collections::BTreeMap, convert::TryInto};
+use std::{
+    borrow::Cow,
+    collections::{btree_map::Entry, BTreeMap},
+    convert::TryInto,
+};
 
 use fst::{Map, MapBuilder};
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use nlp::tokenizers::Token;
 
-use crate::object_builder::JMAPObjectBuilder;
+use crate::{ArrayPos, FieldId};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -33,56 +37,107 @@ const T_PART_ID_END: usize = T_PART_ID_SIZE;
 const T_OFFSET_END: usize = T_OFFSET_START + T_OFFSET_SIZE;
 const T_POSITION_END: usize = T_POSITION_START + T_POSITION_SIZE;
 
-pub fn build_token_map(object: &JMAPObjectBuilder) -> Result<(Vec<u8>, Vec<u8>)> {
-    let mut map = MapBuilder::memory();
-    let mut bytes = Vec::with_capacity(object.ft_tokens_len * T_SIZE);
+#[derive(Debug)]
+pub struct Term {
+    pub field: FieldId,
+    pub field_num: ArrayPos,
+    pub offset: u32,
+    pub len: u8,
+    pub pos: u32,
+    pub is_exact: bool,
+}
 
-    for (key, list) in object.ft_tokens.iter() {
-        map.insert(
-            key.as_bytes(),
-            ((list.len() as u64) << 32) | (bytes.len() as u64),
-        )
-        .map_err(|e| match e {
-            fst::Error::Io(e) => Error::IoError(e),
-            fst::Error::Fst(e) => Error::FstError(e),
-        })?;
+pub struct TermIndexBuilder<'x> {
+    terms: BTreeMap<Cow<'x, str>, Vec<Term>>,
+    terms_len: usize,
+}
 
-        for token in list.iter() {
-            bytes.extend_from_slice(token.part_id.to_be_bytes().as_ref());
-            bytes.extend_from_slice(token.offset.to_be_bytes().as_ref());
-            bytes.extend_from_slice(
-                (token.pos
-                    | (token.field_id as u32) << 24
-                    | if token.is_exact { 0 } else { 1 << 31 })
-                .to_be_bytes()
-                .as_ref(),
-            );
-            bytes.push(token.len);
+impl<'x> Default for TermIndexBuilder<'x> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'x> TermIndexBuilder<'x> {
+    pub fn new() -> Self {
+        TermIndexBuilder {
+            terms: BTreeMap::new(),
+            terms_len: 0,
         }
     }
 
-    Ok((
-        map.into_inner().map_err(|e| match e {
-            fst::Error::Io(e) => Error::IoError(e),
-            fst::Error::Fst(e) => Error::FstError(e),
-        })?,
-        compress_prepend_size(&bytes),
-    ))
+    pub fn add_term(&mut self, field: FieldId, field_num: ArrayPos, token: Token<'x>) {
+        let term = Term {
+            field,
+            field_num,
+            offset: token.offset,
+            len: token.len,
+            pos: token.pos,
+            is_exact: token.is_exact,
+        };
+
+        self.terms_len += 1;
+        match self.terms.entry(token.word) {
+            Entry::Vacant(e) => {
+                e.insert(vec![term]);
+            }
+            Entry::Occupied(e) => {
+                e.into_mut().push(term);
+            }
+        }
+    }
+
+    pub fn serialize(&self) -> Result<(Vec<u8>, Vec<u8>)> {
+        let mut map = MapBuilder::memory();
+        let mut bytes = Vec::with_capacity(self.terms_len * T_SIZE);
+
+        for (key, terms) in self.terms.iter() {
+            map.insert(
+                key.as_bytes(),
+                ((terms.len() as u64) << 32) | (bytes.len() as u64),
+            )
+            .map_err(|e| match e {
+                fst::Error::Io(e) => Error::IoError(e),
+                fst::Error::Fst(e) => Error::FstError(e),
+            })?;
+
+            for term in terms.iter() {
+                bytes.extend_from_slice(term.field_num.to_be_bytes().as_ref());
+                bytes.extend_from_slice(term.offset.to_be_bytes().as_ref());
+                bytes.extend_from_slice(
+                    (term.pos
+                        | (term.field as u32) << 24
+                        | if term.is_exact { 0 } else { 1 << 31 })
+                    .to_be_bytes()
+                    .as_ref(),
+                );
+                bytes.push(term.len);
+            }
+        }
+
+        Ok((
+            map.into_inner().map_err(|e| match e {
+                fst::Error::Io(e) => Error::IoError(e),
+                fst::Error::Fst(e) => Error::FstError(e),
+            })?,
+            compress_prepend_size(&bytes),
+        ))
+    }
 }
 
-pub struct TokenMap<'x> {
+pub struct TermIndex<'x> {
     map: Map<&'x [u8]>,
-    tokens: Vec<u8>,
+    terms: Vec<u8>,
 }
 
-impl<'x> TokenMap<'x> {
+impl<'x> TermIndex<'x> {
     pub fn new(map: &'x [u8], positions: &'x [u8]) -> Result<Self> {
         Ok(Self {
             map: Map::new(map).map_err(|e| match e {
                 fst::Error::Io(e) => Error::IoError(e),
                 fst::Error::Fst(e) => Error::FstError(e),
             })?,
-            tokens: decompress_size_prepended(positions).map_err(Error::DecompressError)?,
+            terms: decompress_size_prepended(positions).map_err(Error::DecompressError)?,
         })
     }
 
@@ -94,32 +149,32 @@ impl<'x> TokenMap<'x> {
     ) -> Result<BTreeMap<&[u8], usize>> {
         let mut search_tree = BTreeMap::new();
 
-        // Sort all tokens by position in the document
+        // Sort all terms by position in the document
         for (word_pos, word) in words.iter().enumerate() {
             let packed_info = self.map.get(word).ok_or(Error::NotFound)?;
-            let total_tokens = (packed_info >> 32) as usize;
+            let total_terms = (packed_info >> 32) as usize;
             let offset = (packed_info & 0xFFFFFFFF) as usize;
 
-            for token_num in 0..total_tokens {
-                // The first bits of the position indicates that the token was added by the stemmer.
+            for term_num in 0..total_terms {
+                // The first bits of the position indicates that the term was added by the stemmer.
                 // The following 7 bits contain the Field Id.
-                let token_offset = offset + (T_SIZE * token_num);
+                let term_offset = offset + (T_SIZE * term_num);
                 let flags = self
-                    .tokens
-                    .get(token_offset + T_POSITION_START)
+                    .terms
+                    .get(term_offset + T_POSITION_START)
                     .ok_or(Error::DataCorruption)?;
 
-                // Filter out tokens that do not belong to the requested part type or are not an exact match
+                // Filter out terms that do not belong to the requested part type or are not an exact match
                 if match_in.map_or(false, |match_in| *flags & 0x7f != match_in)
                     || (match_phrase && *flags & 0x80 != 0)
                 {
                     continue;
                 }
 
-                // Add token to BTreeMap
+                // Add term to BTreeMap
                 search_tree.insert(
-                    self.tokens
-                        .get(token_offset..token_offset + T_SIZE)
+                    self.terms
+                        .get(term_offset..term_offset + T_SIZE)
                         .ok_or(Error::DataCorruption)?,
                     word_pos,
                 );
@@ -130,40 +185,40 @@ impl<'x> TokenMap<'x> {
     }
 
     pub fn match_phrase(&self, words: &[&str], match_in: Option<u8>) -> Result<bool> {
-        let mut matched_tokens = 0;
-        let mut last_part_id = u16::MAX;
-        let mut last_token_pos = u32::MAX;
+        let mut matched_terms = 0;
+        let mut last_field_num = u16::MAX;
+        let mut last_term_pos = u32::MAX;
 
-        for (raw_token, word_num) in self.build_search_tree(words, match_in, true)? {
-            if matched_tokens == word_num {
-                let (token_pos, token_part_id) = (
-                    self.deserialize_position(raw_token)?,
-                    self.deserialize_part_id(raw_token)?,
+        for (raw_term, word_num) in self.build_search_tree(words, match_in, true)? {
+            if matched_terms == word_num {
+                let (term_pos, term_field_num) = (
+                    self.deserialize_position(raw_term)?,
+                    self.deserialize_field_num(raw_term)?,
                 );
 
                 if word_num == 0
-                    || (token_part_id == last_part_id && token_pos == last_token_pos + 1)
+                    || (term_field_num == last_field_num && term_pos == last_term_pos + 1)
                 {
-                    matched_tokens += 1;
-                    if matched_tokens == words.len() {
+                    matched_terms += 1;
+                    if matched_terms == words.len() {
                         return Ok(true);
                     }
 
-                    last_part_id = token_part_id;
-                    last_token_pos = token_pos;
+                    last_field_num = term_field_num;
+                    last_term_pos = term_pos;
 
                     continue;
                 }
             }
 
-            matched_tokens = 0;
+            matched_terms = 0;
         }
 
         Ok(false)
     }
 
     pub fn match_any(&self, words: &[&str], match_in: Option<u8>) -> Result<bool> {
-        let mut last_part_id = u16::MAX;
+        let mut last_field_num = u16::MAX;
 
         if !(1..=64).contains(&words.len()) {
             return Err(Error::InvalidArgument);
@@ -171,14 +226,14 @@ impl<'x> TokenMap<'x> {
         let words_mask: u64 = u64::MAX >> (64 - words.len());
         let mut matched_mask = words_mask;
 
-        for (raw_token, word_num) in self.build_search_tree(words, match_in, false)? {
-            let token_part_id = self.deserialize_part_id(raw_token)?;
+        for (raw_term, word_num) in self.build_search_tree(words, match_in, false)? {
+            let term_field_num = self.deserialize_field_num(raw_term)?;
 
-            if token_part_id != last_part_id {
+            if term_field_num != last_field_num {
                 if matched_mask == 0 {
                     return Ok(true);
                 } else {
-                    last_part_id = token_part_id;
+                    last_field_num = term_field_num;
                     matched_mask = words_mask;
                 }
             }
@@ -190,9 +245,9 @@ impl<'x> TokenMap<'x> {
     }
 
     #[inline(always)]
-    fn deserialize_part_id(&self, raw_token: &[u8]) -> Result<u16> {
+    fn deserialize_field_num(&self, raw_term: &[u8]) -> Result<u16> {
         Ok(u16::from_be_bytes(
-            raw_token
+            raw_term
                 .get(T_PART_ID_START..T_PART_ID_END)
                 .ok_or(Error::DataCorruption)?
                 .try_into()
@@ -201,9 +256,9 @@ impl<'x> TokenMap<'x> {
     }
 
     #[inline(always)]
-    fn deserialize_offset(&self, raw_token: &[u8]) -> Result<u32> {
+    fn deserialize_offset(&self, raw_term: &[u8]) -> Result<u32> {
         Ok(u32::from_be_bytes(
-            raw_token
+            raw_term
                 .get(T_OFFSET_START..T_OFFSET_END)
                 .ok_or(Error::DataCorruption)?
                 .try_into()
@@ -212,74 +267,73 @@ impl<'x> TokenMap<'x> {
     }
 
     #[inline(always)]
-    fn deserialize_position(&self, raw_token: &[u8]) -> Result<u32> {
+    fn deserialize_position(&self, raw_term: &[u8]) -> Result<u32> {
         Ok(u32::from_be_bytes(
-            raw_token
+            raw_term
                 .get(T_POSITION_START..T_POSITION_END)
                 .ok_or(Error::DataCorruption)?
                 .try_into()
                 .unwrap(),
-        ) & !(0x7 << 29))
+        ) & !(0xff << 24))
     }
 
     #[inline(always)]
-    fn deserialize_length(&self, raw_token: &[u8]) -> Result<u8> {
-        Ok(*raw_token.get(T_LENGTH_START).ok_or(Error::DataCorruption)?)
+    fn deserialize_length(&self, raw_term: &[u8]) -> Result<u8> {
+        Ok(*raw_term.get(T_LENGTH_START).ok_or(Error::DataCorruption)?)
     }
 
-    pub fn search_phrase(&self, words: &[&'x str], match_in: Option<u8>) -> Result<Vec<Token<'x>>> {
+    pub fn search_phrase(&self, words: &[&'x str], match_in: Option<FieldId>) -> Result<Vec<Term>> {
         let mut result = Vec::new();
-        let mut matched_tokens = Vec::new();
-        let mut last_part_id = u16::MAX;
-        let mut last_token_pos = u32::MAX;
+        let mut matched_terms = Vec::new();
+        let mut last_field_num = u16::MAX;
+        let mut last_term_pos = u32::MAX;
 
-        // Iterate over all tokens in the search tree
-        for (raw_token, word_num) in self.build_search_tree(words, match_in, true)? {
-            if matched_tokens.len() == word_num {
-                let token_part_id = self.deserialize_part_id(raw_token)?;
+        // Iterate over all terms in the search tree
+        for (raw_term, word_num) in self.build_search_tree(words, match_in, true)? {
+            if matched_terms.len() == word_num {
+                let term_field_num = self.deserialize_field_num(raw_term)?;
 
-                if !result.is_empty() && last_part_id > 0 && token_part_id > last_part_id {
-                    // Match maximum the Subject (part_id = 0) and one part
+                if !result.is_empty() && last_field_num > 0 && term_field_num > last_field_num {
+                    // Match maximum the Subject (field_num = 0) and one part
                     return Ok(result);
                 }
 
-                let token_pos = self.deserialize_position(raw_token)?;
+                let term_pos = self.deserialize_position(raw_term)?;
 
                 if word_num == 0
-                    || (token_part_id == last_part_id && token_pos == last_token_pos + 1)
+                    || (term_field_num == last_field_num && term_pos == last_term_pos + 1)
                 {
-                    last_part_id = token_part_id;
-                    last_token_pos = token_pos;
+                    last_field_num = term_field_num;
+                    last_term_pos = term_pos;
 
-                    matched_tokens.push(Token {
-                        word: words[word_num].into(),
-                        offset: self.deserialize_offset(raw_token)?,
-                        len: self.deserialize_length(raw_token)?,
-                        pos: token_pos,
-                        part_id: token_part_id,
-                        field_id: match_in.unwrap_or(0),
+                    matched_terms.push(Term {
+                        offset: self.deserialize_offset(raw_term)?,
+                        len: self.deserialize_length(raw_term)?,
+                        pos: term_pos,
+                        field_num: term_field_num,
+                        field: match_in.unwrap_or(0),
                         is_exact: true,
                     });
 
-                    if matched_tokens.len() == words.len() {
-                        result.append(&mut matched_tokens);
+                    if matched_terms.len() == words.len() {
+                        result.append(&mut matched_terms);
                     }
                     continue;
                 }
             }
 
-            if !matched_tokens.is_empty() {
-                matched_tokens.clear();
+            if !matched_terms.is_empty() {
+                matched_terms.clear();
             }
         }
 
         Ok(result)
     }
 
-    pub fn search_any(&self, words: &[&'x str], match_in: Option<u8>) -> Result<Vec<Token<'x>>> {
+    pub fn search_any(&self, words: &[&'x str], match_in: Option<u8>) -> Result<Vec<Term>> {
         let mut result = Vec::new();
-        let mut matched_tokens = Vec::new();
-        let mut last_part_id = u16::MAX;
+        let mut matched_terms = Vec::new();
+        let mut last_field_num = u16::MAX;
 
         // Safety check to avoid overflowing the bit mask
         if !(1..=64).contains(&words.len()) {
@@ -288,49 +342,48 @@ impl<'x> TokenMap<'x> {
 
         // Term matching is done using a bit mask, where each bit represents a word.
         // Each time a word is matched, the corresponding bit is cleared.
-        // When all bits are cleared, all matching tokens are added to the result list.
+        // When all bits are cleared, all matching terms are added to the result list.
         let words_mask: u64 = u64::MAX >> (64 - words.len());
         let mut matched_mask = words_mask;
 
-        // Iterate over all tokens in the search tree
-        for (raw_token, word_num) in self.build_search_tree(words, match_in, false)? {
-            let token_part_id = self.deserialize_part_id(raw_token)?;
+        // Iterate over all terms in the search tree
+        for (raw_term, word_num) in self.build_search_tree(words, match_in, false)? {
+            let term_field_num = self.deserialize_field_num(raw_term)?;
 
-            if token_part_id != last_part_id {
+            if term_field_num != last_field_num {
                 if matched_mask == 0 {
-                    result.append(&mut matched_tokens);
+                    result.append(&mut matched_terms);
 
-                    // Match maximum the Subject (part_id = 0) and one part
-                    if last_part_id > 0 {
+                    // Match maximum the Subject (field_num = 0) and one part
+                    if last_field_num > 0 {
                         return Ok(result);
                     }
-                } else if !matched_tokens.is_empty() {
-                    matched_tokens.clear();
+                } else if !matched_terms.is_empty() {
+                    matched_terms.clear();
                 }
 
-                last_part_id = token_part_id;
+                last_field_num = term_field_num;
                 matched_mask = words_mask;
             }
 
             // Clear the bit corresponding to the matched word
             matched_mask &= !(1 << word_num);
-            matched_tokens.push(Token {
-                word: words[word_num].into(),
-                offset: self.deserialize_offset(raw_token)?,
-                len: self.deserialize_length(raw_token)?,
-                pos: self.deserialize_position(raw_token)?,
-                part_id: token_part_id,
-                field_id: match_in.unwrap_or(0),
+            matched_terms.push(Term {
+                offset: self.deserialize_offset(raw_term)?,
+                len: self.deserialize_length(raw_term)?,
+                pos: self.deserialize_position(raw_term)?,
+                field_num: term_field_num,
+                field: match_in.unwrap_or(0),
                 is_exact: false,
             });
         }
 
         if matched_mask == 0 {
             if !result.is_empty() {
-                result.append(&mut matched_tokens);
+                result.append(&mut matched_terms);
                 Ok(result)
             } else {
-                Ok(matched_tokens)
+                Ok(matched_terms)
             }
         } else {
             Ok(result)
@@ -346,12 +399,12 @@ mod tests {
         Language,
     };
 
-    use crate::{object_builder::JMAPObjectBuilder, token_map::build_token_map};
+    use crate::{term_index::TermIndexBuilder, ArrayPos};
 
-    use super::TokenMap;
+    use super::TermIndex;
 
     #[test]
-    fn word_map() {
+    fn term_index() {
         const SUBJECT: u8 = 1;
         const BODY: u8 = 2;
         const ATTACHMENT: u8 = 3;
@@ -449,22 +502,21 @@ mod tests {
             (r#"love loving lovingly loved lovely"#, ATTACHMENT),
         ];
 
-        let mut builder = JMAPObjectBuilder::new(0, 0);
+        let mut builder = TermIndexBuilder::new();
         let stemmer = Stemmer::new(Language::English).unwrap();
 
-        // Build the token map
-        for (num, (text, field_id)) in parts.iter().enumerate() {
-            for mut token in tokenize(text, Language::English, 40) {
-                token.part_id = num as u16;
+        // Build the term index
+        for (field_num, (text, field_id)) in parts.iter().enumerate() {
+            for token in tokenize(text, Language::English, 40) {
                 if let Some(stemmed_token) = stemmer.stem(&token) {
-                    builder.add_text_token(*field_id, stemmed_token);
+                    builder.add_term(*field_id, field_num as ArrayPos, stemmed_token);
                 }
-                builder.add_text_token(*field_id, token);
+                builder.add_term(*field_id, field_num as ArrayPos, token);
             }
         }
 
-        let (raw_map, raw_pos) = build_token_map(&builder).unwrap();
-        let map = TokenMap::new(&raw_map, &raw_pos).unwrap();
+        let (raw_map, raw_pos) = builder.serialize().unwrap();
+        let map = TermIndex::new(&raw_map, &raw_pos).unwrap();
 
         let tests = [
             (vec!["thomas", "clinton"], None, true, 4),
@@ -490,7 +542,7 @@ mod tests {
         ];
 
         for (words, field_id, match_phrase, match_count) in tests {
-            let tokens = if match_phrase {
+            let terms = if match_phrase {
                 map.search_phrase(&words, field_id).unwrap()
             } else {
                 map.search_any(&words, field_id).unwrap()
@@ -502,33 +554,36 @@ mod tests {
             };
 
             assert_eq!(
-                tokens.len(),
+                terms.len(),
                 match_count,
                 "({:?}, {}) != {:?}",
                 words,
                 match_phrase,
-                tokens
+                terms
             );
             assert_eq!(has_match, match_count > 0);
 
-            for token in &tokens {
-                let text_word = parts[token.part_id as usize].0
-                    [token.offset as usize..token.offset as usize + token.len as usize]
+            'outer: for term in terms.iter() {
+                let text_word = parts[term.field_num as usize].0
+                    [term.offset as usize..term.offset as usize + term.len as usize]
                     .to_lowercase();
 
-                if !match_phrase {
-                    if token.word != text_word {
-                        assert_eq!(
-                            token.word,
-                            stemmer
-                                .stem(&Token::new(0, 0, 0, text_word.into()))
-                                .unwrap()
-                                .word
-                        );
+                for word in words.iter() {
+                    if word == &text_word {
+                        continue 'outer;
                     }
-                } else {
-                    assert_eq!(token.word, text_word);
                 }
+
+                if !match_phrase {
+                    if let Some(text_word) = stemmer.stem(&Token::new(0, 0, 0, text_word.into())) {
+                        for word in words.iter() {
+                            if word == &text_word.word {
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
+                panic!("({:?}, {}) != {:?}", words, match_phrase, terms);
             }
         }
     }

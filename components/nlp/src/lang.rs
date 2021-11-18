@@ -86,16 +86,43 @@ mod tests {
     #[test]
     fn detect_languages() {
         let inputs = [
-            ("The quick brown fox jumps over the lazy dog", Language::English),
-            ("Jovencillo emponzoñado de whisky: ¡qué figurota exhibe!", Language::Spanish),
-            ("Ma la volpe col suo balzo ha raggiunto il quieto Fido", Language::Italian),
-            ("Jaz em prisão bota que vexa dez cegonhas felizes", Language::Portuguese),
-            ("Zwölf Boxkämpfer jagten Victor quer über den großen Sylter Deich", Language::German),
+            (
+                "The quick brown fox jumps over the lazy dog",
+                Language::English,
+            ),
+            (
+                "Jovencillo emponzoñado de whisky: ¡qué figurota exhibe!",
+                Language::Spanish,
+            ),
+            (
+                "Ma la volpe col suo balzo ha raggiunto il quieto Fido",
+                Language::Italian,
+            ),
+            (
+                "Jaz em prisão bota que vexa dez cegonhas felizes",
+                Language::Portuguese,
+            ),
+            (
+                "Zwölf Boxkämpfer jagten Victor quer über den großen Sylter Deich",
+                Language::German,
+            ),
             ("עטלף אבק נס דרך מזגן שהתפוצץ כי חם", Language::Hebrew),
-            ("Съешь ещё этих мягких французских булок, да выпей же чаю", Language::Russian),
-            ("Чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів!", Language::Ukrainian),
-            ("Љубазни фењерџија чађавог лица хоће да ми покаже штос", Language::Serbian),
-            ("Pijamalı hasta yağız şoföre çabucak güvendi", Language::Turkish),
+            (
+                "Съешь ещё этих мягких французских булок, да выпей же чаю",
+                Language::Russian,
+            ),
+            (
+                "Чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів!",
+                Language::Ukrainian,
+            ),
+            (
+                "Љубазни фењерџија чађавог лица хоће да ми покаже штос",
+                Language::Serbian,
+            ),
+            (
+                "Pijamalı hasta yağız şoföre çabucak güvendi",
+                Language::Turkish,
+            ),
             ("己所不欲,勿施于人。", Language::Mandarin),
             ("井の中の蛙大海を知らず", Language::Japanese),
             ("시작이 반이다", Language::Korean),
