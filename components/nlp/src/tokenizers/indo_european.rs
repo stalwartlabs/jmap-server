@@ -26,7 +26,7 @@ impl<'x> IndoEuropeanTokenizer<'x> {
     }
 }
 
-/// Parses an indo-european text into lowercase tokens.
+/// Parses indo-european text into lowercase tokens.
 impl<'x> Iterator for IndoEuropeanTokenizer<'x> {
     type Item = Token<'x>;
 

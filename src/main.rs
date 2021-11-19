@@ -1,15 +1,31 @@
-use nlp::{
-    lang::detect_language,
-    tokenizers::{tokenize, Token},
-};
+use std::fs;
+
+use jmap_mail::parse::parse_message;
+
 
 fn main() {
-    println!("Hello, world!");
-    let text = "Hello, world!";
 
-    for token in tokenize(text, detect_language(text).0, 40) {
-        println!("{:?}", token);
+    for file_name in fs::read_dir("/vagrant/Code/stalwart/test/dovecot").unwrap() {
+        let file_name = file_name.as_ref().unwrap().path();
+        if file_name.extension().map_or(false, |e| e != "eml") {
+            continue;
+        }
+        if !file_name.file_name().unwrap().to_str().unwrap().starts_with("m005") {
+            continue;
+        }
+
+        let input = fs::read(&file_name).unwrap();
+
+        let builder = parse_message(&input).unwrap();
+        for field in builder {
+            println!("{:?}", field);
+        }
+
+        break;
+
     }
+
+
 }
 
 /*

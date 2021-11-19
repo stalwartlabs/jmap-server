@@ -1,9 +1,9 @@
 use nlp::tokenizers::Token;
 
 use crate::{
-    document::{DocumentBuilder, Field, IndexField, IndexOptions, TextField},
-    AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
-    TagId,
+    document::{IndexOptions},
+    field::{Field, IndexField, TextLang},
+    AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Tag,
 };
 
 const KEY_BASE_LEN: usize = std::mem::size_of::<AccountId>()
@@ -61,31 +61,30 @@ impl<'x> IndexField<'x> {
     ) -> SerializedKeyValue {
         SerializedKeyValue {
             key: {
-                let field = self.unwrap();
-                let mut bytes = Vec::with_capacity(
-                    KEY_BASE_LEN + field.len() + std::mem::size_of::<ArrayPos>(),
-                );
+                let mut bytes =
+                    Vec::with_capacity(KEY_BASE_LEN + self.len() + std::mem::size_of::<ArrayPos>());
                 bytes.extend_from_slice(&account.to_be_bytes());
                 bytes.extend_from_slice(&collection.to_be_bytes());
                 if let IndexField::Tag(tag) = self {
-                    bytes.extend_from_slice(&field.get_field().to_be_bytes());
+                    bytes.extend_from_slice(&tag.get_field().to_be_bytes());
                     match &tag.value {
                         Tag::Static(id) => bytes.extend_from_slice(&id.to_be_bytes()),
                         Tag::Id(id) => bytes.extend_from_slice(&id.to_be_bytes()),
                         Tag::Text(text) => bytes.extend_from_slice(text.as_bytes()),
                     }
                 } else {
+                    let options = self.get_options();
                     bytes.extend_from_slice(&document.to_be_bytes());
-                    bytes.extend_from_slice(&field.get_field().to_be_bytes());
-                    if field.get_options().is_array() {
-                        bytes.extend_from_slice(&field.get_options().get_pos().to_be_bytes());
+                    bytes.extend_from_slice(&self.get_field().to_be_bytes());
+                    if options.is_array() {
+                        bytes.extend_from_slice(&options.get_pos().to_be_bytes());
                     }
                 }
 
                 bytes
             },
             value: match self {
-                IndexField::Text(t) => SerializedValue::Borrowed(t.value.as_bytes()),
+                IndexField::Text(t) => SerializedValue::Borrowed(t.value.text.as_bytes()),
                 IndexField::Blob(b) => SerializedValue::Borrowed(b.value.as_ref()),
                 IndexField::Integer(i) => SerializedValue::Owned(i.value.to_le_bytes().into()),
                 IndexField::LongInteger(li) => {
@@ -103,24 +102,26 @@ impl<'x> IndexField<'x> {
         collection: &CollectionId,
         document: &DocumentId,
     ) -> Vec<u8> {
-        let field = self.unwrap();
-        let mut bytes = Vec::with_capacity(KEY_BASE_LEN + field.len());
+        let mut bytes = Vec::with_capacity(KEY_BASE_LEN + self.len());
 
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.extend_from_slice(&collection.to_be_bytes());
-        bytes.extend_from_slice(&field.get_field().to_be_bytes());
 
         match self {
             IndexField::Text(text) => {
-                bytes.extend_from_slice(text.value.as_bytes());
+                bytes.extend_from_slice(&text.get_field().to_be_bytes());
+                bytes.extend_from_slice(text.value.text.as_bytes());
             }
             IndexField::Integer(int) => {
+                bytes.extend_from_slice(&int.get_field().to_be_bytes());
                 bytes.extend_from_slice(&int.value.to_be_bytes());
             }
             IndexField::LongInteger(int) => {
+                bytes.extend_from_slice(&int.get_field().to_be_bytes());
                 bytes.extend_from_slice(&int.value.to_be_bytes());
             }
             IndexField::Float(float) => {
+                bytes.extend_from_slice(&float.get_field().to_be_bytes());
                 bytes.extend_from_slice(&float.value.to_be_bytes());
             }
             IndexField::Tag(_) | IndexField::Blob(_) => {
@@ -138,7 +139,7 @@ pub trait TokenSerializer {
         &self,
         account: &AccountId,
         collection: &CollectionId,
-        field: &TextField,
+        field: &Field<TextLang>,
     ) -> Vec<u8>;
 }
 
@@ -147,7 +148,7 @@ impl<'x> TokenSerializer for Token<'x> {
         &self,
         account: &AccountId,
         collection: &CollectionId,
-        field: &TextField,
+        field: &Field<TextLang>,
     ) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(KEY_BASE_LEN + self.word.len() + 1);
         bytes.extend_from_slice(&account.to_be_bytes());

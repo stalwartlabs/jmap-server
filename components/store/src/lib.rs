@@ -2,6 +2,7 @@ pub mod document;
 pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
+pub mod field;
 
 use document::DocumentBuilder;
 
@@ -33,6 +34,7 @@ pub enum FieldValue<'x> {
     Tag(Tag<'x>),
 }
 
+#[derive(Debug)]
 pub enum Tag<'x> {
     Static(TagId),
     Id(DocumentId),

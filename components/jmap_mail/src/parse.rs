@@ -4,9 +4,11 @@ use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
 use mail_parser::{
     Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessagePart,
 };
-use store::document::{
-    DocumentBuilder, IndexOptions, OptionValue, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH,
-    MAX_TOKEN_LENGTH,
+use store::{
+    document::{
+        DocumentBuilder, IndexOptions, OptionValue, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH,
+        MAX_TOKEN_LENGTH,
+    },
 };
 
 use crate::MailField;
@@ -57,7 +59,7 @@ fn parse_text<'x>(builder: &mut DocumentBuilder<'x>, header_name: &HeaderName, t
         HeaderName::Subject => {
             builder.add_text(
                 to_mail_field(header_name),
-                text,
+                text.to_lowercase().into(),
                 <OptionValue>::FullText | <OptionValue>::Sortable,
             );
         }
@@ -261,11 +263,9 @@ fn parse_header<'x>(
     }
 }
 
-pub fn parse_message<'x>(
-    bytes: &'x [u8],
-    builder: &mut DocumentBuilder<'x>,
-) -> Result<(), MessageParseError> {
+pub fn parse_message(bytes: &[u8]) -> Result<DocumentBuilder, MessageParseError> {
     let message = Message::parse(bytes).ok_or(MessageParseError)?;
+    let mut builder = DocumentBuilder::new();
 
     builder.add_integer(
         MailField::Size as u8,
@@ -280,9 +280,9 @@ pub fn parse_message<'x>(
 
     for (header_name, header_value) in message.headers {
         if let HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc = header_name {
-            add_addr_sort(builder, &header_name, &header_value);
+            add_addr_sort(&mut builder, &header_name, &header_value);
         }
-        parse_header(builder, &header_name, header_value);
+        parse_header(&mut builder, &header_name, header_value);
     }
 
     let mut set_pos: usize = 0;
@@ -341,5 +341,5 @@ pub fn parse_message<'x>(
         set_pos += 1;
     }
 
-    Ok(())
+    Ok(builder)
 }

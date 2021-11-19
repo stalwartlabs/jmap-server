@@ -1,7 +1,7 @@
-use std::convert::TryInto;
+pub mod bitmaps;
 
-use roaring::RoaringBitmap;
-use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded, Options};
+use bitmaps::set_bit;
+use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options};
 use store::{
     document::{DocumentBuilder, IndexOptions},
     serialize::{
@@ -11,38 +11,10 @@ use store::{
     AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Result, Store, StoreError, Tag,
 };
 
+use crate::bitmaps::{bitmap_full_merge, bitmap_partial_merge};
+
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
-}
-
-fn bitmap_merge(
-    _new_key: &[u8],
-    existing_val: Option<&[u8]>,
-    operands: &mut MergeOperands,
-) -> Option<Vec<u8>> {
-    let mut rb = if let Some(existing_val) = existing_val {
-        RoaringBitmap::deserialize_from(existing_val).ok()?
-    } else {
-        RoaringBitmap::new()
-    };
-
-    for op in operands {
-        let id = DocumentId::from_ne_bytes(
-            op.get(1..1 + std::mem::size_of::<DocumentId>())?
-                .try_into()
-                .ok()?,
-        );
-
-        if op.get(0)? == &1 {
-            rb.insert(id);
-        } else {
-            rb.remove(id);
-        }
-    }
-
-    let mut bytes = Vec::with_capacity(rb.serialized_size());
-    rb.serialize_into(&mut bytes).ok()?;
-    Some(bytes)
 }
 
 impl RocksDBStore {
@@ -51,7 +23,7 @@ impl RocksDBStore {
         let cf_bitmaps = {
             let mut cf_opts = Options::default();
             //cf_opts.set_max_write_buffer_number(16);
-            cf_opts.set_merge_operator_associative("bitmap merge", bitmap_merge);
+            cf_opts.set_merge_operator("bitmap merge", bitmap_full_merge, bitmap_partial_merge);
             ColumnFamilyDescriptor::new("bitmaps", cf_opts)
         };
 
@@ -105,7 +77,7 @@ impl Store for RocksDBStore {
         let document_id: DocumentId = 0;
 
         for field in document {
-            let field_opt = field.unwrap().get_options();
+            let field_opt = field.get_options();
             if field_opt.is_sortable() {
                 self.db
                     .put_cf(
@@ -122,7 +94,7 @@ impl Store for RocksDBStore {
                         value: SerializedValue::Tag,
                     } => {
                         self.db
-                            .put_cf(&cf_bitmaps, &key, &set_tag(&document_id))
+                            .put_cf(&cf_bitmaps, &key, &set_bit(&document_id))
                             .map_err(|e| StoreError::InternalError(e.into_string()))?;
                     }
                     SerializedKeyValue {
@@ -144,14 +116,14 @@ impl Store for RocksDBStore {
                 }
             }
 
-            if field_opt.is_tokenized() {
+            if field_opt.is_tokenized() || field_opt.is_full_text() {
                 let field = field.unwrap_text();
                 for token in field.tokenize() {
                     self.db
                         .put_cf(
                             &cf_bitmaps,
                             &token.as_index_key(account, collection, field),
-                            &set_tag(&document_id),
+                            &set_bit(&document_id),
                         )
                         .map_err(|e| StoreError::InternalError(e.into_string()))?;
                 }
@@ -237,20 +209,6 @@ impl Store for RocksDBStore {
     ) -> Result<Vec<DocumentId>> {
         todo!()
     }
-}
-
-fn set_tag(document: &DocumentId) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 1);
-    buf.push(1);
-    buf.extend_from_slice(&document.to_ne_bytes());
-    buf
-}
-
-fn clear_tag(document: &DocumentId) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 1);
-    buf.push(0);
-    buf.extend_from_slice(&document.to_ne_bytes());
-    buf
 }
 
 /*
