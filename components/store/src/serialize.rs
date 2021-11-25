@@ -1,15 +1,16 @@
 use nlp::tokenizers::Token;
 
 use crate::{
-    document::{IndexOptions},
+    document::IndexOptions,
     field::{Field, IndexField, TextLang},
     AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Tag,
 };
 
-const KEY_BASE_LEN: usize = std::mem::size_of::<AccountId>()
+pub const PREFIX_LEN: usize = std::mem::size_of::<AccountId>()
     + std::mem::size_of::<CollectionId>()
-    + std::mem::size_of::<FieldId>()
-    + std::mem::size_of::<DocumentId>();
+    + std::mem::size_of::<FieldId>();
+
+pub const KEY_BASE_LEN: usize = PREFIX_LEN + std::mem::size_of::<DocumentId>();
 
 pub struct SerializedKeyValue<'x> {
     pub key: Vec<u8>,
@@ -50,6 +51,56 @@ pub fn serialize_stored_key_pos(
     key.extend_from_slice(&field.to_be_bytes());
     key.extend_from_slice(&pos.to_be_bytes());
     key
+}
+
+pub fn serialize_tag_key(
+    account: &AccountId,
+    collection: &CollectionId,
+    field: &FieldId,
+    tag: &Tag,
+) -> Vec<u8> {
+    let mut key = Vec::with_capacity(KEY_BASE_LEN + tag.len());
+    key.extend_from_slice(&account.to_be_bytes());
+    key.extend_from_slice(&collection.to_be_bytes());
+    key.extend_from_slice(&field.to_be_bytes());
+    match tag {
+        Tag::Static(id) => key.extend_from_slice(&id.to_be_bytes()),
+        Tag::Id(id) => key.extend_from_slice(&id.to_be_bytes()),
+        Tag::Text(text) => key.extend_from_slice(text.as_bytes()),
+    }
+    key
+}
+
+pub fn serialize_text_key(
+    account: &AccountId,
+    collection: &CollectionId,
+    field: &FieldId,
+    text: &str,
+    is_exact: bool,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + text.len() + 1);
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(text.as_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.extend_from_slice(&field.to_be_bytes());
+    if !is_exact {
+        bytes.push(1);
+    }
+    bytes
+}
+
+pub fn serialize_index_key(
+    account: &AccountId,
+    collection: &CollectionId,
+    field: &FieldId,
+    key: &[u8],
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + key.len());
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.extend_from_slice(&field.to_be_bytes());
+    bytes.extend_from_slice(key);
+    bytes
 }
 
 impl<'x> IndexField<'x> {
@@ -96,39 +147,32 @@ impl<'x> IndexField<'x> {
         }
     }
 
-    pub fn as_sort_key(
+    pub fn as_index_key(
         &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(KEY_BASE_LEN + self.len());
-
-        bytes.extend_from_slice(&account.to_be_bytes());
-        bytes.extend_from_slice(&collection.to_be_bytes());
-
-        match self {
+        let mut bytes = match self {
             IndexField::Text(text) => {
-                bytes.extend_from_slice(&text.get_field().to_be_bytes());
-                bytes.extend_from_slice(text.value.text.as_bytes());
+                serialize_index_key(account, collection, &text.field, text.value.text.as_bytes())
             }
             IndexField::Integer(int) => {
-                bytes.extend_from_slice(&int.get_field().to_be_bytes());
-                bytes.extend_from_slice(&int.value.to_be_bytes());
+                serialize_index_key(account, collection, &int.field, &int.value.to_le_bytes())
             }
             IndexField::LongInteger(int) => {
-                bytes.extend_from_slice(&int.get_field().to_be_bytes());
-                bytes.extend_from_slice(&int.value.to_be_bytes());
+                serialize_index_key(account, collection, &int.field, &int.value.to_le_bytes())
             }
-            IndexField::Float(float) => {
-                bytes.extend_from_slice(&float.get_field().to_be_bytes());
-                bytes.extend_from_slice(&float.value.to_be_bytes());
-            }
+            IndexField::Float(float) => serialize_index_key(
+                account,
+                collection,
+                &float.field,
+                &float.value.to_le_bytes(),
+            ),
             IndexField::Tag(_) | IndexField::Blob(_) => {
                 panic!("Blobs and Tags cannot be serialized as sort keys.")
             }
-        }
-
+        };
         bytes.extend_from_slice(&document.to_be_bytes());
         bytes
     }
@@ -150,14 +194,12 @@ impl<'x> TokenSerializer for Token<'x> {
         collection: &CollectionId,
         field: &Field<TextLang>,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(KEY_BASE_LEN + self.word.len() + 1);
-        bytes.extend_from_slice(&account.to_be_bytes());
-        bytes.extend_from_slice(self.word.as_bytes());
-        bytes.extend_from_slice(&collection.to_be_bytes());
-        bytes.extend_from_slice(&field.get_field().to_be_bytes());
-        if field.options.is_full_text() {
-            bytes.push(if self.is_exact { 0 } else { 1 });
-        }
-        bytes
+        serialize_text_key(
+            account,
+            collection,
+            field.get_field(),
+            &self.word,
+            !field.options.is_full_text() || self.is_exact,
+        )
     }
 }

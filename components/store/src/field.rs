@@ -1,8 +1,15 @@
 use std::borrow::Cow;
 
-use nlp::{Language, stemmer::Stemmer, tokenizers::{Token, tokenize}};
+use nlp::{
+    stemmer::Stemmer,
+    tokenizers::{tokenize, Token},
+    Language,
+};
 
-use crate::{DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId, document::{IndexOptions, MAX_TOKEN_LENGTH, OptionValue}};
+use crate::{
+    document::{IndexOptions, OptionValue, MAX_TOKEN_LENGTH},
+    DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
+};
 
 #[derive(Debug)]
 pub enum IndexField<'x> {
@@ -17,11 +24,11 @@ pub enum IndexField<'x> {
 impl<'x> IndexField<'x> {
     pub fn len(&'x self) -> usize {
         match self {
-            IndexField::Text(t) => t.len(),
-            IndexField::Blob(b) => b.len(),
+            IndexField::Text(t) => t.value.text.len(),
+            IndexField::Blob(b) => b.value.len(),
             IndexField::Integer(i) => i.size_of(),
             IndexField::LongInteger(li) => li.size_of(),
-            IndexField::Tag(t) => t.len(),
+            IndexField::Tag(t) => t.value.len(),
             IndexField::Float(f) => f.size_of(),
         }
     }
@@ -60,6 +67,10 @@ impl<'x> IndexField<'x> {
     }
 }
 
+pub trait FieldLen {
+    fn len(&self) -> usize;
+}
+
 #[derive(Debug)]
 pub struct Field<T> {
     pub field: FieldId,
@@ -85,32 +96,23 @@ impl<T> Field<T> {
     }
 
     pub fn size_of(&self) -> usize {
-        std::mem::size_of::<T>()        
+        std::mem::size_of::<T>()
     }
 }
 
-impl<'x> Field<Tag<'x>> {
-    fn len(&self) -> usize {
-        match self.value {
+impl<'x> Tag<'x> {
+    pub fn len(&self) -> usize {
+        match self {
             Tag::Static(_) => std::mem::size_of::<TagId>(),
             Tag::Id(_) => std::mem::size_of::<DocumentId>(),
             Tag::Text(text) => text.len(),
         }
     }
-}
 
-impl<'x> Field<Cow<'x, [u8]>> {
-    fn len(&self) -> usize {
-        self.value.len()
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
-
-impl<'x> Field<TextLang<'x>> {
-    fn len(&self) -> usize {
-        self.value.text.len()
-    }
-}
-
 
 #[derive(Debug)]
 pub struct TextLang<'x> {
@@ -121,22 +123,32 @@ pub struct TextLang<'x> {
 
 impl<'x> Field<TextLang<'x>> {
     pub fn tokenize(&'x self) -> TokenIterator<'x> {
-        TokenIterator {
-            tokenizer: tokenize(&self.value.text, self.value.language, MAX_TOKEN_LENGTH),
-            stemmer: if self.options.is_full_text() {
-                Stemmer::new(self.value.language)
-            } else {
-                None
-            },
-            next_token: None,
-        }
+        TokenIterator::new(
+            &self.value.text,
+            self.value.language,
+            self.options.is_full_text(),
+        )
     }
 }
 
 pub struct TokenIterator<'x> {
     tokenizer: Box<dyn Iterator<Item = Token<'x>> + 'x>,
     stemmer: Option<Stemmer>,
-    next_token: Option<Token<'x>>,
+    pub stemmed_token: Option<Token<'x>>,
+}
+
+impl<'x> TokenIterator<'x> {
+    pub fn new(text: &'x str, language: Language, stemming: bool) -> Self {
+        TokenIterator {
+            tokenizer: tokenize(text, language, MAX_TOKEN_LENGTH),
+            stemmer: if stemming {
+                Stemmer::new(language)
+            } else {
+                None
+            },
+            stemmed_token: None,
+        }
+    }
 }
 
 impl<'x> Iterator for TokenIterator<'x> {
@@ -144,11 +156,11 @@ impl<'x> Iterator for TokenIterator<'x> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(stemmer) = &self.stemmer {
-            if self.next_token.is_some() {
-                std::mem::take(&mut self.next_token)
+            if self.stemmed_token.is_some() {
+                std::mem::take(&mut self.stemmed_token)
             } else {
                 let token = self.tokenizer.next()?;
-                self.next_token = stemmer.stem(&token);
+                self.stemmed_token = stemmer.stem(&token);
                 Some(token)
             }
         } else {

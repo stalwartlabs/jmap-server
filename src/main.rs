@@ -1,25 +1,39 @@
 use std::fs;
 
 use jmap_mail::parse::parse_message;
+use store::{Store, Tag};
+use store_rocksdb::RocksDBStore;
 
 
 fn main() {
+    let db = RocksDBStore::open("/terastore/db/0").unwrap();
 
-    for file_name in fs::read_dir("/vagrant/Code/stalwart/test/dovecot").unwrap() {
+    /*db.set_tag(&0, &0, &1, &111, &Tag::Id(4)).unwrap();
+    db.set_tag(&0, &0, &2, &111, &Tag::Id(4)).unwrap();
+    db.set_tag(&0, &0, &3, &111, &Tag::Id(4)).unwrap();
+    db.set_tag(&0, &0, &4, &111, &Tag::Id(4)).unwrap();
+    db.clear_tag(&0, &0, &2, &111, &Tag::Id(4)).unwrap();
+    println!("{:?}", db.has_tag(&0, &0, &1, &111, &Tag::Id(4)).unwrap());*/
+    
+    for file_name in fs::read_dir("/terastore/mailboxes/dovecot").unwrap() {
         let file_name = file_name.as_ref().unwrap().path();
         if file_name.extension().map_or(false, |e| e != "eml") {
             continue;
         }
-        if !file_name.file_name().unwrap().to_str().unwrap().starts_with("m005") {
-            continue;
-        }
+        //if !file_name.file_name().unwrap().to_str().unwrap().starts_with("m005") {
+        //    continue;
+        //}
 
         let input = fs::read(&file_name).unwrap();
-
-        let builder = parse_message(&input).unwrap();
-        for field in builder {
+        /*for field in builder {
             println!("{:?}", field);
+        }*/
+        if let Ok(builder) = parse_message(&input) {
+            println!("{:?}", file_name);
+            db.insert(&0, &0, builder).unwrap();
+
         }
+
 
         break;
 

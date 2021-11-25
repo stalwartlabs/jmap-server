@@ -1,20 +1,30 @@
 pub mod bitmaps;
+pub mod iterator;
 
-use bitmaps::set_bit;
-use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options};
+use std::{cell::Cell, sync::Arc};
+
+use bitmaps::{clear_bit, has_bit, set_bit};
+use iterator::RocksDBIterator;
+use roaring::RoaringBitmap;
+use rocksdb::{
+    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options, WriteBatch,
+};
 use store::{
-    document::{DocumentBuilder, IndexOptions},
+    document::{DocumentBuilder, IndexOptions, MAX_TOKEN_LENGTH},
+    field::TokenIterator,
     serialize::{
-        serialize_stored_key, serialize_stored_key_pos, SerializedKeyValue, SerializedValue,
-        TokenSerializer,
+        serialize_index_key, serialize_stored_key, serialize_stored_key_pos, serialize_tag_key,
+        serialize_text_key, SerializedKeyValue, SerializedValue, TokenSerializer,
     },
-    AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Result, Store, StoreError, Tag,
+    AccountId, ArrayPos, CollectionId, Condition, DocumentId, FieldId, FieldValue, FilterOperator,
+    LogicalOperator, OrderBy, Result, Store, StoreError, Tag,
 };
 
-use crate::bitmaps::{bitmap_full_merge, bitmap_partial_merge};
+use crate::bitmaps::{bitmap_full_merge, bitmap_op, bitmap_partial_merge};
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
+    id: Cell<u32>,
 }
 
 impl RocksDBStore {
@@ -44,6 +54,7 @@ impl RocksDBStore {
         db_opts.create_if_missing(true);
 
         Ok(Self {
+            id: 0.into(),
             db: DBWithThreadMode::open_cf_descriptors(
                 &db_opts,
                 path,
@@ -54,7 +65,7 @@ impl RocksDBStore {
     }
 }
 
-impl Store for RocksDBStore {
+impl Store<RocksDBIterator> for RocksDBStore {
     fn insert(
         &self,
         account: &AccountId,
@@ -74,18 +85,18 @@ impl Store for RocksDBStore {
             .cf_handle("bitmaps")
             .ok_or_else(|| StoreError::InternalError("No bitmaps column family found.".into()))?;
 
-        let document_id: DocumentId = 0;
+        let document_id: DocumentId = self.id.get();
+        self.id.set(document_id + 1);
+        let mut batch = WriteBatch::default();
 
         for field in document {
             let field_opt = field.get_options();
             if field_opt.is_sortable() {
-                self.db
-                    .put_cf(
-                        &cf_indexes,
-                        &field.as_sort_key(account, collection, &document_id),
-                        &[],
-                    )
-                    .map_err(|e| StoreError::InternalError(e.into_string()))?;
+                batch.put_cf(
+                    &cf_indexes,
+                    &field.as_index_key(account, collection, &document_id),
+                    &[],
+                );
             }
             if field_opt.is_stored() {
                 match field.as_stored_value(account, collection, &document_id) {
@@ -93,25 +104,19 @@ impl Store for RocksDBStore {
                         key,
                         value: SerializedValue::Tag,
                     } => {
-                        self.db
-                            .put_cf(&cf_bitmaps, &key, &set_bit(&document_id))
-                            .map_err(|e| StoreError::InternalError(e.into_string()))?;
+                        batch.merge_cf(&cf_bitmaps, &key, &set_bit(&document_id));
                     }
                     SerializedKeyValue {
                         key,
                         value: SerializedValue::Owned(value),
                     } => {
-                        self.db
-                            .put_cf(&cf_values, &key, &value)
-                            .map_err(|e| StoreError::InternalError(e.into_string()))?;
+                        batch.put_cf(&cf_values, &key, &value);
                     }
                     SerializedKeyValue {
                         key,
                         value: SerializedValue::Borrowed(value),
                     } => {
-                        self.db
-                            .put_cf(&cf_values, &key, value)
-                            .map_err(|e| StoreError::InternalError(e.into_string()))?;
+                        batch.put_cf(&cf_values, &key, value);
                     }
                 }
             }
@@ -119,16 +124,17 @@ impl Store for RocksDBStore {
             if field_opt.is_tokenized() || field_opt.is_full_text() {
                 let field = field.unwrap_text();
                 for token in field.tokenize() {
-                    self.db
-                        .put_cf(
-                            &cf_bitmaps,
-                            &token.as_index_key(account, collection, field),
-                            &set_bit(&document_id),
-                        )
-                        .map_err(|e| StoreError::InternalError(e.into_string()))?;
+                    batch.merge_cf(
+                        &cf_bitmaps,
+                        &token.as_index_key(account, collection, field),
+                        &set_bit(&document_id),
+                    );
                 }
             }
         }
+        self.db
+            .write(batch)
+            .map_err(|e| StoreError::InternalError(e.into_string()))?;
         Ok(document_id)
     }
 
@@ -168,60 +174,254 @@ impl Store for RocksDBStore {
     }
 
     fn set_tag(
-        &mut self,
+        &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
         field: &FieldId,
         tag: &Tag,
     ) -> Result<()> {
-        todo!()
+        self.db
+            .merge_cf(
+                &self.db.cf_handle("bitmaps").ok_or_else(|| {
+                    StoreError::InternalError("No bitmaps column family found.".into())
+                })?,
+                &serialize_tag_key(account, collection, field, tag),
+                &set_bit(document),
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))
     }
 
     fn clear_tag(
-        &mut self,
+        &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
         field: &FieldId,
         tag: &Tag,
     ) -> Result<()> {
-        todo!()
+        self.db
+            .merge_cf(
+                &self.db.cf_handle("bitmaps").ok_or_else(|| {
+                    StoreError::InternalError("No bitmaps column family found.".into())
+                })?,
+                &serialize_tag_key(account, collection, field, tag),
+                &clear_bit(document),
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))
     }
 
     fn has_tag(
-        &mut self,
+        &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
         field: &FieldId,
         tag: &Tag,
     ) -> Result<bool> {
-        todo!()
+        self.db
+            .get_cf(
+                &self.db.cf_handle("bitmaps").ok_or_else(|| {
+                    StoreError::InternalError("No bitmaps column family found.".into())
+                })?,
+                &serialize_tag_key(account, collection, field, tag),
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))?
+            .map_or(Ok(false), |b| has_bit(&b, document))
     }
 
     fn search(
         &self,
         account: &AccountId,
         collection: &CollectionId,
-        filter: &store::Filter,
-        order_by: &[store::OrderBy],
-    ) -> Result<Vec<DocumentId>> {
-        todo!()
+        filter: &FilterOperator,
+        order_by: &[OrderBy],
+    ) -> Result<RocksDBIterator> {
+        struct State<'x> {
+            op: &'x LogicalOperator,
+            it: std::slice::Iter<'x, Condition<'x>>,
+            rb: Option<RoaringBitmap>,
+        }
+
+        let mut stack = Vec::new();
+        let mut state = State {
+            op: &filter.operator,
+            it: filter.conditions.iter(),
+            rb: None,
+        };
+        let mut not_mask = RoaringBitmap::new();
+        not_mask.insert_range(0..5000);
+
+        let cf_indexes = self
+            .db
+            .cf_handle("indexes")
+            .ok_or_else(|| StoreError::InternalError("No indexes column family found.".into()))?;
+        let cf_bitmaps = self
+            .db
+            .cf_handle("bitmaps")
+            .ok_or_else(|| StoreError::InternalError("No bitmaps column family found.".into()))?;
+
+        'outer: loop {
+            while let Some(cond) = state.it.next() {
+                match cond {
+                    Condition::FilterCondition(filter_cond) => match &filter_cond.value {
+                        FieldValue::Keyword(keyword) => {
+                            bitmap_op(
+                                state.op,
+                                &mut state.rb,
+                                self.get_bitmap(
+                                    &cf_bitmaps,
+                                    &serialize_text_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        keyword,
+                                        true,
+                                    ),
+                                )?,
+                                &not_mask,
+                            );
+                        }
+                        FieldValue::Text(text) => {
+                            let mut text_bitmap = None;
+                            let mut it = TokenIterator::new(text.value, text.language, text.stem);
+                            while let Some(token) = it.next() {
+                                let mut token_bitmap = self.get_bitmap(
+                                    &cf_bitmaps,
+                                    &serialize_text_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        &token.word,
+                                        true,
+                                    ),
+                                )?;
+                                if let Some(stemmed_token) = it.stemmed_token {
+                                    bitmap_op(
+                                        &LogicalOperator::Or,
+                                        &mut token_bitmap,
+                                        self.get_bitmap(
+                                            &cf_bitmaps,
+                                            &serialize_text_key(
+                                                account,
+                                                collection,
+                                                &filter_cond.field,
+                                                &stemmed_token.word,
+                                                false,
+                                            ),
+                                        )?,
+                                        &not_mask,
+                                    );
+                                    it.stemmed_token = None;
+                                }
+
+                                bitmap_op(
+                                    &LogicalOperator::And,
+                                    &mut text_bitmap,
+                                    token_bitmap,
+                                    &not_mask,
+                                );
+
+                                if text_bitmap.as_ref().unwrap().is_empty() {
+                                    break;
+                                }
+                            }
+                            bitmap_op(state.op, &mut state.rb, text_bitmap, &not_mask)
+                        }
+                        FieldValue::Integer(i) => {
+                            bitmap_op(
+                                state.op,
+                                &mut state.rb,
+                                self.range_to_bitmap(
+                                    &cf_indexes,
+                                    &serialize_index_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        &i.to_be_bytes(),
+                                    ),
+                                    &filter_cond.op,
+                                )?,
+                                &not_mask,
+                            );
+                        }
+                        FieldValue::LongInteger(i) => {
+                            bitmap_op(
+                                state.op,
+                                &mut state.rb,
+                                self.range_to_bitmap(
+                                    &cf_indexes,
+                                    &serialize_index_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        &i.to_be_bytes(),
+                                    ),
+                                    &filter_cond.op,
+                                )?,
+                                &not_mask,
+                            );
+
+                        },
+                        FieldValue::Float(f) => {
+                            bitmap_op(
+                                state.op,
+                                &mut state.rb,
+                                self.range_to_bitmap(
+                                    &cf_indexes,
+                                    &serialize_index_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        &f.to_be_bytes(),
+                                    ),
+                                    &filter_cond.op,
+                                )?,
+                                &not_mask,
+                            );
+                        },
+                        FieldValue::Tag(tag) => {
+                            bitmap_op(
+                                state.op,
+                                &mut state.rb,
+                                self.get_bitmap(
+                                    &cf_bitmaps,
+                                    &serialize_tag_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        tag,
+                                    ),
+                                )?,
+                                &not_mask,
+                            );
+                        }
+                    },
+                    Condition::FilterOperator(filter_op) => {
+                        stack.push(state);
+                        state = State {
+                            op: &filter_op.operator,
+                            it: filter_op.conditions.iter(),
+                            rb: None,
+                        };
+                        continue 'outer;
+                    }
+                }
+
+                if state.op == &LogicalOperator::And && state.rb.as_ref().unwrap().is_empty() {
+                    break;
+                }
+            }
+            if let Some(mut prev_state) = stack.pop() {
+                bitmap_op(state.op, &mut prev_state.rb, state.rb, &not_mask);
+                state = prev_state;
+            } else {
+                break;
+            }
+        }
+
+        Ok(RocksDBIterator::new(
+            state.rb.unwrap_or_else(RoaringBitmap::new),
+        ))
     }
 }
-
-/*
-
-        Ok(self
-        .db
-        .get_pinned_cf(
-            &self.db.cf_handle("values").ok_or_else(|| {
-                StoreError::InternalError("No values column family found.".into())
-            })?,
-            &serialize_stored_key(account, collection, document, field),
-        )
-        .map_err(|e| StoreError::InternalError(e.into_string()))?.as_deref())
-
-
-*/

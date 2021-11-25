@@ -4,7 +4,11 @@ pub mod serialize;
 pub mod term_index;
 pub mod field;
 
+use std::{array::IntoIter, slice::Iter};
+
 use document::DocumentBuilder;
+use field::TokenIterator;
+use nlp::Language;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -26,8 +30,16 @@ pub type LongInteger = u64;
 pub type Float = f64;
 pub type ArrayPos = u16;
 
+pub struct TextSearchField<'x> {
+    pub value: &'x str,
+    pub language: Language,
+    pub match_phrase: bool,
+    pub stem: bool
+}
+
 pub enum FieldValue<'x> {
-    Text(&'x str),
+    Keyword(&'x str),
+    Text(TextSearchField<'x>),
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
@@ -41,21 +53,22 @@ pub enum Tag<'x> {
     Text(&'x str),
 }
 
-pub enum Filter<'x> {
-    LowerThan(FieldValue<'x>),
-    LowerEqualThan(FieldValue<'x>),
-    GreaterThan(FieldValue<'x>),
-    GreaterEqualThan(FieldValue<'x>),
-    Equal(FieldValue<'x>),
-    EqualMany(Vec<FieldValue<'x>>),
+pub enum ComparisonOperator {
+    LowerThan,
+    LowerEqualThan,
+    GreaterThan,
+    GreaterEqualThan,
+    Equal,
 }
 
 pub struct FilterCondition<'x> {
     pub field: FieldId,
-    pub filter: Filter<'x>,
+    pub op: ComparisonOperator,
+    pub value: FieldValue<'x>,
 }
 
-pub enum Operator {
+#[derive(Debug, Eq, PartialEq)]
+pub enum LogicalOperator {
     And,
     Or,
     Not,
@@ -67,7 +80,7 @@ pub enum Condition<'x> {
 }
 
 pub struct FilterOperator<'x> {
-    pub operator: Operator,
+    pub operator: LogicalOperator,
     pub conditions: Vec<Condition<'x>>,
 }
 
@@ -76,7 +89,7 @@ pub struct OrderBy {
     pub ascending: bool,
 }
 
-pub trait Store {
+pub trait Store<T: IntoIterator<Item = DocumentId>> {
     fn insert(
         &self,
         account: &AccountId,
@@ -101,7 +114,7 @@ pub trait Store {
     ) -> Result<Option<Vec<u8>>>;
 
     fn set_tag(
-        &mut self,
+        &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
@@ -109,7 +122,7 @@ pub trait Store {
         tag: &Tag,
     ) -> Result<()>;
     fn clear_tag(
-        &mut self,
+        &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
@@ -117,7 +130,7 @@ pub trait Store {
         tag: &Tag,
     ) -> Result<()>;
     fn has_tag(
-        &mut self,
+        &self,
         account: &AccountId,
         collection: &CollectionId,
         document: &DocumentId,
@@ -129,7 +142,7 @@ pub trait Store {
         &self,
         account: &AccountId,
         collection: &CollectionId,
-        filter: &Filter,
+        filter: &FilterOperator,
         order_by: &[OrderBy],
-    ) -> Result<Vec<DocumentId>>;
+    ) -> Result<T>;
 }
