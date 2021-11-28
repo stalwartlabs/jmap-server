@@ -8,3 +8,4 @@ publish = false
 store = { path = "../store" }
 rocksdb = "0.17"
 roaring = "0.8.1"
+dashmap = "4.0.2"

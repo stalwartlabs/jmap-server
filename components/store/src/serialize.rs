@@ -103,6 +103,14 @@ pub fn serialize_index_key(
     bytes
 }
 
+pub fn serialize_collection_key(account: &AccountId, collection: &CollectionId) -> Vec<u8> {
+    let mut bytes =
+        Vec::with_capacity(std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>());
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes
+}
+
 impl<'x> IndexField<'x> {
     pub fn as_stored_value(
         &self,
@@ -158,16 +166,16 @@ impl<'x> IndexField<'x> {
                 serialize_index_key(account, collection, &text.field, text.value.text.as_bytes())
             }
             IndexField::Integer(int) => {
-                serialize_index_key(account, collection, &int.field, &int.value.to_le_bytes())
+                serialize_index_key(account, collection, &int.field, &int.value.to_be_bytes())
             }
             IndexField::LongInteger(int) => {
-                serialize_index_key(account, collection, &int.field, &int.value.to_le_bytes())
+                serialize_index_key(account, collection, &int.field, &int.value.to_be_bytes())
             }
             IndexField::Float(float) => serialize_index_key(
                 account,
                 collection,
                 &float.field,
-                &float.value.to_le_bytes(),
+                &float.value.to_be_bytes(),
             ),
             IndexField::Tag(_) | IndexField::Blob(_) => {
                 panic!("Blobs and Tags cannot be serialized as sort keys.")

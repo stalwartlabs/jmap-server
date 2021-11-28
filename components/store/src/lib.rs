@@ -79,6 +79,24 @@ pub enum Condition<'x> {
     FilterOperator(FilterOperator<'x>),
 }
 
+impl<'x> Condition<'x> {
+    pub fn new_condition(field: FieldId, op: ComparisonOperator, value: FieldValue<'x>) -> Self {
+        Condition::FilterCondition(FilterCondition { field, op, value })
+    }
+
+    pub fn and(conditions: Vec<Condition<'x>>) -> Self {
+        Condition::FilterOperator(FilterOperator { operator: LogicalOperator::And, conditions })
+    }
+
+    pub fn or(conditions: Vec<Condition<'x>>) -> Self {
+        Condition::FilterOperator(FilterOperator { operator: LogicalOperator::Or, conditions })
+    }
+
+    pub fn not(conditions: Vec<Condition<'x>>) -> Self {
+        Condition::FilterOperator(FilterOperator { operator: LogicalOperator::Not, conditions })
+    }
+}
+
 pub struct FilterOperator<'x> {
     pub operator: LogicalOperator,
     pub conditions: Vec<Condition<'x>>,

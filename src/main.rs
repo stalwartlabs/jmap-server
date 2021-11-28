@@ -1,45 +1,70 @@
-use std::fs;
+use core::time;
+use std::{fs, sync::Arc, thread};
 
-use jmap_mail::parse::parse_message;
-use store::{Store, Tag};
+use jmap_mail::{parse::parse_message, MailField};
+use nlp::Language;
+use store::{
+    ComparisonOperator, Condition, FieldValue, FilterCondition, FilterOperator, Store, Tag,
+    TextSearchField,
+};
 use store_rocksdb::RocksDBStore;
 
-
 fn main() {
-    let db = RocksDBStore::open("/terastore/db/0").unwrap();
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
+    let db = Arc::new(RocksDBStore::open("/terastore/db/0").unwrap());
+    let mut counter = 0;
 
-    /*db.set_tag(&0, &0, &1, &111, &Tag::Id(4)).unwrap();
-    db.set_tag(&0, &0, &2, &111, &Tag::Id(4)).unwrap();
-    db.set_tag(&0, &0, &3, &111, &Tag::Id(4)).unwrap();
-    db.set_tag(&0, &0, &4, &111, &Tag::Id(4)).unwrap();
-    db.clear_tag(&0, &0, &2, &111, &Tag::Id(4)).unwrap();
-    println!("{:?}", db.has_tag(&0, &0, &1, &111, &Tag::Id(4)).unwrap());*/
-    
     for file_name in fs::read_dir("/terastore/mailboxes/dovecot").unwrap() {
         let file_name = file_name.as_ref().unwrap().path();
         if file_name.extension().map_or(false, |e| e != "eml") {
             continue;
         }
-        //if !file_name.file_name().unwrap().to_str().unwrap().starts_with("m005") {
-        //    continue;
-        //}
-
-        let input = fs::read(&file_name).unwrap();
-        /*for field in builder {
-            println!("{:?}", field);
-        }*/
-        if let Ok(builder) = parse_message(&input) {
-            println!("{:?}", file_name);
-            db.insert(&0, &0, builder).unwrap();
-
-        }
-
-
-        break;
+        let task_id = counter;
+        counter += 1;
+        let t_db = Arc::clone(&db);
+        pool.spawn(move || {
+            //if !file_name.file_name().unwrap().to_str().unwrap().starts_with("m005") {
+            //    continue;
+            //}
+            //str::parse::<u32>(&file_name[1..file_name.len() - 4]).unwrap()
+            let input = fs::read(&file_name).unwrap();
+            if let Ok(builder) = parse_message(&input) {
+                t_db.insert(&0, &0, builder).unwrap();
+            }
+            //let file_name2 = file_name.file_name().unwrap().to_str().unwrap();
+            //thread::sleep(time::Duration::from_millis(str::parse::<u64>(&file_name2[1..file_name2.len() - 4]).unwrap()));
+            println!("{} -> {}", task_id, file_name.display());
+        });
 
     }
 
+    //println!("{} {:?} {:?}", pool.current_num_threads(), pool.current_thread_has_pending_tasks(), pool.current_thread_index());
 
+    thread::sleep(time::Duration::from_millis(1000000));
+
+    /*let filter = FilterOperator {
+        operator: store::LogicalOperator::And,
+        conditions: vec![
+            /*Condition::new_condition(
+                MailField::HeaderField as u8 + 0 as u8,
+                ComparisonOperator::Equal,
+                FieldValue::Text(TextSearchField {
+                    value: "authentication mechanism",
+                    language: Language::English,
+                    match_phrase: false,
+                    stem: false,
+                }),
+            ),*/
+            Condition::new_condition(
+                MailField::Size as u8,
+                ComparisonOperator::LowerEqualThan,
+                FieldValue::Integer(1200),
+            ),
+        ],
+    };
+
+    db.search(&0, &0, &filter, &[]).unwrap();*/
+    
 }
 
 /*

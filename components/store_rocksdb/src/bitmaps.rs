@@ -25,7 +25,7 @@ pub fn bitmap_full_merge(
         RoaringBitmap::new()
     };
 
-    println!("Full merge {:?} {}", operands.size_hint().0, rb.len());
+    //println!("Full merge {:?} {}", operands.size_hint().0, rb.len());
 
     for op in operands {
         match *(op.get(0)?) {
@@ -84,7 +84,7 @@ pub fn bitmap_partial_merge(
 
     bytes.push(BIT_LIST);
 
-    println!("Partial merge {:?}", operands.size_hint().0);
+    //println!("Partial merge {:?}", operands.size_hint().0);
 
     for op in operands {
         match *(op.get(0)?) {
@@ -122,40 +122,109 @@ impl RocksDBStore {
         }
     }
 
+    #[inline(always)]
+    pub fn get_bitmaps_union(
+        &self,
+        keys: Vec<(&Arc<BoundColumnFamily>, Vec<u8>)>,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        let mut result: Option<RoaringBitmap> = None;
+        for bitmap in self.db.multi_get_cf(keys) {
+            if let Some(bytes) = bitmap.map_err(|e| StoreError::InternalError(e.into_string()))? {
+                let rb = RoaringBitmap::deserialize_from(&bytes[..])
+                    .map_err(|e| StoreError::InternalError(e.to_string()))?;
+
+                if let Some(result) = &mut result {
+                    result.bitor_assign(&rb);
+                } else {
+                    result = Some(rb);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    #[inline(always)]
+    pub fn get_bitmaps_intersection(
+        &self,
+        keys: Vec<(&Arc<BoundColumnFamily>, Vec<u8>)>,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        let mut result: Option<RoaringBitmap> = None;
+        for bitmap in self.db.multi_get_cf(keys) {
+            if let Some(bytes) = bitmap.map_err(|e| StoreError::InternalError(e.into_string()))? {
+                let rb = RoaringBitmap::deserialize_from(&bytes[..])
+                    .map_err(|e| StoreError::InternalError(e.to_string()))?;
+
+                if let Some(result) = &mut result {
+                    result.bitand_assign(&rb);
+                    if result.is_empty() {
+                        break;
+                    }
+                } else {
+                    result = Some(rb);
+                }
+            } else {
+                return Ok(None);
+            }
+        }
+        Ok(result)
+    }
+
     pub fn range_to_bitmap(
         &self,
         cf_indexes: &Arc<BoundColumnFamily>,
-        key_start: &[u8],
+        match_key: &[u8],
         op: &ComparisonOperator,
     ) -> crate::Result<Option<RoaringBitmap>> {
         let mut rb = RoaringBitmap::new();
-        let prefix = &key_start[0..PREFIX_LEN];
+        let match_prefix = &match_key[0..PREFIX_LEN];
+        let match_value = &match_key[PREFIX_LEN..];
 
         for (key, _) in self.db.iterator_cf(
             cf_indexes,
             IteratorMode::From(
-                key_start,
+                match_key,
                 match op {
-                    ComparisonOperator::GreaterThan => Direction::Reverse,
-                    ComparisonOperator::GreaterEqualThan => Direction::Reverse,
-                    _ => Direction::Forward,
+                    ComparisonOperator::GreaterThan => Direction::Forward,
+                    ComparisonOperator::GreaterEqualThan => Direction::Forward,
+                    ComparisonOperator::Equal => Direction::Forward,
+                    _ => Direction::Reverse,
                 },
             ),
         ) {
-            if !key.starts_with(prefix) {
+            //print!("{} -> {:?} {:?}", key.starts_with(match_prefix), key, match_prefix);
+            if !key.starts_with(match_prefix) {
                 break;
             }
-            let value = &key[0..key_start.len()];
+            let doc_id_pos = key.len() - std::mem::size_of::<DocumentId>();
+            let value = key.get(PREFIX_LEN..doc_id_pos).ok_or_else(|| {
+                StoreError::InternalError(
+                    "Invalid key found in 'indexes' column family.".to_string(),
+                )
+            })?;
+            /*println!(
+                " {} {}",
+                u32::from_be_bytes(value.try_into().map_err(|e: TryFromSliceError| {
+                    StoreError::InternalError(e.to_string())
+                })?,),
+                u32::from_be_bytes(match_value.try_into().map_err(|e: TryFromSliceError| {
+                    StoreError::InternalError(e.to_string())
+                })?,)
+            );*/
 
             match op {
-                ComparisonOperator::LowerThan if value >= key_start => break,
-                ComparisonOperator::LowerEqualThan if value > key_start => break,
-                ComparisonOperator::GreaterThan if value <= key_start => break,
-                ComparisonOperator::GreaterEqualThan if value < key_start => break,
-                ComparisonOperator::Equal if value != key_start => break,
+                ComparisonOperator::LowerThan if value >= match_value => break,
+                ComparisonOperator::LowerEqualThan if value > match_value => break,
+                ComparisonOperator::GreaterThan if value <= match_value => break,
+                ComparisonOperator::GreaterEqualThan if value < match_value => break,
+                ComparisonOperator::Equal if value != match_value => break,
                 _ => {
                     rb.insert(DocumentId::from_be_bytes(
-                        key[key_start.len()..]
+                        key.get(doc_id_pos..)
+                            .ok_or_else(|| {
+                                StoreError::InternalError(
+                                    "Invalid key found in 'indexes' column family.".to_string(),
+                                )
+                            })?
                             .try_into()
                             .map_err(|e: TryFromSliceError| {
                                 StoreError::InternalError(e.to_string())
