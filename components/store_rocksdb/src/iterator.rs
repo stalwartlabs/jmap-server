@@ -16,12 +16,14 @@ impl IntoIterator for RocksDBIterator {
     type IntoIter = IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter{iter: self.rb.into_iter()}
+        IntoIter {
+            iter: self.rb.into_iter(),
+        }
     }
 }
 
 pub struct IntoIter {
-    iter: roaring::bitmap::IntoIter
+    iter: roaring::bitmap::IntoIter,
 }
 
 impl Iterator for IntoIter {
@@ -33,6 +35,5 @@ impl Iterator for IntoIter {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.iter.size_hint()
-    }    
+    }
 }
-

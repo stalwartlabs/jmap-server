@@ -1,9 +1,6 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use nlp::{
-    lang::detect_language,
-    Language,
-};
+use nlp::{lang::detect_language, Language};
 
 use crate::{
     field::{Field, IndexField, TextLang},
@@ -21,14 +18,16 @@ pub trait IndexOptions {
     const Stored: OptionValue = 0x1 << 16;
     const Array: OptionValue = 0x2 << 16;
     const Sortable: OptionValue = 0x4 << 16;
-    const Tokenized: OptionValue = 0x8 << 16;
+    const Text: OptionValue = 0x8 << 16;
     const FullText: OptionValue = 0x10 << 16;
+    const Keyword: OptionValue = 0x20 << 16;
 
     fn is_stored(&self) -> bool;
     fn is_array(&self) -> bool;
     fn is_sortable(&self) -> bool;
-    fn is_tokenized(&self) -> bool;
+    fn is_text(&self) -> bool;
     fn is_full_text(&self) -> bool;
+    fn is_keyword(&self) -> bool;
     fn is_none(&self) -> bool;
     fn get_pos(&self) -> ArrayPos;
     fn set_pos(pos: usize) -> OptionValue;
@@ -57,8 +56,13 @@ impl IndexOptions for OptionValue {
     }
 
     #[inline(always)]
-    fn is_tokenized(&self) -> bool {
-        self & Self::Tokenized != 0
+    fn is_text(&self) -> bool {
+        self & Self::Text != 0
+    }
+
+    #[inline(always)]
+    fn is_keyword(&self) -> bool {
+        self & Self::Keyword != 0
     }
 
     #[inline(always)]
@@ -79,12 +83,14 @@ impl IndexOptions for OptionValue {
 
 pub type OptionValue = u32;
 
+#[derive(Debug)]
 struct WeightedAverage {
     weight: usize,
     occurrences: usize,
     confidence: f64,
 }
 
+#[derive(Debug)]
 pub struct DocumentBuilder<'x> {
     fields: Vec<IndexField<'x>>,
     lang_detected: HashMap<Language, WeightedAverage>,

@@ -1,33 +1,45 @@
 pub mod bitmaps;
 pub mod document_id;
 pub mod iterator;
+pub mod term;
 
-use std::{cell::Cell, collections::HashSet, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    convert::TryInto,
+    sync::Mutex,
+};
 
 use bitmaps::{clear_bit, has_bit, set_bit};
 use dashmap::DashMap;
 use iterator::RocksDBIterator;
+
+use nlp::Language;
 use roaring::RoaringBitmap;
-use rocksdb::{
-    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options, WriteBatch,
-};
+use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options, WriteBatch};
 use store::{
-    document::{DocumentBuilder, IndexOptions, MAX_TOKEN_LENGTH},
+    document::{DocumentBuilder, IndexOptions},
     field::TokenIterator,
     serialize::{
         serialize_collection_key, serialize_index_key, serialize_stored_key,
-        serialize_stored_key_pos, serialize_tag_key, serialize_text_key, SerializedKeyValue,
-        SerializedValue, TokenSerializer,
+        serialize_stored_key_pos, serialize_tag_key, serialize_term_id_key, serialize_text_key,
+        SerializedKeyValue, SerializedValue,
     },
+    term_index::TermIndexBuilder,
     AccountId, ArrayPos, CollectionId, Condition, DocumentId, FieldId, FieldValue, FilterOperator,
-    LogicalOperator, OrderBy, Result, Store, StoreError, Tag,
+    LogicalOperator, OrderBy, Result, Store, StoreError, Tag, TermId,
 };
 
-use crate::bitmaps::{bitmap_full_merge, bitmap_op, bitmap_partial_merge};
+use crate::{
+    bitmaps::{bitmap_full_merge, bitmap_op, bitmap_partial_merge},
+    term::get_last_term_id,
+};
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
     reserved_ids: DashMap<(AccountId, CollectionId), HashSet<DocumentId>>,
+    term_id_lock: DashMap<String, (TermId, u32)>,
+    term_id_last: Mutex<u64>,
 }
 
 impl RocksDBStore {
@@ -52,18 +64,28 @@ impl RocksDBStore {
             ColumnFamilyDescriptor::new("indexes", cf_opts)
         };
 
+        // Term index
+        let cf_terms = {
+            let cf_opts = Options::default();
+            ColumnFamilyDescriptor::new("terms", cf_opts)
+        };
+
         let mut db_opts = Options::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
 
+        let db: DBWithThreadMode<MultiThreaded> = DBWithThreadMode::open_cf_descriptors(
+            &db_opts,
+            path,
+            vec![cf_bitmaps, cf_values, cf_indexes, cf_terms],
+        )
+        .map_err(|e| StoreError::InternalError(e.into_string()))?;
+
         Ok(Self {
             reserved_ids: DashMap::new(),
-            db: DBWithThreadMode::open_cf_descriptors(
-                &db_opts,
-                path,
-                vec![cf_bitmaps, cf_values, cf_indexes],
-            )
-            .map_err(|e| StoreError::InternalError(e.into_string()))?,
+            term_id_lock: DashMap::new(),
+            term_id_last: Mutex::new(get_last_term_id(&db)?),
+            db,
         })
     }
 }
@@ -99,6 +121,9 @@ impl Store<RocksDBIterator> for RocksDBStore {
             &set_bit(&document_id),
         );
 
+        // Full text term positions
+        let mut term_index = TermIndexBuilder::new();
+
         for field in document {
             let field_opt = field.get_options();
             if field_opt.is_sortable() {
@@ -131,17 +156,67 @@ impl Store<RocksDBIterator> for RocksDBStore {
                 }
             }
 
-            if field_opt.is_tokenized() || field_opt.is_full_text() {
+            if field_opt.is_full_text() {
+                let field = field.unwrap_text();
+                let terms = self.get_terms(field.tokenize())?;
+                if !terms.is_empty() {
+                    for term in &terms {
+                        batch.merge_cf(
+                            &cf_bitmaps,
+                            &serialize_term_id_key(
+                                account,
+                                collection,
+                                field.get_field(),
+                                &term.id,
+                                true,
+                            ),
+                            &set_bit(&document_id),
+                        );
+                        if term.id_stemmed > 0 {
+                            batch.merge_cf(
+                                &cf_bitmaps,
+                                &serialize_term_id_key(
+                                    account,
+                                    collection,
+                                    field.get_field(),
+                                    &term.id_stemmed,
+                                    false,
+                                ),
+                                &set_bit(&document_id),
+                            );
+                        }
+                    }
+                    let opt = field.get_options();
+                    term_index.add_item(
+                        *field.get_field(),
+                        if opt.is_array() { opt.get_pos() + 1 } else { 0 },
+                        terms,
+                    );
+                }
+            } else if field_opt.is_text() {
                 let field = field.unwrap_text();
                 for token in field.tokenize() {
                     batch.merge_cf(
                         &cf_bitmaps,
-                        &token.as_index_key(account, collection, field),
+                        &serialize_text_key(account, collection, field.get_field(), &token.word),
                         &set_bit(&document_id),
                     );
                 }
+            } else if field_opt.is_keyword() {
+                batch.merge_cf(
+                    &cf_bitmaps,
+                    &serialize_text_key(
+                        account,
+                        collection,
+                        field.get_field(),
+                        &field.unwrap_text().value.text,
+                    ),
+                    &set_bit(&document_id),
+                );
             }
         }
+
+        if !term_index.is_empty() {}
 
         match self.db.write(batch) {
             Ok(_) => {
@@ -292,79 +367,42 @@ impl Store<RocksDBIterator> for RocksDBStore {
                                         collection,
                                         &filter_cond.field,
                                         keyword,
-                                        true,
                                     ),
                                 )?,
                                 &not_mask,
                             );
                         }
                         FieldValue::Text(text) => {
-                            let mut it = TokenIterator::new(text.value, text.language, text.stem);
-                            if text.stem {
-                                let mut text_bitmap = None;
-                                while let Some(token) = it.next() {
-                                    let mut keys = vec![
-                                        (
-                                            &cf_bitmaps,
-                                            serialize_text_key(
-                                                account,
-                                                collection,
-                                                &filter_cond.field,
-                                                &token.word,
-                                                true,
-                                            ),
-                                        ),
-                                        (
-                                            &cf_bitmaps,
-                                            serialize_text_key(
-                                                account,
-                                                collection,
-                                                &filter_cond.field,
-                                                &token.word,
-                                                false,
-                                            ),
-                                        ),
-                                    ];
-                                    if let Some(stemmed_token) = it.stemmed_token {
-                                        keys.push((
-                                            &cf_bitmaps,
-                                            serialize_text_key(
-                                                account,
-                                                collection,
-                                                &filter_cond.field,
-                                                &stemmed_token.word,
-                                                false,
-                                            ),
-                                        ));
-                                        keys.push((
-                                            &cf_bitmaps,
-                                            serialize_text_key(
-                                                account,
-                                                collection,
-                                                &filter_cond.field,
-                                                &stemmed_token.word,
-                                                true,
-                                            ),
-                                        ));
-                                        it.stemmed_token = None;
-                                    }
-
-                                    bitmap_op(
-                                        &LogicalOperator::And,
-                                        &mut text_bitmap,
-                                        self.get_bitmaps_union(keys)?,
-                                        &not_mask,
-                                    );
-
-                                    if text_bitmap.as_ref().unwrap().is_empty() {
-                                        break;
-                                    }
-                                }
-                                bitmap_op(state.op, &mut state.rb, text_bitmap, &not_mask);
-                            } else {
-                                let mut keys = Vec::new();
-                                for token in it {
-                                    keys.push((
+                            let mut keys = Vec::new();
+                            for token in TokenIterator::new(text, Language::English, false) {
+                                keys.push((
+                                    &cf_bitmaps,
+                                    serialize_text_key(
+                                        account,
+                                        collection,
+                                        &filter_cond.field,
+                                        &token.word,
+                                    ),
+                                ));
+                            }
+                            bitmap_op(
+                                state.op,
+                                &mut state.rb,
+                                self.get_bitmaps_intersection(keys)?,
+                                &not_mask,
+                            );
+                        }
+                        FieldValue::FullText(text) => {
+                            if (text.value.starts_with('"') && text.value.ends_with('"'))
+                                || (text.value.starts_with('\'') && text.value.ends_with('\''))
+                            {
+                                for token in TokenIterator::new(text.value, text.language, false) {}
+                            }
+                            let mut it = TokenIterator::new(text.value, text.language, false);
+                            let mut text_bitmap = None;
+                            while let Some(token) = it.next() {
+                                /*let mut keys = vec![
+                                    (
                                         &cf_bitmaps,
                                         serialize_text_key(
                                             account,
@@ -373,15 +411,54 @@ impl Store<RocksDBIterator> for RocksDBStore {
                                             &token.word,
                                             true,
                                         ),
+                                    ),
+                                    (
+                                        &cf_bitmaps,
+                                        serialize_text_key(
+                                            account,
+                                            collection,
+                                            &filter_cond.field,
+                                            &token.word,
+                                            false,
+                                        ),
+                                    ),
+                                ];
+                                if let Some(stemmed_token) = it.stemmed_token {
+                                    keys.push((
+                                        &cf_bitmaps,
+                                        serialize_text_key(
+                                            account,
+                                            collection,
+                                            &filter_cond.field,
+                                            &stemmed_token.word,
+                                            false,
+                                        ),
                                     ));
+                                    keys.push((
+                                        &cf_bitmaps,
+                                        serialize_text_key(
+                                            account,
+                                            collection,
+                                            &filter_cond.field,
+                                            &stemmed_token.word,
+                                            true,
+                                        ),
+                                    ));
+                                    it.stemmed_token = None;
                                 }
+
                                 bitmap_op(
-                                    state.op,
-                                    &mut state.rb,
-                                    self.get_bitmaps_intersection(keys)?,
+                                    &LogicalOperator::And,
+                                    &mut text_bitmap,
+                                    self.get_bitmaps_union(keys)?,
                                     &not_mask,
                                 );
+
+                                if text_bitmap.as_ref().unwrap().is_empty() {
+                                    break;
+                                }*/
                             }
+                            bitmap_op(state.op, &mut state.rb, text_bitmap, &not_mask);
                         }
                         FieldValue::Integer(i) => {
                             bitmap_op(

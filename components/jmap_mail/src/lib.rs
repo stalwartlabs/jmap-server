@@ -13,3 +13,9 @@ pub enum MailField {
 
     HeaderField = 8,
 }
+
+impl From<MailField> for u8 {
+    fn from(field: MailField) -> Self {
+        field as u8
+    }
+}

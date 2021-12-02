@@ -10,6 +10,10 @@ store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
 rayon = "1.5.1"
 
+[dev-dependencies]
+csv = "1.1"
+serde = { version = "1", features = ["derive"] }
+
 [workspace]
 resolver = "2"
 members = [

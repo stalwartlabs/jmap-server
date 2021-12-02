@@ -20,7 +20,6 @@ impl<'x> Iterator for JapaneseTokenizer<'x> {
     fn next(&mut self) -> Option<Self::Item> {
         Some(Token::new(
             0,
-            0,
             self.max_token_length,
             self.text[0..2].into(),
         ))

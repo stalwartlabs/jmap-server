@@ -1,8 +1,8 @@
 pub mod document;
+pub mod field;
 pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
-pub mod field;
 
 use std::{array::IntoIter, slice::Iter};
 
@@ -29,17 +29,19 @@ pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
 pub type ArrayPos = u16;
+pub type TermId = u64;
 
 pub struct TextSearchField<'x> {
     pub value: &'x str,
     pub language: Language,
     pub match_phrase: bool,
-    pub stem: bool
+    pub stem: bool,
 }
 
 pub enum FieldValue<'x> {
     Keyword(&'x str),
-    Text(TextSearchField<'x>),
+    Text(&'x str),
+    FullText(TextSearchField<'x>),
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
@@ -85,15 +87,24 @@ impl<'x> Condition<'x> {
     }
 
     pub fn and(conditions: Vec<Condition<'x>>) -> Self {
-        Condition::FilterOperator(FilterOperator { operator: LogicalOperator::And, conditions })
+        Condition::FilterOperator(FilterOperator {
+            operator: LogicalOperator::And,
+            conditions,
+        })
     }
 
     pub fn or(conditions: Vec<Condition<'x>>) -> Self {
-        Condition::FilterOperator(FilterOperator { operator: LogicalOperator::Or, conditions })
+        Condition::FilterOperator(FilterOperator {
+            operator: LogicalOperator::Or,
+            conditions,
+        })
     }
 
     pub fn not(conditions: Vec<Condition<'x>>) -> Self {
-        Condition::FilterOperator(FilterOperator { operator: LogicalOperator::Not, conditions })
+        Condition::FilterOperator(FilterOperator {
+            operator: LogicalOperator::Not,
+            conditions,
+        })
     }
 }
 

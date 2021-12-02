@@ -21,7 +21,6 @@ impl Stemmer {
             if text.len() != token.len as usize || text != token.word {
                 Some(Token {
                     word: text.into(),
-                    pos: token.pos,
                     len: token.len,
                     offset: token.offset,
                     is_exact: false,

@@ -1,5 +1,5 @@
 use core::time;
-use std::{fs, sync::Arc, thread};
+use std::{collections::HashMap, fs, sync::Arc, thread};
 
 use jmap_mail::{parse::parse_message, MailField};
 use nlp::Language;
@@ -10,7 +10,10 @@ use store::{
 use store_rocksdb::RocksDBStore;
 
 fn main() {
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().unwrap();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap();
     let db = Arc::new(RocksDBStore::open("/terastore/db/0").unwrap());
     let mut counter = 0;
 
@@ -35,7 +38,6 @@ fn main() {
             //thread::sleep(time::Duration::from_millis(str::parse::<u64>(&file_name2[1..file_name2.len() - 4]).unwrap()));
             println!("{} -> {}", task_id, file_name.display());
         });
-
     }
 
     //println!("{} {:?} {:?}", pool.current_num_threads(), pool.current_thread_has_pending_tasks(), pool.current_thread_index());
@@ -46,7 +48,7 @@ fn main() {
         operator: store::LogicalOperator::And,
         conditions: vec![
             /*Condition::new_condition(
-                MailField::HeaderField as u8 + 0 as u8,
+                MailField::HeaderField.into() + 0.into(),
                 ComparisonOperator::Equal,
                 FieldValue::Text(TextSearchField {
                     value: "authentication mechanism",
@@ -56,7 +58,7 @@ fn main() {
                 }),
             ),*/
             Condition::new_condition(
-                MailField::Size as u8,
+                MailField::Size.into(),
                 ComparisonOperator::LowerEqualThan,
                 FieldValue::Integer(1200),
             ),
@@ -64,7 +66,116 @@ fn main() {
     };
 
     db.search(&0, &0, &filter, &[]).unwrap();*/
-    
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde::Deserialize;
+    use store::document::IndexOptions;
+    use store::document::{DocumentBuilder, OptionValue};
+    use store::Store;
+    use store_rocksdb::RocksDBStore;
+
+    const FIELDS: [&str; 20] = [
+        "id",
+        "accession_number",
+        "artist",
+        "artistRole",
+        "artistId",
+        "title",
+        "dateText",
+        "medium",
+        "creditLine",
+        "year",
+        "acquisitionYear",
+        "dimensions",
+        "width",
+        "height",
+        "depth",
+        "units",
+        "inscription",
+        "thumbnailCopyright",
+        "thumbnailUrl",
+        "url",
+    ];
+
+    const FIELDS_OPTIONS: [u32; 20] = [
+        0,                                                // "id",
+        <OptionValue>::Text | <OptionValue>::Stored, // "accession_number",
+        <OptionValue>::Text | <OptionValue>::Stored, // "artist",
+        <OptionValue>::Text | <OptionValue>::Stored, // "artistRole",
+        0,                                                // "artistId",
+        <OptionValue>::FullText | <OptionValue>::Stored,  // "title",
+        <OptionValue>::FullText | <OptionValue>::Stored,  // "dateText",
+        <OptionValue>::FullText | <OptionValue>::Stored,  // "medium",
+        <OptionValue>::FullText | <OptionValue>::Stored,  // "creditLine",
+        0,                                                // "year",
+        0,                                                // "acquisitionYear",
+        <OptionValue>::FullText | <OptionValue>::Stored,  // "dimensions",
+        0,                                                // "width",
+        0,                                                // "height",
+        0,                                                // "depth",
+        <OptionValue>::Text | <OptionValue>::Stored, // "units",
+        <OptionValue>::FullText | <OptionValue>::Stored,  // "inscription",
+        <OptionValue>::Text | <OptionValue>::Stored, // "thumbnailCopyright",
+        <OptionValue>::Text | <OptionValue>::Stored, // "thumbnailUrl",
+        <OptionValue>::Text | <OptionValue>::Stored, // "url",
+    ];
+
+    #[test]
+    fn create_database() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .build()
+            .unwrap()
+            .scope(|s| {
+                let db = Arc::new(RocksDBStore::open("/terastore/db/artwork_termid2").unwrap());
+                let mut reader = csv::ReaderBuilder::new()
+                    .has_headers(true)
+                    .from_path("/terastore/datasets/artwork_data.csv")
+                    .unwrap();
+                let mut count = 0;
+
+                for record in reader.records() {
+                    let record = record.unwrap();
+                    let t_db = db.clone();
+                    s.spawn(move |_| {
+                        let mut builder = DocumentBuilder::new();
+                        for (pos, field) in record.iter().enumerate() {
+                            if field.is_empty() {
+                                continue;
+                            }
+                            if FIELDS_OPTIONS[pos] == 0 {
+                                if let Ok(value) = field.parse::<u32>() {
+                                    builder.add_integer(
+                                        pos as u8,
+                                        value,
+                                        <OptionValue>::Sortable | <OptionValue>::Stored,
+                                    );
+                                }
+                            } else {
+                                builder.add_text(pos as u8, field.into(), FIELDS_OPTIONS[pos]);
+                                builder.add_text(
+                                    pos as u8,
+                                    field.to_lowercase().into(),
+                                    <OptionValue>::Sortable,
+                                );
+                            }
+                        }
+                        t_db.insert(&0, &0, builder).unwrap();
+                        println!("Inserted {:?}", record.get(0));
+                    });
+                }
+            });
+    }
+
+    #[test]
+    fn query_database() {
+        let db = RocksDBStore::open("/terastore/db/artwork_termid").unwrap();
+        println!("Okye");
+    }
 }
 
 /*

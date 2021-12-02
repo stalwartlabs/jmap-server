@@ -10,17 +10,14 @@ pub struct Token<'x> {
     pub word: Cow<'x, str>,
     pub offset: u32,    // Word offset in the text part
     pub len: u8,        // Word length
-    pub pos: u32,       // Word position in the text part
     pub is_exact: bool, // True if the token is an exact match
 }
 
 impl<'x> Token<'x> {
-    pub fn new(pos: usize, offset: usize, len: usize, word: Cow<'x, str>) -> Token<'x> {
-        debug_assert!(pos < (1 << 24) as usize); // Max 16.777.216 tokens per part
+    pub fn new(offset: usize, len: usize, word: Cow<'x, str>) -> Token<'x> {
         debug_assert!(offset <= u32::max_value() as usize);
         debug_assert!(len <= u8::max_value() as usize);
         Token {
-            pos: pos as u32,
             offset: offset as u32,
             len: len as u8,
             word,

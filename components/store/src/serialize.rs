@@ -3,7 +3,7 @@ use nlp::tokenizers::Token;
 use crate::{
     document::IndexOptions,
     field::{Field, IndexField, TextLang},
-    AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Tag,
+    AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Tag, TermId,
 };
 
 pub const PREFIX_LEN: usize = std::mem::size_of::<AccountId>()
@@ -76,11 +76,25 @@ pub fn serialize_text_key(
     collection: &CollectionId,
     field: &FieldId,
     text: &str,
-    is_exact: bool,
 ) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + text.len() + 1);
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + text.len());
     bytes.extend_from_slice(&account.to_be_bytes());
     bytes.extend_from_slice(text.as_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.extend_from_slice(&field.to_be_bytes());
+    bytes
+}
+
+pub fn serialize_term_id_key(
+    account: &AccountId,
+    collection: &CollectionId,
+    field: &FieldId,
+    term_id: &TermId,
+    is_exact: bool,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<TermId>() + 1);
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(&term_id.to_be_bytes());
     bytes.extend_from_slice(&collection.to_be_bytes());
     bytes.extend_from_slice(&field.to_be_bytes());
     if !is_exact {
@@ -183,31 +197,5 @@ impl<'x> IndexField<'x> {
         };
         bytes.extend_from_slice(&document.to_be_bytes());
         bytes
-    }
-}
-
-pub trait TokenSerializer {
-    fn as_index_key(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        field: &Field<TextLang>,
-    ) -> Vec<u8>;
-}
-
-impl<'x> TokenSerializer for Token<'x> {
-    fn as_index_key(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        field: &Field<TextLang>,
-    ) -> Vec<u8> {
-        serialize_text_key(
-            account,
-            collection,
-            field.get_field(),
-            &self.word,
-            !field.options.is_full_text() || self.is_exact,
-        )
     }
 }

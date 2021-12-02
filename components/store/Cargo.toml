@@ -6,5 +6,5 @@ publish = false
 
 [dependencies]
 nlp = { path = "../nlp" }
-fst = "0.4.7" # FST
-lz4_flex = { version = "0.9.2", default-features = false, features = ["checked-decode"] }
+bitpacking = "0.8.4"
+integer-encoding = "3.0.2"

@@ -12,98 +12,79 @@ fn escape_char(c: char, string: &mut String) {
     }
 }
 
-pub fn generate_snippet(terms: &[Term], parts: &[&str]) -> Option<Vec<String>> {
-    let mut result = Vec::new();
-    let mut terms = terms.iter().peekable();
+pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
+    let mut snippet = String::with_capacity(text.len());
+    let start_offset = terms.get(0)?.offset as usize;
 
-    for part in parts {
-        let mut snippet = String::with_capacity(parts.len());
-        let start_offset = terms.peek()?.offset as usize;
-
-        if start_offset > 0 {
-            let mut word_count = 0;
-            let mut from_offset = 0;
-            if part.len() > 240 {
-                for (pos, char) in part.get(0..start_offset)?.char_indices().rev() {
-                    // Add up to 2 words or 40 characters of context
-                    if char.is_whitespace() {
-                        word_count += 1;
-                        if word_count == 3 {
-                            break;
-                        }
-                    }
-                    from_offset = pos;
-                    if start_offset - from_offset >= 40 {
+    if start_offset > 0 {
+        let mut word_count = 0;
+        let mut from_offset = 0;
+        if text.len() > 240 {
+            for (pos, char) in text.get(0..start_offset)?.char_indices().rev() {
+                // Add up to 2 words or 40 characters of context
+                if char.is_whitespace() {
+                    word_count += 1;
+                    if word_count == 3 {
                         break;
                     }
                 }
-            }
-
-            for char in part.get(from_offset..start_offset)?.chars() {
-                escape_char(char, &mut snippet);
-            }
-        }
-
-        while let Some(term) = terms.next() {
-            snippet.push_str("<mark>");
-            snippet.push_str(
-                part.get(term.offset as usize..term.offset as usize + term.len as usize)?,
-            );
-            snippet.push_str("</mark>");
-
-            let (next_offset, next_field_num) = if let Some(next_term) = terms.peek() {
-                (
-                    if next_term.field_num == term.field_num {
-                        next_term.offset as usize
-                    } else {
-                        part.len()
-                    },
-                    next_term.field_num,
-                )
-            } else {
-                (part.len(), u16::MAX)
-            };
-
-            for char in part
-                .get(term.offset as usize + term.len as usize..next_offset)?
-                .chars()
-            {
-                if snippet.len() + 3 > 255 {
+                from_offset = pos;
+                if start_offset - from_offset >= 40 {
                     break;
                 }
-                escape_char(char, &mut snippet);
-            }
-
-            if next_field_num != term.field_num {
-                break;
-            } else if snippet.len() + 3 > 255 {
-                while let Some(next_term) = terms.peek() {
-                    if next_term.field_num != term.field_num {
-                        break;
-                    }
-                    terms.next();
-                }
             }
         }
 
-        result.push(snippet);
+        for char in text.get(from_offset..start_offset)?.chars() {
+            escape_char(char, &mut snippet);
+        }
     }
 
-    Some(result)
+    let mut terms = terms.iter().peekable();
+
+    'outer: while let Some(term) = terms.next() {
+        snippet.push_str("<mark>");
+        snippet.push_str(text.get(term.offset as usize..term.offset as usize + term.len as usize)?);
+        snippet.push_str("</mark>");
+
+        let next_offset = if let Some(next_term) = terms.peek() {
+            next_term.offset as usize
+        } else {
+            text.len()
+        };
+
+        for char in text
+            .get(term.offset as usize + term.len as usize..next_offset)?
+            .chars()
+        {
+            if snippet.len() + 3 > 255 {
+                break 'outer;
+            }
+            escape_char(char, &mut snippet);
+        }
+
+        if snippet.len() + 3 > 255 {
+            break;
+        }
+    }
+
+    Some(snippet)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, convert::TryFrom};
+
     use nlp::{tokenizers::tokenize, Language};
 
-    use crate::term_index::{TermIndex, TermIndexBuilder};
+    use crate::term_index::{MatchTerm, TermIndex, TermIndexBuilder};
 
     use super::*;
 
     #[test]
     fn search_snippets() {
         let inputs = [
-            (vec![
+            /*(vec![
                 "Help a friend from Abidjan Côte d'Ivoire",
                 concat!(
                 "When my mother died when she was given birth to me, my father took me so ", 
@@ -152,7 +133,7 @@ mod tests {
                     ),
 
                 ],
-            ),
+            ),*/
             (vec![
                 "孫子兵法",
                 concat!(
@@ -193,33 +174,50 @@ mod tests {
         ];
 
         for (parts, tests) in inputs {
-            let mut term_builder = TermIndexBuilder::new();
+            let mut builder = TermIndexBuilder::new();
+            let mut term_dict = HashMap::new();
+
             for (field_num, part) in parts.iter().enumerate() {
+                let mut terms = Vec::new();
                 for token in tokenize(part, Language::English, 40) {
-                    term_builder.add_term(
-                        if field_num == 0 { 0 } else { 1 },
-                        field_num as u16,
-                        token,
+                    let dict_len = term_dict.len() as u64 + 1;
+                    terms.push(Term::new(
+                        *term_dict
+                            .entry(token.word.to_string())
+                            .or_insert_with(|| dict_len),
+                        0,
+                        &token,
+                    ));
+                }
+                builder.add_item(field_num as u8, 0, terms);
+            }
+
+            let compressed_term_index = builder.compress();
+            let term_index = TermIndex::try_from(&compressed_term_index[..]).unwrap();
+
+            for (match_words, snippets) in tests {
+                let mut match_terms = Vec::new();
+                for word in &match_words {
+                    match_terms.push(MatchTerm {
+                        id: *term_dict.get(*word).unwrap_or(&0),
+                        id_stemmed: 0,
+                    });
+                }
+
+                let term_groups = term_index
+                    .match_terms(&match_terms, None, false, true, true)
+                    .unwrap()
+                    .unwrap();
+
+                assert_eq!(term_groups.len(), snippets.len());
+
+                for (term_group, snippet) in term_groups.iter().zip(snippets.iter()) {
+                    assert_eq!(
+                        snippet,
+                        &generate_snippet(&term_group.terms, parts[term_group.field_id as usize])
+                            .unwrap()
                     );
                 }
-            }
-            let (raw_map, raw_pos) = term_builder.serialize().unwrap();
-            let map = TermIndex::new(&raw_map, &raw_pos).unwrap();
-
-            for test in tests {
-                let results = map.search_any(&test.0, None).unwrap();
-
-                let snippet = generate_snippet(
-                    &results,
-                    if results[0].field_num == 0 {
-                        &parts
-                    } else {
-                        &parts[1..]
-                    },
-                )
-                .unwrap();
-
-                assert_eq!(snippet, test.1);
             }
         }
     }

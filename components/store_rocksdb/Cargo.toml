@@ -5,7 +5,11 @@ edition = "2018"
 publish = false
 
 [dependencies]
+nlp = { path = "../nlp" }
 store = { path = "../store" }
 rocksdb = "0.17"
 roaring = "0.8.1"
 dashmap = "4.0.2"
+
+[dev-dependencies]
+rayon = "1.5.1"
