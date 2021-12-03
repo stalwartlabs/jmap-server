@@ -22,7 +22,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 const LENGTH_SIZE: usize = std::mem::size_of::<u32>();
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Term {
     pub id: TermId,
     pub id_stemmed: TermId,
@@ -58,7 +58,7 @@ pub struct TermIndex<'x> {
     items: Vec<TermIndexItem<'x>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct MatchTerm {
     pub id: TermId,
     pub id_stemmed: TermId,

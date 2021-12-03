@@ -10,7 +10,7 @@ impl RocksDBStore {
         &self,
         account: &AccountId,
         collection: &CollectionId,
-        recycle_ids: bool,
+        reuse_ids: bool,
     ) -> crate::Result<DocumentId> {
         let mut entry = self
             .reserved_ids
@@ -21,7 +21,7 @@ impl RocksDBStore {
         let mut id: DocumentId = 0;
 
         if !used_ids.is_empty() {
-            if recycle_ids {
+            if reuse_ids {
                 id = 0;
                 for used_id in &used_ids {
                     if (used_id - id) > 0 {

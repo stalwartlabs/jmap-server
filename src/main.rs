@@ -5,7 +5,6 @@ use jmap_mail::{parse::parse_message, MailField};
 use nlp::Language;
 use store::{
     ComparisonOperator, Condition, FieldValue, FilterCondition, FilterOperator, Store, Tag,
-    TextSearchField,
 };
 use store_rocksdb::RocksDBStore;
 

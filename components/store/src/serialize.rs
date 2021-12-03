@@ -117,6 +117,22 @@ pub fn serialize_index_key(
     bytes
 }
 
+pub fn serialize_term_index_key(
+    account: &AccountId,
+    collection: &CollectionId,
+    document: &DocumentId,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(
+        std::mem::size_of::<AccountId>()
+            + std::mem::size_of::<CollectionId>()
+            + std::mem::size_of::<DocumentId>(),
+    );
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.extend_from_slice(&document.to_be_bytes());
+    bytes
+}
+
 pub fn serialize_collection_key(account: &AccountId, collection: &CollectionId) -> Vec<u8> {
     let mut bytes =
         Vec::with_capacity(std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>());

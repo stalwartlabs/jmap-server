@@ -1,6 +1,9 @@
-use std::convert::TryInto;
+use std::{
+    borrow::{Borrow, Cow},
+    collections::{hash_map::Entry, HashMap},
+    convert::TryInto,
+};
 
-use dashmap::mapref::entry::Entry;
 use rocksdb::{DBWithThreadMode, MultiThreaded};
 use store::{
     field::TokenIterator,
@@ -13,28 +16,34 @@ use crate::RocksDBStore;
 const LAST_TERM_KEY: &[u8; 1] = &[0];
 
 impl RocksDBStore {
-    pub fn get_match_terms(
-        &self,
-        mut tokens: TokenIterator,
-    ) -> crate::Result<Option<Vec<MatchTerm>>> {
+    pub fn get_match_terms(&self, tokens: TokenIterator) -> crate::Result<Option<Vec<MatchTerm>>> {
         let cf_terms = self
             .db
             .cf_handle("terms")
             .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?;
         let mut result = Vec::with_capacity(10);
-        let mut token_map = Vec::with_capacity(10);
         let mut query = Vec::with_capacity(10);
 
-        while let Some(token) = tokens.next() {
-            query.push((&cf_terms, Vec::from(token.word.as_bytes())));
+        let mut word_dict = HashMap::new();
+
+        for token in tokens {
+            let word_pos = if let Some(word_pos) = word_dict.get(&token.word) {
+                *word_pos
+            } else {
+                query.push((&cf_terms, Vec::from(token.word.as_bytes())));
+
+                let word_pos = (word_dict.len() + 1) as u64;
+                word_dict.insert(token.word.clone(), word_pos);
+                word_pos
+            };
+
             if token.is_exact {
-                token_map.push((result.len(), true, tokens.stemmed_token.is_none()));
                 result.push(MatchTerm {
-                    id: 0,
+                    id: word_pos,
                     id_stemmed: 0,
                 })
             } else {
-                token_map.push((result.len() - 1, false, true));
+                result.last_mut().unwrap().id_stemmed = word_pos;
             }
         }
 
@@ -42,24 +51,28 @@ impl RocksDBStore {
             return Ok(None);
         }
 
-        for (term_id, (pos, is_exact, is_last)) in self
+        let mut id_list = vec![0u64; word_dict.len()];
+
+        for (term_id, id) in self
             .db
             .multi_get_cf(query)
             .into_iter()
-            .zip(token_map.into_iter())
+            .zip(id_list.iter_mut())
         {
-            let term = &mut result[pos];
             if let Some(term_id) = term_id.map_err(|e| StoreError::InternalError(e.to_string()))? {
-                *(if is_exact {
-                    &mut term.id
-                } else {
-                    &mut term.id_stemmed
-                }) = TermId::from_le_bytes(term_id.try_into().map_err(|_| {
+                *id = TermId::from_le_bytes(term_id.try_into().map_err(|_| {
                     StoreError::InternalError("Failed to deserialize term id.".into())
                 })?);
             }
-            if is_last && term.id == 0 && term.id_stemmed == 0 {
+        }
+
+        for term in &mut result {
+            if term.id == 0 {
                 return Ok(None);
+            }
+            term.id = id_list[(term.id - 1) as usize];
+            if term.id_stemmed > 0 {
+                term.id_stemmed = id_list[(term.id_stemmed - 1) as usize];
             }
         }
 
@@ -71,43 +84,53 @@ impl RocksDBStore {
             .db
             .cf_handle("terms")
             .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?;
+
         let mut result = Vec::with_capacity(10);
         let mut query = Vec::with_capacity(10);
-        let mut token_map = Vec::with_capacity(10);
+
+        let mut word_dict = HashMap::with_capacity(10);
+        let mut word_list = Vec::with_capacity(10);
 
         for token in tokens {
-            query.push((&cf_terms, Vec::from(token.word.as_bytes())));
+            let word_pos = if let Some(word_pos) = word_dict.get(&token.word) {
+                *word_pos
+            } else {
+                self.term_id_lock
+                    .entry(token.word.to_string())
+                    .or_insert((0, 0))
+                    .value_mut()
+                    .1 += 1;
+                query.push((&cf_terms, Vec::from(token.word.as_bytes())));
+
+                let word_pos = (word_list.len() + 1) as u64;
+                word_dict.insert(token.word.clone(), word_pos);
+                word_list.push((0u64, token.word.clone()));
+                word_pos
+            };
+
             if token.is_exact {
-                result.push(Term::new(0, 0, &token));
+                result.push(Term::new(word_pos, 0, &token));
+            } else {
+                result.last_mut().unwrap().id_stemmed = word_pos;
             }
-            self.term_id_lock
-                .entry(token.word.to_string())
-                .or_insert((0, 0))
-                .value_mut()
-                .1 += 1;
-            token_map.push((result.len() - 1, token.word, token.is_exact));
         }
 
-        for (term_id, (pos, word, is_exact)) in self
+        for (term_id, (id, word)) in self
             .db
             .multi_get_cf(query)
             .into_iter()
-            .zip(token_map.into_iter())
+            .zip(word_list.iter_mut())
         {
-            let term = &mut result[pos];
-            let mut term_entry =
-                if let Entry::Occupied(term_entry) = self.term_id_lock.entry(word.to_string()) {
-                    term_entry
-                } else {
-                    panic!("Term not found in term_id_lock");
-                };
+            let mut term_entry = if let dashmap::mapref::entry::Entry::Occupied(term_entry) =
+                self.term_id_lock.entry(word.to_string())
+            {
+                term_entry
+            } else {
+                panic!("Term not found in term_id_lock");
+            };
             let term_lock = term_entry.get_mut();
 
-            *(if is_exact {
-                &mut term.id
-            } else {
-                &mut term.id_stemmed
-            }) = if let Some(term_id) =
+            *id = if let Some(term_id) =
                 term_id.map_err(|e| StoreError::InternalError(e.to_string()))?
             {
                 let term_id = TermId::from_le_bytes(term_id.try_into().map_err(|_| {
@@ -142,6 +165,13 @@ impl RocksDBStore {
             }
         }
 
+        for term in &mut result {
+            term.id = word_list[(term.id - 1) as usize].0;
+            if term.id_stemmed > 0 {
+                term.id_stemmed = word_list[(term.id_stemmed - 1) as usize].0;
+            }
+        }
+
         Ok(result)
     }
 
@@ -167,7 +197,10 @@ mod tests {
     use std::{collections::HashSet, sync::Arc};
 
     use nlp::Language;
-    use store::field::TokenIterator;
+    use store::{
+        field::TokenIterator,
+        term_index::{MatchTerm, Term},
+    };
 
     use crate::RocksDBStore;
 
@@ -175,14 +208,94 @@ mod tests {
     const NUM_THREADS: usize = 20;
 
     #[test]
-    fn unique_term_ids() {
+    fn stemmed_duplicates() {
+        const TEXT: &str = "love loving lovingly loved lovely";
+
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_sd_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
+
+        assert_eq!(
+            db.get_terms(TokenIterator::new(TEXT, Language::English, true))
+                .unwrap(),
+            vec![
+                Term {
+                    id: 1,
+                    id_stemmed: 0,
+                    offset: 0,
+                    len: 4
+                },
+                Term {
+                    id: 2,
+                    id_stemmed: 1,
+                    offset: 5,
+                    len: 6
+                },
+                Term {
+                    id: 3,
+                    id_stemmed: 1,
+                    offset: 12,
+                    len: 8
+                },
+                Term {
+                    id: 4,
+                    id_stemmed: 1,
+                    offset: 21,
+                    len: 5
+                },
+                Term {
+                    id: 5,
+                    id_stemmed: 1,
+                    offset: 27,
+                    len: 6
+                }
+            ]
+        );
+
+        assert_eq!(
+            db.get_match_terms(TokenIterator::new(TEXT, Language::English, true))
+                .unwrap()
+                .unwrap(),
+            vec![
+                MatchTerm {
+                    id: 1,
+                    id_stemmed: 0
+                },
+                MatchTerm {
+                    id: 2,
+                    id_stemmed: 1
+                },
+                MatchTerm {
+                    id: 3,
+                    id_stemmed: 1
+                },
+                MatchTerm {
+                    id: 4,
+                    id_stemmed: 1
+                },
+                MatchTerm {
+                    id: 5,
+                    id_stemmed: 1
+                }
+            ]
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_duplicates() {
         rayon::ThreadPoolBuilder::new()
             .num_threads(NUM_THREADS)
             .build()
             .unwrap()
             .scope(|s| {
                 let mut temp_dir = std::env::temp_dir();
-                temp_dir.push("stalwart_termid_test");
+                temp_dir.push("strdb_cd_test");
                 if temp_dir.exists() {
                     std::fs::remove_dir_all(&temp_dir).unwrap();
                 }

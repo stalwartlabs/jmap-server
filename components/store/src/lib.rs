@@ -31,17 +31,10 @@ pub type Float = f64;
 pub type ArrayPos = u16;
 pub type TermId = u64;
 
-pub struct TextSearchField<'x> {
-    pub value: &'x str,
-    pub language: Language,
-    pub match_phrase: bool,
-    pub stem: bool,
-}
-
 pub enum FieldValue<'x> {
     Keyword(&'x str),
     Text(&'x str),
-    FullText(TextSearchField<'x>),
+    FullText(&'x str),
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
