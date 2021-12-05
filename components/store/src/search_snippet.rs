@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn search_snippets() {
         let inputs = [
-            /*(vec![
+            (vec![
                 "Help a friend from Abidjan Côte d'Ivoire",
                 concat!(
                 "When my mother died when she was given birth to me, my father took me so ", 
@@ -133,7 +133,7 @@ mod tests {
                     ),
 
                 ],
-            ),*/
+            ),
             (vec![
                 "孫子兵法",
                 concat!(

@@ -13,7 +13,9 @@ use crate::{
 
 #[derive(Debug)]
 pub enum IndexField<'x> {
-    Text(Field<TextLang<'x>>),
+    FullText(Field<TextLang<'x>>),
+    Text(Field<Cow<'x, str>>),
+    Keyword(Field<Cow<'x, str>>),
     Blob(Field<Cow<'x, [u8]>>),
     Integer(Field<Integer>),
     LongInteger(Field<LongInteger>),
@@ -24,12 +26,14 @@ pub enum IndexField<'x> {
 impl<'x> IndexField<'x> {
     pub fn len(&'x self) -> usize {
         match self {
-            IndexField::Text(t) => t.value.text.len(),
+            IndexField::FullText(t) => t.value.text.len(),
             IndexField::Blob(b) => b.value.len(),
             IndexField::Integer(i) => i.size_of(),
             IndexField::LongInteger(li) => li.size_of(),
             IndexField::Tag(t) => t.value.len(),
             IndexField::Float(f) => f.size_of(),
+            IndexField::Text(t) => t.value.len(),
+            IndexField::Keyword(k) => k.value.len(),
         }
     }
 
@@ -45,6 +49,8 @@ impl<'x> IndexField<'x> {
             IndexField::LongInteger(li) => &li.field,
             IndexField::Tag(t) => &t.field,
             IndexField::Float(f) => &f.field,
+            IndexField::FullText(t) => &t.field,
+            IndexField::Keyword(k) => &k.field,
         }
     }
 
@@ -56,17 +62,20 @@ impl<'x> IndexField<'x> {
             IndexField::LongInteger(li) => &li.options,
             IndexField::Tag(t) => &t.options,
             IndexField::Float(f) => &f.options,
+            IndexField::FullText(t) => &t.options,
+            IndexField::Keyword(k) => &k.options,
         }
     }
 
-    pub fn unwrap_text(&'x self) -> &Field<TextLang<'x>> {
+    pub fn unwrap_fulltext(&'x self) -> &Field<TextLang<'x>> {
         match self {
-            IndexField::Text(t) => t,
+            IndexField::FullText(t) => t,
             _ => panic!("unwrap_text called on non-text field"),
         }
     }
 }
 
+#[allow(clippy::len_without_is_empty)]
 pub trait FieldLen {
     fn len(&self) -> usize;
 }
@@ -87,12 +96,12 @@ impl<T> Field<T> {
         }
     }
 
-    pub fn get_field(&self) -> &FieldId {
-        &self.field
+    pub fn get_field(&self) -> FieldId {
+        self.field
     }
 
-    pub fn get_options(&self) -> &OptionValue {
-        &self.options
+    pub fn get_options(&self) -> OptionValue {
+        self.options
     }
 
     pub fn size_of(&self) -> usize {
@@ -119,16 +128,6 @@ pub struct TextLang<'x> {
     pub text: Cow<'x, str>,
     pub language: Language,
     pub confidence: f64,
-}
-
-impl<'x> Field<TextLang<'x>> {
-    pub fn tokenize(&'x self) -> TokenIterator<'x> {
-        TokenIterator::new(
-            &self.value.text,
-            self.value.language,
-            self.options.is_full_text(),
-        )
-    }
 }
 
 pub struct TokenIterator<'x> {

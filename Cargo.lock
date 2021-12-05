@@ -335,7 +335,6 @@ dependencies = [
 name = "jmap-server"
 version = "0.1.0"
 dependencies = [
- "csv",
  "jmap_mail",
  "nlp",
  "rayon",
@@ -766,6 +765,17 @@ dependencies = [
  "rayon",
  "roaring",
  "rocksdb",
+ "store",
+ "store_test",
+]
+
+[[package]]
+name = "store_test"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "nlp",
+ "rayon",
  "store",
 ]
 

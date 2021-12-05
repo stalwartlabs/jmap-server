@@ -18,16 +18,10 @@ pub trait IndexOptions {
     const Stored: OptionValue = 0x1 << 16;
     const Array: OptionValue = 0x2 << 16;
     const Sortable: OptionValue = 0x4 << 16;
-    const Text: OptionValue = 0x8 << 16;
-    const FullText: OptionValue = 0x10 << 16;
-    const Keyword: OptionValue = 0x20 << 16;
 
     fn is_stored(&self) -> bool;
     fn is_array(&self) -> bool;
     fn is_sortable(&self) -> bool;
-    fn is_text(&self) -> bool;
-    fn is_full_text(&self) -> bool;
-    fn is_keyword(&self) -> bool;
     fn is_none(&self) -> bool;
     fn get_pos(&self) -> ArrayPos;
     fn set_pos(pos: usize) -> OptionValue;
@@ -53,21 +47,6 @@ impl IndexOptions for OptionValue {
     #[inline(always)]
     fn is_sortable(&self) -> bool {
         self & Self::Sortable != 0
-    }
-
-    #[inline(always)]
-    fn is_text(&self) -> bool {
-        self & Self::Text != 0
-    }
-
-    #[inline(always)]
-    fn is_keyword(&self) -> bool {
-        self & Self::Keyword != 0
-    }
-
-    #[inline(always)]
-    fn is_full_text(&self) -> bool {
-        self & Self::FullText != 0
     }
 
     #[inline(always)]
@@ -123,38 +102,59 @@ impl<'x> DocumentBuilder<'x> {
             .map(|(l, _)| l)
     }
 
+    pub fn add_keyword(&mut self, field: FieldId, value: Cow<'x, str>, options: OptionValue) {
+        if !value.is_empty() {
+            self.fields
+                .push(IndexField::Keyword(Field::new(field, options, value)));
+        }
+    }
+
     pub fn add_text(&mut self, field: FieldId, value: Cow<'x, str>, options: OptionValue) {
         if !value.is_empty() {
-            let (language, confidence) = if options.is_full_text() {
-                let result = detect_language(&value);
-                let w = self
-                    .lang_detected
-                    .entry(result.0)
-                    .or_insert_with(|| WeightedAverage {
-                        weight: 0,
-                        confidence: 0.0,
-                        occurrences: 0,
-                    });
-                w.occurrences += 1;
-                w.weight += value.len();
-                w.confidence += result.1 * value.len() as f64;
-                if result.1 < MIN_LANGUAGE_SCORE {
-                    self.lang_low_score.push(self.fields.len());
-                }
-                result
-            } else {
-                (Language::English, 1.0)
-            };
-            self.fields.push(IndexField::Text(Field::new(
-                field,
-                options,
-                TextLang {
-                    language,
-                    confidence,
-                    text: value,
-                },
-            )));
+            self.fields
+                .push(IndexField::Text(Field::new(field, options, value)));
         }
+    }
+
+    pub fn add_full_text(
+        &mut self,
+        field: FieldId,
+        value: Cow<'x, str>,
+        language: Option<Language>,
+        options: OptionValue,
+    ) {
+        if value.is_empty() {
+            return;
+        }
+        let (language, confidence) = if let Some(language) = language {
+            (language, 1.0)
+        } else {
+            let result = detect_language(&value);
+            let w = self
+                .lang_detected
+                .entry(result.0)
+                .or_insert_with(|| WeightedAverage {
+                    weight: 0,
+                    confidence: 0.0,
+                    occurrences: 0,
+                });
+            w.occurrences += 1;
+            w.weight += value.len();
+            w.confidence += result.1 * value.len() as f64;
+            if result.1 < MIN_LANGUAGE_SCORE {
+                self.lang_low_score.push(self.fields.len());
+            }
+            result
+        };
+        self.fields.push(IndexField::FullText(Field::new(
+            field,
+            options,
+            TextLang {
+                language,
+                confidence,
+                text: value,
+            },
+        )));
     }
 
     pub fn add_blob(&mut self, field: FieldId, value: Cow<'x, [u8]>, options: OptionValue) {
@@ -191,7 +191,7 @@ impl<'x> IntoIterator for DocumentBuilder<'x> {
         if !self.lang_low_score.is_empty() && self.lang_detected.len() > 1 {
             let lang = *self.most_likely_language().unwrap();
             for field_id in self.lang_low_score.drain(..) {
-                if let IndexField::Text(ref mut field) = self.fields[field_id] {
+                if let IndexField::FullText(ref mut field) = self.fields[field_id] {
                     field.value.language = lang;
                 } else {
                     debug_assert!(false, "Unexpected field type.");

@@ -1,8 +1,4 @@
-use std::{
-    borrow::{Borrow, Cow},
-    collections::{hash_map::Entry, HashMap},
-    convert::TryInto,
-};
+use std::{collections::HashMap, convert::TryInto, time::Instant};
 
 use rocksdb::{DBWithThreadMode, MultiThreaded};
 use store::{
@@ -115,7 +111,7 @@ impl RocksDBStore {
             }
         }
 
-        for (term_id, (id, word)) in self
+        for (term_id, (word_id, word)) in self
             .db
             .multi_get_cf(query)
             .into_iter()
@@ -126,11 +122,12 @@ impl RocksDBStore {
             {
                 term_entry
             } else {
+                // This should never happen.
                 panic!("Term not found in term_id_lock");
             };
             let term_lock = term_entry.get_mut();
 
-            *id = if let Some(term_id) =
+            *word_id = if let Some(term_id) =
                 term_id.map_err(|e| StoreError::InternalError(e.to_string()))?
             {
                 let term_id = TermId::from_le_bytes(term_id.try_into().map_err(|_| {

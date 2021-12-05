@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs, sync::Arc, thread};
 use jmap_mail::{parse::parse_message, MailField};
 use nlp::Language;
 use store::{
-    ComparisonOperator, Condition, FieldValue, FilterCondition, FilterOperator, Store, Tag,
+    ComparisonOperator, Condition, FieldValue, FilterCondition, FilterOperator, Store, Tag, StoreInsert,
 };
 use store_rocksdb::RocksDBStore;
 
@@ -31,7 +31,7 @@ fn main() {
             //str::parse::<u32>(&file_name[1..file_name.len() - 4]).unwrap()
             let input = fs::read(&file_name).unwrap();
             if let Ok(builder) = parse_message(&input) {
-                t_db.insert(&0, &0, builder).unwrap();
+                t_db.insert(0, 0, builder).unwrap();
             }
             //let file_name2 = file_name.file_name().unwrap().to_str().unwrap();
             //thread::sleep(time::Duration::from_millis(str::parse::<u64>(&file_name2[1..file_name2.len() - 4]).unwrap()));
@@ -77,98 +77,6 @@ mod tests {
     use store::Store;
     use store_rocksdb::RocksDBStore;
 
-    const FIELDS: [&str; 20] = [
-        "id",
-        "accession_number",
-        "artist",
-        "artistRole",
-        "artistId",
-        "title",
-        "dateText",
-        "medium",
-        "creditLine",
-        "year",
-        "acquisitionYear",
-        "dimensions",
-        "width",
-        "height",
-        "depth",
-        "units",
-        "inscription",
-        "thumbnailCopyright",
-        "thumbnailUrl",
-        "url",
-    ];
-
-    const FIELDS_OPTIONS: [u32; 20] = [
-        0,                                                // "id",
-        <OptionValue>::Text | <OptionValue>::Stored, // "accession_number",
-        <OptionValue>::Text | <OptionValue>::Stored, // "artist",
-        <OptionValue>::Text | <OptionValue>::Stored, // "artistRole",
-        0,                                                // "artistId",
-        <OptionValue>::FullText | <OptionValue>::Stored,  // "title",
-        <OptionValue>::FullText | <OptionValue>::Stored,  // "dateText",
-        <OptionValue>::FullText | <OptionValue>::Stored,  // "medium",
-        <OptionValue>::FullText | <OptionValue>::Stored,  // "creditLine",
-        0,                                                // "year",
-        0,                                                // "acquisitionYear",
-        <OptionValue>::FullText | <OptionValue>::Stored,  // "dimensions",
-        0,                                                // "width",
-        0,                                                // "height",
-        0,                                                // "depth",
-        <OptionValue>::Text | <OptionValue>::Stored, // "units",
-        <OptionValue>::FullText | <OptionValue>::Stored,  // "inscription",
-        <OptionValue>::Text | <OptionValue>::Stored, // "thumbnailCopyright",
-        <OptionValue>::Text | <OptionValue>::Stored, // "thumbnailUrl",
-        <OptionValue>::Text | <OptionValue>::Stored, // "url",
-    ];
-
-    #[test]
-    fn create_database() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(8)
-            .build()
-            .unwrap()
-            .scope(|s| {
-                let db = Arc::new(RocksDBStore::open("/terastore/db/artwork_termid2").unwrap());
-                let mut reader = csv::ReaderBuilder::new()
-                    .has_headers(true)
-                    .from_path("/terastore/datasets/artwork_data.csv")
-                    .unwrap();
-                let mut count = 0;
-
-                for record in reader.records() {
-                    let record = record.unwrap();
-                    let t_db = db.clone();
-                    s.spawn(move |_| {
-                        let mut builder = DocumentBuilder::new();
-                        for (pos, field) in record.iter().enumerate() {
-                            if field.is_empty() {
-                                continue;
-                            }
-                            if FIELDS_OPTIONS[pos] == 0 {
-                                if let Ok(value) = field.parse::<u32>() {
-                                    builder.add_integer(
-                                        pos as u8,
-                                        value,
-                                        <OptionValue>::Sortable | <OptionValue>::Stored,
-                                    );
-                                }
-                            } else {
-                                builder.add_text(pos as u8, field.into(), FIELDS_OPTIONS[pos]);
-                                builder.add_text(
-                                    pos as u8,
-                                    field.to_lowercase().into(),
-                                    <OptionValue>::Sortable,
-                                );
-                            }
-                        }
-                        t_db.insert(&0, &0, builder).unwrap();
-                        println!("Inserted {:?}", record.get(0));
-                    });
-                }
-            });
-    }
 
     #[test]
     fn query_database() {

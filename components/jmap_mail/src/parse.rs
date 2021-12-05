@@ -29,10 +29,10 @@ fn parse_address<'x>(
     };
     if let Some(ref addr) = address.address {
         if addr.len() <= MAX_TOKEN_LENGTH {
-            builder.add_text(
+            builder.add_keyword(
                 to_mail_field(header_name),
                 addr.to_lowercase().into(),
-                <OptionValue>::Keyword,
+                <OptionValue>::None,
             );
         }
     };
@@ -55,19 +55,20 @@ fn parse_address_group<'x>(
 fn parse_text<'x>(builder: &mut DocumentBuilder<'x>, header_name: &HeaderName, text: Cow<'x, str>) {
     match header_name {
         HeaderName::Subject => {
-            builder.add_text(
+            builder.add_full_text(
                 to_mail_field(header_name),
                 text.to_lowercase().into(),
-                <OptionValue>::FullText | <OptionValue>::Sortable,
+                None,
+                <OptionValue>::Sortable,
             );
         }
 
         HeaderName::Keywords | HeaderName::ContentLanguage | HeaderName::MimeVersion => {
             if text.len() <= MAX_TOKEN_LENGTH {
-                builder.add_text(
+                builder.add_keyword(
                     to_mail_field(header_name),
                     text.to_lowercase().into(),
-                    <OptionValue>::Keyword,
+                    <OptionValue>::None,
                 );
             }
         }
@@ -77,12 +78,12 @@ fn parse_text<'x>(builder: &mut DocumentBuilder<'x>, header_name: &HeaderName, t
         | HeaderName::ContentId
         | HeaderName::ResentMessageId => {
             if text.len() <= MAX_ID_LENGTH {
-                builder.add_text(to_mail_field(header_name), text, <OptionValue>::Keyword);
+                builder.add_keyword(to_mail_field(header_name), text, <OptionValue>::None);
             }
         }
 
         _ => {
-            builder.add_text(to_mail_field(header_name), text, <OptionValue>::Text);
+            builder.add_text(to_mail_field(header_name), text, <OptionValue>::None);
         }
     }
 }
@@ -93,26 +94,26 @@ fn parse_content_type<'x>(
     content_type: ContentType<'x>,
 ) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
-        builder.add_text(
+        builder.add_keyword(
             to_mail_field(header_name),
             content_type.c_type,
-            <OptionValue>::Keyword,
+            <OptionValue>::None,
         );
     }
     if let Some(subtype) = content_type.c_subtype {
         if subtype.len() <= MAX_TOKEN_LENGTH {
-            builder.add_text(to_mail_field(header_name), subtype, <OptionValue>::Keyword);
+            builder.add_keyword(to_mail_field(header_name), subtype, <OptionValue>::None);
         }
     }
     if let Some(attributes) = content_type.attributes {
         for (key, value) in attributes {
             if key == "name" || key == "filename" {
-                builder.add_text(to_mail_field(header_name), value, <OptionValue>::Text);
+                builder.add_text(to_mail_field(header_name), value, <OptionValue>::None);
             } else if value.len() <= MAX_TOKEN_LENGTH {
-                builder.add_text(
+                builder.add_keyword(
                     to_mail_field(header_name),
                     value.to_lowercase().into(),
-                    <OptionValue>::Keyword,
+                    <OptionValue>::None,
                 );
             }
         }
@@ -287,12 +288,11 @@ pub fn parse_message(bytes: &[u8]) -> Result<DocumentBuilder, MessageParseError>
     for text_body in message.text_body {
         match text_body {
             mail_parser::InlinePart::Text(body) => {
-                builder.add_text(
+                builder.add_full_text(
                     MailField::Body.into(),
                     body.contents,
-                    <OptionValue>::FullText
-                        | <OptionValue>::Stored
-                        | <OptionValue>::set_pos(set_pos),
+                    None,
+                    <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
                 );
                 set_pos += 1;
             }
@@ -304,9 +304,10 @@ pub fn parse_message(bytes: &[u8]) -> Result<DocumentBuilder, MessageParseError>
     for html_body in message.html_body {
         match html_body {
             mail_parser::InlinePart::Text(body) => {
-                builder.add_text(
+                builder.add_full_text(
                     MailField::Body.into(),
                     body.contents,
+                    None,
                     <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
                 );
                 set_pos += 1;
@@ -319,12 +320,11 @@ pub fn parse_message(bytes: &[u8]) -> Result<DocumentBuilder, MessageParseError>
     for attachment in message.attachments {
         match attachment {
             MessagePart::Text(text) => {
-                builder.add_text(
+                builder.add_full_text(
                     MailField::Attachment.into(),
                     text.contents,
-                    <OptionValue>::Stored
-                        | <OptionValue>::FullText
-                        | <OptionValue>::set_pos(set_pos),
+                    None,
+                    <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
                 );
             }
             MessagePart::Binary(blob) | MessagePart::InlineBinary(blob) => {

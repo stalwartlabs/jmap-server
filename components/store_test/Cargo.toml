@@ -1,0 +1,11 @@
+[package]
+name = "store_test"
+version = "0.1.0"
+edition = "2018"
+publish = false
+
+[dependencies]
+store = { path = "../store" }
+nlp = { path = "../nlp" }
+rayon = "1.5.1"
+csv = "1.1"

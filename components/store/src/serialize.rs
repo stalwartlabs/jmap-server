@@ -1,9 +1,6 @@
-use nlp::tokenizers::Token;
-
 use crate::{
-    document::IndexOptions,
-    field::{Field, IndexField, TextLang},
-    AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Tag, TermId,
+    document::IndexOptions, field::IndexField, AccountId, ArrayPos, CollectionId, DocumentId,
+    FieldId, Tag, TermId,
 };
 
 pub const PREFIX_LEN: usize = std::mem::size_of::<AccountId>()
@@ -24,10 +21,10 @@ pub enum SerializedValue<'x> {
 }
 
 pub fn serialize_stored_key(
-    account: &AccountId,
-    collection: &CollectionId,
-    document: &DocumentId,
-    field: &FieldId,
+    account: AccountId,
+    collection: CollectionId,
+    document: DocumentId,
+    field: FieldId,
 ) -> Vec<u8> {
     let mut key = Vec::with_capacity(KEY_BASE_LEN);
     key.extend_from_slice(&account.to_be_bytes());
@@ -38,11 +35,11 @@ pub fn serialize_stored_key(
 }
 
 pub fn serialize_stored_key_pos(
-    account: &AccountId,
-    collection: &CollectionId,
-    document: &DocumentId,
-    field: &FieldId,
-    pos: &ArrayPos,
+    account: AccountId,
+    collection: CollectionId,
+    document: DocumentId,
+    field: FieldId,
+    pos: ArrayPos,
 ) -> Vec<u8> {
     let mut key = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<ArrayPos>());
     key.extend_from_slice(&account.to_be_bytes());
@@ -54,9 +51,9 @@ pub fn serialize_stored_key_pos(
 }
 
 pub fn serialize_tag_key(
-    account: &AccountId,
-    collection: &CollectionId,
-    field: &FieldId,
+    account: AccountId,
+    collection: CollectionId,
+    field: FieldId,
     tag: &Tag,
 ) -> Vec<u8> {
     let mut key = Vec::with_capacity(KEY_BASE_LEN + tag.len());
@@ -72,9 +69,9 @@ pub fn serialize_tag_key(
 }
 
 pub fn serialize_text_key(
-    account: &AccountId,
-    collection: &CollectionId,
-    field: &FieldId,
+    account: AccountId,
+    collection: CollectionId,
+    field: FieldId,
     text: &str,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + text.len());
@@ -86,10 +83,10 @@ pub fn serialize_text_key(
 }
 
 pub fn serialize_term_id_key(
-    account: &AccountId,
-    collection: &CollectionId,
-    field: &FieldId,
-    term_id: &TermId,
+    account: AccountId,
+    collection: CollectionId,
+    field: FieldId,
+    term_id: TermId,
     is_exact: bool,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<TermId>() + 1);
@@ -104,9 +101,9 @@ pub fn serialize_term_id_key(
 }
 
 pub fn serialize_index_key(
-    account: &AccountId,
-    collection: &CollectionId,
-    field: &FieldId,
+    account: AccountId,
+    collection: CollectionId,
+    field: FieldId,
     key: &[u8],
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + key.len());
@@ -118,9 +115,9 @@ pub fn serialize_index_key(
 }
 
 pub fn serialize_term_index_key(
-    account: &AccountId,
-    collection: &CollectionId,
-    document: &DocumentId,
+    account: AccountId,
+    collection: CollectionId,
+    document: DocumentId,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
         std::mem::size_of::<AccountId>()
@@ -133,7 +130,7 @@ pub fn serialize_term_index_key(
     bytes
 }
 
-pub fn serialize_collection_key(account: &AccountId, collection: &CollectionId) -> Vec<u8> {
+pub fn serialize_collection_key(account: AccountId, collection: CollectionId) -> Vec<u8> {
     let mut bytes =
         Vec::with_capacity(std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>());
     bytes.extend_from_slice(&account.to_be_bytes());
@@ -144,9 +141,9 @@ pub fn serialize_collection_key(account: &AccountId, collection: &CollectionId) 
 impl<'x> IndexField<'x> {
     pub fn as_stored_value(
         &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
     ) -> SerializedKeyValue {
         SerializedKeyValue {
             key: {
@@ -173,7 +170,10 @@ impl<'x> IndexField<'x> {
                 bytes
             },
             value: match self {
-                IndexField::Text(t) => SerializedValue::Borrowed(t.value.text.as_bytes()),
+                IndexField::FullText(t) => SerializedValue::Borrowed(t.value.text.as_bytes()),
+                IndexField::Keyword(t) | IndexField::Text(t) => {
+                    SerializedValue::Borrowed(t.value.as_bytes())
+                }
                 IndexField::Blob(b) => SerializedValue::Borrowed(b.value.as_ref()),
                 IndexField::Integer(i) => SerializedValue::Owned(i.value.to_le_bytes().into()),
                 IndexField::LongInteger(li) => {
@@ -187,28 +187,31 @@ impl<'x> IndexField<'x> {
 
     pub fn as_index_key(
         &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
     ) -> Vec<u8> {
         let mut bytes = match self {
-            IndexField::Text(text) => {
-                serialize_index_key(account, collection, &text.field, text.value.text.as_bytes())
+            IndexField::Keyword(text) | IndexField::Text(text) => {
+                serialize_index_key(account, collection, text.field, text.value.as_bytes())
+            }
+            IndexField::FullText(text) => {
+                serialize_index_key(account, collection, text.field, text.value.text.as_bytes())
             }
             IndexField::Integer(int) => {
-                serialize_index_key(account, collection, &int.field, &int.value.to_be_bytes())
+                serialize_index_key(account, collection, int.field, &int.value.to_be_bytes())
             }
             IndexField::LongInteger(int) => {
-                serialize_index_key(account, collection, &int.field, &int.value.to_be_bytes())
+                serialize_index_key(account, collection, int.field, &int.value.to_be_bytes())
             }
             IndexField::Float(float) => serialize_index_key(
                 account,
                 collection,
-                &float.field,
+                float.field,
                 &float.value.to_be_bytes(),
             ),
-            IndexField::Tag(_) | IndexField::Blob(_) => {
-                panic!("Blobs and Tags cannot be serialized as sort keys.")
+            field => {
+                panic!("{:?} cannot be serialized as sort keys.", field)
             }
         };
         bytes.extend_from_slice(&document.to_be_bytes());

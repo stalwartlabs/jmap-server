@@ -4,7 +4,7 @@ use std::{
     array::TryFromSliceError,
     convert::TryInto,
     ops::{BitAndAssign, BitOrAssign, BitXorAssign},
-    sync::Arc,
+    sync::Arc, collections::HashSet,
 };
 use store::{serialize::PREFIX_LEN, ComparisonOperator, DocumentId, LogicalOperator, StoreError};
 
@@ -239,7 +239,7 @@ impl RocksDBStore {
 }
 
 #[inline(always)]
-pub fn set_bit(document: &DocumentId) -> Vec<u8> {
+pub fn set_bit(document: DocumentId) -> Vec<u8> {
     let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 1);
     buf.push(BIT_SET);
     buf.extend_from_slice(&document.to_ne_bytes());
@@ -247,7 +247,20 @@ pub fn set_bit(document: &DocumentId) -> Vec<u8> {
 }
 
 #[inline(always)]
-pub fn clear_bit(document: &DocumentId) -> Vec<u8> {
+pub fn set_bit_list(documents: HashSet<DocumentId>) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(((std::mem::size_of::<DocumentId>() + 1) * documents.len()) + 1);
+    buf.push(BIT_LIST);
+    
+    for document in documents {
+        buf.push(BIT_SET);
+        buf.extend_from_slice(&document.to_ne_bytes());
+    }
+
+    buf
+}
+
+#[inline(always)]
+pub fn clear_bit(document: DocumentId) -> Vec<u8> {
     let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 1);
     buf.push(BIT_CLEAR);
     buf.extend_from_slice(&document.to_ne_bytes());
@@ -255,10 +268,10 @@ pub fn clear_bit(document: &DocumentId) -> Vec<u8> {
 }
 
 #[inline(always)]
-pub fn has_bit(bytes: &[u8], document: &DocumentId) -> crate::Result<bool> {
+pub fn has_bit(bytes: &[u8], document: DocumentId) -> crate::Result<bool> {
     Ok(RoaringBitmap::deserialize_from(bytes)
         .map_err(|e| StoreError::InternalError(e.to_string()))?
-        .contains(*document))
+        .contains(document))
 }
 
 #[inline(always)]

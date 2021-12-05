@@ -4,11 +4,7 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use std::{array::IntoIter, slice::Iter};
-
 use document::DocumentBuilder;
-use field::TokenIterator;
-use nlp::Language;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -111,60 +107,80 @@ pub struct OrderBy {
     pub ascending: bool,
 }
 
-pub trait Store<T: IntoIterator<Item = DocumentId>> {
+pub trait StoreInsert {
     fn insert(
         &self,
-        account: &AccountId,
-        collection: &CollectionId,
+        account: AccountId,
+        collection: CollectionId,
         document: DocumentBuilder,
     ) -> Result<DocumentId>;
+    fn insert_bulk(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        documents: Vec<DocumentBuilder>,
+    ) -> Result<Vec<DocumentId>>;
+}
 
-    fn get_value(
+pub trait StoreQuery<T: IntoIterator<Item = DocumentId>> {
+    fn query(
         &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
-        field: &FieldId,
-    ) -> Result<Option<Vec<u8>>>;
-    fn get_value_by_pos(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
-        field: &FieldId,
-        pos: &ArrayPos,
-    ) -> Result<Option<Vec<u8>>>;
-
-    fn set_tag(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
-        field: &FieldId,
-        tag: &Tag,
-    ) -> Result<()>;
-    fn clear_tag(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
-        field: &FieldId,
-        tag: &Tag,
-    ) -> Result<()>;
-    fn has_tag(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
-        document: &DocumentId,
-        field: &FieldId,
-        tag: &Tag,
-    ) -> Result<bool>;
-
-    fn search(
-        &self,
-        account: &AccountId,
-        collection: &CollectionId,
+        account: AccountId,
+        collection: CollectionId,
         filter: &FilterOperator,
         order_by: &[OrderBy],
     ) -> Result<T>;
+}
+
+pub trait StoreGet {
+    fn get_value(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        field: FieldId,
+    ) -> Result<Option<Vec<u8>>>;
+
+    fn get_value_by_pos(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        field: FieldId,
+        pos: ArrayPos,
+    ) -> Result<Option<Vec<u8>>>;
+}
+
+pub trait StoreTag {
+    fn set_tag(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        field: FieldId,
+        tag: Tag,
+    ) -> Result<()>;
+
+    fn clear_tag(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        field: FieldId,
+        tag: Tag,
+    ) -> Result<()>;
+
+    fn has_tag(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        field: FieldId,
+        tag: Tag,
+    ) -> Result<bool>;
+}
+
+pub trait Store<T: IntoIterator<Item = DocumentId>>:
+    StoreInsert + StoreQuery<T> + StoreGet + StoreTag + Send + Sync + Sized
+{
 }
