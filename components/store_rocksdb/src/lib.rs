@@ -7,7 +7,7 @@ pub mod query;
 pub mod tag;
 pub mod term;
 
-use std::{collections::HashSet, sync::Mutex};
+use std::sync::Mutex;
 
 use bitmaps::{bitmap_full_merge, bitmap_partial_merge};
 use dashmap::DashMap;
@@ -71,14 +71,15 @@ impl RocksDBStore {
     }
 }
 
-impl<T: IntoIterator<Item = DocumentId>> Store<T> for RocksDBStore where
-    RocksDBStore: store::StoreQuery<T>
+impl<'x, T: Iterator<Item = DocumentId>> Store<'x, T> for RocksDBStore where
+    RocksDBStore: store::StoreQuery<'x, T>
 {
 }
 
 #[cfg(test)]
 mod tests {
-    use store_test::insert_artworks;
+
+    use store_test::test_artworks::{filter_artworks, insert_artworks, sort_artworks};
 
     use crate::RocksDBStore;
 
@@ -86,11 +87,13 @@ mod tests {
     fn rocksdb_test() {
         let mut temp_dir = std::env::temp_dir();
         temp_dir.push("strdb_query_test");
-        if temp_dir.exists() {
+        /*if temp_dir.exists() {
             std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
+        }*/
 
-        insert_artworks(RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap());
-        println!("Done!");
+        let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
+        //insert_artworks(RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap());
+        filter_artworks(&db);
+        //sort_artworks(&db);
     }
 }

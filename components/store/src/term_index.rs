@@ -462,7 +462,7 @@ impl<'x> TermIndex<'x> {
             let mut term_pos = 0;
             let mut byte_pos = 0;
 
-            while term_pos < item.terms_len {
+            'term_loop : while term_pos < item.terms_len {
                 let (bytes_read, chunk) = self.uncompress_chunk(
                     item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
                     (item.terms_len * 4) - (term_pos * 4),
@@ -487,14 +487,14 @@ impl<'x> TermIndex<'x> {
                             if partial_match.len() == match_terms.len() {
                                 terms.append(&mut partial_match);
                                 if !match_many {
-                                    break;
+                                    break 'term_loop;
                                 }
                             }
                         } else if match_pos > 0 {
                             partial_match.clear();
                         }
                     } else {
-                        for (match_pos, match_term) in match_terms.iter().enumerate() {
+                        'match_loop : for (match_pos, match_term) in match_terms.iter().enumerate() {
                             if match_term.id == term_id
                                 || match_term.id == term_id_stemmed
                                 || (match_term.id_stemmed > 0
@@ -510,12 +510,12 @@ impl<'x> TermIndex<'x> {
 
                                 // Clear the bit corresponding to the matched term
                                 matched_mask &= !(1 << match_pos);
-                                break;
+                                break 'match_loop;
                             }
                         }
 
                         if !match_many && matched_mask == 0 {
-                            break;
+                            break 'term_loop;
                         }
                     }
                     term_pos += 1;

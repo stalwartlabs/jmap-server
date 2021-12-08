@@ -2,9 +2,10 @@ use roaring::RoaringBitmap;
 use rocksdb::{BoundColumnFamily, Direction, IteratorMode, MergeOperands};
 use std::{
     array::TryFromSliceError,
+    collections::HashSet,
     convert::TryInto,
     ops::{BitAndAssign, BitOrAssign, BitXorAssign},
-    sync::Arc, collections::HashSet,
+    sync::Arc,
 };
 use store::{serialize::PREFIX_LEN, ComparisonOperator, DocumentId, LogicalOperator, StoreError};
 
@@ -191,7 +192,12 @@ impl RocksDBStore {
                 },
             ),
         ) {
-            //print!("{} -> {:?} {:?}", key.starts_with(match_prefix), key, match_prefix);
+            /*print!(
+                "{} -> {:?} {:?}",
+                key.starts_with(match_prefix),
+                key,
+                match_prefix
+            );*/
             if !key.starts_with(match_prefix) {
                 break;
             }
@@ -212,9 +218,21 @@ impl RocksDBStore {
             );*/
 
             match op {
-                ComparisonOperator::LowerThan if value >= match_value => break,
+                ComparisonOperator::LowerThan if value >= match_value => {
+                    if value == match_value {
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
                 ComparisonOperator::LowerEqualThan if value > match_value => break,
-                ComparisonOperator::GreaterThan if value <= match_value => break,
+                ComparisonOperator::GreaterThan if value <= match_value => {
+                    if value == match_value {
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
                 ComparisonOperator::GreaterEqualThan if value < match_value => break,
                 ComparisonOperator::Equal if value != match_value => break,
                 _ => {
@@ -248,9 +266,10 @@ pub fn set_bit(document: DocumentId) -> Vec<u8> {
 
 #[inline(always)]
 pub fn set_bit_list(documents: HashSet<DocumentId>) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(((std::mem::size_of::<DocumentId>() + 1) * documents.len()) + 1);
+    let mut buf =
+        Vec::with_capacity(((std::mem::size_of::<DocumentId>() + 1) * documents.len()) + 1);
     buf.push(BIT_LIST);
-    
+
     for document in documents {
         buf.push(BIT_SET);
         buf.extend_from_slice(&document.to_ne_bytes());
@@ -276,7 +295,7 @@ pub fn has_bit(bytes: &[u8], document: DocumentId) -> crate::Result<bool> {
 
 #[inline(always)]
 pub fn bitmap_op<'x>(
-    op: &LogicalOperator,
+    op: LogicalOperator,
     dest: &'x mut Option<RoaringBitmap>,
     mut src: Option<RoaringBitmap>,
     not_mask: &'x RoaringBitmap,

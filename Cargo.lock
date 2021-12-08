@@ -338,7 +338,6 @@ dependencies = [
  "jmap_mail",
  "nlp",
  "rayon",
- "serde",
  "store",
  "store_rocksdb",
 ]

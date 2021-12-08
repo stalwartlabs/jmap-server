@@ -1,6 +1,8 @@
+use std::convert::TryInto;
+
 use crate::{
     document::IndexOptions, field::IndexField, AccountId, ArrayPos, CollectionId, DocumentId,
-    FieldId, Tag, TermId,
+    FieldId, Float, Integer, LongInteger, Tag, TermId,
 };
 
 pub const PREFIX_LEN: usize = std::mem::size_of::<AccountId>()
@@ -114,6 +116,18 @@ pub fn serialize_index_key(
     bytes
 }
 
+pub fn serialize_index_key_prefix(
+    account: AccountId,
+    collection: CollectionId,
+    field: FieldId,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN);
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.extend_from_slice(&field.to_be_bytes());
+    bytes
+}
+
 pub fn serialize_term_index_key(
     account: AccountId,
     collection: CollectionId,
@@ -136,6 +150,36 @@ pub fn serialize_collection_key(account: AccountId, collection: CollectionId) ->
     bytes.extend_from_slice(&account.to_be_bytes());
     bytes.extend_from_slice(&collection.to_be_bytes());
     bytes
+}
+
+#[inline(always)]
+pub fn deserialize_integer(bytes: Vec<u8>) -> Option<Integer> {
+    Integer::from_le_bytes(bytes.try_into().ok()?).into()
+}
+
+#[inline(always)]
+pub fn deserialize_long_integer(bytes: Vec<u8>) -> Option<LongInteger> {
+    LongInteger::from_le_bytes(bytes.try_into().ok()?).into()
+}
+
+#[inline(always)]
+pub fn deserialize_float(bytes: Vec<u8>) -> Option<Float> {
+    Float::from_le_bytes(bytes.try_into().ok()?).into()
+}
+
+#[inline(always)]
+pub fn deserialize_text(bytes: Vec<u8>) -> Option<String> {
+    String::from_utf8(bytes).ok()
+}
+
+#[inline(always)]
+pub fn deserialize_document_id(bytes: &[u8]) -> Option<DocumentId> {
+    DocumentId::from_be_bytes(
+        bytes[bytes.len() - std::mem::size_of::<DocumentId>()..]
+            .try_into()
+            .ok()?,
+    )
+    .into()
 }
 
 impl<'x> IndexField<'x> {
@@ -204,12 +248,9 @@ impl<'x> IndexField<'x> {
             IndexField::LongInteger(int) => {
                 serialize_index_key(account, collection, int.field, &int.value.to_be_bytes())
             }
-            IndexField::Float(float) => serialize_index_key(
-                account,
-                collection,
-                float.field,
-                &float.value.to_be_bytes(),
-            ),
+            IndexField::Float(float) => {
+                serialize_index_key(account, collection, float.field, &float.value.to_be_bytes())
+            }
             field => {
                 panic!("{:?} cannot be serialized as sort keys.", field)
             }

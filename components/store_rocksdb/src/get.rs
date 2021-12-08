@@ -6,7 +6,7 @@ use store::{
 use crate::RocksDBStore;
 
 impl StoreGet for RocksDBStore {
-    fn get_value(
+    fn get_stored_value(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -23,7 +23,7 @@ impl StoreGet for RocksDBStore {
             .map_err(|e| StoreError::InternalError(e.into_string()))
     }
 
-    fn get_value_by_pos(
+    fn get_stored_value_by_pos(
         &self,
         account: AccountId,
         collection: CollectionId,

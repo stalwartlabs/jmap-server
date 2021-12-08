@@ -1,7 +1,6 @@
-use std::{collections::HashSet, convert::TryFrom};
-
 use nlp::{lang::detect_language, Language};
 use roaring::RoaringBitmap;
+use std::{collections::HashSet, convert::TryFrom, slice::Iter};
 use store::{
     field::TokenIterator,
     serialize::{
@@ -9,34 +8,28 @@ use store::{
         serialize_text_key,
     },
     term_index::TermIndex,
-    AccountId, CollectionId, Condition, FieldValue, FilterOperator, LogicalOperator, OrderBy,
+    AccountId, CollectionId, Comparator, FieldValue, Filter, FilterOperator, LogicalOperator,
     StoreError, StoreQuery,
 };
 
 use crate::{bitmaps::bitmap_op, iterator::RocksDBIterator, RocksDBStore};
 
-impl StoreQuery<RocksDBIterator> for RocksDBStore {
+struct State<'x> {
+    op: LogicalOperator,
+    it: Iter<'x, Filter<'x>>,
+    rb: Option<RoaringBitmap>,
+}
+
+impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
     #[allow(clippy::blocks_in_if_conditions)]
     fn query(
-        &self,
+        &'x self,
         account: AccountId,
         collection: CollectionId,
-        filter: &FilterOperator,
-        _order_by: &[OrderBy],
-    ) -> crate::Result<RocksDBIterator> {
-        struct State<'x> {
-            op: &'x LogicalOperator,
-            it: std::slice::Iter<'x, Condition<'x>>,
-            rb: Option<RoaringBitmap>,
-        }
-
-        let mut stack = Vec::new();
-        let mut state = State {
-            op: &filter.operator,
-            it: filter.conditions.iter(),
-            rb: None,
-        };
-        let not_mask = self
+        filter: Option<Filter>,
+        sort: Option<Vec<Comparator>>,
+    ) -> crate::Result<RocksDBIterator<'x>> {
+        let all_doc_ids = self
             .get_document_ids(account, collection)?
             .unwrap_or_else(RoaringBitmap::new);
 
@@ -53,10 +46,36 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
             .cf_handle("values")
             .ok_or_else(|| StoreError::InternalError("No values column family found.".into()))?;
 
+        let filter = match filter {
+            Some(Filter::Operator(filter)) => filter,
+            Some(filter) => FilterOperator {
+                operator: LogicalOperator::And,
+                conditions: vec![filter],
+            },
+            None => {
+                return Ok(RocksDBIterator::new(
+                    account,
+                    collection,
+                    all_doc_ids,
+                    &self.db,
+                    cf_indexes,
+                    sort,
+                ));
+            }
+        };
+
+        let mut state = State {
+            op: filter.operator,
+            it: filter.conditions.iter(),
+            rb: None,
+        };
+
+        let mut stack = Vec::new();
+
         'outer: loop {
             while let Some(cond) = state.it.next() {
                 match cond {
-                    Condition::FilterCondition(filter_cond) => {
+                    Filter::Condition(filter_cond) => {
                         match &filter_cond.value {
                             FieldValue::Keyword(keyword) => {
                                 bitmap_op(
@@ -71,7 +90,7 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                             keyword,
                                         ),
                                     )?,
-                                    &not_mask,
+                                    &all_doc_ids,
                                 );
                             }
                             FieldValue::Text(text) => {
@@ -91,18 +110,18 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                     state.op,
                                     &mut state.rb,
                                     self.get_bitmaps_intersection(keys)?,
-                                    &not_mask,
+                                    &all_doc_ids,
                                 );
                             }
-                            FieldValue::FullText(text) => {
-                                let match_phrase = (text.starts_with('"') && text.ends_with('"'))
-                                    || (text.starts_with('\'') && text.ends_with('\''));
-                                let language = detect_language(text);
-
-                                if let Some(match_terms) = self.get_match_terms(
-                                    TokenIterator::new(text, language.0, !match_phrase),
-                                )? {
-                                    if match_phrase {
+                            FieldValue::FullText(query) => {
+                                if let Some(match_terms) =
+                                    self.get_match_terms(TokenIterator::new(
+                                        query.text,
+                                        query.language,
+                                        !query.match_phrase,
+                                    ))?
+                                {
+                                    if query.match_phrase {
                                         let mut requested_ids = HashSet::new();
                                         let mut keys = Vec::new();
                                         for match_term in &match_terms {
@@ -175,7 +194,12 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                             }
                                         }
 
-                                        bitmap_op(state.op, &mut state.rb, candidates, &not_mask);
+                                        bitmap_op(
+                                            state.op,
+                                            &mut state.rb,
+                                            candidates,
+                                            &all_doc_ids,
+                                        );
                                     } else {
                                         let mut requested_ids = HashSet::new();
                                         let mut text_bitmap = None;
@@ -213,20 +237,25 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                             }
 
                                             bitmap_op(
-                                                &LogicalOperator::And,
+                                                LogicalOperator::And,
                                                 &mut text_bitmap,
                                                 self.get_bitmaps_union(keys)?,
-                                                &not_mask,
+                                                &all_doc_ids,
                                             );
 
                                             if text_bitmap.as_ref().unwrap().is_empty() {
                                                 break;
                                             }
                                         }
-                                        bitmap_op(state.op, &mut state.rb, text_bitmap, &not_mask);
+                                        bitmap_op(
+                                            state.op,
+                                            &mut state.rb,
+                                            text_bitmap,
+                                            &all_doc_ids,
+                                        );
                                     }
                                 } else {
-                                    bitmap_op(state.op, &mut state.rb, None, &not_mask);
+                                    bitmap_op(state.op, &mut state.rb, None, &all_doc_ids);
                                 }
                             }
                             FieldValue::Integer(i) => {
@@ -243,7 +272,7 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                         ),
                                         &filter_cond.op,
                                     )?,
-                                    &not_mask,
+                                    &all_doc_ids,
                                 );
                             }
                             FieldValue::LongInteger(i) => {
@@ -260,7 +289,7 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                         ),
                                         &filter_cond.op,
                                     )?,
-                                    &not_mask,
+                                    &all_doc_ids,
                                 );
                             }
                             FieldValue::Float(f) => {
@@ -277,7 +306,7 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                         ),
                                         &filter_cond.op,
                                     )?,
-                                    &not_mask,
+                                    &all_doc_ids,
                                 );
                             }
                             FieldValue::Tag(tag) => {
@@ -293,15 +322,15 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                                             tag,
                                         ),
                                     )?,
-                                    &not_mask,
+                                    &all_doc_ids,
                                 );
                             }
                         }
                     }
-                    Condition::FilterOperator(filter_op) => {
+                    Filter::Operator(filter_op) => {
                         stack.push(state);
                         state = State {
-                            op: &filter_op.operator,
+                            op: filter_op.operator,
                             it: filter_op.conditions.iter(),
                             rb: None,
                         };
@@ -309,22 +338,25 @@ impl StoreQuery<RocksDBIterator> for RocksDBStore {
                     }
                 }
 
-                if state.op == &LogicalOperator::And && state.rb.as_ref().unwrap().is_empty() {
+                if state.op == LogicalOperator::And && state.rb.as_ref().unwrap().is_empty() {
                     break;
                 }
             }
             if let Some(mut prev_state) = stack.pop() {
-                bitmap_op(state.op, &mut prev_state.rb, state.rb, &not_mask);
+                bitmap_op(prev_state.op, &mut prev_state.rb, state.rb, &all_doc_ids);
                 state = prev_state;
             } else {
                 break;
             }
         }
 
-        println!("{:?}", state.rb.as_ref().unwrap());
-
         Ok(RocksDBIterator::new(
+            account,
+            collection,
             state.rb.unwrap_or_else(RoaringBitmap::new),
+            &self.db,
+            cf_indexes,
+            sort,
         ))
     }
 }

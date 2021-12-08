@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, time::Instant};
+use std::{collections::HashMap, convert::TryInto};
 
 use rocksdb::{DBWithThreadMode, MultiThreaded};
 use store::{
