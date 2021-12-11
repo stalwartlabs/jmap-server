@@ -7,4 +7,3 @@ publish = false
 [dependencies]
 nlp = { path = "../nlp" }
 bitpacking = "0.8.4"
-integer-encoding = "3.0.2"

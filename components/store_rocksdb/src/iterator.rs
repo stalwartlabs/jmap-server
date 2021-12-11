@@ -6,7 +6,7 @@ use rocksdb::{
     MultiThreaded,
 };
 use store::{
-    serialize::{deserialize_document_id, serialize_index_key_prefix},
+    serialize::{deserialize_index_document_id, serialize_index_key_prefix},
     AccountId, CollectionId, Comparator, DocumentId, FieldId,
 };
 
@@ -162,7 +162,7 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                     break;
                 }
 
-                let doc_id = deserialize_document_id(&key)?;
+                let doc_id = deserialize_index_document_id(&key)?;
                 if it_opts.remaining.contains(doc_id) {
                     it_opts.remaining.remove(doc_id);
 

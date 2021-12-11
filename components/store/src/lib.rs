@@ -1,8 +1,11 @@
 pub mod document;
 pub mod field;
+pub mod leb128;
 pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
+
+use std::{collections::HashSet, iter::FromIterator};
 
 use document::DocumentBuilder;
 use nlp::Language;
@@ -97,6 +100,46 @@ impl<'x> Filter<'x> {
         Filter::Condition(FilterCondition { field, op, value })
     }
 
+    pub fn eq(field: FieldId, value: FieldValue<'x>) -> Self {
+        Filter::Condition(FilterCondition {
+            field,
+            op: ComparisonOperator::Equal,
+            value,
+        })
+    }
+
+    pub fn lt(field: FieldId, value: FieldValue<'x>) -> Self {
+        Filter::Condition(FilterCondition {
+            field,
+            op: ComparisonOperator::LowerThan,
+            value,
+        })
+    }
+
+    pub fn le(field: FieldId, value: FieldValue<'x>) -> Self {
+        Filter::Condition(FilterCondition {
+            field,
+            op: ComparisonOperator::LowerEqualThan,
+            value,
+        })
+    }
+
+    pub fn gt(field: FieldId, value: FieldValue<'x>) -> Self {
+        Filter::Condition(FilterCondition {
+            field,
+            op: ComparisonOperator::GreaterThan,
+            value,
+        })
+    }
+
+    pub fn ge(field: FieldId, value: FieldValue<'x>) -> Self {
+        Filter::Condition(FilterCondition {
+            field,
+            op: ComparisonOperator::GreaterEqualThan,
+            value,
+        })
+    }
+
     pub fn and(conditions: Vec<Filter<'x>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::And,
@@ -151,7 +194,12 @@ pub trait StoreInsert {
         account: AccountId,
         collection: CollectionId,
         document: DocumentBuilder,
-    ) -> Result<DocumentId>;
+    ) -> crate::Result<DocumentId> {
+        self.insert_bulk(account, collection, vec![document])?
+            .pop()
+            .ok_or_else(|| StoreError::InternalError("No document id returned".to_string()))
+    }
+
     fn insert_bulk(
         &self,
         account: AccountId,
@@ -177,14 +225,6 @@ pub trait StoreGet {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-    ) -> Result<Option<Vec<u8>>>;
-
-    fn get_stored_value_by_pos(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
         pos: ArrayPos,
     ) -> Result<Option<Vec<u8>>>;
 
@@ -195,7 +235,7 @@ pub trait StoreGet {
         document: DocumentId,
         field: FieldId,
     ) -> Result<Option<Integer>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field)? {
+        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
             Ok(Some(serialize::deserialize_integer(bytes).ok_or_else(
                 || StoreError::InternalError("Failed to deserialize integer".to_string()),
             )?))
@@ -211,7 +251,7 @@ pub trait StoreGet {
         document: DocumentId,
         field: FieldId,
     ) -> Result<Option<LongInteger>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field)? {
+        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
             Ok(Some(
                 serialize::deserialize_long_integer(bytes).ok_or_else(|| {
                     StoreError::InternalError("Failed to deserialize long integer".to_string())
@@ -229,7 +269,7 @@ pub trait StoreGet {
         document: DocumentId,
         field: FieldId,
     ) -> Result<Option<Float>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field)? {
+        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
             Ok(Some(serialize::deserialize_float(bytes).ok_or_else(
                 || StoreError::InternalError("Failed to deserialize float".to_string()),
             )?))
@@ -245,7 +285,7 @@ pub trait StoreGet {
         document: DocumentId,
         field: FieldId,
     ) -> Result<Option<String>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field)? {
+        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
             Ok(Some(serialize::deserialize_text(bytes).ok_or_else(
                 || StoreError::InternalError("Failed to decode UTF-8 string".to_string()),
             )?))
@@ -262,7 +302,7 @@ pub trait StoreTag {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: Tag,
+        tag: &Tag,
     ) -> Result<()>;
 
     fn clear_tag(
@@ -271,7 +311,7 @@ pub trait StoreTag {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: Tag,
+        tag: &Tag,
     ) -> Result<()>;
 
     fn has_tag(
@@ -280,11 +320,34 @@ pub trait StoreTag {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: Tag,
+        tag: &Tag,
     ) -> Result<bool>;
 }
 
+pub trait StoreDelete {
+    fn delete_document(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+    ) -> Result<()> {
+        self.delete_document_bulk(
+            account,
+            collection,
+            HashSet::from_iter(vec![document].into_iter()),
+        )
+    }
+    fn delete_document_bulk(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        documents: HashSet<DocumentId>,
+    ) -> Result<()>;
+    fn delete_account(&self, account: AccountId) -> Result<()>;
+    fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
+}
+
 pub trait Store<'x, T: Iterator<Item = DocumentId>>:
-    StoreInsert + StoreQuery<'x, T> + StoreGet + StoreTag + Send + Sync + Sized
+    StoreInsert + StoreQuery<'x, T> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized
 {
 }

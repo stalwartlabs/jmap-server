@@ -1,66 +1,62 @@
 use roaring::RoaringBitmap;
-use rocksdb::{BoundColumnFamily, Direction, IteratorMode, MergeOperands};
+use rocksdb::{
+    compaction_filter::Decision, BoundColumnFamily, Direction, IteratorMode, MergeOperands,
+};
 use std::{
     array::TryFromSliceError,
-    collections::HashSet,
     convert::TryInto,
     ops::{BitAndAssign, BitOrAssign, BitXorAssign},
     sync::Arc,
 };
-use store::{serialize::PREFIX_LEN, ComparisonOperator, DocumentId, LogicalOperator, StoreError};
+use store::{
+    leb128::Leb128, serialize::PREFIX_LEN, ComparisonOperator, DocumentId, LogicalOperator,
+    StoreError,
+};
 
 use crate::RocksDBStore;
 
-const BIT_SET: u8 = 1;
+const BIT_SET: u8 = 0x80;
 const BIT_CLEAR: u8 = 0;
-const BIT_LIST: u8 = 2;
 
-pub fn bitmap_full_merge(
+const IS_BITLIST: u8 = 0;
+const IS_BITMAP: u8 = 1;
+
+pub fn bitmap_merge(
     _new_key: &[u8],
     existing_val: Option<&[u8]>,
     operands: &mut MergeOperands,
 ) -> Option<Vec<u8>> {
-    let mut rb = if let Some(existing_val) = existing_val {
-        RoaringBitmap::deserialize_from(existing_val).ok()?
-    } else {
-        RoaringBitmap::new()
+    /*print!(
+        "Merge operands {:?}, has val {} -> ",
+        operands.size_hint().0,
+        existing_val.is_some(),
+    );*/
+
+    let mut bm = match existing_val {
+        Some(existing_val) => into_bitmap(existing_val).ok()?,
+        None if operands.size_hint().0 == 1 => {
+            //println!("return unserialized");
+            return Some(Vec::from(operands.into_iter().next().unwrap()));
+        }
+        _ => RoaringBitmap::new(),
     };
 
-    //println!("Full merge {:?} {}", operands.size_hint().0, rb.len());
-
     for op in operands {
-        match *(op.get(0)?) {
-            BIT_SET => {
-                rb.insert(DocumentId::from_ne_bytes(
-                    op.get(1..1 + std::mem::size_of::<DocumentId>())?
-                        .try_into()
-                        .ok()?,
-                ));
-            }
-            BIT_CLEAR => {
-                rb.remove(DocumentId::from_ne_bytes(
-                    op.get(1..1 + std::mem::size_of::<DocumentId>())?
-                        .try_into()
-                        .ok()?,
-                ));
-            }
-            BIT_LIST => {
-                for op in op.get(1..)?.chunks(std::mem::size_of::<DocumentId>() + 1) {
-                    let id = DocumentId::from_ne_bytes(
-                        op.get(1..1 + std::mem::size_of::<DocumentId>())?
-                            .try_into()
-                            .ok()?,
-                    );
-                    match *(op.get(0)?) {
-                        BIT_SET => {
-                            rb.insert(id);
-                        }
-                        BIT_CLEAR => {
-                            rb.remove(id);
-                        }
-                        _ => return None,
+        match *op.get(0)? {
+            IS_BITMAP => {
+                if let Ok(union_bm) = deserialize_bitmap(op) {
+                    //print!("Bitmap union");
+                    if !bm.is_empty() {
+                        bm.bitor_assign(&union_bm);
+                    } else {
+                        bm = union_bm;
                     }
+                } else {
+                    return None;
                 }
+            }
+            IS_BITLIST => {
+                deserialize_bitlist(&mut bm, op).ok()?;
             }
             _ => {
                 return None;
@@ -68,38 +64,64 @@ pub fn bitmap_full_merge(
         }
     }
 
-    let mut bytes = Vec::with_capacity(rb.serialized_size());
-    rb.serialize_into(&mut bytes).ok()?;
+    //println!(" -> {}", bm.len());
+
+    let mut bytes = Vec::with_capacity(bm.serialized_size() + 1);
+    bytes.push(IS_BITMAP);
+    bm.serialize_into(&mut bytes).ok()?;
     Some(bytes)
 }
 
-pub fn bitmap_partial_merge(
-    _new_key: &[u8],
-    _existing_val: Option<&[u8]>,
-    operands: &mut MergeOperands,
-) -> Option<Vec<u8>> {
-    debug_assert!(_existing_val.is_none());
+pub fn bitmap_compact(_level: u32, _key: &[u8], value: &[u8]) -> Decision {
+    //println!("Compact entry with {:?} bytes.", value.len());
+    match into_bitmap(value) {
+        Ok(bm) if bm.is_empty() => Decision::Remove,
+        _ => Decision::Keep,
+    }
+}
 
-    let mut bytes =
-        Vec::with_capacity((operands.size_hint().0 * (std::mem::size_of::<DocumentId>() + 1)) + 1);
+#[inline(always)]
+pub fn deserialize_bitlist(bm: &mut RoaringBitmap, bytes: &[u8]) -> crate::Result<()> {
+    let mut it = bytes[1..].iter();
+    'inner: while let Some(header) = it.next() {
+        let mut items = (header & 0x7F) + 1;
+        let is_set = (header & BIT_SET) != 0;
+        //print!("[{} {}] ", if is_set { "set" } else { "clear" }, items);
 
-    bytes.push(BIT_LIST);
-
-    //println!("Partial merge {:?}", operands.size_hint().0);
-
-    for op in operands {
-        match *(op.get(0)?) {
-            BIT_SET | BIT_CLEAR => {
-                bytes.extend_from_slice(op);
+        while items > 0 {
+            if let Some(doc_id) = DocumentId::from_leb128_it(&mut it) {
+                if is_set {
+                    bm.insert(doc_id);
+                } else {
+                    bm.remove(doc_id);
+                }
+                items -= 1;
+            } else {
+                debug_assert!(items == 0, "{:?}", bytes);
+                break 'inner;
             }
-            BIT_LIST => {
-                bytes.extend_from_slice(&op[1..]);
-            }
-            _ => return None,
         }
     }
+    Ok(())
+}
 
-    Some(bytes)
+#[inline(always)]
+pub fn deserialize_bitmap(bytes: &[u8]) -> crate::Result<RoaringBitmap> {
+    RoaringBitmap::deserialize_from(&bytes[1..])
+        .map_err(|e| StoreError::InternalError(e.to_string()))
+}
+
+#[inline(always)]
+pub fn into_bitmap(bytes: &[u8]) -> crate::Result<RoaringBitmap> {
+    match *bytes.get(0).ok_or(StoreError::DataCorruption)? {
+        IS_BITMAP => deserialize_bitmap(bytes),
+        IS_BITLIST => {
+            let mut bm = RoaringBitmap::new();
+            deserialize_bitlist(&mut bm, bytes)?;
+            Ok(bm)
+        }
+        _ => Err(StoreError::DataCorruption),
+    }
 }
 
 impl RocksDBStore {
@@ -114,10 +136,7 @@ impl RocksDBStore {
             .get_pinned_cf(cf_bitmaps, key)
             .map_err(|e| StoreError::InternalError(e.into_string()))?
         {
-            Ok(Some(
-                RoaringBitmap::deserialize_from(&bytes[..])
-                    .map_err(|e| StoreError::InternalError(e.to_string()))?,
-            ))
+            Ok(Some(into_bitmap(&bytes)?))
         } else {
             Ok(None)
         }
@@ -131,13 +150,12 @@ impl RocksDBStore {
         let mut result: Option<RoaringBitmap> = None;
         for bitmap in self.db.multi_get_cf(keys) {
             if let Some(bytes) = bitmap.map_err(|e| StoreError::InternalError(e.into_string()))? {
-                let rb = RoaringBitmap::deserialize_from(&bytes[..])
-                    .map_err(|e| StoreError::InternalError(e.to_string()))?;
+                let bm = into_bitmap(&bytes)?;
 
                 if let Some(result) = &mut result {
-                    result.bitor_assign(&rb);
+                    result.bitor_assign(&bm);
                 } else {
-                    result = Some(rb);
+                    result = Some(bm);
                 }
             }
         }
@@ -152,16 +170,15 @@ impl RocksDBStore {
         let mut result: Option<RoaringBitmap> = None;
         for bitmap in self.db.multi_get_cf(keys) {
             if let Some(bytes) = bitmap.map_err(|e| StoreError::InternalError(e.into_string()))? {
-                let rb = RoaringBitmap::deserialize_from(&bytes[..])
-                    .map_err(|e| StoreError::InternalError(e.to_string()))?;
+                let bm = into_bitmap(&bytes)?;
 
                 if let Some(result) = &mut result {
-                    result.bitand_assign(&rb);
+                    result.bitand_assign(&bm);
                     if result.is_empty() {
                         break;
                     }
                 } else {
-                    result = Some(rb);
+                    result = Some(bm);
                 }
             } else {
                 return Ok(None);
@@ -176,7 +193,7 @@ impl RocksDBStore {
         match_key: &[u8],
         op: &ComparisonOperator,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        let mut rb = RoaringBitmap::new();
+        let mut bm = RoaringBitmap::new();
         let match_prefix = &match_key[0..PREFIX_LEN];
         let match_value = &match_key[PREFIX_LEN..];
 
@@ -192,12 +209,6 @@ impl RocksDBStore {
                 },
             ),
         ) {
-            /*print!(
-                "{} -> {:?} {:?}",
-                key.starts_with(match_prefix),
-                key,
-                match_prefix
-            );*/
             if !key.starts_with(match_prefix) {
                 break;
             }
@@ -207,15 +218,6 @@ impl RocksDBStore {
                     "Invalid key found in 'indexes' column family.".to_string(),
                 )
             })?;
-            /*println!(
-                " {} {}",
-                u32::from_be_bytes(value.try_into().map_err(|e: TryFromSliceError| {
-                    StoreError::InternalError(e.to_string())
-                })?,),
-                u32::from_be_bytes(match_value.try_into().map_err(|e: TryFromSliceError| {
-                    StoreError::InternalError(e.to_string())
-                })?,)
-            );*/
 
             match op {
                 ComparisonOperator::LowerThan if value >= match_value => {
@@ -236,7 +238,7 @@ impl RocksDBStore {
                 ComparisonOperator::GreaterEqualThan if value < match_value => break,
                 ComparisonOperator::Equal if value != match_value => break,
                 _ => {
-                    rb.insert(DocumentId::from_be_bytes(
+                    bm.insert(DocumentId::from_be_bytes(
                         key.get(doc_id_pos..)
                             .ok_or_else(|| {
                                 StoreError::InternalError(
@@ -252,45 +254,13 @@ impl RocksDBStore {
             }
         }
 
-        Ok(Some(rb))
+        Ok(Some(bm))
     }
-}
-
-#[inline(always)]
-pub fn set_bit(document: DocumentId) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 1);
-    buf.push(BIT_SET);
-    buf.extend_from_slice(&document.to_ne_bytes());
-    buf
-}
-
-#[inline(always)]
-pub fn set_bit_list(documents: HashSet<DocumentId>) -> Vec<u8> {
-    let mut buf =
-        Vec::with_capacity(((std::mem::size_of::<DocumentId>() + 1) * documents.len()) + 1);
-    buf.push(BIT_LIST);
-
-    for document in documents {
-        buf.push(BIT_SET);
-        buf.extend_from_slice(&document.to_ne_bytes());
-    }
-
-    buf
-}
-
-#[inline(always)]
-pub fn clear_bit(document: DocumentId) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 1);
-    buf.push(BIT_CLEAR);
-    buf.extend_from_slice(&document.to_ne_bytes());
-    buf
 }
 
 #[inline(always)]
 pub fn has_bit(bytes: &[u8], document: DocumentId) -> crate::Result<bool> {
-    Ok(RoaringBitmap::deserialize_from(bytes)
-        .map_err(|e| StoreError::InternalError(e.to_string()))?
-        .contains(document))
+    Ok(into_bitmap(bytes)?.contains(document))
 }
 
 #[inline(always)]
@@ -328,5 +298,124 @@ pub fn bitmap_op<'x>(
         *dest = src;
     } else {
         *dest = Some(RoaringBitmap::new());
+    }
+}
+
+macro_rules! impl_bit {
+    ($single:ident, $many:ident, $flag:ident) => {
+        #[inline(always)]
+        pub fn $single(document: DocumentId) -> Vec<u8> {
+            let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 2);
+            buf.push(IS_BITLIST);
+            buf.push($flag);
+            document.to_leb128_bytes(&mut buf);
+            buf
+        }
+
+        #[inline(always)]
+        pub fn $many<T>(documents: T) -> Vec<u8>
+        where
+            T: Iterator<Item = DocumentId>,
+        {
+            debug_assert!(documents.size_hint().0 > 0);
+
+            let mut buf = Vec::with_capacity(
+                ((std::mem::size_of::<DocumentId>() + 1)
+                    * documents
+                        .size_hint()
+                        .1
+                        .unwrap_or_else(|| documents.size_hint().0))
+                    + 2,
+            );
+
+            buf.push(IS_BITLIST);
+
+            let mut header_pos = 0;
+            let mut total_docs = 0;
+
+            for (pos, document) in documents.enumerate() {
+                if pos & 0x7F == 0 {
+                    header_pos = buf.len();
+                    buf.push($flag | 0x7F);
+                }
+                document.to_leb128_bytes(&mut buf);
+                total_docs = pos;
+            }
+
+            buf[header_pos] = $flag | ((total_docs & 0x7F) as u8);
+
+            buf
+        }
+    };
+}
+
+impl_bit!(set_bit, set_bits, BIT_SET);
+impl_bit!(clear_bit, clear_bits, BIT_CLEAR);
+
+#[cfg(test)]
+mod tests {
+
+    use roaring::RoaringBitmap;
+    use rocksdb::{ColumnFamilyDescriptor, Options, DB};
+
+    use crate::bitmaps::into_bitmap;
+
+    use super::{bitmap_compact, bitmap_merge, clear_bit, clear_bits, set_bits};
+
+    #[test]
+    fn bitmap_merge_compact() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_bitmap_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        {
+            let cf_bitmaps = {
+                let mut cf_opts = Options::default();
+                cf_opts.set_merge_operator_associative("merge", bitmap_merge);
+                cf_opts.set_compaction_filter("compact", bitmap_compact);
+                ColumnFamilyDescriptor::new("bitmaps", cf_opts)
+            };
+            let mut db_opts = Options::default();
+            db_opts.create_missing_column_families(true);
+            db_opts.create_if_missing(true);
+
+            let db = DB::open_cf_descriptors(&db_opts, &temp_dir, vec![cf_bitmaps]).unwrap();
+            let cf_bitmaps = db.cf_handle("bitmaps").unwrap();
+            let key = "key1".as_bytes();
+
+            db.merge_cf(&cf_bitmaps, key, set_bits(0..1)).unwrap();
+            assert_eq!(
+                into_bitmap(&db.get_cf(&cf_bitmaps, key).unwrap().unwrap()).unwrap(),
+                (0..1).collect()
+            );
+            db.merge_cf(&cf_bitmaps, key, set_bits(1..500)).unwrap();
+            db.merge_cf(&cf_bitmaps, key, set_bits(500..1000)).unwrap();
+            assert_eq!(
+                into_bitmap(&db.get_cf(&cf_bitmaps, key).unwrap().unwrap()).unwrap(),
+                (0..1000).collect()
+            );
+            db.merge_cf(&cf_bitmaps, key, clear_bits(0..128)).unwrap();
+            db.merge_cf(&cf_bitmaps, key, clear_bits(128..384)).unwrap();
+            db.merge_cf(&cf_bitmaps, key, clear_bit(384)).unwrap();
+            db.merge_cf(&cf_bitmaps, key, clear_bit(385)).unwrap();
+            db.merge_cf(&cf_bitmaps, key, clear_bit(386)).unwrap();
+            assert_eq!(
+                into_bitmap(&db.get_cf(&cf_bitmaps, key).unwrap().unwrap()).unwrap(),
+                (387..1000).collect()
+            );
+            db.merge_cf(&cf_bitmaps, key, clear_bits(387..1000))
+                .unwrap();
+            db.compact_range_cf(&cf_bitmaps, None::<&[u8]>, None::<&[u8]>);
+            assert_eq!(
+                into_bitmap(&db.get_cf(&cf_bitmaps, key).unwrap().unwrap()).unwrap(),
+                RoaringBitmap::new()
+            );
+            // Commented out as compaction filters are not executed when there is a merge taking place.
+            //assert!(db.get_cf(&cf_bitmaps, key).unwrap().is_none());
+        }
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

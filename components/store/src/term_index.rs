@@ -3,17 +3,16 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-use integer_encoding::VarInt;
 use nlp::tokenizers::Token;
 
-use crate::{ArrayPos, FieldId, TermId};
+use crate::{leb128::Leb128, ArrayPos, FieldId, TermId};
 
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
 #[derive(Debug)]
 pub enum Error {
     DataCorruption,
-    VarintDecodeError,
+    Leb128DecodeError,
     BitpackDecodeError,
     InvalidArgument,
 }
@@ -232,15 +231,8 @@ impl TermIndexBuilder {
             let header_pos = bytes.len();
             bytes.extend_from_slice(&[0u8; LENGTH_SIZE]);
             bytes.push(term_index.field);
-            {
-                let compressed_len = term_index.field_num.encode_var(&mut compressed[..]);
-                bytes.extend_from_slice(&compressed[..compressed_len]);
-            }
-            {
-                let compressed_len =
-                    (term_index.terms.len() as u32).encode_var(&mut compressed[..]);
-                bytes.extend_from_slice(&compressed[..compressed_len]);
-            }
+            term_index.field_num.to_leb128_bytes(&mut bytes);
+            term_index.terms.len().to_leb128_bytes(&mut bytes);
 
             let terms_pos = bytes.len();
 
@@ -291,8 +283,7 @@ impl TermIndexBuilder {
                         pos += block_len;
                     } else {
                         for val in &chunk[pos..] {
-                            let compressed_len = (*val).encode_var(&mut compressed[..]);
-                            bytes.extend_from_slice(&compressed[..compressed_len]);
+                            (*val).to_leb128_bytes(&mut bytes);
                         }
                         pos = len;
                     }
@@ -329,19 +320,19 @@ impl<'x> TryFrom<&'x [u8]> for TermIndex<'x> {
             pos += 1;
 
             let (field_num, bytes_read) =
-                ArrayPos::decode_var(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                    .ok_or(Error::VarintDecodeError)?;
+                ArrayPos::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+                    .ok_or(Error::Leb128DecodeError)?;
             pos += bytes_read;
 
             let (terms_len, bytes_read) =
-                u32::decode_var(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                    .ok_or(Error::VarintDecodeError)?;
+                usize::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+                    .ok_or(Error::Leb128DecodeError)?;
             pos += bytes_read;
 
             term_index.items.push(TermIndexItem {
                 field_id: *field,
                 field_num,
-                terms_len: terms_len as usize,
+                terms_len,
                 terms: bytes
                     .get(pos..pos + item_len)
                     .ok_or(Error::DataCorruption)?,
@@ -372,8 +363,8 @@ impl<'x> TermIndex<'x> {
             } else {
                 while remaining_items > 0 {
                     let (_, bytes_read) =
-                        u32::decode_var(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                            .ok_or(Error::VarintDecodeError)?;
+                        u32::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+                            .ok_or(Error::Leb128DecodeError)?;
 
                     pos += bytes_read;
                     remaining_items -= 1;
@@ -419,8 +410,8 @@ impl<'x> TermIndex<'x> {
             let mut pos = 0;
             while decompressed.len() < remaining_items {
                 let (val, bytes_read) =
-                    u32::decode_var(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                        .ok_or(Error::VarintDecodeError)?;
+                    u32::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+                        .ok_or(Error::Leb128DecodeError)?;
                 decompressed.push(val);
                 pos += bytes_read;
             }
@@ -462,7 +453,7 @@ impl<'x> TermIndex<'x> {
             let mut term_pos = 0;
             let mut byte_pos = 0;
 
-            'term_loop : while term_pos < item.terms_len {
+            'term_loop: while term_pos < item.terms_len {
                 let (bytes_read, chunk) = self.uncompress_chunk(
                     item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
                     (item.terms_len * 4) - (term_pos * 4),
@@ -494,7 +485,7 @@ impl<'x> TermIndex<'x> {
                             partial_match.clear();
                         }
                     } else {
-                        'match_loop : for (match_pos, match_term) in match_terms.iter().enumerate() {
+                        'match_loop: for (match_pos, match_term) in match_terms.iter().enumerate() {
                             if match_term.id == term_id
                                 || match_term.id == term_id_stemmed
                                 || (match_term.id_stemmed > 0

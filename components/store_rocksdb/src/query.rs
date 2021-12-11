@@ -1,11 +1,11 @@
-use nlp::{lang::detect_language, Language};
+use nlp::Language;
 use roaring::RoaringBitmap;
 use std::{collections::HashSet, convert::TryFrom, slice::Iter};
 use store::{
     field::TokenIterator,
     serialize::{
-        serialize_index_key, serialize_tag_key, serialize_term_id_key, serialize_term_index_key,
-        serialize_text_key,
+        serialize_acd_key_leb128, serialize_bm_tag_key, serialize_bm_term_key,
+        serialize_bm_text_key, serialize_index_key_base,
     },
     term_index::TermIndex,
     AccountId, CollectionId, Comparator, FieldValue, Filter, FilterOperator, LogicalOperator,
@@ -83,7 +83,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                     &mut state.rb,
                                     self.get_bitmap(
                                         &cf_bitmaps,
-                                        &serialize_text_key(
+                                        &serialize_bm_text_key(
                                             account,
                                             collection,
                                             filter_cond.field,
@@ -98,7 +98,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                 for token in TokenIterator::new(text, Language::English, false) {
                                     keys.push((
                                         &cf_bitmaps,
-                                        serialize_text_key(
+                                        serialize_bm_text_key(
                                             account,
                                             collection,
                                             filter_cond.field,
@@ -129,7 +129,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                                 requested_ids.insert(match_term.id);
                                                 keys.push((
                                                     &cf_bitmaps,
-                                                    serialize_term_id_key(
+                                                    serialize_bm_term_key(
                                                         account,
                                                         collection,
                                                         filter_cond.field,
@@ -150,7 +150,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                                         .db
                                                         .get_cf(
                                                             &cf_values,
-                                                            &serialize_term_index_key(
+                                                            &serialize_acd_key_leb128(
                                                                 account,
                                                                 collection,
                                                                 document_id,
@@ -220,7 +220,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                                     requested_ids.insert(term_op);
                                                     keys.push((
                                                         &cf_bitmaps,
-                                                        serialize_term_id_key(
+                                                        serialize_bm_term_key(
                                                             account,
                                                             collection,
                                                             filter_cond.field,
@@ -264,7 +264,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                     &mut state.rb,
                                     self.range_to_bitmap(
                                         &cf_indexes,
-                                        &serialize_index_key(
+                                        &serialize_index_key_base(
                                             account,
                                             collection,
                                             filter_cond.field,
@@ -281,7 +281,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                     &mut state.rb,
                                     self.range_to_bitmap(
                                         &cf_indexes,
-                                        &serialize_index_key(
+                                        &serialize_index_key_base(
                                             account,
                                             collection,
                                             filter_cond.field,
@@ -298,7 +298,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                     &mut state.rb,
                                     self.range_to_bitmap(
                                         &cf_indexes,
-                                        &serialize_index_key(
+                                        &serialize_index_key_base(
                                             account,
                                             collection,
                                             filter_cond.field,
@@ -315,7 +315,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                     &mut state.rb,
                                     self.get_bitmap(
                                         &cf_bitmaps,
-                                        &serialize_tag_key(
+                                        &serialize_bm_tag_key(
                                             account,
                                             collection,
                                             filter_cond.field,

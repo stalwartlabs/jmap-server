@@ -170,12 +170,12 @@ where
     }
 
     let tests = [
-        /*(
+        (
             Filter::and(vec![
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText("water"),
+                    FieldValue::FullText(TextQuery::query_english("water")),
                 ),
                 Filter::new_condition(
                     fields["year"],
@@ -190,7 +190,7 @@ where
                 Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText("gelatin"),
+                    FieldValue::FullText(TextQuery::query_english("gelatin")),
                 ),
                 Filter::new_condition(
                     fields["year"],
@@ -206,13 +206,11 @@ where
             vec!["p79426", "p79427", "p79428", "p79429", "p79430"],
         ),
         (
-            Filter::and(vec![
-                Filter::new_condition(
-                    fields["title"],
-                    ComparisonOperator::Equal,
-                    FieldValue::FullText("'rustic bridge'"),
-                ),
-            ]),
+            Filter::and(vec![Filter::new_condition(
+                fields["title"],
+                ComparisonOperator::Equal,
+                FieldValue::FullText(TextQuery::query_english("'rustic bridge'")),
+            )]),
             vec!["d05503"],
         ),
         (
@@ -253,7 +251,7 @@ where
                         ComparisonOperator::Equal,
                         FieldValue::Integer(1971),
                     ),
-                ])
+                ]),
             ]),
             vec!["p01764", "t05843"],
         ),
@@ -301,7 +299,7 @@ where
                 "n05095", "n05096", "n05145", "n05157", "n05158", "n05159", "n05298", "n05303",
                 "n06070", "t01181", "t03571", "t05805", "t05806", "t12147", "t12154", "t12155",
             ],
-        ),*/
+        ),
         (
             Filter::and(vec![
                 Filter::new_condition(
@@ -339,7 +337,51 @@ where
                     FieldValue::Integer(2008),
                 ),
             ]),
-            vec![""],
+            vec!["ar00039", "t12600"],
+        ),
+        (
+            Filter::and(vec![
+                Filter::new_condition(
+                    fields["title"],
+                    ComparisonOperator::Equal,
+                    FieldValue::FullText(TextQuery::query_english("study")),
+                ),
+                Filter::new_condition(
+                    fields["medium"],
+                    ComparisonOperator::Equal,
+                    FieldValue::FullText(TextQuery::query_english("paper")),
+                ),
+                Filter::new_condition(
+                    fields["creditLine"],
+                    ComparisonOperator::Equal,
+                    FieldValue::FullText(TextQuery::query_english("'purchased'")),
+                ),
+                Filter::not(vec![
+                    Filter::new_condition(
+                        fields["title"],
+                        ComparisonOperator::Equal,
+                        FieldValue::FullText(TextQuery::query_english("'anatomical'")),
+                    ),
+                    Filter::new_condition(
+                        fields["title"],
+                        ComparisonOperator::Equal,
+                        FieldValue::FullText(TextQuery::query_english("'for'")),
+                    ),
+                ]),
+                Filter::new_condition(
+                    fields["year"],
+                    ComparisonOperator::GreaterThan,
+                    FieldValue::Integer(1900),
+                ),
+                Filter::new_condition(
+                    fields["acquisitionYear"],
+                    ComparisonOperator::GreaterThan,
+                    FieldValue::Integer(2000),
+                ),
+            ]),
+            vec![
+                "p80042", "p80043", "p80044", "p80045", "p80203", "t11937", "t12172",
+            ],
         ),
     ];
 

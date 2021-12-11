@@ -1,8 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::Instant,
-    vec::IntoIter,
 };
 
 use nlp::Language;
@@ -11,31 +9,16 @@ use store::{
     document::{DocumentBuilder, IndexOptions},
     field::{IndexField, TokenIterator},
     serialize::{
-        serialize_collection_key, serialize_term_id_key, serialize_term_index_key,
-        serialize_text_key, SerializedKeyValue, SerializedValue,
+        serialize_ac_key_leb128, serialize_acd_key_leb128, serialize_bm_tag_key,
+        serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
     },
     term_index::TermIndexBuilder,
     AccountId, CollectionId, DocumentId, StoreError, StoreInsert,
 };
 
-use crate::{
-    bitmaps::{set_bit, set_bit_list},
-    document_id::UncommittedDocumentId,
-    RocksDBStore,
-};
+use crate::{bitmaps::set_bits, document_id::UncommittedDocumentId, RocksDBStore};
 
 impl StoreInsert for RocksDBStore {
-    fn insert(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentBuilder,
-    ) -> crate::Result<DocumentId> {
-        self.insert_bulk(account, collection, vec![document])?
-            .pop()
-            .ok_or_else(|| StoreError::InternalError("No document id returned".to_string()))
-    }
-
     fn insert_bulk(
         &self,
         account: AccountId,
@@ -71,15 +54,7 @@ impl StoreInsert for RocksDBStore {
         }
 
         for (key, doc_id_list) in bitmap_list {
-            batch.merge_cf(
-                &cf_bitmaps,
-                key,
-                if doc_id_list.len() > 1 {
-                    set_bit_list(doc_id_list)
-                } else {
-                    set_bit(*doc_id_list.iter().next().unwrap())
-                },
-            )
+            batch.merge_cf(&cf_bitmaps, key, set_bits(doc_id_list.into_iter()))
         }
 
         self.db
@@ -107,7 +82,7 @@ impl RocksDBStore {
 
         // Add document id to collection
         bitmap_list
-            .entry(serialize_collection_key(account, collection))
+            .entry(serialize_ac_key_leb128(account, collection))
             .or_insert_with(HashSet::new)
             .insert(document_id.get_id());
 
@@ -115,15 +90,15 @@ impl RocksDBStore {
         let mut term_index = TermIndexBuilder::new();
 
         for field in document {
-            let field_opt = match &field {
+            match &field {
                 IndexField::FullText(t) => {
-                    let field_opt = t.get_options();
+                    let opt = t.get_options();
                     let terms =
                         self.get_terms(TokenIterator::new(&t.value.text, t.value.language, true))?;
                     if !terms.is_empty() {
                         for term in &terms {
                             bitmap_list
-                                .entry(serialize_term_id_key(
+                                .entry(serialize_bm_term_key(
                                     account,
                                     collection,
                                     t.get_field(),
@@ -135,7 +110,7 @@ impl RocksDBStore {
 
                             if term.id_stemmed > 0 {
                                 bitmap_list
-                                    .entry(serialize_term_id_key(
+                                    .entry(serialize_bm_term_key(
                                         account,
                                         collection,
                                         t.get_field(),
@@ -149,21 +124,44 @@ impl RocksDBStore {
 
                         term_index.add_item(
                             t.get_field(),
-                            if field_opt.is_array() {
-                                field_opt.get_pos() + 1
-                            } else {
-                                0
-                            },
+                            if opt.is_array() { opt.get_pos() + 1 } else { 0 },
                             terms,
                         );
                     }
 
-                    field_opt
+                    let opt = t.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                t.get_field(),
+                                opt.get_pos(),
+                            ),
+                            t.value.text.as_bytes(),
+                        );
+                    }
+
+                    if opt.is_sortable() {
+                        batch.put_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                t.get_field(),
+                                t.value.text.as_bytes(),
+                            ),
+                            &[],
+                        );
+                    }
                 }
                 IndexField::Text(t) => {
                     for token in TokenIterator::new(&t.value, Language::English, false) {
                         bitmap_list
-                            .entry(serialize_text_key(
+                            .entry(serialize_bm_text_key(
                                 account,
                                 collection,
                                 t.get_field(),
@@ -172,11 +170,38 @@ impl RocksDBStore {
                             .or_insert_with(HashSet::new)
                             .insert(document_id.get_id());
                     }
-                    t.get_options()
+
+                    let opt = t.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                t.get_field(),
+                                opt.get_pos(),
+                            ),
+                            t.value.as_bytes(),
+                        );
+                    }
+                    if opt.is_sortable() {
+                        batch.put_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                t.get_field(),
+                                t.value.as_bytes(),
+                            ),
+                            &[],
+                        );
+                    }
                 }
                 IndexField::Keyword(k) => {
                     bitmap_list
-                        .entry(serialize_text_key(
+                        .entry(serialize_bm_text_key(
                             account,
                             collection,
                             k.get_field(),
@@ -184,55 +209,161 @@ impl RocksDBStore {
                         ))
                         .or_insert_with(HashSet::new)
                         .insert(document_id.get_id());
-                    k.get_options()
+
+                    let opt = k.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                k.get_field(),
+                                opt.get_pos(),
+                            ),
+                            k.value.as_bytes(),
+                        );
+                    }
+
+                    if opt.is_sortable() {
+                        batch.put_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                k.get_field(),
+                                k.value.as_bytes(),
+                            ),
+                            &[],
+                        );
+                    }
                 }
-                IndexField::Blob(b) => b.get_options(),
-                IndexField::Integer(i) => i.get_options(),
-                IndexField::LongInteger(i) => i.get_options(),
-                IndexField::Tag(t) => t.get_options(),
-                IndexField::Float(f) => f.get_options(),
+                IndexField::Tag(t) => {
+                    bitmap_list
+                        .entry(serialize_bm_tag_key(
+                            account,
+                            collection,
+                            t.get_field(),
+                            &t.value,
+                        ))
+                        .or_insert_with(HashSet::new)
+                        .insert(document_id.get_id());
+                }
+                IndexField::Blob(b) => {
+                    let opt = b.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                b.get_field(),
+                                opt.get_pos(),
+                            ),
+                            &b.value,
+                        );
+                    }
+                }
+                IndexField::Integer(i) => {
+                    let opt = i.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                i.get_field(),
+                                opt.get_pos(),
+                            ),
+                            &i.value.to_le_bytes(),
+                        );
+                    }
+
+                    if opt.is_sortable() {
+                        batch.put_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                i.get_field(),
+                                &i.value.to_be_bytes(),
+                            ),
+                            &[],
+                        );
+                    }
+                }
+                IndexField::LongInteger(i) => {
+                    let opt = i.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                i.get_field(),
+                                opt.get_pos(),
+                            ),
+                            &i.value.to_le_bytes(),
+                        );
+                    }
+
+                    if opt.is_sortable() {
+                        batch.put_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                i.get_field(),
+                                &i.value.to_be_bytes(),
+                            ),
+                            &[],
+                        );
+                    }
+                }
+                IndexField::Float(f) => {
+                    let opt = f.get_options();
+                    if opt.is_stored() {
+                        batch.put_cf(
+                            cf_values,
+                            serialize_stored_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                f.get_field(),
+                                opt.get_pos(),
+                            ),
+                            &f.value.to_le_bytes(),
+                        );
+                    }
+
+                    if opt.is_sortable() {
+                        batch.put_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id.get_id(),
+                                f.get_field(),
+                                &f.value.to_be_bytes(),
+                            ),
+                            &[],
+                        );
+                    }
+                }
             };
-
-            if field_opt.is_sortable() {
-                batch.put_cf(
-                    cf_indexes,
-                    &field.as_index_key(account, collection, document_id.get_id()),
-                    &[],
-                );
-            }
-
-            if field_opt.is_stored() {
-                match field.as_stored_value(account, collection, document_id.get_id()) {
-                    SerializedKeyValue {
-                        key,
-                        value: SerializedValue::Tag,
-                    } => {
-                        bitmap_list
-                            .entry(key)
-                            .or_insert_with(HashSet::new)
-                            .insert(document_id.get_id());
-                    }
-                    SerializedKeyValue {
-                        key,
-                        value: SerializedValue::Owned(value),
-                    } => {
-                        batch.put_cf(cf_values, &key, &value);
-                    }
-                    SerializedKeyValue {
-                        key,
-                        value: SerializedValue::Borrowed(value),
-                    } => {
-                        batch.put_cf(cf_values, &key, value);
-                    }
-                }
-            }
         }
 
         // Compress and store TermIndex
         if !term_index.is_empty() {
             batch.put_cf(
                 cf_values,
-                &serialize_term_index_key(account, collection, document_id.get_id()),
+                &serialize_acd_key_leb128(account, collection, document_id.get_id()),
                 &term_index.compress(),
             );
         }

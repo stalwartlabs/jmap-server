@@ -2,7 +2,7 @@ use std::{ops::BitXorAssign, time::Instant};
 
 use dashmap::DashMap;
 use roaring::RoaringBitmap;
-use store::{serialize::serialize_collection_key, AccountId, CollectionId, DocumentId, StoreError};
+use store::{serialize::serialize_ac_key_leb128, AccountId, CollectionId, DocumentId, StoreError};
 
 use crate::RocksDBStore;
 
@@ -114,7 +114,7 @@ impl<'x> RocksDBStore {
             &self.db.cf_handle("bitmaps").ok_or_else(|| {
                 StoreError::InternalError("No bitmaps column family found.".into())
             })?,
-            &serialize_collection_key(account, collection),
+            &serialize_ac_key_leb128(account, collection),
         )
     }
 
@@ -135,7 +135,7 @@ impl<'x> RocksDBStore {
                 &self.db.cf_handle("bitmaps").ok_or_else(|| {
                     StoreError::InternalError("No bitmaps column family found.".into())
                 })?,
-                &serialize_collection_key(account, collection),
+                &serialize_ac_key_leb128(account, collection),
                 bytes,
             )
             .map_err(|e| StoreError::InternalError(e.to_string()))

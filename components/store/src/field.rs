@@ -7,7 +7,7 @@ use nlp::{
 };
 
 use crate::{
-    document::{IndexOptions, OptionValue, MAX_TOKEN_LENGTH},
+    document::{OptionValue, MAX_TOKEN_LENGTH},
     DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
 };
 
