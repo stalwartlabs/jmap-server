@@ -5,8 +5,6 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use std::{collections::HashSet, iter::FromIterator};
-
 use document::DocumentBuilder;
 use nlp::Language;
 
@@ -331,17 +329,13 @@ pub trait StoreDelete {
         collection: CollectionId,
         document: DocumentId,
     ) -> Result<()> {
-        self.delete_document_bulk(
-            account,
-            collection,
-            HashSet::from_iter(vec![document].into_iter()),
-        )
+        self.delete_document_bulk(account, collection, &[document])
     }
     fn delete_document_bulk(
         &self,
         account: AccountId,
         collection: CollectionId,
-        documents: HashSet<DocumentId>,
+        documents: &[DocumentId],
     ) -> Result<()>;
     fn delete_account(&self, account: AccountId) -> Result<()>;
     fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;

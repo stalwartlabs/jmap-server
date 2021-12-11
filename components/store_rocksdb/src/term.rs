@@ -13,10 +13,7 @@ const LAST_TERM_KEY: &[u8; 1] = &[0];
 
 impl RocksDBStore {
     pub fn get_match_terms(&self, tokens: TokenIterator) -> crate::Result<Option<Vec<MatchTerm>>> {
-        let cf_terms = self
-            .db
-            .cf_handle("terms")
-            .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?;
+        let cf_terms = self.get_handle("terms")?;
         let mut result = Vec::with_capacity(10);
         let mut query = Vec::with_capacity(10);
 
@@ -76,10 +73,7 @@ impl RocksDBStore {
     }
 
     pub fn get_terms(&self, tokens: TokenIterator) -> crate::Result<Vec<Term>> {
-        let cf_terms = self
-            .db
-            .cf_handle("terms")
-            .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?;
+        let cf_terms = self.get_handle("terms")?;
 
         let mut result = Vec::with_capacity(10);
         let mut query = Vec::with_capacity(10);

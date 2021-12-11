@@ -1,6 +1,11 @@
 use nlp::Language;
 use roaring::RoaringBitmap;
-use std::{collections::HashSet, convert::TryFrom, slice::Iter};
+use std::{
+    collections::HashSet,
+    convert::TryFrom,
+    ops::{BitAndAssign, BitXorAssign},
+    slice::Iter,
+};
 use store::{
     field::TokenIterator,
     serialize::{
@@ -17,7 +22,7 @@ use crate::{bitmaps::bitmap_op, iterator::RocksDBIterator, RocksDBStore};
 struct State<'x> {
     op: LogicalOperator,
     it: Iter<'x, Filter<'x>>,
-    rb: Option<RoaringBitmap>,
+    bm: Option<RoaringBitmap>,
 }
 
 impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
@@ -29,22 +34,14 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
         filter: Option<Filter>,
         sort: Option<Vec<Comparator>>,
     ) -> crate::Result<RocksDBIterator<'x>> {
-        let all_doc_ids = self
+        let mut document_ids = self
             .get_document_ids(account, collection)?
             .unwrap_or_else(RoaringBitmap::new);
+        let tombstoned_ids = self.get_tombstoned_ids(account, collection)?;
 
-        let cf_indexes = self
-            .db
-            .cf_handle("indexes")
-            .ok_or_else(|| StoreError::InternalError("No indexes column family found.".into()))?;
-        let cf_bitmaps = self
-            .db
-            .cf_handle("bitmaps")
-            .ok_or_else(|| StoreError::InternalError("No bitmaps column family found.".into()))?;
-        let cf_values = self
-            .db
-            .cf_handle("values")
-            .ok_or_else(|| StoreError::InternalError("No values column family found.".into()))?;
+        let cf_indexes = self.get_handle("indexes")?;
+        let cf_bitmaps = self.get_handle("bitmaps")?;
+        let cf_values = self.get_handle("values")?;
 
         let filter = match filter {
             Some(Filter::Operator(filter)) => filter,
@@ -53,10 +50,13 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                 conditions: vec![filter],
             },
             None => {
+                if let Some(tombstoned_ids) = tombstoned_ids {
+                    document_ids.bitxor_assign(tombstoned_ids)
+                }
                 return Ok(RocksDBIterator::new(
                     account,
                     collection,
-                    all_doc_ids,
+                    document_ids,
                     &self.db,
                     cf_indexes,
                     sort,
@@ -67,7 +67,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
         let mut state = State {
             op: filter.operator,
             it: filter.conditions.iter(),
-            rb: None,
+            bm: None,
         };
 
         let mut stack = Vec::new();
@@ -80,7 +80,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                             FieldValue::Keyword(keyword) => {
                                 bitmap_op(
                                     state.op,
-                                    &mut state.rb,
+                                    &mut state.bm,
                                     self.get_bitmap(
                                         &cf_bitmaps,
                                         &serialize_bm_text_key(
@@ -90,7 +90,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                             keyword,
                                         ),
                                     )?,
-                                    &all_doc_ids,
+                                    &document_ids,
                                 );
                             }
                             FieldValue::Text(text) => {
@@ -108,9 +108,9 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                 }
                                 bitmap_op(
                                     state.op,
-                                    &mut state.rb,
+                                    &mut state.bm,
                                     self.get_bitmaps_intersection(keys)?,
-                                    &all_doc_ids,
+                                    &document_ids,
                                 );
                             }
                             FieldValue::FullText(query) => {
@@ -196,9 +196,9 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
 
                                         bitmap_op(
                                             state.op,
-                                            &mut state.rb,
+                                            &mut state.bm,
                                             candidates,
-                                            &all_doc_ids,
+                                            &document_ids,
                                         );
                                     } else {
                                         let mut requested_ids = HashSet::new();
@@ -240,7 +240,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                                 LogicalOperator::And,
                                                 &mut text_bitmap,
                                                 self.get_bitmaps_union(keys)?,
-                                                &all_doc_ids,
+                                                &document_ids,
                                             );
 
                                             if text_bitmap.as_ref().unwrap().is_empty() {
@@ -249,19 +249,19 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                         }
                                         bitmap_op(
                                             state.op,
-                                            &mut state.rb,
+                                            &mut state.bm,
                                             text_bitmap,
-                                            &all_doc_ids,
+                                            &document_ids,
                                         );
                                     }
                                 } else {
-                                    bitmap_op(state.op, &mut state.rb, None, &all_doc_ids);
+                                    bitmap_op(state.op, &mut state.bm, None, &document_ids);
                                 }
                             }
                             FieldValue::Integer(i) => {
                                 bitmap_op(
                                     state.op,
-                                    &mut state.rb,
+                                    &mut state.bm,
                                     self.range_to_bitmap(
                                         &cf_indexes,
                                         &serialize_index_key_base(
@@ -272,13 +272,13 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                         ),
                                         &filter_cond.op,
                                     )?,
-                                    &all_doc_ids,
+                                    &document_ids,
                                 );
                             }
                             FieldValue::LongInteger(i) => {
                                 bitmap_op(
                                     state.op,
-                                    &mut state.rb,
+                                    &mut state.bm,
                                     self.range_to_bitmap(
                                         &cf_indexes,
                                         &serialize_index_key_base(
@@ -289,13 +289,13 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                         ),
                                         &filter_cond.op,
                                     )?,
-                                    &all_doc_ids,
+                                    &document_ids,
                                 );
                             }
                             FieldValue::Float(f) => {
                                 bitmap_op(
                                     state.op,
-                                    &mut state.rb,
+                                    &mut state.bm,
                                     self.range_to_bitmap(
                                         &cf_indexes,
                                         &serialize_index_key_base(
@@ -306,13 +306,13 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                         ),
                                         &filter_cond.op,
                                     )?,
-                                    &all_doc_ids,
+                                    &document_ids,
                                 );
                             }
                             FieldValue::Tag(tag) => {
                                 bitmap_op(
                                     state.op,
-                                    &mut state.rb,
+                                    &mut state.bm,
                                     self.get_bitmap(
                                         &cf_bitmaps,
                                         &serialize_bm_tag_key(
@@ -322,7 +322,7 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                                             tag,
                                         ),
                                     )?,
-                                    &all_doc_ids,
+                                    &document_ids,
                                 );
                             }
                         }
@@ -332,18 +332,18 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
                         state = State {
                             op: filter_op.operator,
                             it: filter_op.conditions.iter(),
-                            rb: None,
+                            bm: None,
                         };
                         continue 'outer;
                     }
                 }
 
-                if state.op == LogicalOperator::And && state.rb.as_ref().unwrap().is_empty() {
+                if state.op == LogicalOperator::And && state.bm.as_ref().unwrap().is_empty() {
                     break;
                 }
             }
             if let Some(mut prev_state) = stack.pop() {
-                bitmap_op(prev_state.op, &mut prev_state.rb, state.rb, &all_doc_ids);
+                bitmap_op(prev_state.op, &mut prev_state.bm, state.bm, &document_ids);
                 state = prev_state;
             } else {
                 break;
@@ -353,7 +353,15 @@ impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
         Ok(RocksDBIterator::new(
             account,
             collection,
-            state.rb.unwrap_or_else(RoaringBitmap::new),
+            match (state.bm, tombstoned_ids) {
+                (Some(mut results), Some(tombstoned_ids)) if !results.is_empty() => {
+                    document_ids.bitxor_assign(tombstoned_ids);
+                    results.bitand_assign(document_ids);
+                    results
+                }
+                (Some(results), None) => results,
+                _ => RoaringBitmap::new(),
+            },
             &self.db,
             cf_indexes,
             sort,

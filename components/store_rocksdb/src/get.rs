@@ -16,9 +16,7 @@ impl StoreGet for RocksDBStore {
     ) -> crate::Result<Option<Vec<u8>>> {
         self.db
             .get_cf(
-                &self.db.cf_handle("values").ok_or_else(|| {
-                    StoreError::InternalError("No values column family found.".into())
-                })?,
+                &self.get_handle("values")?,
                 &serialize_stored_key(account, collection, document, field, pos),
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))

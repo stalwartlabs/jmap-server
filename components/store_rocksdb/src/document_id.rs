@@ -2,7 +2,10 @@ use std::{ops::BitXorAssign, time::Instant};
 
 use dashmap::DashMap;
 use roaring::RoaringBitmap;
-use store::{serialize::serialize_ac_key_leb128, AccountId, CollectionId, DocumentId, StoreError};
+use store::{
+    serialize::{serialize_bm_internal, BM_TOMBSTONED_IDS, BM_USED_IDS},
+    AccountId, CollectionId, DocumentId,
+};
 
 use crate::RocksDBStore;
 
@@ -111,11 +114,24 @@ impl<'x> RocksDBStore {
         collection: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
         self.get_bitmap(
-            &self.db.cf_handle("bitmaps").ok_or_else(|| {
-                StoreError::InternalError("No bitmaps column family found.".into())
-            })?,
-            &serialize_ac_key_leb128(account, collection),
+            &self.get_handle("bitmaps")?,
+            &serialize_bm_internal(account, collection, BM_USED_IDS),
         )
+    }
+
+    pub fn get_tombstoned_ids(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        self.get_bitmap(
+            &self.get_handle("bitmaps")?,
+            &serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
+        )
+        .map(|bm| match &bm {
+            Some(v) if !v.is_empty() => bm,
+            _ => None,
+        })
     }
 
     #[cfg(test)]
@@ -125,17 +141,20 @@ impl<'x> RocksDBStore {
         collection: CollectionId,
         bitmap: RoaringBitmap,
     ) -> crate::Result<()> {
-        let mut bytes = Vec::with_capacity(bitmap.serialized_size());
+        use store::StoreError;
+
+        use crate::bitmaps::IS_BITMAP;
+
+        let mut bytes = Vec::with_capacity(bitmap.serialized_size() + 1);
+        bytes.push(IS_BITMAP);
         bitmap
             .serialize_into(&mut bytes)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
 
         self.db
             .put_cf(
-                &self.db.cf_handle("bitmaps").ok_or_else(|| {
-                    StoreError::InternalError("No bitmaps column family found.".into())
-                })?,
-                &serialize_ac_key_leb128(account, collection),
+                &self.get_handle("bitmaps")?,
+                &serialize_bm_internal(account, collection, BM_USED_IDS),
                 bytes,
             )
             .map_err(|e| StoreError::InternalError(e.to_string()))

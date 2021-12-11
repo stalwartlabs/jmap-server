@@ -19,9 +19,7 @@ impl StoreTag for RocksDBStore {
     ) -> crate::Result<()> {
         self.db
             .merge_cf(
-                &self.db.cf_handle("bitmaps").ok_or_else(|| {
-                    StoreError::InternalError("No bitmaps column family found.".into())
-                })?,
+                &self.get_handle("bitmaps")?,
                 &serialize_bm_tag_key(account, collection, field, tag),
                 &set_bit(document),
             )
@@ -38,9 +36,7 @@ impl StoreTag for RocksDBStore {
     ) -> crate::Result<()> {
         self.db
             .merge_cf(
-                &self.db.cf_handle("bitmaps").ok_or_else(|| {
-                    StoreError::InternalError("No bitmaps column family found.".into())
-                })?,
+                &self.get_handle("bitmaps")?,
                 &serialize_bm_tag_key(account, collection, field, tag),
                 &clear_bit(document),
             )
@@ -55,14 +51,22 @@ impl StoreTag for RocksDBStore {
         field: FieldId,
         tag: &Tag,
     ) -> crate::Result<bool> {
+        let cf_bitmaps = self.get_handle("bitmaps")?;
         self.db
             .get_cf(
-                &self.db.cf_handle("bitmaps").ok_or_else(|| {
-                    StoreError::InternalError("No bitmaps column family found.".into())
-                })?,
+                &cf_bitmaps,
                 &serialize_bm_tag_key(account, collection, field, tag),
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))?
-            .map_or(Ok(false), |b| has_bit(&b, document))
+            .map_or(Ok(false), |b| {
+                if has_bit(&b, document)? {
+                    match self.get_tombstoned_ids(account, collection)? {
+                        Some(tombstone_ids) if tombstone_ids.contains(document) => Ok(false),
+                        _ => Ok(true),
+                    }
+                } else {
+                    Ok(false)
+                }
+            })
     }
 }

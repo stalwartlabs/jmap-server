@@ -9,8 +9,9 @@ use store::{
     document::{DocumentBuilder, IndexOptions},
     field::{IndexField, TokenIterator},
     serialize::{
-        serialize_ac_key_leb128, serialize_acd_key_leb128, serialize_bm_tag_key,
+        serialize_acd_key_leb128, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
+        BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
     AccountId, CollectionId, DocumentId, StoreError, StoreInsert,
@@ -25,18 +26,9 @@ impl StoreInsert for RocksDBStore {
         collection: CollectionId,
         documents: Vec<DocumentBuilder>,
     ) -> store::Result<Vec<DocumentId>> {
-        let cf_values = self
-            .db
-            .cf_handle("values")
-            .ok_or_else(|| StoreError::InternalError("No values column family found.".into()))?;
-        let cf_indexes = self
-            .db
-            .cf_handle("indexes")
-            .ok_or_else(|| StoreError::InternalError("No indexes column family found.".into()))?;
-        let cf_bitmaps = self
-            .db
-            .cf_handle("bitmaps")
-            .ok_or_else(|| StoreError::InternalError("No bitmaps column family found.".into()))?;
+        let cf_values = self.get_handle("values")?;
+        let cf_indexes = self.get_handle("indexes")?;
+        let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut batch = WriteBatch::default();
         let mut document_ids = Vec::with_capacity(documents.len());
         let mut bitmap_list = HashMap::new();
@@ -82,7 +74,7 @@ impl RocksDBStore {
 
         // Add document id to collection
         bitmap_list
-            .entry(serialize_ac_key_leb128(account, collection))
+            .entry(serialize_bm_internal(account, collection, BM_USED_IDS))
             .or_insert_with(HashSet::new)
             .insert(document_id.get_id());
 

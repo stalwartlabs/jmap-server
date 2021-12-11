@@ -8,12 +8,14 @@ pub mod query;
 pub mod tag;
 pub mod term;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use bitmaps::{bitmap_compact, bitmap_merge};
 use dashmap::DashMap;
 use document_id::DocumentIdAssigner;
-use rocksdb::{ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options};
+use rocksdb::{
+    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options,
+};
 use store::{AccountId, CollectionId, DocumentId, Result, Store, StoreError, TermId};
 use term::get_last_term_id;
 
@@ -72,20 +74,22 @@ impl RocksDBStore {
         })
     }
 
+    #[inline(always)]
+    fn get_handle(&self, name: &str) -> Result<Arc<BoundColumnFamily>> {
+        self.db.cf_handle(name).ok_or_else(|| {
+            StoreError::InternalError(format!(
+                "Failed to get handle for '{}' column family.",
+                name
+            ))
+        })
+    }
+
     pub fn compact(&self) -> Result<()> {
         for cf in [
-            self.db.cf_handle("values").ok_or_else(|| {
-                StoreError::InternalError("No values column family found.".into())
-            })?,
-            self.db.cf_handle("indexes").ok_or_else(|| {
-                StoreError::InternalError("No indexes column family found.".into())
-            })?,
-            self.db.cf_handle("bitmaps").ok_or_else(|| {
-                StoreError::InternalError("No bitmaps column family found.".into())
-            })?,
-            self.db.cf_handle("terms").ok_or_else(|| {
-                StoreError::InternalError("No bitmaps column family found.".into())
-            })?,
+            self.get_handle("values")?,
+            self.get_handle("indexes")?,
+            self.get_handle("bitmaps")?,
+            self.get_handle("terms")?,
         ] {
             self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
         }

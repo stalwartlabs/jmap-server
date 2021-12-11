@@ -15,11 +15,11 @@ use store::{
 
 use crate::RocksDBStore;
 
-const BIT_SET: u8 = 0x80;
-const BIT_CLEAR: u8 = 0;
+pub const BIT_SET: u8 = 0x80;
+pub const BIT_CLEAR: u8 = 0;
 
-const IS_BITLIST: u8 = 0;
-const IS_BITMAP: u8 = 1;
+pub const IS_BITLIST: u8 = 0;
+pub const IS_BITMAP: u8 = 1;
 
 pub fn bitmap_merge(
     _new_key: &[u8],

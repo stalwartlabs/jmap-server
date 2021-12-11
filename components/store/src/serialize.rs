@@ -17,6 +17,8 @@ pub const BM_TERM_STEMMED: u8 = 2;
 pub const BM_TAG_ID: u8 = 3;
 pub const BM_TAG_TEXT: u8 = 4;
 pub const BM_TAG_STATIC: u8 = 5;
+pub const BM_USED_IDS: u8 = 6;
+pub const BM_TOMBSTONED_IDS: u8 = 7;
 
 pub fn serialize_stored_key(
     account: AccountId,
@@ -96,6 +98,14 @@ pub fn serialize_bm_term_key(
     } else {
         BM_TERM_STEMMED
     });
+    bytes
+}
+
+pub fn serialize_bm_internal(account: AccountId, collection: CollectionId, id: u8) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + 1);
+    account.to_leb128_bytes(&mut bytes);
+    bytes.push(collection);
+    bytes.push(id);
     bytes
 }
 
