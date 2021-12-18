@@ -1,5 +1,5 @@
 use store::{
-    serialize::serialize_stored_key, AccountId, ArrayPos, CollectionId, DocumentId, FieldId,
+    serialize::serialize_stored_key, AccountId, CollectionId, DocumentId, FieldId, FieldNumber,
     StoreError, StoreGet,
 };
 
@@ -12,13 +12,17 @@ impl StoreGet for RocksDBStore {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        pos: ArrayPos,
+        pos: FieldNumber,
     ) -> crate::Result<Option<Vec<u8>>> {
-        self.db
-            .get_cf(
-                &self.get_handle("values")?,
-                &serialize_stored_key(account, collection, document, field, pos),
-            )
-            .map_err(|e| StoreError::InternalError(e.into_string()))
+        match self.get_tombstoned_ids(account, collection)? {
+            Some(tombstoned_ids) if tombstoned_ids.contains(document) => Ok(None),
+            _ => self
+                .db
+                .get_cf(
+                    &self.get_handle("values")?,
+                    &serialize_stored_key(account, collection, document, field, pos),
+                )
+                .map_err(|e| StoreError::InternalError(e.into_string())),
+        }
     }
 }

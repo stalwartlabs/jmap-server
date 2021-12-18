@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use crate::{
-    leb128::Leb128, AccountId, ArrayPos, CollectionId, DocumentId, FieldId, Float, Integer,
+    leb128::Leb128, AccountId, CollectionId, DocumentId, FieldId, FieldNumber, Float, Integer,
     LongInteger, Tag, TermId,
 };
 
@@ -25,9 +25,9 @@ pub fn serialize_stored_key(
     collection: CollectionId,
     document: DocumentId,
     field: FieldId,
-    pos: ArrayPos,
+    pos: FieldNumber,
 ) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<ArrayPos>());
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<FieldNumber>());
     account.to_leb128_bytes(&mut bytes);
     bytes.push(collection);
     document.to_leb128_bytes(&mut bytes);

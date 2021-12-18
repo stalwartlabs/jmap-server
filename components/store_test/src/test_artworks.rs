@@ -6,8 +6,8 @@ use std::{
 
 use nlp::Language;
 use store::{
-    document::{DocumentBuilder, IndexOptions, OptionValue},
-    Comparator, ComparisonOperator, DocumentId, FieldValue, Filter, Store, TextQuery,
+    document::DocumentBuilder, field::Text, Comparator, ComparisonOperator, DocumentId, FieldValue,
+    Filter, Store, TextQuery,
 };
 
 const FIELDS: [&str; 20] = [
@@ -96,32 +96,33 @@ where
                             FieldType::Text => {
                                 builder.add_text(
                                     pos as u8,
-                                    field.to_lowercase().into(),
-                                    <OptionValue>::Sortable,
+                                    0,
+                                    Text::Tokenized(field.to_lowercase().into()),
+                                    false,
+                                    true,
                                 );
                             }
                             FieldType::FullText => {
-                                builder.add_full_text(
+                                builder.add_text(
                                     pos as u8,
-                                    field.to_lowercase().into(),
-                                    Some(Language::English),
-                                    <OptionValue>::Sortable,
+                                    0,
+                                    Text::Full((field.to_lowercase().into(), Language::English)),
+                                    false,
+                                    true,
                                 );
                             }
                             FieldType::Integer => {
                                 if let Ok(value) = field.parse::<u32>() {
-                                    builder.add_integer(
-                                        pos as u8,
-                                        value,
-                                        <OptionValue>::Sortable | <OptionValue>::Stored,
-                                    );
+                                    builder.add_integer(pos as u8, 0, value, true, true);
                                 }
                             }
                             FieldType::Keyword => {
-                                builder.add_keyword(
+                                builder.add_text(
                                     pos as u8,
-                                    field.to_lowercase().into(),
-                                    <OptionValue>::Sortable | <OptionValue>::Stored,
+                                    0,
+                                    Text::Keyword(field.to_lowercase().into()),
+                                    true,
+                                    true,
                                 );
                             }
                         }

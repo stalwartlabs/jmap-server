@@ -2,73 +2,90 @@ use std::borrow::Cow;
 
 use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
 use mail_parser::{
-    Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessagePart,
+    decoders::html::{html_to_text, text_to_html},
+    parsers::fields::unstructured::thread_name,
+    Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessageAttachment,
+    MessagePart,
 };
-use store::document::{
-    DocumentBuilder, IndexOptions, OptionValue, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH,
-    MAX_TOKEN_LENGTH,
+use nlp::Language;
+use store::{
+    document::{DocumentBuilder, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    field::Text,
+    FieldNumber, Integer, LongInteger,
 };
 
-use crate::MailField;
-
-#[derive(Debug)]
-pub struct MessageParseError;
-
-#[inline(always)]
-fn to_mail_field(name: &HeaderName) -> u8 {
-    MailField::HeaderField as u8 + *name as u8
-}
+use crate::{MessageField, MessageParts, MessageStoreError};
 
 fn parse_address<'x>(
-    builder: &mut DocumentBuilder<'x>,
-    header_name: &HeaderName,
+    document: &mut DocumentBuilder<'x>,
+    header_name: HeaderName,
     address: Addr<'x>,
 ) {
     if let Some(name) = address.name {
-        parse_text(builder, header_name, name);
+        parse_text(document, header_name, name);
     };
     if let Some(ref addr) = address.address {
         if addr.len() <= MAX_TOKEN_LENGTH {
-            builder.add_keyword(
-                to_mail_field(header_name),
-                addr.to_lowercase().into(),
-                <OptionValue>::None,
+            document.add_text(
+                header_name.into(),
+                0,
+                Text::Keyword(addr.to_lowercase().into()),
+                false,
+                false,
             );
         }
     };
 }
 
 fn parse_address_group<'x>(
-    builder: &mut DocumentBuilder<'x>,
-    header_name: &HeaderName,
+    document: &mut DocumentBuilder<'x>,
+    header_name: HeaderName,
     mut group: Group<'x>,
 ) {
     if let Some(name) = group.name {
-        parse_text(builder, header_name, name);
+        parse_text(document, header_name, name);
     };
 
     for address in group.addresses.drain(..) {
-        parse_address(builder, header_name, address);
+        parse_address(document, header_name, address);
     }
 }
 
-fn parse_text<'x>(builder: &mut DocumentBuilder<'x>, header_name: &HeaderName, text: Cow<'x, str>) {
+fn parse_text<'x>(document: &mut DocumentBuilder<'x>, header_name: HeaderName, text: Cow<'x, str>) {
     match header_name {
         HeaderName::Subject => {
-            builder.add_full_text(
-                to_mail_field(header_name),
-                text.to_lowercase().into(),
-                None,
-                <OptionValue>::Sortable,
+            let text = thread_name(text.as_ref()).trim();
+            let thread_name = if !text.is_empty() {
+                let text = text.to_lowercase();
+                let thread_name = text.clone();
+                document.add_text(
+                    header_name.into(),
+                    0,
+                    Text::Full((text.into(), Language::Unknown)),
+                    false,
+                    true,
+                );
+                thread_name
+            } else {
+                "()".to_string()
+            };
+            document.add_text(
+                MessageField::ThreadName.into(),
+                0,
+                Text::Keyword(thread_name.into()),
+                false,
+                false,
             );
         }
 
         HeaderName::Keywords | HeaderName::ContentLanguage | HeaderName::MimeVersion => {
             if text.len() <= MAX_TOKEN_LENGTH {
-                builder.add_keyword(
-                    to_mail_field(header_name),
-                    text.to_lowercase().into(),
-                    <OptionValue>::None,
+                document.add_text(
+                    header_name.into(),
+                    0,
+                    Text::Keyword(text.to_lowercase().into()),
+                    false,
+                    false,
                 );
             }
         }
@@ -78,53 +95,53 @@ fn parse_text<'x>(builder: &mut DocumentBuilder<'x>, header_name: &HeaderName, t
         | HeaderName::ContentId
         | HeaderName::ResentMessageId => {
             if text.len() <= MAX_ID_LENGTH {
-                builder.add_keyword(to_mail_field(header_name), text, <OptionValue>::None);
+                document.add_text(header_name.into(), 0, Text::Keyword(text), false, false);
             }
         }
 
         _ => {
-            builder.add_text(to_mail_field(header_name), text, <OptionValue>::None);
+            document.add_text(header_name.into(), 0, Text::Tokenized(text), false, false);
         }
     }
 }
 
 fn parse_content_type<'x>(
-    builder: &mut DocumentBuilder<'x>,
-    header_name: &HeaderName,
+    document: &mut DocumentBuilder<'x>,
+    header_name: HeaderName,
     content_type: ContentType<'x>,
 ) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
-        builder.add_keyword(
-            to_mail_field(header_name),
-            content_type.c_type,
-            <OptionValue>::None,
+        document.add_text(
+            header_name.into(),
+            0,
+            Text::Keyword(content_type.c_type),
+            false,
+            false,
         );
     }
     if let Some(subtype) = content_type.c_subtype {
         if subtype.len() <= MAX_TOKEN_LENGTH {
-            builder.add_keyword(to_mail_field(header_name), subtype, <OptionValue>::None);
+            document.add_text(header_name.into(), 0, Text::Keyword(subtype), false, false);
         }
     }
     if let Some(attributes) = content_type.attributes {
         for (key, value) in attributes {
             if key == "name" || key == "filename" {
-                builder.add_text(to_mail_field(header_name), value, <OptionValue>::None);
+                document.add_text(header_name.into(), 0, Text::Tokenized(value), false, false);
             } else if value.len() <= MAX_TOKEN_LENGTH {
-                builder.add_keyword(
-                    to_mail_field(header_name),
-                    value.to_lowercase().into(),
-                    <OptionValue>::None,
+                document.add_text(
+                    header_name.into(),
+                    0,
+                    Text::Keyword(value.to_lowercase().into()),
+                    false,
+                    false,
                 );
             }
         }
     }
 }
 
-fn parse_datetime<'x>(
-    builder: &mut DocumentBuilder<'x>,
-    header_name: &HeaderName,
-    date_time: DateTime,
-) {
+fn parse_datetime(document: &mut DocumentBuilder, header_name: HeaderName, date_time: DateTime) {
     if (0..23).contains(&date_time.tz_hour)
         && (0..59).contains(&date_time.tz_minute)
         && (1970..2500).contains(&date_time.year)
@@ -143,10 +160,12 @@ fn parse_datetime<'x>(
             .ymd_opt(date_time.year as i32, date_time.month, date_time.day)
             .and_hms_opt(date_time.hour, date_time.minute, date_time.second)
         {
-            builder.add_long_int(
-                to_mail_field(header_name),
+            document.add_long_int(
+                header_name.into(),
+                0,
                 datetime.timestamp() as u64,
-                <OptionValue>::Sortable,
+                false,
+                true,
             );
         }
     }
@@ -154,8 +173,8 @@ fn parse_datetime<'x>(
 
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort<'x>(
-    builder: &mut DocumentBuilder<'x>,
-    header_name: &HeaderName,
+    document: &mut DocumentBuilder<'x>,
+    header_name: HeaderName,
     header_value: &HeaderValue<'x>,
 ) {
     let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
@@ -209,135 +228,322 @@ fn add_addr_sort<'x>(
                 }
             }
         }
-        builder.add_text(
-            to_mail_field(header_name),
-            text.into(),
-            <OptionValue>::Sortable,
+        document.add_text(
+            header_name.into(),
+            0,
+            Text::Tokenized(text.into()),
+            false,
+            true,
         );
     };
 }
 
 fn parse_header<'x>(
-    builder: &mut DocumentBuilder<'x>,
-    header_name: &HeaderName,
+    document: &mut DocumentBuilder<'x>,
+    header_name: HeaderName,
     header_value: HeaderValue<'x>,
 ) {
     match header_value {
         HeaderValue::Address(address) => {
-            parse_address(builder, header_name, address);
+            parse_address(document, header_name, address);
         }
         HeaderValue::AddressList(address_list) => {
             for item in address_list {
-                parse_address(builder, header_name, item);
+                parse_address(document, header_name, item);
             }
         }
         HeaderValue::Group(group) => {
-            parse_address_group(builder, header_name, group);
+            parse_address_group(document, header_name, group);
         }
         HeaderValue::GroupList(group_list) => {
             for item in group_list {
-                parse_address_group(builder, header_name, item);
+                parse_address_group(document, header_name, item);
             }
         }
         HeaderValue::Text(text) => {
-            parse_text(builder, header_name, text);
+            parse_text(document, header_name, text);
         }
         HeaderValue::TextList(text_list) => {
             for item in text_list {
-                parse_text(builder, header_name, item);
+                parse_text(document, header_name, item);
             }
         }
         HeaderValue::DateTime(date_time) => {
-            parse_datetime(builder, header_name, date_time);
+            parse_datetime(document, header_name, date_time);
         }
         HeaderValue::ContentType(content_type) => {
-            parse_content_type(builder, header_name, content_type);
+            parse_content_type(document, header_name, content_type);
         }
         HeaderValue::Collection(header_value) => {
             for item in header_value {
-                parse_header(builder, header_name, item);
+                parse_header(document, header_name, item);
             }
         }
         HeaderValue::Empty => (),
     }
 }
 
-pub fn parse_message(bytes: &[u8]) -> Result<DocumentBuilder, MessageParseError> {
-    let message = Message::parse(bytes).ok_or(MessageParseError)?;
-    let mut builder = DocumentBuilder::new();
+pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder> {
+    let mut document = DocumentBuilder::new();
+    let mut message_parts = MessageParts {
+        html_body: message.html_body,
+        text_body: message.text_body,
+        attachments: message.attachments,
+        offset_body: message.offset_body,
+        size: message.raw_message.len(),
+        received_at: Utc::now().timestamp(),
+    };
+    let mut total_message_parts = message.parts.len();
+    let mut nested_headers = Vec::with_capacity(message.parts.len());
 
-    builder.add_integer(
-        MailField::Size.into(),
-        bytes.len() as u32,
-        <OptionValue>::Sortable,
+    document.add_integer(
+        MessageField::Size.into(),
+        0,
+        message_parts.size as Integer,
+        false,
+        true,
     );
-    builder.add_long_int(
-        MailField::ReceivedAt.into(),
-        Utc::now().timestamp() as u64,
-        <OptionValue>::Sortable,
+    document.add_long_int(
+        MessageField::ReceivedAt.into(),
+        0,
+        message_parts.received_at as LongInteger,
+        false,
+        true,
+    );
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_HEADERS,
+        bincode::serialize(&message.headers_rfc)
+            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .into(),
+    );
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_RAW,
+        message.raw_message,
     );
 
-    for (header_name, header_value) in message.headers {
+    for (header_name, header_value) in message.headers_rfc {
         if let HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc = header_name {
-            add_addr_sort(&mut builder, &header_name, &header_value);
+            add_addr_sort(&mut document, header_name, &header_value);
         }
-        parse_header(&mut builder, &header_name, header_value);
+        parse_header(&mut document, header_name, header_value);
     }
 
-    let mut set_pos: usize = 0;
-    for text_body in message.text_body {
-        match text_body {
-            mail_parser::InlinePart::Text(body) => {
-                builder.add_full_text(
-                    MailField::Body.into(),
-                    body.contents,
-                    None,
-                    <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
+    for (part_id, part) in message.parts.into_iter().enumerate() {
+        match part {
+            MessagePart::Html(html) => {
+                nested_headers.push(html.headers);
+
+                let field =
+                    if let Some(pos) = message_parts.text_body.iter().position(|&p| p == part_id) {
+                        message_parts.text_body[pos] = total_message_parts;
+                        MessageField::Body
+                    } else if message_parts.html_body.contains(&part_id) {
+                        MessageField::Body
+                    } else {
+                        MessageField::Attachment
+                    };
+
+                document.add_text(
+                    field.clone().into(),
+                    total_message_parts as FieldNumber,
+                    Text::Full((html_to_text(html.body.as_ref()).into(), Language::Unknown)),
+                    true,
+                    field == MessageField::Body,
                 );
-                set_pos += 1;
-            }
-            mail_parser::InlinePart::InlineBinary(_) => todo!(),
-        }
-    }
 
-    set_pos = 0;
-    for html_body in message.html_body {
-        match html_body {
-            mail_parser::InlinePart::Text(body) => {
-                builder.add_full_text(
-                    MailField::Body.into(),
-                    body.contents,
-                    None,
-                    <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
+                document.add_text(
+                    field.into(),
+                    part_id as FieldNumber,
+                    Text::Default(html.body),
+                    true,
+                    false,
                 );
-                set_pos += 1;
+                total_message_parts += 1;
             }
-            mail_parser::InlinePart::InlineBinary(_) => (), //TODO: add attachment
-        }
-    }
-
-    set_pos = 0;
-    for attachment in message.attachments {
-        match attachment {
             MessagePart::Text(text) => {
-                builder.add_full_text(
-                    MailField::Attachment.into(),
-                    text.contents,
-                    None,
-                    <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
+                nested_headers.push(text.headers);
+                let field =
+                    if let Some(pos) = message_parts.html_body.iter().position(|&p| p == part_id) {
+                        document.add_text(
+                            MessageField::Body.into(),
+                            total_message_parts as FieldNumber,
+                            Text::Default(text_to_html(text.body.as_ref()).into()),
+                            true,
+                            false,
+                        );
+                        message_parts.html_body[pos] = total_message_parts;
+                        total_message_parts += 1;
+                        MessageField::Body
+                    } else if message_parts.text_body.contains(&part_id) {
+                        MessageField::Body
+                    } else {
+                        MessageField::Attachment
+                    };
+
+                document.add_text(
+                    field.into(),
+                    part_id as FieldNumber,
+                    Text::Full((text.body, Language::Unknown)),
+                    true,
+                    false,
                 );
             }
-            MessagePart::Binary(blob) | MessagePart::InlineBinary(blob) => {
-                builder.add_blob(
-                    MailField::Attachment.into(),
-                    blob.contents,
-                    <OptionValue>::Stored | <OptionValue>::set_pos(set_pos),
+            MessagePart::Binary(binary) | MessagePart::InlineBinary(binary) => {
+                nested_headers.push(binary.headers);
+                document.add_blob(
+                    MessageField::Attachment.into(),
+                    part_id as FieldNumber,
+                    binary.body,
                 );
             }
-            MessagePart::Message(_) => (), //TODO: parse message
-        }
-        set_pos += 1;
+            MessagePart::Message(nested_message) => {
+                nested_headers.push(nested_message.headers);
+                match nested_message.body {
+                    MessageAttachment::Parsed(mut message) => {
+                        if let Some(HeaderValue::Text(subject)) =
+                            message.headers_rfc.remove(&HeaderName::Subject)
+                        {
+                            document.add_text(
+                                MessageField::Attachment.into(),
+                                part_id as FieldNumber,
+                                Text::Full((subject, Language::Unknown)),
+                                false,
+                                false,
+                            );
+                        }
+                        for part in message.parts {
+                            match part {
+                                MessagePart::Text(text) => {
+                                    document.add_text(
+                                        MessageField::Attachment.into(),
+                                        part_id as FieldNumber,
+                                        Text::Full((text.body, Language::Unknown)),
+                                        false,
+                                        false,
+                                    );
+                                }
+                                MessagePart::Html(html) => {
+                                    document.add_text(
+                                        MessageField::Attachment.into(),
+                                        part_id as FieldNumber,
+                                        Text::Full((
+                                            html_to_text(&html.body).into(),
+                                            Language::Unknown,
+                                        )),
+                                        false,
+                                        false,
+                                    );
+                                }
+                                _ => (),
+                            }
+                        }
+                        document.add_blob(
+                            MessageField::Attachment.into(),
+                            part_id as FieldNumber,
+                            message.raw_message,
+                        );
+                    }
+                    MessageAttachment::Raw(raw_message) => {
+                        if let Some(message) = &Message::parse(raw_message.as_ref()) {
+                            if let Some(HeaderValue::Text(subject)) =
+                                message.headers_rfc.get(&HeaderName::Subject)
+                            {
+                                document.add_text(
+                                    MessageField::Attachment.into(),
+                                    part_id as FieldNumber,
+                                    Text::Full((subject.to_string().into(), Language::Unknown)),
+                                    false,
+                                    false,
+                                );
+                            }
+                            for part in &message.parts {
+                                match part {
+                                    MessagePart::Text(text) => {
+                                        document.add_text(
+                                            MessageField::Attachment.into(),
+                                            part_id as FieldNumber,
+                                            Text::Full((
+                                                text.body.to_string().into(),
+                                                Language::Unknown,
+                                            )),
+                                            false,
+                                            false,
+                                        );
+                                    }
+                                    MessagePart::Html(html) => {
+                                        document.add_text(
+                                            MessageField::Attachment.into(),
+                                            part_id as FieldNumber,
+                                            Text::Full((
+                                                html_to_text(&html.body).into(),
+                                                Language::Unknown,
+                                            )),
+                                            false,
+                                            false,
+                                        );
+                                    }
+                                    _ => (),
+                                }
+                            }
+                        }
+                        document.add_blob(
+                            MessageField::Attachment.into(),
+                            part_id as FieldNumber,
+                            raw_message,
+                        );
+                    }
+                }
+            }
+            MessagePart::Multipart(header) => {
+                nested_headers.push(header);
+            }
+        };
     }
 
-    Ok(builder)
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_HEADERS_OTHER,
+        bincode::serialize(&message.headers_other)
+            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .into(),
+    );
+
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_HEADERS_OFFSETS,
+        bincode::serialize(&message.headers_offsets)
+            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .into(),
+    );
+
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_HEADERS_NESTED,
+        bincode::serialize(&nested_headers)
+            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .into(),
+    );
+
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_HEADERS_PARTS,
+        bincode::serialize(&message_parts)
+            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .into(),
+    );
+
+    document.add_blob(
+        MessageField::Internal.into(),
+        crate::MESSAGE_HEADERS_STRUCTURE,
+        bincode::serialize(&message.structure)
+            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .into(),
+    );
+
+    // TODO use content language when available
+    // TODO index PDF, Doc, Excel, etc.
+
+    Ok(document)
 }

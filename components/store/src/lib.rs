@@ -22,11 +22,11 @@ pub type AccountId = u32;
 pub type CollectionId = u8;
 pub type DocumentId = u32;
 pub type FieldId = u8;
+pub type FieldNumber = u16;
 pub type TagId = u8;
 pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
-pub type ArrayPos = u16;
 pub type TermId = u64;
 
 pub enum FieldValue<'x> {
@@ -223,7 +223,7 @@ pub trait StoreGet {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        pos: ArrayPos,
+        pos: FieldNumber,
     ) -> Result<Option<Vec<u8>>>;
 
     fn get_integer(
@@ -341,7 +341,9 @@ pub trait StoreDelete {
     fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
 }
 
-pub trait Store<'x, T: Iterator<Item = DocumentId>>:
-    StoreInsert + StoreQuery<'x, T> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized
+pub trait Store<'x, T>
+where
+    T: Iterator<Item = DocumentId>,
+    Self: StoreInsert + StoreQuery<'x, T> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized,
 {
 }

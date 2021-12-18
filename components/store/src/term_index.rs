@@ -5,7 +5,7 @@ use std::{
 
 use nlp::tokenizers::Token;
 
-use crate::{leb128::Leb128, ArrayPos, FieldId, TermId};
+use crate::{leb128::Leb128, FieldId, FieldNumber, TermId};
 
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
@@ -32,13 +32,13 @@ pub struct Term {
 #[derive(Debug)]
 pub struct TermGroup {
     pub field_id: FieldId,
-    pub field_num: ArrayPos,
+    pub field_num: FieldNumber,
     pub terms: Vec<Term>,
 }
 
 pub struct TermIndexBuilderItem {
     field: FieldId,
-    field_num: ArrayPos,
+    field_num: FieldNumber,
     terms: Vec<Term>,
 }
 
@@ -48,7 +48,7 @@ pub struct TermIndexBuilder {
 
 pub struct TermIndexItem<'x> {
     pub field_id: FieldId,
-    pub field_num: ArrayPos,
+    pub field_num: FieldNumber,
     pub terms_len: usize,
     pub terms: &'x [u8],
 }
@@ -206,7 +206,7 @@ impl TermIndexBuilder {
         TermIndexBuilder { items: Vec::new() }
     }
 
-    pub fn add_item(&mut self, field: FieldId, field_num: ArrayPos, terms: Vec<Term>) {
+    pub fn add_item(&mut self, field: FieldId, field_num: FieldNumber, terms: Vec<Term>) {
         self.items.push(TermIndexBuilderItem {
             field,
             field_num,
@@ -320,7 +320,7 @@ impl<'x> TryFrom<&'x [u8]> for TermIndex<'x> {
             pos += 1;
 
             let (field_num, bytes_read) =
-                ArrayPos::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+                FieldNumber::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
                     .ok_or(Error::Leb128DecodeError)?;
             pos += bytes_read;
 

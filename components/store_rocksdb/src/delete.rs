@@ -257,8 +257,8 @@ mod tests {
     use std::iter::FromIterator;
 
     use nlp::Language;
-    use store::document::IndexOptions;
-    use store::document::{DocumentBuilder, OptionValue};
+    use store::document::DocumentBuilder;
+    use store::field::Text;
     use store::{
         Comparator, DocumentId, FieldId, FieldValue, Filter, Float, Integer, LongInteger,
         StoreDelete, StoreGet, StoreInsert, StoreQuery, StoreTag, Tag, TextQuery,
@@ -278,40 +278,36 @@ mod tests {
 
             for raw_doc_num in 0..10 {
                 let mut builder = DocumentBuilder::new();
-                builder.add_keyword(
+                builder.add_text(
                     0,
-                    format!("keyword_{}", raw_doc_num).into(),
-                    <OptionValue>::Sortable | <OptionValue>::Stored,
+                    0,
+                    Text::Keyword(format!("keyword_{}", raw_doc_num).into()),
+                    true,
+                    true,
                 );
                 builder.add_text(
                     1,
-                    format!("this is the text number {}", raw_doc_num).into(),
-                    <OptionValue>::Sortable | <OptionValue>::Stored,
+                    0,
+                    Text::Tokenized(format!("this is the text number {}", raw_doc_num).into()),
+                    true,
+                    true,
                 );
-                builder.add_full_text(
+                builder.add_text(
                     2,
-                    format!("and here goes the full text number {}", raw_doc_num).into(),
-                    Some(Language::English),
-                    <OptionValue>::Sortable | <OptionValue>::Stored,
+                    0,
+                    Text::Full((
+                        format!("and here goes the full text number {}", raw_doc_num).into(),
+                        Language::English,
+                    )),
+                    true,
+                    true,
                 );
-                builder.add_float(
-                    3,
-                    raw_doc_num as Float,
-                    <OptionValue>::Sortable | <OptionValue>::Stored,
-                );
-                builder.add_integer(
-                    4,
-                    raw_doc_num as Integer,
-                    <OptionValue>::Sortable | <OptionValue>::Stored,
-                );
-                builder.add_long_int(
-                    5,
-                    raw_doc_num as LongInteger,
-                    <OptionValue>::Sortable | <OptionValue>::Stored,
-                );
-                builder.add_tag(6, Tag::Id(0), 0);
-                builder.add_tag(7, Tag::Static(0), 0);
-                builder.add_tag(8, Tag::Text("my custom tag"), 0);
+                builder.add_float(3, 0, raw_doc_num as Float, true, true);
+                builder.add_integer(4, 0, raw_doc_num as Integer, true, true);
+                builder.add_long_int(5, 0, raw_doc_num as LongInteger, true, true);
+                builder.add_tag(6, Tag::Id(0));
+                builder.add_tag(7, Tag::Static(0));
+                builder.add_tag(8, Tag::Text("my custom tag"));
 
                 db.insert(0, 0, builder).unwrap();
             }
@@ -329,6 +325,17 @@ mod tests {
                         "Field {}",
                         field
                     );
+
+                    for field in 0..6 {
+                        assert!(db.get_stored_value(0, 0, 0, field, 0).unwrap().is_none());
+                        assert!(db.get_stored_value(0, 0, 9, field, 0).unwrap().is_none());
+                        for doc_id in 1..9 {
+                            assert!(db
+                                .get_stored_value(0, 0, doc_id, field, 0)
+                                .unwrap()
+                                .is_some());
+                        }
+                    }
                 }
 
                 assert_eq!(
@@ -371,17 +378,6 @@ mod tests {
                     );
                     db.purge_tombstoned(0, 0).unwrap();
                     assert!(db.get_tombstoned_ids(0, 0).unwrap().is_none());
-                }
-            }
-
-            for field in 0..6 {
-                assert!(db.get_stored_value(0, 0, 0, field, 0).unwrap().is_none());
-                assert!(db.get_stored_value(0, 0, 9, field, 0).unwrap().is_none());
-                for doc_id in 1..9 {
-                    assert!(db
-                        .get_stored_value(0, 0, doc_id, field, 0)
-                        .unwrap()
-                        .is_some());
                 }
             }
         }
