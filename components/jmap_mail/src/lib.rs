@@ -1,9 +1,20 @@
 use mail_parser::MessagePartId;
 use serde::{Deserialize, Serialize};
-use store::FieldNumber;
+use store::{mutex_map::MutexMap, FieldNumber, Store};
 
 pub mod ingest;
 pub mod parse;
+
+pub const MAIL_CID: u8 = 0;
+pub const THREAD_CID: u8 = 1;
+
+pub const MESSAGE_RAW: FieldNumber = 0;
+pub const MESSAGE_HEADERS: FieldNumber = 1;
+pub const MESSAGE_HEADERS_OTHER: FieldNumber = 2;
+pub const MESSAGE_HEADERS_OFFSETS: FieldNumber = 3;
+pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
+pub const MESSAGE_HEADERS_PARTS: FieldNumber = 5;
+pub const MESSAGE_HEADERS_STRUCTURE: FieldNumber = 6;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageParts {
@@ -26,6 +37,8 @@ pub enum MessageField {
     Keyword = 132,
     Thread = 133,
     ThreadName = 134,
+    MessageIdRef = 135,
+    ThreadId = 136,
 }
 
 impl From<MessageField> for u8 {
@@ -34,19 +47,20 @@ impl From<MessageField> for u8 {
     }
 }
 
-pub type Result<T> = std::result::Result<T, MessageStoreError>;
-
-pub enum MessageStoreError {
-    ParseError,
-    SerializeError(String),
+pub struct MessageStore<'x, T> {
+    pub id_lock: MutexMap,
+    pub ref_lock: MutexMap,
+    pub db: &'x T,
 }
-
-pub const COLLECTION_ID: u8 = 0;
-
-pub const MESSAGE_RAW: FieldNumber = 0;
-pub const MESSAGE_HEADERS: FieldNumber = 1;
-pub const MESSAGE_HEADERS_OTHER: FieldNumber = 2;
-pub const MESSAGE_HEADERS_OFFSETS: FieldNumber = 3;
-pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
-pub const MESSAGE_HEADERS_PARTS: FieldNumber = 5;
-pub const MESSAGE_HEADERS_STRUCTURE: FieldNumber = 6;
+impl<'x, T> MessageStore<'x, T>
+where
+    T: Store<'x>,
+{
+    pub fn new(db: &T) -> MessageStore<T> {
+        MessageStore {
+            id_lock: MutexMap::with_capacity(1024),
+            ref_lock: MutexMap::with_capacity(1024),
+            db,
+        }
+    }
+}

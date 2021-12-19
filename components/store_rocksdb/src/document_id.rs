@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use roaring::RoaringBitmap;
 use store::{
     serialize::{serialize_bm_internal, BM_TOMBSTONED_IDS, BM_USED_IDS},
-    AccountId, CollectionId, DocumentId,
+    AccountId, BaseId, CollectionId, DocumentId,
 };
 
 use crate::RocksDBStore;
@@ -34,14 +34,15 @@ pub struct UncommittedDocumentId<'x> {
     collection: CollectionId,
     id: DocumentId,
     committed: bool,
-    id_assigner: &'x DashMap<(AccountId, CollectionId), DocumentIdAssigner>,
+    id_assigner: &'x DashMap<BaseId, DocumentIdAssigner>,
 }
 
 impl<'x> Drop for UncommittedDocumentId<'x> {
     fn drop(&mut self) {
         if !self.committed {
-            if let Some(mut id_assigner) =
-                self.id_assigner.get_mut(&(self.account, self.collection))
+            if let Some(mut id_assigner) = self
+                .id_assigner
+                .get_mut(&BaseId::new(self.account, self.collection))
             {
                 id_assigner.available_ids.insert(self.id);
             }
@@ -68,7 +69,7 @@ impl<'x> RocksDBStore {
     ) -> crate::Result<UncommittedDocumentId<'x>> {
         let mut id_assigner_entry = self
             .id_assigner
-            .entry((account, collection))
+            .entry(BaseId::new(account, collection))
             .or_try_insert_with(|| {
                 let (available_ids, next_id) =
                     if let Some(used_ids) = self.get_document_ids(account, collection)? {
@@ -165,7 +166,10 @@ impl<'x> RocksDBStore {
         account: AccountId,
         collection: CollectionId,
     ) -> Option<DocumentIdAssigner> {
-        self.id_assigner.remove(&(account, collection))?.1.into()
+        self.id_assigner
+            .remove(&BaseId::new(account, collection))?
+            .1
+            .into()
     }
 }
 

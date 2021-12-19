@@ -11,6 +11,12 @@ use crate::RocksDBStore;
 
 const LAST_TERM_KEY: &[u8; 1] = &[0];
 
+#[derive(Debug, Default)]
+pub struct TermLock {
+    pub term_id: TermId,
+    pub lock_count: usize,
+}
+
 impl RocksDBStore {
     pub fn get_match_terms(&self, tokens: TokenIterator) -> crate::Result<Option<Vec<MatchTerm>>> {
         let cf_terms = self.get_handle("terms")?;
@@ -81,20 +87,20 @@ impl RocksDBStore {
         let mut word_dict = HashMap::with_capacity(10);
         let mut word_list = Vec::with_capacity(10);
 
-        for token in tokens {
+        for mut token in tokens {
             let word_pos = if let Some(word_pos) = word_dict.get(&token.word) {
                 *word_pos
             } else {
                 self.term_id_lock
                     .entry(token.word.to_string())
-                    .or_insert((0, 0))
+                    .or_insert(TermLock::default())
                     .value_mut()
-                    .1 += 1;
+                    .lock_count += 1;
                 query.push((&cf_terms, Vec::from(token.word.as_bytes())));
 
                 let word_pos = (word_list.len() + 1) as u64;
                 word_dict.insert(token.word.clone(), word_pos);
-                word_list.push((0u64, token.word.clone()));
+                word_list.push((0u64, std::mem::take(&mut token.word)));
                 word_pos
             };
 
@@ -127,11 +133,11 @@ impl RocksDBStore {
                 let term_id = TermId::from_le_bytes(term_id.try_into().map_err(|_| {
                     StoreError::InternalError("Failed to deserialize term id.".into())
                 })?);
-                if term_lock.0 == 0 {
-                    term_lock.0 = term_id;
+                if term_lock.term_id == 0 {
+                    term_lock.term_id = term_id;
                 }
                 term_id
-            } else if term_lock.0 == 0 {
+            } else if term_lock.term_id == 0 {
                 let term_id = {
                     let mut last_term = self.term_id_last.lock().unwrap();
                     *last_term += 1;
@@ -144,14 +150,14 @@ impl RocksDBStore {
                     .put_cf(&cf_terms, word.as_bytes(), term_id.to_le_bytes())
                     .map_err(|e| StoreError::InternalError(e.to_string()))?;
 
-                term_lock.0 = term_id;
+                term_lock.term_id = term_id;
                 term_id
             } else {
-                term_lock.0
+                term_lock.term_id
             };
 
-            term_lock.1 -= 1;
-            if term_lock.1 == 0 {
+            term_lock.lock_count -= 1;
+            if term_lock.lock_count == 0 {
                 term_entry.remove();
             }
         }

@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
-    parsers::fields::unstructured::thread_name,
     Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessageAttachment,
     MessagePart,
 };
@@ -11,10 +10,10 @@ use nlp::Language;
 use store::{
     document::{DocumentBuilder, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::Text,
-    FieldNumber, Integer, LongInteger,
+    FieldNumber, Integer, LongInteger, StoreError,
 };
 
-use crate::{MessageField, MessageParts, MessageStoreError};
+use crate::{MessageField, MessageParts};
 
 fn parse_address<'x>(
     document: &mut DocumentBuilder<'x>,
@@ -54,27 +53,12 @@ fn parse_address_group<'x>(
 fn parse_text<'x>(document: &mut DocumentBuilder<'x>, header_name: HeaderName, text: Cow<'x, str>) {
     match header_name {
         HeaderName::Subject => {
-            let text = thread_name(text.as_ref()).trim();
-            let thread_name = if !text.is_empty() {
-                let text = text.to_lowercase();
-                let thread_name = text.clone();
-                document.add_text(
-                    header_name.into(),
-                    0,
-                    Text::Full((text.into(), Language::Unknown)),
-                    false,
-                    true,
-                );
-                thread_name
-            } else {
-                "()".to_string()
-            };
             document.add_text(
-                MessageField::ThreadName.into(),
+                header_name.into(),
                 0,
-                Text::Keyword(thread_name.into()),
+                Text::Full((text, Language::Unknown)),
                 false,
-                false,
+                true,
             );
         }
 
@@ -95,7 +79,13 @@ fn parse_text<'x>(document: &mut DocumentBuilder<'x>, header_name: HeaderName, t
         | HeaderName::ContentId
         | HeaderName::ResentMessageId => {
             if text.len() <= MAX_ID_LENGTH {
-                document.add_text(header_name.into(), 0, Text::Keyword(text), false, false);
+                document.add_text(
+                    MessageField::MessageIdRef.into(),
+                    0,
+                    Text::Keyword(text),
+                    false,
+                    false,
+                );
             }
         }
 
@@ -283,7 +273,7 @@ fn parse_header<'x>(
     }
 }
 
-pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder> {
+pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder> {
     let mut document = DocumentBuilder::new();
     let mut message_parts = MessageParts {
         html_body: message.html_body,
@@ -314,7 +304,7 @@ pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder
         MessageField::Internal.into(),
         crate::MESSAGE_HEADERS,
         bincode::serialize(&message.headers_rfc)
-            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
     document.add_blob(
@@ -506,7 +496,7 @@ pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder
         MessageField::Internal.into(),
         crate::MESSAGE_HEADERS_OTHER,
         bincode::serialize(&message.headers_other)
-            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
 
@@ -514,7 +504,7 @@ pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder
         MessageField::Internal.into(),
         crate::MESSAGE_HEADERS_OFFSETS,
         bincode::serialize(&message.headers_offsets)
-            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
 
@@ -522,7 +512,7 @@ pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder
         MessageField::Internal.into(),
         crate::MESSAGE_HEADERS_NESTED,
         bincode::serialize(&nested_headers)
-            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
 
@@ -530,7 +520,7 @@ pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder
         MessageField::Internal.into(),
         crate::MESSAGE_HEADERS_PARTS,
         bincode::serialize(&message_parts)
-            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
 
@@ -538,7 +528,7 @@ pub fn build_message_document(message: Message) -> crate::Result<DocumentBuilder
         MessageField::Internal.into(),
         crate::MESSAGE_HEADERS_STRUCTURE,
         bincode::serialize(&message.structure)
-            .map_err(|e| MessageStoreError::SerializeError(e.to_string()))?
+            .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
 

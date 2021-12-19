@@ -1,6 +1,7 @@
 pub mod document;
 pub mod field;
 pub mod leb128;
+pub mod mutex_map;
 pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
@@ -11,6 +12,8 @@ use nlp::Language;
 #[derive(Debug)]
 pub enum StoreError {
     InternalError(String),
+    SerializeError(String),
+    ParseError,
     DataCorruption,
     NotFound,
     InvalidArgument,
@@ -28,6 +31,21 @@ pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
 pub type TermId = u64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BaseId {
+    pub account_id: AccountId,
+    pub collection_id: CollectionId,
+}
+
+impl BaseId {
+    pub fn new(account_id: AccountId, collection_id: CollectionId) -> BaseId {
+        BaseId {
+            account_id,
+            collection_id,
+        }
+    }
+}
 
 pub enum FieldValue<'x> {
     Keyword(&'x str),
@@ -206,14 +224,15 @@ pub trait StoreInsert {
     ) -> Result<Vec<DocumentId>>;
 }
 
-pub trait StoreQuery<'x, T: Iterator<Item = DocumentId>> {
+pub trait StoreQuery<'x> {
+    type Iter: Iterator<Item = DocumentId>;
     fn query(
         &'x self,
         account: AccountId,
         collection: CollectionId,
         filter: Option<Filter>,
         sort: Option<Vec<Comparator>>,
-    ) -> Result<T>;
+    ) -> Result<Self::Iter>;
 }
 
 pub trait StoreGet {
@@ -225,6 +244,15 @@ pub trait StoreGet {
         field: FieldId,
         pos: FieldNumber,
     ) -> Result<Option<Vec<u8>>>;
+
+    fn get_stored_value_multi(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        documents: &[DocumentId],
+        field: FieldId,
+        pos: FieldNumber,
+    ) -> Result<Vec<Option<Vec<u8>>>>;
 
     fn get_integer(
         &self,
@@ -240,6 +268,26 @@ pub trait StoreGet {
         } else {
             Ok(None)
         }
+    }
+
+    fn get_integer_multi(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        documents: &[DocumentId],
+        field: FieldId,
+    ) -> Result<Vec<Option<Integer>>> {
+        let mut result = Vec::with_capacity(documents.len());
+        for item in self.get_stored_value_multi(account, collection, documents, field, 0)? {
+            if let Some(bytes) = item {
+                result.push(Some(serialize::deserialize_integer(bytes).ok_or_else(
+                    || StoreError::InternalError("Failed to deserialize integer".to_string()),
+                )?));
+            } else {
+                result.push(None);
+            }
+        }
+        Ok(result)
     }
 
     fn get_long_integer(
@@ -341,9 +389,7 @@ pub trait StoreDelete {
     fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
 }
 
-pub trait Store<'x, T>
-where
-    T: Iterator<Item = DocumentId>,
-    Self: StoreInsert + StoreQuery<'x, T> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized,
+pub trait Store<'x>:
+    StoreInsert + StoreQuery<'x> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized
 {
 }

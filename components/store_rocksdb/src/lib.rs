@@ -16,13 +16,13 @@ use document_id::DocumentIdAssigner;
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options,
 };
-use store::{AccountId, CollectionId, DocumentId, Result, Store, StoreError, TermId};
-use term::get_last_term_id;
+use store::{BaseId, DocumentId, Result, Store, StoreError};
+use term::{get_last_term_id, TermLock};
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
-    id_assigner: DashMap<(AccountId, CollectionId), DocumentIdAssigner>,
-    term_id_lock: DashMap<String, (TermId, u32)>,
+    id_assigner: DashMap<BaseId, DocumentIdAssigner>,
+    term_id_lock: DashMap<String, TermLock>,
     term_id_last: Mutex<u64>,
 }
 
@@ -67,9 +67,9 @@ impl RocksDBStore {
         .map_err(|e| StoreError::InternalError(e.into_string()))?;
 
         Ok(Self {
-            id_assigner: DashMap::new(),
-            term_id_lock: DashMap::new(),
-            term_id_last: Mutex::new(get_last_term_id(&db)?),
+            id_assigner: DashMap::with_capacity(1024),
+            term_id_lock: DashMap::with_capacity(1024),
+            term_id_last: get_last_term_id(&db)?.into(),
             db,
         })
     }
@@ -97,10 +97,7 @@ impl RocksDBStore {
     }
 }
 
-impl<'x, T: Iterator<Item = DocumentId>> Store<'x, T> for RocksDBStore where
-    RocksDBStore: store::StoreQuery<'x, T>
-{
-}
+impl<'x> Store<'x> for RocksDBStore where RocksDBStore: store::StoreQuery<'x> {}
 
 #[cfg(test)]
 mod tests {

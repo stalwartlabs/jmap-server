@@ -25,7 +25,9 @@ struct State<'x> {
     bm: Option<RoaringBitmap>,
 }
 
-impl<'x> StoreQuery<'x, RocksDBIterator<'x>> for RocksDBStore {
+impl<'x> StoreQuery<'x> for RocksDBStore {
+    type Iter = RocksDBIterator<'x>;
+
     #[allow(clippy::blocks_in_if_conditions)]
     fn query(
         &'x self,

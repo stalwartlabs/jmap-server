@@ -6,8 +6,8 @@ use std::{
 
 use nlp::Language;
 use store::{
-    document::DocumentBuilder, field::Text, Comparator, ComparisonOperator, DocumentId, FieldValue,
-    Filter, Store, TextQuery,
+    document::DocumentBuilder, field::Text, Comparator, ComparisonOperator, FieldValue, Filter,
+    Store, TextQuery,
 };
 
 const FIELDS: [&str; 20] = [
@@ -63,11 +63,7 @@ const FIELDS_OPTIONS: [FieldType; 20] = [
     FieldType::Text,     // "url",
 ];
 
-pub fn insert_artworks<'x, T, I>(db: &T)
-where
-    T: Store<'x, I>,
-    I: Iterator<Item = DocumentId>,
-{
+pub fn insert_artworks<'x, T: Store<'x>>(db: &T) {
     rayon::ThreadPoolBuilder::new()
         .num_threads(8)
         .build()
@@ -160,11 +156,7 @@ where
         });
 }
 
-pub fn filter_artworks<'x, T: 'x, I>(db: &'x T)
-where
-    T: Store<'x, I>,
-    I: Iterator<Item = DocumentId>,
-{
+pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
     let mut fields = HashMap::new();
     for (field_num, field) in FIELDS.iter().enumerate() {
         fields.insert(field.to_string(), field_num as u8);
@@ -408,11 +400,7 @@ where
     }
 }
 
-pub fn sort_artworks<'x, T: 'x, I>(db: &'x T)
-where
-    T: Store<'x, I>,
-    I: Iterator<Item = DocumentId>,
-{
+pub fn sort_artworks<'x, T: Store<'x>>(db: &'x T) {
     let mut fields = HashMap::new();
     for (field_num, field) in FIELDS.iter().enumerate() {
         fields.insert(field.to_string(), field_num as u8);
