@@ -6,8 +6,8 @@ use std::{
 
 use nlp::Language;
 use store::{
-    document::DocumentBuilder, field::Text, Comparator, ComparisonOperator, FieldValue, Filter,
-    Store, TextQuery,
+    batch::WriteOperation, field::Text, Comparator, ComparisonOperator, FieldValue, Filter, Store,
+    TextQuery,
 };
 
 const FIELDS: [&str; 20] = [
@@ -82,7 +82,7 @@ pub fn insert_artworks<'x, T: Store<'x>>(db: &T) {
                 let record = record.unwrap();
                 let documents = documents.clone();
                 s.spawn(move |_| {
-                    let mut builder = DocumentBuilder::new();
+                    let mut builder = WriteOperation::insert(0, 0);
                     for (pos, field) in record.iter().enumerate() {
                         if field.is_empty() {
                             continue;
@@ -142,7 +142,7 @@ pub fn insert_artworks<'x, T: Store<'x>>(db: &T) {
 
                     s.spawn(move |_| {
                         let now = Instant::now();
-                        let doc_ids = db.insert_bulk(0, 0, chunk).unwrap();
+                        let doc_ids = db.update_bulk(chunk).unwrap();
                         println!(
                             "Inserted {} entries in {} ms (Thread {}/{}).",
                             doc_ids.len(),
@@ -379,7 +379,7 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
     ];
 
     for (filter, expected_results) in tests {
-        let mut results = Vec::with_capacity(expected_results.len());
+        let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for doc_id in db
             .query(
@@ -391,7 +391,7 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
             .unwrap()
         {
             results.push(
-                db.get_text(0, 0, doc_id, fields["accession_number"])
+                db.get_value(0, 0, doc_id, fields["accession_number"])
                     .unwrap()
                     .unwrap(),
             );
@@ -445,11 +445,11 @@ pub fn sort_artworks<'x, T: Store<'x>>(db: &'x T) {
     ];
 
     for (sort, expected_results) in tests {
-        let mut results = Vec::with_capacity(expected_results.len());
+        let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for doc_id in db.query(0, 0, None, Some(sort)).unwrap() {
             results.push(
-                db.get_text(0, 0, doc_id, fields["accession_number"])
+                db.get_value(0, 0, doc_id, fields["accession_number"])
                     .unwrap()
                     .unwrap(),
             );

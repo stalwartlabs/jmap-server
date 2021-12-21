@@ -7,7 +7,7 @@ use nlp::{
 };
 
 use crate::{
-    document::MAX_TOKEN_LENGTH, DocumentId, FieldId, FieldNumber, Float, Integer, LongInteger, Tag,
+    batch::MAX_TOKEN_LENGTH, DocumentId, FieldId, FieldNumber, Float, Integer, LongInteger, Tag,
     TagId,
 };
 

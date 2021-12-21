@@ -16,7 +16,7 @@ use document_id::DocumentIdAssigner;
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options,
 };
-use store::{BaseId, DocumentId, Result, Store, StoreError};
+use store::{BaseId, Result, Store, StoreError};
 use term::{get_last_term_id, TermLock};
 
 pub struct RocksDBStore {

@@ -46,7 +46,7 @@ impl MutexMap {
         }
     }
 
-    pub fn lock_hash<T, I>(&self, it: T) -> Result<MutexMapLock<I>>
+    pub fn lock_many_hash<T, I>(&self, it: T) -> Result<MutexMapLock<I>>
     where
         T: Iterator<Item = I>,
         I: Eq + Hash,
@@ -74,7 +74,7 @@ impl MutexMap {
         Ok(obtained_locks)
     }
 
-    pub fn lock<T, I>(&self, it: T) -> Result<MutexMapLock<I>>
+    pub fn lock_many<T, I>(&self, it: T) -> Result<MutexMapLock<I>>
     where
         T: Iterator<Item = I>,
         I: Into<u64> + Copy,
@@ -98,5 +98,15 @@ impl MutexMap {
         }
 
         Ok(obtained_locks)
+    }
+
+    pub fn lock<T>(&self, key: T) -> Result<MutexGuard<'_, usize>>
+    where
+        T: Into<u64> + Copy,
+    {
+        let hash = key.into() & self.mask;
+        self.map[hash as usize]
+            .lock()
+            .map_err(|_| MutexMapLockError)
     }
 }

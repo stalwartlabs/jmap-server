@@ -1,4 +1,4 @@
-pub mod document;
+pub mod batch;
 pub mod field;
 pub mod leb128;
 pub mod mutex_map;
@@ -6,8 +6,9 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use document::DocumentBuilder;
+use batch::WriteOperation;
 use nlp::Language;
+use serialize::StoreDeserialize;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -24,6 +25,7 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 pub type AccountId = u32;
 pub type CollectionId = u8;
 pub type DocumentId = u32;
+pub type ThreadId = u64;
 pub type FieldId = u8;
 pub type FieldNumber = u16;
 pub type TagId = u8;
@@ -57,10 +59,10 @@ pub enum FieldValue<'x> {
     Tag(Tag<'x>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Tag<'x> {
     Static(TagId),
-    Id(DocumentId),
+    Id(LongInteger),
     Text(&'x str),
 }
 
@@ -204,24 +206,14 @@ impl Comparator {
     }
 }
 
-pub trait StoreInsert {
-    fn insert(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentBuilder,
-    ) -> crate::Result<DocumentId> {
-        self.insert_bulk(account, collection, vec![document])?
+pub trait StoreUpdate {
+    fn update(&self, document: WriteOperation) -> crate::Result<DocumentId> {
+        self.update_bulk(vec![document])?
             .pop()
             .ok_or_else(|| StoreError::InternalError("No document id returned".to_string()))
     }
 
-    fn insert_bulk(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        documents: Vec<DocumentBuilder>,
-    ) -> Result<Vec<DocumentId>>;
+    fn update_bulk(&self, documents: Vec<WriteOperation>) -> Result<Vec<DocumentId>>;
 }
 
 pub trait StoreQuery<'x> {
@@ -236,7 +228,7 @@ pub trait StoreQuery<'x> {
 }
 
 pub trait StoreGet {
-    fn get_stored_value(
+    fn get_raw_value(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -245,7 +237,7 @@ pub trait StoreGet {
         pos: FieldNumber,
     ) -> Result<Option<Vec<u8>>>;
 
-    fn get_stored_value_multi(
+    fn get_multi_raw_value(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -254,101 +246,76 @@ pub trait StoreGet {
         pos: FieldNumber,
     ) -> Result<Vec<Option<Vec<u8>>>>;
 
-    fn get_integer(
+    fn get_value<T>(
         &self,
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-    ) -> Result<Option<Integer>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
-            Ok(Some(serialize::deserialize_integer(bytes).ok_or_else(
-                || StoreError::InternalError("Failed to deserialize integer".to_string()),
-            )?))
+    ) -> Result<Option<T>>
+    where
+        Vec<u8>: serialize::StoreDeserialize<T>,
+    {
+        if let Some(bytes) = self.get_raw_value(account, collection, document, field, 0)? {
+            Ok(Some(bytes.deserialize()?))
         } else {
             Ok(None)
         }
     }
 
-    fn get_integer_multi(
+    fn get_multi_value<T>(
         &self,
         account: AccountId,
         collection: CollectionId,
         documents: &[DocumentId],
         field: FieldId,
-    ) -> Result<Vec<Option<Integer>>> {
+    ) -> Result<Vec<Option<T>>>
+    where
+        Vec<u8>: serialize::StoreDeserialize<T>,
+    {
         let mut result = Vec::with_capacity(documents.len());
-        for item in self.get_stored_value_multi(account, collection, documents, field, 0)? {
+        for item in self.get_multi_raw_value(account, collection, documents, field, 0)? {
             if let Some(bytes) = item {
-                result.push(Some(serialize::deserialize_integer(bytes).ok_or_else(
-                    || StoreError::InternalError("Failed to deserialize integer".to_string()),
-                )?));
+                result.push(Some(bytes.deserialize()?));
             } else {
                 result.push(None);
             }
         }
         Ok(result)
     }
-
-    fn get_long_integer(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-    ) -> Result<Option<LongInteger>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
-            Ok(Some(
-                serialize::deserialize_long_integer(bytes).ok_or_else(|| {
-                    StoreError::InternalError("Failed to deserialize long integer".to_string())
-                })?,
-            ))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn get_float(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-    ) -> Result<Option<Float>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
-            Ok(Some(serialize::deserialize_float(bytes).ok_or_else(
-                || StoreError::InternalError("Failed to deserialize float".to_string()),
-            )?))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn get_text(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-    ) -> Result<Option<String>> {
-        if let Some(bytes) = self.get_stored_value(account, collection, document, field, 0)? {
-            Ok(Some(serialize::deserialize_text(bytes).ok_or_else(
-                || StoreError::InternalError("Failed to decode UTF-8 string".to_string()),
-            )?))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 pub trait StoreTag {
+    type Iter: Iterator<Item = DocumentId>;
+
+    fn get_tag(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        field: FieldId,
+        tag: Tag,
+    ) -> Result<Option<Self::Iter>> {
+        Ok(self
+            .get_tags(account, collection, field, &[tag])?
+            .pop()
+            .unwrap())
+    }
+
+    fn get_tags(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        field: FieldId,
+        tags: &[Tag],
+    ) -> Result<Vec<Option<Self::Iter>>>;
+
     fn set_tag(
         &self,
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: &Tag,
+        tag: Tag,
     ) -> Result<()>;
 
     fn clear_tag(
@@ -357,7 +324,7 @@ pub trait StoreTag {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: &Tag,
+        tag: Tag,
     ) -> Result<()>;
 
     fn has_tag(
@@ -366,7 +333,7 @@ pub trait StoreTag {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: &Tag,
+        tag: Tag,
     ) -> Result<bool>;
 }
 
@@ -390,6 +357,6 @@ pub trait StoreDelete {
 }
 
 pub trait Store<'x>:
-    StoreInsert + StoreQuery<'x> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized
+    StoreUpdate + StoreQuery<'x> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized
 {
 }

@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use crate::{
     leb128::Leb128, AccountId, CollectionId, DocumentId, FieldId, FieldNumber, Float, Integer,
-    LongInteger, Tag, TermId,
+    LongInteger, StoreError, Tag, TermId,
 };
 
 pub const PREFIX_LEN: usize = std::mem::size_of::<AccountId>()
@@ -228,4 +228,36 @@ pub fn deserialize_index_document_id(bytes: &[u8]) -> Option<DocumentId> {
 #[inline(always)]
 pub fn deserialize_document_id_from_leb128(bytes: &[u8]) -> Option<DocumentId> {
     DocumentId::from_leb128_bytes(bytes)?.0.into()
+}
+
+pub trait StoreDeserialize<T>: Sized {
+    fn deserialize(self) -> crate::Result<T>;
+}
+
+impl StoreDeserialize<String> for Vec<u8> {
+    fn deserialize(self) -> crate::Result<String> {
+        deserialize_text(self)
+            .ok_or_else(|| StoreError::InternalError("Failed to decode UTF-8 string".to_string()))
+    }
+}
+
+impl StoreDeserialize<Float> for Vec<u8> {
+    fn deserialize(self) -> crate::Result<Float> {
+        deserialize_float(self)
+            .ok_or_else(|| StoreError::InternalError("Failed to decode float".to_string()))
+    }
+}
+
+impl StoreDeserialize<LongInteger> for Vec<u8> {
+    fn deserialize(self) -> crate::Result<LongInteger> {
+        deserialize_long_integer(self)
+            .ok_or_else(|| StoreError::InternalError("Failed to decode long integer".to_string()))
+    }
+}
+
+impl StoreDeserialize<Integer> for Vec<u8> {
+    fn deserialize(self) -> crate::Result<Integer> {
+        deserialize_integer(self)
+            .ok_or_else(|| StoreError::InternalError("Failed to decode integer".to_string()))
+    }
 }

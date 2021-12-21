@@ -1,10 +1,12 @@
+use std::ops::BitAndAssign;
+
 use store::{
     serialize::serialize_bm_tag_key, AccountId, CollectionId, DocumentId, FieldId, StoreError,
     StoreTag, Tag,
 };
 
 use crate::{
-    bitmaps::{clear_bit, has_bit, set_bit},
+    bitmaps::{clear_bit, has_bit, into_bitmap, set_bit},
     RocksDBStore,
 };
 
@@ -15,12 +17,12 @@ impl StoreTag for RocksDBStore {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: &Tag,
+        tag: Tag,
     ) -> crate::Result<()> {
         self.db
             .merge_cf(
                 &self.get_handle("bitmaps")?,
-                &serialize_bm_tag_key(account, collection, field, tag),
+                &serialize_bm_tag_key(account, collection, field, &tag),
                 &set_bit(document),
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))
@@ -32,12 +34,12 @@ impl StoreTag for RocksDBStore {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: &Tag,
+        tag: Tag,
     ) -> crate::Result<()> {
         self.db
             .merge_cf(
                 &self.get_handle("bitmaps")?,
-                &serialize_bm_tag_key(account, collection, field, tag),
+                &serialize_bm_tag_key(account, collection, field, &tag),
                 &clear_bit(document),
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))
@@ -49,13 +51,13 @@ impl StoreTag for RocksDBStore {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        tag: &Tag,
+        tag: Tag,
     ) -> crate::Result<bool> {
         let cf_bitmaps = self.get_handle("bitmaps")?;
         self.db
             .get_cf(
                 &cf_bitmaps,
-                &serialize_bm_tag_key(account, collection, field, tag),
+                &serialize_bm_tag_key(account, collection, field, &tag),
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))?
             .map_or(Ok(false), |b| {
@@ -68,5 +70,44 @@ impl StoreTag for RocksDBStore {
                     Ok(false)
                 }
             })
+    }
+
+    type Iter = roaring::bitmap::IntoIter;
+
+    fn get_tags(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        field: FieldId,
+        tags: &[Tag],
+    ) -> store::Result<Vec<Option<Self::Iter>>> {
+        let cf_bitmaps = self.get_handle("bitmaps")?;
+        let mut result = Vec::with_capacity(tags.len());
+        if let Some(document_ids) = self.get_winnowed_ids(account, collection)? {
+            let mut keys = Vec::with_capacity(tags.len());
+
+            for tag in tags {
+                keys.push((
+                    &cf_bitmaps,
+                    serialize_bm_tag_key(account, collection, field, tag),
+                ));
+            }
+
+            for bytes in self.db.multi_get_cf(keys) {
+                if let Some(bytes) =
+                    bytes.map_err(|e| StoreError::InternalError(e.into_string()))?
+                {
+                    let mut tagged_docs = into_bitmap(&bytes)?;
+                    tagged_docs.bitand_assign(&document_ids);
+                    if !tagged_docs.is_empty() {
+                        result.push(Some(tagged_docs.into_iter()));
+                        continue;
+                    }
+                }
+                result.push(None);
+            }
+        }
+
+        Ok(result)
     }
 }

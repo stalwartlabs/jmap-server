@@ -257,11 +257,11 @@ mod tests {
     use std::iter::FromIterator;
 
     use nlp::Language;
-    use store::document::DocumentBuilder;
+    use store::batch::WriteOperation;
     use store::field::Text;
     use store::{
         Comparator, DocumentId, FieldId, FieldValue, Filter, Float, Integer, LongInteger,
-        StoreDelete, StoreGet, StoreInsert, StoreQuery, StoreTag, Tag, TextQuery,
+        StoreDelete, StoreGet, StoreQuery, StoreTag, StoreUpdate, Tag, TextQuery,
     };
 
     use crate::RocksDBStore;
@@ -277,7 +277,7 @@ mod tests {
             let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
 
             for raw_doc_num in 0..10 {
-                let mut builder = DocumentBuilder::new();
+                let mut builder = WriteOperation::insert(0, 0);
                 builder.add_text(
                     0,
                     0,
@@ -309,7 +309,7 @@ mod tests {
                 builder.add_tag(7, Tag::Static(0));
                 builder.add_tag(8, Tag::Text("my custom tag"));
 
-                db.insert(0, 0, builder).unwrap();
+                db.update(builder).unwrap();
             }
 
             db.delete_document(0, 0, 9).unwrap();
@@ -327,13 +327,10 @@ mod tests {
                     );
 
                     for field in 0..6 {
-                        assert!(db.get_stored_value(0, 0, 0, field, 0).unwrap().is_none());
-                        assert!(db.get_stored_value(0, 0, 9, field, 0).unwrap().is_none());
+                        assert!(db.get_raw_value(0, 0, 0, field, 0).unwrap().is_none());
+                        assert!(db.get_raw_value(0, 0, 9, field, 0).unwrap().is_none());
                         for doc_id in 1..9 {
-                            assert!(db
-                                .get_stored_value(0, 0, doc_id, field, 0)
-                                .unwrap()
-                                .is_some());
+                            assert!(db.get_raw_value(0, 0, doc_id, field, 0).unwrap().is_some());
                         }
                     }
                 }
@@ -364,10 +361,10 @@ mod tests {
                     .iter()
                     .enumerate()
                 {
-                    assert!(!db.has_tag(0, 0, 0, 6 + pos as FieldId, tag).unwrap());
-                    assert!(!db.has_tag(0, 0, 9, 6 + pos as FieldId, tag).unwrap());
+                    assert!(!db.has_tag(0, 0, 0, 6 + pos as FieldId, *tag).unwrap());
+                    assert!(!db.has_tag(0, 0, 9, 6 + pos as FieldId, *tag).unwrap());
                     for doc_id in 1..9 {
-                        assert!(db.has_tag(0, 0, doc_id, 6 + pos as FieldId, tag).unwrap());
+                        assert!(db.has_tag(0, 0, doc_id, 6 + pos as FieldId, *tag).unwrap());
                     }
                 }
 

@@ -1,12 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::HashSet;
 
 use mail_parser::{HeaderName, HeaderValue, Message};
 use store::{
-    field::Text, AccountId, ComparisonOperator, FieldValue, Filter, Integer, Store, StoreError,
-    StoreQuery,
+    batch::{WriteOperation, MAX_ID_LENGTH},
+    field::Text,
+    AccountId, ComparisonOperator, DocumentId, FieldValue, Filter, Store, StoreError, Tag,
+    ThreadId,
 };
 
-use crate::{parse::build_message_document, MessageField, MessageStore};
+use crate::{parse::build_message_document, MessageField, MessageStore, MAIL_CID};
 
 impl<'x, T> MessageStore<'x, T>
 where
@@ -14,7 +16,7 @@ where
 {
     pub fn ingest_message(&self, account: AccountId, raw_message: &[u8]) -> store::Result<()> {
         // Parse raw message
-        let message = Message::parse(raw_message).ok_or(StoreError::ParseError)?;
+        let mut message = Message::parse(raw_message).ok_or(StoreError::ParseError)?;
 
         // Obtain the thread name
         let thread_name = message
@@ -39,99 +41,93 @@ where
         ] {
             match message
                 .headers_rfc
-                .get(&header_name)
-                .unwrap_or(&HeaderValue::Empty)
+                .remove(&header_name)
+                .unwrap_or(HeaderValue::Empty)
             {
-                HeaderValue::Text(text) => reference_ids.push(text),
-                HeaderValue::TextList(list) => reference_ids.extend(list),
+                HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => reference_ids.push(text),
+                HeaderValue::TextList(mut list) => {
+                    reference_ids.extend(list.drain(..).filter(|text| text.len() <= MAX_ID_LENGTH));
+                }
                 HeaderValue::Collection(col) => {
                     for item in col {
                         match item {
-                            HeaderValue::Text(text) => reference_ids.push(text),
-                            HeaderValue::TextList(list) => reference_ids.extend(list),
-                            _ => {}
+                            HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
+                                reference_ids.push(text)
+                            }
+                            HeaderValue::TextList(mut list) => reference_ids
+                                .extend(list.drain(..).filter(|text| text.len() <= MAX_ID_LENGTH)),
+                            _ => (),
                         }
                     }
                 }
-                _ => todo!(),
+                _ => (),
             }
         }
 
-        // Lock all reference ids
-        let _reference_ids_lock = self
-            .ref_lock
-            .lock_hash(reference_ids.iter())
+        // Build message document
+        let mut batch = build_message_document(account, message)?;
+        let mut batches = Vec::new();
+
+        // Lock account
+        let _account_lock = self
+            .id_lock
+            .lock(account)
             .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))?;
 
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
             // Query all document ids containing the reference ids
-            // and lock all those ids to prevent other threads from
-            // modifying them.
-            let locks = self
-                .id_lock
-                .lock(self.db.query(
+            let message_doc_ids = self
+                .db
+                .query(
                     account,
                     crate::MAIL_CID,
                     Some(Filter::and(vec![
-                    Filter::new_condition(
-                        MessageField::ThreadName.into(),
-                        ComparisonOperator::Equal,
-                        FieldValue::Keyword(&thread_name),
-                    ),
-                    Filter::or(
-                        reference_ids
-                            .into_iter()
-                            .map(|id| {
-                                Filter::new_condition(
-                                    MessageField::MessageIdRef.into(),
-                                    ComparisonOperator::Equal,
-                                    FieldValue::Keyword(id),
-                                )
-                            })
-                            .collect(),
-                    ),
-                ])),
+                        Filter::new_condition(
+                            MessageField::ThreadName.into(),
+                            ComparisonOperator::Equal,
+                            FieldValue::Keyword(&thread_name),
+                        ),
+                        Filter::or(
+                            reference_ids
+                                .iter()
+                                .map(|id| {
+                                    Filter::new_condition(
+                                        MessageField::MessageIdRef.into(),
+                                        ComparisonOperator::Equal,
+                                        FieldValue::Keyword(id),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                    ])),
                     None,
-                )?)
-                .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))?;
+                )?
+                .collect::<Vec<DocumentId>>();
 
             // Obtain thread ids for all matching document ids
-            if !locks.is_empty() {
-                let message_doc_ids = locks.get_values();
-                let thread_ids = self.db.get_integer_multi(
-                    account,
-                    crate::MAIL_CID,
-                    &message_doc_ids,
-                    MessageField::ThreadId.into(),
-                )?;
+            if !message_doc_ids.is_empty() {
+                let thread_ids = self
+                    .db
+                    .get_multi_value(
+                        account,
+                        crate::MAIL_CID,
+                        &message_doc_ids,
+                        MessageField::ThreadId.into(),
+                    )?
+                    .into_iter()
+                    .flatten()
+                    .collect::<HashSet<ThreadId>>();
 
                 if thread_ids.len() > 1 {
-                    let id_map = thread_ids
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(pos, value)| Some(((*value)?, pos)))
-                        .collect::<BTreeMap<u32, usize>>();
-                    if !id_map.is_empty() {
-                        let mut id_map_iter = id_map.iter();
-                        let thread_id = *(id_map_iter.next().unwrap().0);
-                        for (_, &pos) in id_map_iter {
-                            let doc_id = message_doc_ids[pos];
-                            /*document.add_integer(
-                                MessageField::ThreadId.into(),
-                                0,
-                                thread_id,
-                                true,
-                                false,
-                            );*/
-                        }
-                        Some(thread_id)
-                    } else {
-                        None
-                    }
+                    Some(self.merge_threads(
+                        account,
+                        &mut batches,
+                        thread_ids.into_iter().collect(),
+                    )?)
                 } else {
                     // There was just one match, use it as the thread id
-                    thread_ids[0]
+                    thread_ids.into_iter().next()
                 }
             } else {
                 None
@@ -146,57 +142,91 @@ where
             0
         };
 
-        let mut document = build_message_document(message)?;
+        for reference_id in reference_ids {
+            batch.add_text(
+                MessageField::MessageIdRef.into(),
+                0,
+                Text::Keyword(reference_id),
+                false,
+                false,
+            );
+        }
 
-        document.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
+        batch.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
+        batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
 
-        document.add_text(
+        batch.add_text(
             MessageField::ThreadName.into(),
             0,
             Text::Keyword(thread_name.into()),
             false,
-            false,
+            true,
         );
+        batches.push(batch);
+
+        // Write batches to store
+        self.db.update_bulk(batches)?;
 
         Ok(())
     }
+
+    fn merge_threads(
+        &self,
+        account: AccountId,
+        batches: &mut Vec<WriteOperation>,
+        thread_ids: Vec<ThreadId>,
+    ) -> store::Result<ThreadId> {
+        // Query tags for all thread ids
+        let mut tag_iterators = Vec::with_capacity(thread_ids.len());
+
+        for (pos, tag_iterator) in self
+            .db
+            .get_tags(
+                account,
+                MAIL_CID,
+                MessageField::ThreadId.into(),
+                &thread_ids
+                    .iter()
+                    .map(|id| Tag::Id(*id))
+                    .collect::<Vec<Tag>>(),
+            )?
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(tag_iterator) = tag_iterator {
+                debug_assert!(tag_iterator.size_hint().0 > 0);
+                tag_iterators.push((tag_iterator, thread_ids[pos]));
+            } else {
+                // TODO log this error instead
+                debug_assert!(false, "No tags found for thread id {}.", thread_ids[pos]);
+            }
+        }
+
+        tag_iterators.sort_by_key(|i| i.0.size_hint().0);
+
+        let mut tag_iterators = tag_iterators.into_iter();
+        let thread_id = if let Some((_, thread_id)) = tag_iterators.next_back() {
+            thread_id
+        } else {
+            thread_ids[0]
+        };
+
+        let mut deleted_threads = WriteOperation::delete(account, MAIL_CID, None);
+
+        while let Some((tag_iterator, delete_thread_id)) = tag_iterators.next_back() {
+            for document_id in tag_iterator {
+                let mut batch = WriteOperation::update(account, MAIL_CID, document_id);
+                batch.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
+                batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
+                batches.push(batch);
+            }
+            deleted_threads.add_tag(MessageField::ThreadId.into(), Tag::Id(delete_thread_id));
+        }
+
+        if !deleted_threads.is_empty() {
+            batches.push(deleted_threads);
+        }
+
+        Ok(thread_id)
+    }
 }
-
-/*
-
-Message 1
-ID: 001
-
-Message 2
-ID: 002
-References: 001
-
-Message 3
-ID: 003
-References: 002
-
-Message 4
-ID: 004
-References: 003
-
-Message 5
-ID: 005
-References: 002, 001
-
-
-1, 2, 3, 4, 5 =>
-1 = ThreadId 1
-2 = SELECT ids WHERE ref = 1 => id(1) => ThreadId 1
-3 = SELECT ids WHERE ref = 2 => id(2) => ThreadId 1
-4 = SELECT ids WHERE ref = 3 => id(3) => ThreadId 1
-5 = SELECT ids WHERE ref = 2, 1 => id(1,2) => ThreadId 1
-
-5, 4, 3, 2, 1 =>
-5 = SELECT ids WHERE ref = 5, 2, 1 => NULL => ThreadId 5
-4 = SELECT ids WHERE ref = 4, 3 => NULL => ThreadId 4
-3 = SELECT ids WHERE ref = 3, 2 => id(4, 5) => ThreadId 4, 5 => Delete 5 => Merge => ThreadId 4
-2 = SELECT ids WHERE ref = 2, 1 => id(3, 4, 5) => ThreadId 4
-1 = SELECT ids WHERE ref = 1 => id(2, 3, 4, 5) => ThreadId 4
-
-
-*/

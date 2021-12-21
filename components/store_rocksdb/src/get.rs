@@ -6,7 +6,7 @@ use store::{
 use crate::RocksDBStore;
 
 impl StoreGet for RocksDBStore {
-    fn get_stored_value(
+    fn get_raw_value(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -26,7 +26,7 @@ impl StoreGet for RocksDBStore {
         }
     }
 
-    fn get_stored_value_multi(
+    fn get_multi_raw_value(
         &self,
         account: AccountId,
         collection: CollectionId,

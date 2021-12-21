@@ -120,6 +120,21 @@ impl<'x> RocksDBStore {
         )
     }
 
+    pub fn get_winnowed_ids(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        if let Some(mut docs) = self.get_document_ids(account, collection)? {
+            if let Some(tombstoned_docs) = self.get_tombstoned_ids(account, collection)? {
+                docs.bitxor_assign(tombstoned_docs);
+            }
+            Ok(Some(docs))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn get_tombstoned_ids(
         &self,
         account: AccountId,

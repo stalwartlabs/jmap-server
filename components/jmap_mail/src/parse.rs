@@ -6,17 +6,17 @@ use mail_parser::{
     Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessageAttachment,
     MessagePart,
 };
-use nlp::Language;
+use nlp::lang::LanguageDetector;
 use store::{
-    document::{DocumentBuilder, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    batch::{WriteOperation, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::Text,
-    FieldNumber, Integer, LongInteger, StoreError,
+    AccountId, FieldNumber, Integer, LongInteger, StoreError,
 };
 
-use crate::{MessageField, MessageParts};
+use crate::{MessageField, MessageParts, MAIL_CID};
 
 fn parse_address<'x>(
-    document: &mut DocumentBuilder<'x>,
+    document: &mut WriteOperation<'x>,
     header_name: HeaderName,
     address: Addr<'x>,
 ) {
@@ -37,7 +37,7 @@ fn parse_address<'x>(
 }
 
 fn parse_address_group<'x>(
-    document: &mut DocumentBuilder<'x>,
+    document: &mut WriteOperation<'x>,
     header_name: HeaderName,
     mut group: Group<'x>,
 ) {
@@ -50,18 +50,8 @@ fn parse_address_group<'x>(
     }
 }
 
-fn parse_text<'x>(document: &mut DocumentBuilder<'x>, header_name: HeaderName, text: Cow<'x, str>) {
+fn parse_text<'x>(document: &mut WriteOperation<'x>, header_name: HeaderName, text: Cow<'x, str>) {
     match header_name {
-        HeaderName::Subject => {
-            document.add_text(
-                header_name.into(),
-                0,
-                Text::Full((text, Language::Unknown)),
-                false,
-                true,
-            );
-        }
-
         HeaderName::Keywords | HeaderName::ContentLanguage | HeaderName::MimeVersion => {
             if text.len() <= MAX_TOKEN_LENGTH {
                 document.add_text(
@@ -74,20 +64,11 @@ fn parse_text<'x>(document: &mut DocumentBuilder<'x>, header_name: HeaderName, t
             }
         }
 
-        HeaderName::MessageId
+        HeaderName::Subject
+        | HeaderName::MessageId
         | HeaderName::References
         | HeaderName::ContentId
-        | HeaderName::ResentMessageId => {
-            if text.len() <= MAX_ID_LENGTH {
-                document.add_text(
-                    MessageField::MessageIdRef.into(),
-                    0,
-                    Text::Keyword(text),
-                    false,
-                    false,
-                );
-            }
-        }
+        | HeaderName::ResentMessageId => (),
 
         _ => {
             document.add_text(header_name.into(), 0, Text::Tokenized(text), false, false);
@@ -96,7 +77,7 @@ fn parse_text<'x>(document: &mut DocumentBuilder<'x>, header_name: HeaderName, t
 }
 
 fn parse_content_type<'x>(
-    document: &mut DocumentBuilder<'x>,
+    document: &mut WriteOperation<'x>,
     header_name: HeaderName,
     content_type: ContentType<'x>,
 ) {
@@ -131,7 +112,7 @@ fn parse_content_type<'x>(
     }
 }
 
-fn parse_datetime(document: &mut DocumentBuilder, header_name: HeaderName, date_time: DateTime) {
+fn parse_datetime(document: &mut WriteOperation, header_name: HeaderName, date_time: DateTime) {
     if (0..23).contains(&date_time.tz_hour)
         && (0..59).contains(&date_time.tz_minute)
         && (1970..2500).contains(&date_time.year)
@@ -163,7 +144,7 @@ fn parse_datetime(document: &mut DocumentBuilder, header_name: HeaderName, date_
 
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort<'x>(
-    document: &mut DocumentBuilder<'x>,
+    document: &mut WriteOperation<'x>,
     header_name: HeaderName,
     header_value: &HeaderValue<'x>,
 ) {
@@ -229,7 +210,7 @@ fn add_addr_sort<'x>(
 }
 
 fn parse_header<'x>(
-    document: &mut DocumentBuilder<'x>,
+    document: &mut WriteOperation<'x>,
     header_name: HeaderName,
     header_value: HeaderValue<'x>,
 ) {
@@ -273,8 +254,10 @@ fn parse_header<'x>(
     }
 }
 
-pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder> {
-    let mut document = DocumentBuilder::new();
+pub fn build_message_document(
+    account: AccountId,
+    mut message: Message,
+) -> store::Result<WriteOperation> {
     let mut message_parts = MessageParts {
         html_body: message.html_body,
         text_body: message.text_body,
@@ -283,8 +266,10 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
         size: message.raw_message.len(),
         received_at: Utc::now().timestamp(),
     };
+    let mut document = WriteOperation::insert(account, MAIL_CID);
     let mut total_message_parts = message.parts.len();
     let mut nested_headers = Vec::with_capacity(message.parts.len());
+    let mut language_detector = LanguageDetector::new();
 
     document.add_integer(
         MessageField::Size.into(),
@@ -313,6 +298,16 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
         message.raw_message,
     );
 
+    if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&HeaderName::Subject) {
+        document.add_text(
+            HeaderName::Subject.into(),
+            0,
+            Text::Full(language_detector.detect_wrap(subject)),
+            false,
+            false,
+        );
+    }
+
     for (header_name, header_value) in message.headers_rfc {
         if let HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc = header_name {
             add_addr_sort(&mut document, header_name, &header_value);
@@ -338,7 +333,9 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                 document.add_text(
                     field.clone().into(),
                     total_message_parts as FieldNumber,
-                    Text::Full((html_to_text(html.body.as_ref()).into(), Language::Unknown)),
+                    Text::Full(
+                        language_detector.detect_wrap(html_to_text(html.body.as_ref()).into()),
+                    ),
                     true,
                     field == MessageField::Body,
                 );
@@ -375,7 +372,7 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                 document.add_text(
                     field.into(),
                     part_id as FieldNumber,
-                    Text::Full((text.body, Language::Unknown)),
+                    Text::Full(language_detector.detect_wrap(text.body)),
                     true,
                     false,
                 );
@@ -398,7 +395,7 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                             document.add_text(
                                 MessageField::Attachment.into(),
                                 part_id as FieldNumber,
-                                Text::Full((subject, Language::Unknown)),
+                                Text::Full(language_detector.detect_wrap(subject)),
                                 false,
                                 false,
                             );
@@ -409,7 +406,7 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                                     document.add_text(
                                         MessageField::Attachment.into(),
                                         part_id as FieldNumber,
-                                        Text::Full((text.body, Language::Unknown)),
+                                        Text::Full(language_detector.detect_wrap(text.body)),
                                         false,
                                         false,
                                     );
@@ -418,10 +415,10 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                                     document.add_text(
                                         MessageField::Attachment.into(),
                                         part_id as FieldNumber,
-                                        Text::Full((
-                                            html_to_text(&html.body).into(),
-                                            Language::Unknown,
-                                        )),
+                                        Text::Full(
+                                            language_detector
+                                                .detect_wrap(html_to_text(&html.body).into()),
+                                        ),
                                         false,
                                         false,
                                     );
@@ -443,7 +440,9 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                                 document.add_text(
                                     MessageField::Attachment.into(),
                                     part_id as FieldNumber,
-                                    Text::Full((subject.to_string().into(), Language::Unknown)),
+                                    Text::Full(
+                                        language_detector.detect_wrap(subject.to_string().into()),
+                                    ),
                                     false,
                                     false,
                                 );
@@ -454,10 +453,10 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                                         document.add_text(
                                             MessageField::Attachment.into(),
                                             part_id as FieldNumber,
-                                            Text::Full((
-                                                text.body.to_string().into(),
-                                                Language::Unknown,
-                                            )),
+                                            Text::Full(
+                                                language_detector
+                                                    .detect_wrap(text.body.to_string().into()),
+                                            ),
                                             false,
                                             false,
                                         );
@@ -466,10 +465,10 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
                                         document.add_text(
                                             MessageField::Attachment.into(),
                                             part_id as FieldNumber,
-                                            Text::Full((
-                                                html_to_text(&html.body).into(),
-                                                Language::Unknown,
-                                            )),
+                                            Text::Full(
+                                                language_detector
+                                                    .detect_wrap(html_to_text(&html.body).into()),
+                                            ),
                                             false,
                                             false,
                                         );
@@ -531,6 +530,10 @@ pub fn build_message_document(message: Message) -> store::Result<DocumentBuilder
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
     );
+
+    if let Some(default_language) = language_detector.most_frequent_language() {
+        document.set_default_language(*default_language);
+    }
 
     // TODO use content language when available
     // TODO index PDF, Doc, Excel, etc.

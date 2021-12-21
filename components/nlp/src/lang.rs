@@ -1,11 +1,38 @@
+use std::collections::HashMap;
+
 use whatlang::{detect, Lang};
 
 use crate::Language;
 
-pub fn detect_language(text: &str) -> (Language, f64) {
-    detect(text).map_or((Language::Unknown, 0.0), |info| {
-        (
-            match info.lang() {
+pub const MIN_LANGUAGE_SCORE: f64 = 0.5;
+
+#[derive(Debug)]
+struct WeightedAverage {
+    weight: usize,
+    occurrences: usize,
+    confidence: f64,
+}
+
+pub struct LanguageDetector {
+    lang_detected: HashMap<Language, WeightedAverage>,
+}
+
+impl Default for LanguageDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LanguageDetector {
+    pub fn new() -> LanguageDetector {
+        LanguageDetector {
+            lang_detected: HashMap::new(),
+        }
+    }
+
+    pub fn detect(&mut self, text: &str, min_score: f64) -> Language {
+        if let Some(info) = detect(text) {
+            let language = match info.lang() {
                 Lang::Epo => Language::Esperanto,
                 Lang::Eng => Language::English,
                 Lang::Rus => Language::Russian,
@@ -73,10 +100,47 @@ pub fn detect_language(text: &str) -> (Language, f64) {
                 Lang::Lat => Language::Latin,
                 Lang::Slk => Language::Slovak,
                 Lang::Cat => Language::Catalan,
-            },
-            info.confidence(),
-        )
-    })
+            };
+            let confidence = info.confidence();
+            let w = self
+                .lang_detected
+                .entry(language)
+                .or_insert_with(|| WeightedAverage {
+                    weight: 0,
+                    confidence: 0.0,
+                    occurrences: 0,
+                });
+            w.occurrences += 1;
+            w.weight += text.len();
+            w.confidence += confidence * text.len() as f64;
+            if confidence < min_score {
+                Language::Unknown
+            } else {
+                language
+            }
+        } else {
+            Language::Unknown
+        }
+    }
+
+    pub fn detect_wrap<T>(&mut self, text: T) -> (T, Language)
+    where
+        T: AsRef<str>,
+    {
+        let language = self.detect(text.as_ref(), MIN_LANGUAGE_SCORE);
+        (text, language)
+    }
+
+    pub fn most_frequent_language(&self) -> Option<&Language> {
+        self.lang_detected
+            .iter()
+            .max_by(|(_, a), (_, b)| {
+                ((a.confidence / a.weight as f64) * a.occurrences as f64)
+                    .partial_cmp(&((b.confidence / b.weight as f64) * b.occurrences as f64))
+                    .unwrap_or(std::cmp::Ordering::Less)
+            })
+            .map(|(l, _)| l)
+    }
 }
 
 #[cfg(test)]
@@ -128,10 +192,37 @@ mod tests {
             ("시작이 반이다", Language::Korean),
         ];
 
+        let mut detector = LanguageDetector::new();
+
         for input in inputs.iter() {
-            let (lang, _) = detect_language(input.0);
-            //println!("{:?}", lang);
-            assert_eq!(lang, input.1);
+            assert_eq!(detector.detect(input.0, 0.0), input.1);
         }
+    }
+
+    #[test]
+    fn weighted_language() {
+        let mut detector = LanguageDetector::new();
+        for lang in [
+            (Language::Spanish, 0.5, 70),
+            (Language::Japanese, 0.2, 100),
+            (Language::Japanese, 0.3, 100),
+            (Language::Japanese, 0.4, 200),
+            (Language::English, 0.7, 50),
+        ]
+        .iter()
+        {
+            let w = detector
+                .lang_detected
+                .entry(lang.0)
+                .or_insert_with(|| WeightedAverage {
+                    weight: 0,
+                    confidence: 0.0,
+                    occurrences: 0,
+                });
+            w.occurrences += 1;
+            w.weight += lang.2;
+            w.confidence += lang.1 * lang.2 as f64;
+        }
+        assert_eq!(detector.most_frequent_language(), Some(&Language::Japanese));
     }
 }

@@ -49,7 +49,6 @@ impl From<MessageField> for u8 {
 
 pub struct MessageStore<'x, T> {
     pub id_lock: MutexMap,
-    pub ref_lock: MutexMap,
     pub db: &'x T,
 }
 impl<'x, T> MessageStore<'x, T>
@@ -59,7 +58,6 @@ where
     pub fn new(db: &T) -> MessageStore<T> {
         MessageStore {
             id_lock: MutexMap::with_capacity(1024),
-            ref_lock: MutexMap::with_capacity(1024),
             db,
         }
     }

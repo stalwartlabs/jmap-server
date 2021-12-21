@@ -4,9 +4,9 @@ use std::{
 };
 
 use nlp::Language;
-use rocksdb::{BoundColumnFamily, WriteBatch};
+use rocksdb::BoundColumnFamily;
 use store::{
-    document::DocumentBuilder,
+    batch::{WriteAction, WriteOperation},
     field::{IndexField, Text, TokenIterator},
     serialize::{
         serialize_acd_key_leb128, serialize_bm_internal, serialize_bm_tag_key,
@@ -14,69 +14,122 @@ use store::{
         BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, CollectionId, DocumentId, StoreError, StoreInsert,
+    DocumentId, StoreError, StoreUpdate,
 };
 
-use crate::{bitmaps::set_bits, document_id::UncommittedDocumentId, RocksDBStore};
+use crate::{bitmaps::set_bits, RocksDBStore};
 
-impl StoreInsert for RocksDBStore {
-    fn insert_bulk(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        documents: Vec<DocumentBuilder>,
-    ) -> store::Result<Vec<DocumentId>> {
+impl StoreUpdate for RocksDBStore {
+    fn update_bulk(&self, batches: Vec<WriteOperation>) -> store::Result<Vec<DocumentId>> {
         let cf_values = self.get_handle("values")?;
         let cf_indexes = self.get_handle("indexes")?;
         let cf_bitmaps = self.get_handle("bitmaps")?;
-        let mut batch = WriteBatch::default();
-        let mut document_ids = Vec::with_capacity(documents.len());
+        let mut write_batch = rocksdb::WriteBatch::default();
+        let mut uncommitted_ids = Vec::with_capacity(batches.len());
         let mut bitmap_list = HashMap::new();
 
-        for document in documents {
-            document_ids.push(self.insert_document(
-                &mut batch,
-                &cf_values,
-                &cf_indexes,
-                &mut bitmap_list,
-                account,
-                collection,
-                document,
-            )?);
+        for batch in batches {
+            match batch.get_action() {
+                WriteAction::Insert => {
+                    let uncommitted_id = self
+                        .reserve_document_id(batch.get_account_id(), batch.get_collection_id())?;
+                    self._update_document(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &mut bitmap_list,
+                        batch,
+                        uncommitted_id.get_id(),
+                    )?;
+                    uncommitted_ids.push(uncommitted_id);
+                }
+                WriteAction::Update(document_id) => self._update_document(
+                    &mut write_batch,
+                    &cf_values,
+                    &cf_indexes,
+                    &mut bitmap_list,
+                    batch,
+                    document_id,
+                )?,
+                WriteAction::DeleteAll => {
+                    self._delete(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &cf_bitmaps,
+                        batch,
+                    )?;
+                }
+                WriteAction::Delete(_) => unimplemented!(),
+            }
         }
 
         for (key, doc_id_list) in bitmap_list {
-            batch.merge_cf(&cf_bitmaps, key, set_bits(doc_id_list.into_iter()))
+            write_batch.merge_cf(&cf_bitmaps, key, set_bits(doc_id_list.into_iter()))
         }
 
         self.db
-            .write(batch)
+            .write(write_batch)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
 
-        Ok(document_ids.into_iter().map(|mut id| id.commit()).collect())
+        Ok(uncommitted_ids
+            .into_iter()
+            .map(|mut id| id.commit())
+            .collect())
     }
 }
 
 impl RocksDBStore {
     #[allow(clippy::too_many_arguments)]
-    fn insert_document(
+    fn _delete(
         &self,
-        batch: &mut WriteBatch,
+        write_batch: &mut rocksdb::WriteBatch,
+        _cf_values: &Arc<BoundColumnFamily>,
+        _cf_indexes: &Arc<BoundColumnFamily>,
+        cf_bitmaps: &Arc<BoundColumnFamily>,
+        batch: WriteOperation,
+    ) -> crate::Result<()> {
+        let account_id = batch.get_account_id();
+        let collection_id = batch.get_collection_id();
+
+        for field in batch {
+            match field {
+                IndexField::Tag(ref tag) => {
+                    write_batch.delete_cf(
+                        cf_bitmaps,
+                        &serialize_bm_tag_key(
+                            account_id,
+                            collection_id,
+                            *field.get_field(),
+                            &tag.value,
+                        ),
+                    );
+                }
+                _ => unimplemented!(),
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn _update_document(
+        &self,
+        batch: &mut rocksdb::WriteBatch,
         cf_values: &Arc<BoundColumnFamily>,
         cf_indexes: &Arc<BoundColumnFamily>,
         bitmap_list: &mut HashMap<Vec<u8>, HashSet<DocumentId>>,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentBuilder,
-    ) -> crate::Result<UncommittedDocumentId> {
-        // Reserve a document id
-        let document_id = self.reserve_document_id(account, collection)?;
+        document: WriteOperation,
+        document_id: DocumentId,
+    ) -> crate::Result<()> {
+        let account = document.get_account_id();
+        let collection = document.get_collection_id();
+        let default_language = document.get_default_language();
 
         // Add document id to collection
         bitmap_list
             .entry(serialize_bm_internal(account, collection, BM_USED_IDS))
             .or_insert_with(HashSet::new)
-            .insert(document_id.get_id());
+            .insert(document_id);
 
         // Full text term positions
         let mut term_index = TermIndexBuilder::new();
@@ -95,7 +148,7 @@ impl RocksDBStore {
                                     text,
                                 ))
                                 .or_insert_with(HashSet::new)
-                                .insert(document_id.get_id());
+                                .insert(document_id);
                             text
                         }
                         Text::Tokenized(text) => {
@@ -108,13 +161,20 @@ impl RocksDBStore {
                                         &token.word,
                                     ))
                                     .or_insert_with(HashSet::new)
-                                    .insert(document_id.get_id());
+                                    .insert(document_id);
                             }
                             text
                         }
                         Text::Full((text, language)) => {
-                            let terms =
-                                self.get_terms(TokenIterator::new(text, *language, true))?;
+                            let terms = self.get_terms(TokenIterator::new(
+                                text,
+                                if *language == Language::Unknown {
+                                    default_language
+                                } else {
+                                    *language
+                                },
+                                true,
+                            ))?;
                             if !terms.is_empty() {
                                 for term in &terms {
                                     bitmap_list
@@ -126,7 +186,7 @@ impl RocksDBStore {
                                             true,
                                         ))
                                         .or_insert_with(HashSet::new)
-                                        .insert(document_id.get_id());
+                                        .insert(document_id);
 
                                     if term.id_stemmed > 0 {
                                         bitmap_list
@@ -138,7 +198,7 @@ impl RocksDBStore {
                                                 false,
                                             ))
                                             .or_insert_with(HashSet::new)
-                                            .insert(document_id.get_id());
+                                            .insert(document_id);
                                     }
                                 }
 
@@ -154,7 +214,7 @@ impl RocksDBStore {
                             serialize_stored_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 t.get_field(),
                                 t.get_field_num(),
                             ),
@@ -168,7 +228,7 @@ impl RocksDBStore {
                             &serialize_index_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 t.get_field(),
                                 text.as_bytes(),
                             ),
@@ -186,7 +246,7 @@ impl RocksDBStore {
                             &t.value,
                         ))
                         .or_insert_with(HashSet::new)
-                        .insert(document_id.get_id());
+                        .insert(document_id);
                 }
                 IndexField::Blob(b) => {
                     batch.put_cf(
@@ -194,7 +254,7 @@ impl RocksDBStore {
                         serialize_stored_key(
                             account,
                             collection,
-                            document_id.get_id(),
+                            document_id,
                             b.get_field(),
                             b.get_field_num(),
                         ),
@@ -208,7 +268,7 @@ impl RocksDBStore {
                             serialize_stored_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 i.get_field(),
                                 i.get_field_num(),
                             ),
@@ -222,7 +282,7 @@ impl RocksDBStore {
                             &serialize_index_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 i.get_field(),
                                 &i.value.to_be_bytes(),
                             ),
@@ -237,7 +297,7 @@ impl RocksDBStore {
                             serialize_stored_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 i.get_field(),
                                 i.get_field_num(),
                             ),
@@ -251,7 +311,7 @@ impl RocksDBStore {
                             &serialize_index_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 i.get_field(),
                                 &i.value.to_be_bytes(),
                             ),
@@ -266,7 +326,7 @@ impl RocksDBStore {
                             serialize_stored_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 f.get_field(),
                                 f.get_field_num(),
                             ),
@@ -280,7 +340,7 @@ impl RocksDBStore {
                             &serialize_index_key(
                                 account,
                                 collection,
-                                document_id.get_id(),
+                                document_id,
                                 f.get_field(),
                                 &f.value.to_be_bytes(),
                             ),
@@ -295,11 +355,11 @@ impl RocksDBStore {
         if !term_index.is_empty() {
             batch.put_cf(
                 cf_values,
-                &serialize_acd_key_leb128(account, collection, document_id.get_id()),
+                &serialize_acd_key_leb128(account, collection, document_id),
                 &term_index.compress(),
             );
         }
 
-        Ok(document_id)
+        Ok(())
     }
 }
