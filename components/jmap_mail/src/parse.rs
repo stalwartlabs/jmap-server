@@ -3,12 +3,13 @@ use std::borrow::Cow;
 use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
+    parsers::fields::thread::thread_name,
     Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessageAttachment,
     MessagePart,
 };
-use nlp::lang::LanguageDetector;
+use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
-    batch::{WriteOperation, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    batch::{WriteOperation, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::Text,
     AccountId, FieldNumber, Integer, LongInteger, StoreError,
 };
@@ -254,10 +255,10 @@ fn parse_header<'x>(
     }
 }
 
-pub fn build_message_document(
+pub fn build_message_document<'x>(
     account: AccountId,
-    mut message: Message,
-) -> store::Result<WriteOperation> {
+    mut message: Message<'x>,
+) -> store::Result<(WriteOperation, Vec<Cow<'x, str>>, String)> {
     let mut message_parts = MessageParts {
         html_body: message.html_body,
         text_body: message.text_body,
@@ -266,7 +267,7 @@ pub fn build_message_document(
         size: message.raw_message.len(),
         received_at: Utc::now().timestamp(),
     };
-    let mut document = WriteOperation::insert(account, MAIL_CID);
+    let mut document = WriteOperation::insert_document(account, MAIL_CID);
     let mut total_message_parts = message.parts.len();
     let mut nested_headers = Vec::with_capacity(message.parts.len());
     let mut language_detector = LanguageDetector::new();
@@ -298,14 +299,69 @@ pub fn build_message_document(
         message.raw_message,
     );
 
-    if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&HeaderName::Subject) {
-        document.add_text(
-            HeaderName::Subject.into(),
-            0,
-            Text::Full(language_detector.detect_wrap(subject)),
-            false,
-            false,
-        );
+    // Obtain thread name
+    let thread_name = message
+        .headers_rfc
+        .remove(&HeaderName::Subject)
+        .and_then(|subject| {
+            if let HeaderValue::Text(subject) = subject {
+                let (thread_name, language) = match thread_name(&subject) {
+                    thread_name if !thread_name.is_empty() => (
+                        thread_name.to_string(),
+                        language_detector.detect(thread_name, MIN_LANGUAGE_SCORE),
+                    ),
+                    _ => (
+                        "!".to_string(),
+                        language_detector.detect(&subject, MIN_LANGUAGE_SCORE),
+                    ),
+                };
+
+                document.add_text(
+                    HeaderName::Subject.into(),
+                    0,
+                    Text::Full((subject, language)),
+                    false,
+                    false,
+                );
+
+                Some(thread_name)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "!".to_string());
+
+    // Build a list containing all IDs that appear in the header
+    let mut reference_ids = Vec::new();
+    for header_name in [
+        HeaderName::MessageId,
+        HeaderName::InReplyTo,
+        HeaderName::References,
+        HeaderName::ResentMessageId,
+    ] {
+        match message
+            .headers_rfc
+            .remove(&header_name)
+            .unwrap_or(HeaderValue::Empty)
+        {
+            HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => reference_ids.push(text),
+            HeaderValue::TextList(mut list) => {
+                reference_ids.extend(list.drain(..).filter(|text| text.len() <= MAX_ID_LENGTH));
+            }
+            HeaderValue::Collection(col) => {
+                for item in col {
+                    match item {
+                        HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
+                            reference_ids.push(text)
+                        }
+                        HeaderValue::TextList(mut list) => reference_ids
+                            .extend(list.drain(..).filter(|text| text.len() <= MAX_ID_LENGTH)),
+                        _ => (),
+                    }
+                }
+            }
+            _ => (),
+        }
     }
 
     for (header_name, header_value) in message.headers_rfc {
@@ -538,5 +594,5 @@ pub fn build_message_document(
     // TODO use content language when available
     // TODO index PDF, Doc, Excel, etc.
 
-    Ok(document)
+    Ok((document, reference_ids, thread_name))
 }

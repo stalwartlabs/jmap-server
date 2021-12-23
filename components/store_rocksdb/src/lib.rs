@@ -102,12 +102,15 @@ impl<'x> Store<'x> for RocksDBStore where RocksDBStore: store::StoreQuery<'x> {}
 #[cfg(test)]
 mod tests {
 
-    use store_test::test_artworks::{filter_artworks, insert_artworks, sort_artworks};
+    use store_test::{
+        test_artworks::{filter_artworks, insert_artworks, sort_artworks},
+        test_mail_threads::test_mail_threads,
+    };
 
     use crate::RocksDBStore;
 
     #[test]
-    fn rocksdb_test() {
+    fn test_artworks() {
         let mut temp_dir = std::env::temp_dir();
         temp_dir.push("strdb_query_test");
         /*if temp_dir.exists() {
@@ -118,6 +121,22 @@ mod tests {
         //db.compact().unwrap();
         //insert_artworks(&db);
         filter_artworks(&db);
-        //sort_artworks(&db);
+        sort_artworks(&db);
+    }
+
+    #[test]
+    fn test_message_threads() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_threads_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        {
+            let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
+            test_mail_threads(&db);
+        }
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

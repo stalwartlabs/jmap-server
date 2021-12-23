@@ -277,7 +277,7 @@ mod tests {
             let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
 
             for raw_doc_num in 0..10 {
-                let mut builder = WriteOperation::insert(0, 0);
+                let mut builder = WriteOperation::insert_document(0, 0);
                 builder.add_text(
                     0,
                     0,
@@ -327,10 +327,19 @@ mod tests {
                     );
 
                     for field in 0..6 {
-                        assert!(db.get_raw_value(0, 0, 0, field, 0).unwrap().is_none());
-                        assert!(db.get_raw_value(0, 0, 9, field, 0).unwrap().is_none());
+                        assert!(db
+                            .get_document_value::<Vec<u8>>(0, 0, 0, field, 0)
+                            .unwrap()
+                            .is_none());
+                        assert!(db
+                            .get_document_value::<Vec<u8>>(0, 0, 9, field, 0)
+                            .unwrap()
+                            .is_none());
                         for doc_id in 1..9 {
-                            assert!(db.get_raw_value(0, 0, doc_id, field, 0).unwrap().is_some());
+                            assert!(db
+                                .get_document_value::<Vec<u8>>(0, 0, doc_id, field, 0)
+                                .unwrap()
+                                .is_some());
                         }
                     }
                 }

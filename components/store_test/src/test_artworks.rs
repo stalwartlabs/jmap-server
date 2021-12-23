@@ -82,7 +82,7 @@ pub fn insert_artworks<'x, T: Store<'x>>(db: &T) {
                 let record = record.unwrap();
                 let documents = documents.clone();
                 s.spawn(move |_| {
-                    let mut builder = WriteOperation::insert(0, 0);
+                    let mut builder = WriteOperation::insert_document(0, 0);
                     for (pos, field) in record.iter().enumerate() {
                         if field.is_empty() {
                             continue;
@@ -391,7 +391,7 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
             .unwrap()
         {
             results.push(
-                db.get_value(0, 0, doc_id, fields["accession_number"])
+                db.get_document_value(0, 0, doc_id, fields["accession_number"], 0)
                     .unwrap()
                     .unwrap(),
             );
@@ -449,7 +449,7 @@ pub fn sort_artworks<'x, T: Store<'x>>(db: &'x T) {
 
         for doc_id in db.query(0, 0, None, Some(sort)).unwrap() {
             results.push(
-                db.get_value(0, 0, doc_id, fields["accession_number"])
+                db.get_document_value(0, 0, doc_id, fields["accession_number"], 0)
                     .unwrap()
                     .unwrap(),
             );

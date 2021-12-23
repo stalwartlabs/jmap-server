@@ -38,6 +38,24 @@ pub fn serialize_stored_key(
     bytes
 }
 
+pub fn serialize_stored_key_global(
+    account: Option<AccountId>,
+    collection: Option<CollectionId>,
+    field: Option<FieldId>,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN);
+    if let Some(account) = account {
+        account.to_leb128_bytes(&mut bytes);
+    }
+    if let Some(collection) = collection {
+        bytes.push(collection);
+    }
+    if let Some(field) = field {
+        bytes.push(field);
+    }
+    bytes
+}
+
 pub fn serialize_bm_tag_key(
     account: AccountId,
     collection: CollectionId,
@@ -232,6 +250,12 @@ pub fn deserialize_document_id_from_leb128(bytes: &[u8]) -> Option<DocumentId> {
 
 pub trait StoreDeserialize<T>: Sized {
     fn deserialize(self) -> crate::Result<T>;
+}
+
+impl StoreDeserialize<Vec<u8>> for Vec<u8> {
+    fn deserialize(self) -> crate::Result<Vec<u8>> {
+        Ok(self)
+    }
 }
 
 impl StoreDeserialize<String> for Vec<u8> {

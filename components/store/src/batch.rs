@@ -13,60 +13,65 @@ pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
 pub struct WriteOperation<'x> {
-    account: AccountId,
-    collection: CollectionId,
     action: WriteAction,
-    language: Language,
     fields: Vec<IndexField<'x>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum WriteAction {
-    Insert,
-    Update(DocumentId),
-    Delete(DocumentId),
-    DeleteAll,
+    UpdateDocument(AccountId, CollectionId, Option<DocumentId>, Language),
+    DeleteDocument(AccountId, CollectionId, DocumentId),
+    UpdateCollection(AccountId, CollectionId),
+    DeleteCollection(AccountId, CollectionId),
+    Update,
+    Delete,
 }
 
 impl<'x> WriteOperation<'x> {
-    pub fn insert(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
+    pub fn insert_document(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
         WriteOperation {
-            account,
-            collection,
-            action: WriteAction::Insert,
-            language: Language::English,
+            action: WriteAction::UpdateDocument(account, collection, None, Language::English),
             fields: Vec::new(),
         }
     }
 
-    pub fn update(
+    pub fn update_document(
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
     ) -> WriteOperation<'x> {
         WriteOperation {
-            account,
-            collection,
-            action: WriteAction::Update(document),
-            language: Language::English,
+            action: WriteAction::UpdateDocument(
+                account,
+                collection,
+                document.into(),
+                Language::English,
+            ),
             fields: Vec::new(),
         }
     }
 
-    pub fn delete(
+    pub fn delete_document(
         account: AccountId,
         collection: CollectionId,
-        document: Option<DocumentId>,
+        document: DocumentId,
     ) -> WriteOperation<'x> {
         WriteOperation {
-            account,
-            collection,
-            action: if let Some(document) = document {
-                WriteAction::Delete(document)
-            } else {
-                WriteAction::DeleteAll
-            },
-            language: Language::English,
+            action: WriteAction::DeleteDocument(account, collection, document),
+            fields: Vec::new(),
+        }
+    }
+
+    pub fn update_collection(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
+        WriteOperation {
+            action: WriteAction::UpdateCollection(account, collection),
+            fields: Vec::new(),
+        }
+    }
+
+    pub fn delete_collection(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
+        WriteOperation {
+            action: WriteAction::DeleteCollection(account, collection),
             fields: Vec::new(),
         }
     }
@@ -134,24 +139,14 @@ impl<'x> WriteOperation<'x> {
         )));
     }
 
-    pub fn get_account_id(&self) -> AccountId {
-        self.account
-    }
-
-    pub fn get_collection_id(&self) -> CollectionId {
-        self.collection
-    }
-
     pub fn get_action(&self) -> WriteAction {
         self.action
     }
 
-    pub fn set_default_language(&mut self, language: Language) {
-        self.language = language;
-    }
-
-    pub fn get_default_language(&self) -> Language {
-        self.language
+    pub fn set_default_language(&mut self, set_language: Language) {
+        if let WriteAction::UpdateDocument(_, _, _, language) = &mut self.action {
+            *language = set_language;
+        };
     }
 
     pub fn is_empty(&self) -> bool {

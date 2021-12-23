@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "mail-parser"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "encoding_rs",
  "serde",
@@ -793,6 +793,7 @@ name = "store_test"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "jmap_mail",
  "nlp",
  "rayon",
  "store",

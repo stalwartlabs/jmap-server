@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 store = { path = "../store" }
+jmap_mail = { path = "../jmap_mail" }
 nlp = { path = "../nlp" }
 rayon = "1.5.1"
 csv = "1.1"

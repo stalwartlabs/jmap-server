@@ -1,12 +1,85 @@
 use store::{
-    serialize::serialize_stored_key, AccountId, CollectionId, DocumentId, FieldId, FieldNumber,
-    StoreError, StoreGet,
+    serialize::{serialize_stored_key, serialize_stored_key_global, StoreDeserialize},
+    AccountId, CollectionId, DocumentId, FieldId, FieldNumber, StoreError, StoreGet,
 };
 
 use crate::RocksDBStore;
 
 impl StoreGet for RocksDBStore {
+    fn get_value<T>(
+        &self,
+        account: Option<AccountId>,
+        collection: Option<CollectionId>,
+        field: Option<FieldId>,
+    ) -> store::Result<Option<T>>
+    where
+        Vec<u8>: StoreDeserialize<T>,
+    {
+        if let Some(bytes) = self.get_raw_value(account, collection, field)? {
+            Ok(Some(bytes.deserialize()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn get_document_value<T>(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        field: FieldId,
+        field_num: FieldNumber,
+    ) -> store::Result<Option<T>>
+    where
+        Vec<u8>: StoreDeserialize<T>,
+    {
+        if let Some(bytes) =
+            self.get_document_raw_value(account, collection, document, field, field_num)?
+        {
+            Ok(Some(bytes.deserialize()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn get_multi_document_value<T>(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        documents: &[DocumentId],
+        field: FieldId,
+    ) -> store::Result<Vec<Option<T>>>
+    where
+        Vec<u8>: StoreDeserialize<T>,
+    {
+        let mut result = Vec::with_capacity(documents.len());
+        for item in self.get_multi_document_raw_value(account, collection, documents, field, 0)? {
+            if let Some(bytes) = item {
+                result.push(Some(bytes.deserialize()?));
+            } else {
+                result.push(None);
+            }
+        }
+        Ok(result)
+    }
+}
+
+impl RocksDBStore {
     fn get_raw_value(
+        &self,
+        account: Option<AccountId>,
+        collection: Option<CollectionId>,
+        field: Option<FieldId>,
+    ) -> crate::Result<Option<Vec<u8>>> {
+        self.db
+            .get_cf(
+                &self.get_handle("values")?,
+                &serialize_stored_key_global(account, collection, field),
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))
+    }
+
+    fn get_document_raw_value(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -26,7 +99,7 @@ impl StoreGet for RocksDBStore {
         }
     }
 
-    fn get_multi_raw_value(
+    fn get_multi_document_raw_value(
         &self,
         account: AccountId,
         collection: CollectionId,

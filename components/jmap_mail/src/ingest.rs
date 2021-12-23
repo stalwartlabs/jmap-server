@@ -1,11 +1,9 @@
 use std::collections::HashSet;
 
-use mail_parser::{HeaderName, HeaderValue, Message};
+use mail_parser::Message;
 use store::{
-    batch::{WriteOperation, MAX_ID_LENGTH},
-    field::Text,
-    AccountId, ComparisonOperator, DocumentId, FieldValue, Filter, Store, StoreError, Tag,
-    ThreadId,
+    batch::WriteOperation, field::Text, AccountId, ComparisonOperator, DocumentId, FieldValue,
+    Filter, Store, StoreError, Tag, ThreadId,
 };
 
 use crate::{parse::build_message_document, MessageField, MessageStore, MAIL_CID};
@@ -15,57 +13,11 @@ where
     T: Store<'x>,
 {
     pub fn ingest_message(&self, account: AccountId, raw_message: &[u8]) -> store::Result<()> {
-        // Parse raw message
-        let mut message = Message::parse(raw_message).ok_or(StoreError::ParseError)?;
-
-        // Obtain the thread name
-        let thread_name = message
-            .get_thread_name()
-            .and_then(|val| {
-                let val = val.trim();
-                if !val.is_empty() {
-                    Some(val.to_lowercase())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| "!".to_string());
-
-        // Build a list containing all IDs that appear in the header
-        let mut reference_ids = Vec::new();
-        for header_name in [
-            HeaderName::MessageId,
-            HeaderName::InReplyTo,
-            HeaderName::References,
-            HeaderName::ResentMessageId,
-        ] {
-            match message
-                .headers_rfc
-                .remove(&header_name)
-                .unwrap_or(HeaderValue::Empty)
-            {
-                HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => reference_ids.push(text),
-                HeaderValue::TextList(mut list) => {
-                    reference_ids.extend(list.drain(..).filter(|text| text.len() <= MAX_ID_LENGTH));
-                }
-                HeaderValue::Collection(col) => {
-                    for item in col {
-                        match item {
-                            HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                                reference_ids.push(text)
-                            }
-                            HeaderValue::TextList(mut list) => reference_ids
-                                .extend(list.drain(..).filter(|text| text.len() <= MAX_ID_LENGTH)),
-                            _ => (),
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-
         // Build message document
-        let mut batch = build_message_document(account, message)?;
+        let (mut batch, reference_ids, thread_name) = build_message_document(
+            account,
+            Message::parse(raw_message).ok_or(StoreError::ParseError)?,
+        )?;
         let mut batches = Vec::new();
 
         // Lock account
@@ -109,7 +61,7 @@ where
             if !message_doc_ids.is_empty() {
                 let thread_ids = self
                     .db
-                    .get_multi_value(
+                    .get_multi_document_value(
                         account,
                         crate::MAIL_CID,
                         &message_doc_ids,
@@ -120,6 +72,7 @@ where
                     .collect::<HashSet<ThreadId>>();
 
                 if thread_ids.len() > 1 {
+                    // Merge all matching threads
                     Some(self.merge_threads(
                         account,
                         &mut batches,
@@ -139,7 +92,20 @@ where
         let thread_id = if let Some(thread_id) = thread_id {
             thread_id
         } else {
-            0
+            let thread_id: ThreadId = if let Some(thread_id) = self.db.get_value::<ThreadId>(
+                account.into(),
+                MAIL_CID.into(),
+                Some(MessageField::ThreadId.into()),
+            )? {
+                thread_id + 1
+            } else {
+                0
+            };
+
+            let mut thread_op = WriteOperation::update_collection(account, MAIL_CID);
+            thread_op.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
+            batches.push(thread_op);
+            thread_id
         };
 
         for reference_id in reference_ids {
@@ -202,20 +168,20 @@ where
             }
         }
 
-        tag_iterators.sort_by_key(|i| i.0.size_hint().0);
+        tag_iterators.sort_unstable_by_key(|i| i.0.size_hint().0);
 
-        let mut tag_iterators = tag_iterators.into_iter();
-        let thread_id = if let Some((_, thread_id)) = tag_iterators.next_back() {
+        let mut tag_iterators = tag_iterators.into_iter().rev();
+        let thread_id = if let Some((_, thread_id)) = tag_iterators.next() {
             thread_id
         } else {
             thread_ids[0]
         };
 
-        let mut deleted_threads = WriteOperation::delete(account, MAIL_CID, None);
+        let mut deleted_threads = WriteOperation::delete_collection(account, MAIL_CID);
 
-        while let Some((tag_iterator, delete_thread_id)) = tag_iterators.next_back() {
+        for (tag_iterator, delete_thread_id) in tag_iterators {
             for document_id in tag_iterator {
-                let mut batch = WriteOperation::update(account, MAIL_CID, document_id);
+                let mut batch = WriteOperation::update_document(account, MAIL_CID, document_id);
                 batch.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
                 batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
                 batches.push(batch);

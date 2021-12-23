@@ -8,7 +8,6 @@ pub mod term_index;
 
 use batch::WriteOperation;
 use nlp::Language;
-use serialize::StoreDeserialize;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -228,42 +227,27 @@ pub trait StoreQuery<'x> {
 }
 
 pub trait StoreGet {
-    fn get_raw_value(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        pos: FieldNumber,
-    ) -> Result<Option<Vec<u8>>>;
-
-    fn get_multi_raw_value(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        documents: &[DocumentId],
-        field: FieldId,
-        pos: FieldNumber,
-    ) -> Result<Vec<Option<Vec<u8>>>>;
-
     fn get_value<T>(
         &self,
+        account: Option<AccountId>,
+        collection: Option<CollectionId>,
+        field: Option<FieldId>,
+    ) -> Result<Option<T>>
+    where
+        Vec<u8>: serialize::StoreDeserialize<T>;
+
+    fn get_document_value<T>(
+        &self,
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
+        field_num: FieldNumber,
     ) -> Result<Option<T>>
     where
-        Vec<u8>: serialize::StoreDeserialize<T>,
-    {
-        if let Some(bytes) = self.get_raw_value(account, collection, document, field, 0)? {
-            Ok(Some(bytes.deserialize()?))
-        } else {
-            Ok(None)
-        }
-    }
+        Vec<u8>: serialize::StoreDeserialize<T>;
 
-    fn get_multi_value<T>(
+    fn get_multi_document_value<T>(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -271,18 +255,7 @@ pub trait StoreGet {
         field: FieldId,
     ) -> Result<Vec<Option<T>>>
     where
-        Vec<u8>: serialize::StoreDeserialize<T>,
-    {
-        let mut result = Vec::with_capacity(documents.len());
-        for item in self.get_multi_raw_value(account, collection, documents, field, 0)? {
-            if let Some(bytes) = item {
-                result.push(Some(bytes.deserialize()?));
-            } else {
-                result.push(None);
-            }
-        }
-        Ok(result)
-    }
+        Vec<u8>: serialize::StoreDeserialize<T>;
 }
 
 pub trait StoreTag {

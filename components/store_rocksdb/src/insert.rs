@@ -11,10 +11,10 @@ use store::{
     serialize::{
         serialize_acd_key_leb128, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
-        BM_USED_IDS,
+        serialize_stored_key_global, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    DocumentId, StoreError, StoreUpdate,
+    AccountId, CollectionId, DocumentId, StoreError, StoreUpdate,
 };
 
 use crate::{bitmaps::set_bits, RocksDBStore};
@@ -30,37 +30,80 @@ impl StoreUpdate for RocksDBStore {
 
         for batch in batches {
             match batch.get_action() {
-                WriteAction::Insert => {
-                    let uncommitted_id = self
-                        .reserve_document_id(batch.get_account_id(), batch.get_collection_id())?;
-                    self._update_document(
-                        &mut write_batch,
-                        &cf_values,
-                        &cf_indexes,
-                        &mut bitmap_list,
-                        batch,
-                        uncommitted_id.get_id(),
-                    )?;
-                    uncommitted_ids.push(uncommitted_id);
+                WriteAction::UpdateDocument(account, collection, document_id, default_language) => {
+                    if let Some(document_id) = document_id {
+                        self._update_document(
+                            &mut write_batch,
+                            &cf_values,
+                            &cf_indexes,
+                            &mut bitmap_list,
+                            account,
+                            collection,
+                            document_id,
+                            default_language,
+                            batch,
+                        )?
+                    } else {
+                        let uncommitted_id = self.reserve_document_id(account, collection)?;
+                        self._update_document(
+                            &mut write_batch,
+                            &cf_values,
+                            &cf_indexes,
+                            &mut bitmap_list,
+                            account,
+                            collection,
+                            uncommitted_id.get_id(),
+                            default_language,
+                            batch,
+                        )?;
+                        uncommitted_ids.push(uncommitted_id);
+                    }
                 }
-                WriteAction::Update(document_id) => self._update_document(
-                    &mut write_batch,
-                    &cf_values,
-                    &cf_indexes,
-                    &mut bitmap_list,
-                    batch,
-                    document_id,
-                )?,
-                WriteAction::DeleteAll => {
-                    self._delete(
+                WriteAction::DeleteDocument(_, _, _) => unimplemented!(),
+                WriteAction::UpdateCollection(account, collection) => {
+                    self._update_global(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
                         &cf_bitmaps,
+                        account.into(),
+                        collection.into(),
                         batch,
                     )?;
                 }
-                WriteAction::Delete(_) => unimplemented!(),
+                WriteAction::DeleteCollection(account, collection) => {
+                    self._delete_global(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &cf_bitmaps,
+                        account.into(),
+                        collection.into(),
+                        batch,
+                    )?;
+                }
+                WriteAction::Update => {
+                    self._update_global(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &cf_bitmaps,
+                        None,
+                        None,
+                        batch,
+                    )?;
+                }
+                WriteAction::Delete => {
+                    self._delete_global(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &cf_bitmaps,
+                        None,
+                        None,
+                        batch,
+                    )?;
+                }
             }
         }
 
@@ -81,25 +124,64 @@ impl StoreUpdate for RocksDBStore {
 
 impl RocksDBStore {
     #[allow(clippy::too_many_arguments)]
-    fn _delete(
+    fn _update_global(
+        &self,
+        write_batch: &mut rocksdb::WriteBatch,
+        cf_values: &Arc<BoundColumnFamily>,
+        _cf_indexes: &Arc<BoundColumnFamily>,
+        _cf_bitmaps: &Arc<BoundColumnFamily>,
+        account: Option<AccountId>,
+        collection: Option<CollectionId>,
+        batch: WriteOperation,
+    ) -> crate::Result<()> {
+        for field in batch {
+            match field {
+                IndexField::LongInteger(ref i) => {
+                    write_batch.put_cf(
+                        cf_values,
+                        serialize_stored_key_global(account, collection, i.get_field().into()),
+                        &i.value.to_le_bytes(),
+                    );
+                }
+                IndexField::Integer(ref i) => {
+                    write_batch.put_cf(
+                        cf_values,
+                        serialize_stored_key_global(account, collection, i.get_field().into()),
+                        &i.value.to_le_bytes(),
+                    );
+                }
+                IndexField::Float(ref f) => {
+                    write_batch.put_cf(
+                        cf_values,
+                        serialize_stored_key_global(account, collection, f.get_field().into()),
+                        &f.value.to_le_bytes(),
+                    );
+                }
+                _ => unimplemented!(),
+            };
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn _delete_global(
         &self,
         write_batch: &mut rocksdb::WriteBatch,
         _cf_values: &Arc<BoundColumnFamily>,
         _cf_indexes: &Arc<BoundColumnFamily>,
         cf_bitmaps: &Arc<BoundColumnFamily>,
+        account: Option<AccountId>,
+        collection: Option<CollectionId>,
         batch: WriteOperation,
     ) -> crate::Result<()> {
-        let account_id = batch.get_account_id();
-        let collection_id = batch.get_collection_id();
-
         for field in batch {
             match field {
                 IndexField::Tag(ref tag) => {
                     write_batch.delete_cf(
                         cf_bitmaps,
                         &serialize_bm_tag_key(
-                            account_id,
-                            collection_id,
+                            account.unwrap(),
+                            collection.unwrap(),
                             *field.get_field(),
                             &tag.value,
                         ),
@@ -118,13 +200,12 @@ impl RocksDBStore {
         cf_values: &Arc<BoundColumnFamily>,
         cf_indexes: &Arc<BoundColumnFamily>,
         bitmap_list: &mut HashMap<Vec<u8>, HashSet<DocumentId>>,
-        document: WriteOperation,
+        account: AccountId,
+        collection: CollectionId,
         document_id: DocumentId,
+        default_language: Language,
+        document: WriteOperation,
     ) -> crate::Result<()> {
-        let account = document.get_account_id();
-        let collection = document.get_collection_id();
-        let default_language = document.get_default_language();
-
         // Add document id to collection
         bitmap_list
             .entry(serialize_bm_internal(account, collection, BM_USED_IDS))
