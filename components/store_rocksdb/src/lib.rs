@@ -84,6 +84,10 @@ impl RocksDBStore {
         })
     }
 
+    pub fn get_db(&self) -> &DBWithThreadMode<MultiThreaded> {
+        &self.db
+    }
+
     pub fn compact(&self) -> Result<()> {
         for cf in [
             self.get_handle("values")?,
@@ -134,7 +138,7 @@ mod tests {
 
         {
             let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
-            test_mail_threads(&db);
+            test_mail_threads(db);
         }
 
         std::fs::remove_dir_all(&temp_dir).unwrap();

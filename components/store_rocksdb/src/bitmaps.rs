@@ -9,8 +9,8 @@ use std::{
     sync::Arc,
 };
 use store::{
-    leb128::Leb128, serialize::PREFIX_LEN, ComparisonOperator, DocumentId, LogicalOperator,
-    StoreError,
+    leb128::Leb128, serialize::PREFIX_LEN, ComparisonOperator, DocumentId, DocumentSet,
+    LogicalOperator, StoreError,
 };
 
 use crate::RocksDBStore;
@@ -351,6 +351,89 @@ macro_rules! impl_bit {
 
 impl_bit!(set_bit, set_bits, BIT_SET);
 impl_bit!(clear_bit, clear_bits, BIT_CLEAR);
+
+pub struct RocksDBDocumentSet {
+    bitmap: RoaringBitmap,
+}
+
+impl RocksDBDocumentSet {
+    pub fn from_roaring(bitmap: RoaringBitmap) -> RocksDBDocumentSet {
+        RocksDBDocumentSet { bitmap }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> crate::Result<RocksDBDocumentSet> {
+        Ok(RocksDBDocumentSet {
+            bitmap: into_bitmap(bytes)?,
+        })
+    }
+
+    pub fn unwrap(self) -> RoaringBitmap {
+        self.bitmap
+    }
+}
+
+impl Default for RocksDBDocumentSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DocumentSet for RocksDBDocumentSet {
+    fn new() -> RocksDBDocumentSet {
+        RocksDBDocumentSet {
+            bitmap: RoaringBitmap::new(),
+        }
+    }
+
+    fn contains(&self, document: DocumentId) -> bool {
+        self.bitmap.contains(document)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.bitmap.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.bitmap.len() as usize
+    }
+
+    fn intersection(&mut self, other: &Self) {
+        self.bitmap.bitand_assign(&other.bitmap);
+    }
+
+    fn union(&mut self, other: &Self) {
+        self.bitmap.bitor_assign(&other.bitmap);
+    }
+
+    fn difference(&mut self, other: &Self) {
+        self.bitmap.bitxor_assign(&other.bitmap);
+    }
+}
+
+impl Eq for RocksDBDocumentSet {}
+
+impl PartialEq for RocksDBDocumentSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.bitmap == other.bitmap
+    }
+}
+
+impl IntoIterator for RocksDBDocumentSet {
+    type Item = DocumentId;
+    type IntoIter = roaring::bitmap::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.bitmap.into_iter()
+    }
+}
+
+impl Clone for RocksDBDocumentSet {
+    fn clone(&self) -> Self {
+        Self {
+            bitmap: self.bitmap.clone(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

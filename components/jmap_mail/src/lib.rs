@@ -1,12 +1,12 @@
+use jmap_store::{JMAPComparator, JMAPQuery};
 use mail_parser::MessagePartId;
+use query::{JMAPMailComparator, JMAPMailFilterCondition};
 use serde::{Deserialize, Serialize};
-use store::{mutex_map::MutexMap, FieldNumber, Store};
+use store::{AccountId, DocumentId, DocumentSet, FieldNumber, ThreadId};
 
-pub mod ingest;
+pub mod import;
 pub mod parse;
-
-pub const MAIL_CID: u8 = 0;
-pub const THREAD_CID: u8 = 1;
+pub mod query;
 
 pub const MESSAGE_RAW: FieldNumber = 0;
 pub const MESSAGE_HEADERS: FieldNumber = 1;
@@ -15,6 +15,11 @@ pub const MESSAGE_HEADERS_OFFSETS: FieldNumber = 3;
 pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
 pub const MESSAGE_HEADERS_PARTS: FieldNumber = 5;
 pub const MESSAGE_HEADERS_STRUCTURE: FieldNumber = 6;
+
+pub struct JMAPMailId {
+    pub thread_id: ThreadId,
+    pub doc_id: DocumentId,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageParts {
@@ -39,6 +44,7 @@ pub enum MessageField {
     ThreadName = 134,
     MessageIdRef = 135,
     ThreadId = 136,
+    Mailbox = 137,
 }
 
 impl From<MessageField> for u8 {
@@ -47,18 +53,18 @@ impl From<MessageField> for u8 {
     }
 }
 
-pub struct MessageStore<'x, T> {
-    pub id_lock: MutexMap,
-    pub db: &'x T,
+pub trait JMAPMailStoreImport<'x> {
+    fn mail_import(&'x self, account: AccountId, raw_message: &[u8]) -> store::Result<()>;
 }
-impl<'x, T> MessageStore<'x, T>
-where
-    T: Store<'x>,
-{
-    pub fn new(db: &T) -> MessageStore<T> {
-        MessageStore {
-            id_lock: MutexMap::with_capacity(1024),
-            db,
-        }
-    }
+
+pub trait JMAPMailStoreQuery<'x> {
+    type Set: DocumentSet;
+
+    fn mail_query(
+        &'x self,
+        query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
+        collapse_threads: bool,
+    ) -> store::Result<Vec<JMAPMailId>>;
 }
+
+pub trait JMAPMailStore<'x>: JMAPMailStoreImport<'x> + JMAPMailStoreQuery<'x> {}

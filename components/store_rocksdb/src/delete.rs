@@ -307,7 +307,7 @@ mod tests {
                 builder.add_long_int(5, 0, raw_doc_num as LongInteger, true, true);
                 builder.add_tag(6, Tag::Id(0));
                 builder.add_tag(7, Tag::Static(0));
-                builder.add_tag(8, Tag::Text("my custom tag"));
+                builder.add_tag(8, Tag::Text("my custom tag".into()));
 
                 db.update(builder).unwrap();
             }
@@ -318,7 +318,7 @@ mod tests {
             for do_purge in [true, false] {
                 for field in 0..6 {
                     assert_eq!(
-                        db.query(0, 0, None, Some(vec![Comparator::ascending(field)]))
+                        db.query(0, 0, Filter::None, Comparator::ascending(field))
                             .unwrap()
                             .collect::<Vec<DocumentId>>(),
                         Vec::from_iter(1..9),
@@ -345,9 +345,14 @@ mod tests {
                 }
 
                 assert_eq!(
-                    db.query(0, 0, Some(Filter::eq(1, FieldValue::Text("text"))), None)
-                        .unwrap()
-                        .collect::<Vec<DocumentId>>(),
+                    db.query(
+                        0,
+                        0,
+                        Filter::eq(1, FieldValue::Text("text".into())),
+                        Comparator::None
+                    )
+                    .unwrap()
+                    .collect::<Vec<DocumentId>>(),
                     Vec::from_iter(1..9)
                 );
 
@@ -355,25 +360,35 @@ mod tests {
                     db.query(
                         0,
                         0,
-                        Some(Filter::eq(
+                        Filter::eq(
                             2,
-                            FieldValue::FullText(TextQuery::query_english("text"))
-                        )),
-                        None
+                            FieldValue::FullText(TextQuery::query_english("text".into()))
+                        ),
+                        Comparator::None
                     )
                     .unwrap()
                     .collect::<Vec<DocumentId>>(),
                     Vec::from_iter(1..9)
                 );
 
-                for (pos, tag) in [Tag::Id(0), Tag::Static(0), Tag::Text("my custom tag")]
-                    .iter()
-                    .enumerate()
+                for (pos, tag) in [
+                    Tag::Id(0),
+                    Tag::Static(0),
+                    Tag::Text("my custom tag".into()),
+                ]
+                .iter()
+                .enumerate()
                 {
-                    assert!(!db.has_tag(0, 0, 0, 6 + pos as FieldId, *tag).unwrap());
-                    assert!(!db.has_tag(0, 0, 9, 6 + pos as FieldId, *tag).unwrap());
+                    assert!(!db
+                        .has_tag(0, 0, 0, 6 + pos as FieldId, tag.clone())
+                        .unwrap());
+                    assert!(!db
+                        .has_tag(0, 0, 9, 6 + pos as FieldId, tag.clone())
+                        .unwrap());
                     for doc_id in 1..9 {
-                        assert!(db.has_tag(0, 0, doc_id, 6 + pos as FieldId, *tag).unwrap());
+                        assert!(db
+                            .has_tag(0, 0, doc_id, 6 + pos as FieldId, tag.clone())
+                            .unwrap());
                     }
                 }
 

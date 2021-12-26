@@ -5,6 +5,7 @@ edition = "2018"
 
 [dependencies]
 nlp = { path = "components/nlp" }
+jmap_store = { path = "components/jmap_store" }
 jmap_mail = { path = "components/jmap_mail" }
 store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
@@ -14,6 +15,7 @@ rayon = "1.5.1"
 resolver = "2"
 members = [
     "components/nlp",
+    "components/jmap_store",
     "components/jmap_mail",
     "components/store",
     "components/store_rocksdb",

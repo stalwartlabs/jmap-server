@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 nlp = { path = "../nlp" }
+jmap_store = { path = "../jmap_store" }
 store = { path = "../store" }
 mail-parser = { path = "/home/vagrant/code/mail-parser" }
 chrono = "0.4"

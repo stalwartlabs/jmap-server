@@ -72,7 +72,7 @@ impl<'x> RocksDBStore {
             .entry(BaseId::new(account, collection))
             .or_try_insert_with(|| {
                 let (available_ids, next_id) =
-                    if let Some(used_ids) = self.get_document_ids(account, collection)? {
+                    if let Some(used_ids) = self.get_document_ids_unclean(account, collection)? {
                         let next_id = used_ids.max().unwrap() + 1;
                         let mut available_ids: RoaringBitmap = (0..next_id).collect();
                         available_ids.bitxor_assign(used_ids);
@@ -109,7 +109,7 @@ impl<'x> RocksDBStore {
         })
     }
 
-    pub fn get_document_ids(
+    pub fn get_document_ids_unclean(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -120,12 +120,12 @@ impl<'x> RocksDBStore {
         )
     }
 
-    pub fn get_winnowed_ids(
+    pub fn get_document_ids(
         &self,
         account: AccountId,
         collection: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(mut docs) = self.get_document_ids(account, collection)? {
+        if let Some(mut docs) = self.get_document_ids_unclean(account, collection)? {
             if let Some(tombstoned_docs) = self.get_tombstoned_ids(account, collection)? {
                 docs.bitxor_assign(tombstoned_docs);
             }

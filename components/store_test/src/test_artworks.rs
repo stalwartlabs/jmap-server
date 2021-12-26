@@ -168,7 +168,7 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("water")),
+                    FieldValue::FullText(TextQuery::query_english("water".into())),
                 ),
                 Filter::new_condition(
                     fields["year"],
@@ -183,7 +183,7 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("gelatin")),
+                    FieldValue::FullText(TextQuery::query_english("gelatin".into())),
                 ),
                 Filter::new_condition(
                     fields["year"],
@@ -202,7 +202,7 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
             Filter::and(vec![Filter::new_condition(
                 fields["title"],
                 ComparisonOperator::Equal,
-                FieldValue::FullText(TextQuery::query_english("'rustic bridge'")),
+                FieldValue::FullText(TextQuery::query_english("'rustic bridge'".into())),
             )]),
             vec!["d05503"],
         ),
@@ -211,12 +211,12 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("'rustic'")),
+                    FieldValue::FullText(TextQuery::query_english("'rustic'".into())),
                 ),
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("study")),
+                    FieldValue::FullText(TextQuery::query_english("study".into())),
                 ),
             ]),
             vec!["d00399", "d05352"],
@@ -226,12 +226,12 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::new_condition(
                     fields["artist"],
                     ComparisonOperator::Equal,
-                    FieldValue::Text("mauro kunst"),
+                    FieldValue::Text("mauro kunst".into()),
                 ),
                 Filter::new_condition(
                     fields["artistRole"],
                     ComparisonOperator::Equal,
-                    FieldValue::Keyword("artist"),
+                    FieldValue::Keyword("artist".into()),
                 ),
                 Filter::or(vec![
                     Filter::new_condition(
@@ -253,12 +253,12 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::not(vec![Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("oil")),
+                    FieldValue::FullText(TextQuery::query_english("oil".into())),
                 )]),
                 Filter::new_condition(
                     fields["creditLine"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("bequeath")),
+                    FieldValue::FullText(TextQuery::query_english("bequeath".into())),
                 ),
                 Filter::or(vec![
                     Filter::and(vec![
@@ -298,12 +298,12 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::new_condition(
                     fields["artist"],
                     ComparisonOperator::Equal,
-                    FieldValue::Text("warhol"),
+                    FieldValue::Text("warhol".into()),
                 ),
                 Filter::not(vec![Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("'campbell'")),
+                    FieldValue::FullText(TextQuery::query_english("'campbell'".into())),
                 )]),
                 Filter::not(vec![Filter::or(vec![
                     Filter::new_condition(
@@ -337,28 +337,28 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("study")),
+                    FieldValue::FullText(TextQuery::query_english("study".into())),
                 ),
                 Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("paper")),
+                    FieldValue::FullText(TextQuery::query_english("paper".into())),
                 ),
                 Filter::new_condition(
                     fields["creditLine"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("'purchased'")),
+                    FieldValue::FullText(TextQuery::query_english("'purchased'".into())),
                 ),
                 Filter::not(vec![
                     Filter::new_condition(
                         fields["title"],
                         ComparisonOperator::Equal,
-                        FieldValue::FullText(TextQuery::query_english("'anatomical'")),
+                        FieldValue::FullText(TextQuery::query_english("'anatomical'".into())),
                     ),
                     Filter::new_condition(
                         fields["title"],
                         ComparisonOperator::Equal,
-                        FieldValue::FullText(TextQuery::query_english("'for'")),
+                        FieldValue::FullText(TextQuery::query_english("'for'".into())),
                     ),
                 ]),
                 Filter::new_condition(
@@ -385,8 +385,8 @@ pub fn filter_artworks<'x, T: Store<'x>>(db: &'x T) {
             .query(
                 0,
                 0,
-                Some(filter),
-                Some(vec![Comparator::ascending(fields["accession_number"])]),
+                filter,
+                Comparator::ascending(fields["accession_number"]),
             )
             .unwrap()
         {
@@ -447,7 +447,10 @@ pub fn sort_artworks<'x, T: Store<'x>>(db: &'x T) {
     for (sort, expected_results) in tests {
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
-        for doc_id in db.query(0, 0, None, Some(sort)).unwrap() {
+        for doc_id in db
+            .query(0, 0, Filter::None, Comparator::List(sort))
+            .unwrap()
+        {
             results.push(
                 db.get_document_value(0, 0, doc_id, fields["accession_number"], 0)
                     .unwrap()

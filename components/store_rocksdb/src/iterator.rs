@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    ops::{BitAndAssign, BitXorAssign},
+    sync::Arc,
+};
 
 use roaring::RoaringBitmap;
 use rocksdb::{
@@ -7,8 +10,10 @@ use rocksdb::{
 };
 use store::{
     serialize::{deserialize_index_document_id, serialize_index_key_prefix},
-    AccountId, CollectionId, Comparator, DocumentId, FieldId,
+    AccountId, CollectionId, Comparator, DocumentId, DocumentSet, FieldId,
 };
+
+use crate::{bitmaps::RocksDBDocumentSet, RocksDBStore};
 
 pub struct RocksDBIterator<'x> {
     db: &'x DBWithThreadMode<MultiThreaded>,
@@ -17,89 +22,110 @@ pub struct RocksDBIterator<'x> {
     current: usize,
 }
 
-struct IndexIterator<'x> {
+struct DocumentSetIndex {
+    set: RoaringBitmap,
+    it: Option<roaring::bitmap::IntoIter>,
+}
+
+struct DBIndex<'x> {
     it: Option<DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>>,
     prefix: Vec<u8>,
     start_key: Vec<u8>,
     ascending: bool,
+}
+
+enum IndexType<'x> {
+    DocumentSet(DocumentSetIndex),
+    DB(DBIndex<'x>),
+    None,
+}
+
+struct IndexIterator<'x> {
+    index: IndexType<'x>,
     remaining: RoaringBitmap,
     next_item: Option<DocumentId>,
     eof: bool,
-}
-
-impl<'x> IndexIterator<'x> {
-    pub fn new(
-        account: AccountId,
-        collection: CollectionId,
-        comp: &Comparator,
-        results: RoaringBitmap,
-    ) -> IndexIterator<'x> {
-        let prefix = serialize_index_key_prefix(account, collection, comp.field);
-        let start_key = if !comp.ascending {
-            let (account, collection, field) = if comp.field < FieldId::MAX {
-                (account, collection, comp.field + 1)
-            } else if collection < CollectionId::MAX {
-                (account, collection + 1, comp.field)
-            } else {
-                (account + 1, collection, comp.field)
-            };
-            serialize_index_key_prefix(account, collection, field)
-        } else {
-            prefix.clone()
-        };
-        IndexIterator {
-            it: None,
-            start_key,
-            prefix,
-            ascending: comp.ascending,
-            eof: false,
-            remaining: results,
-            next_item: None,
-        }
-    }
 }
 
 impl<'x> RocksDBIterator<'x> {
     pub fn new(
         account: AccountId,
         collection: CollectionId,
-        results: RoaringBitmap,
-        db: &'x DBWithThreadMode<MultiThreaded>,
-        cf_indexes: Arc<BoundColumnFamily<'x>>,
-        sort: Option<Vec<Comparator>>,
-    ) -> RocksDBIterator<'x> {
-        let iterators = if let Some(sort) = sort {
-            let mut iterators = Vec::with_capacity(sort.len());
-            let mut sort_it = sort.iter();
-            if let Some(comp) = sort_it.next() {
-                iterators.push(IndexIterator::new(account, collection, comp, results));
-            }
-            for comp in sort_it {
-                iterators.push(IndexIterator::new(
-                    account,
-                    collection,
-                    comp,
-                    RoaringBitmap::new(),
-                ));
-            }
-            iterators
+        mut results: RoaringBitmap,
+        db: &'x RocksDBStore,
+        sort: Comparator<RocksDBDocumentSet>,
+    ) -> store::Result<RocksDBIterator<'x>> {
+        let mut iterators = Vec::new();
+        let mut all_doc_ids = None;
+
+        for comp in (if let Comparator::List(list) = sort {
+            list
         } else {
-            vec![IndexIterator {
-                it: None,
-                prefix: vec![],
-                start_key: vec![],
-                ascending: false,
-                eof: true,
+            vec![sort]
+        })
+        .into_iter()
+        {
+            iterators.push(IndexIterator {
+                index: match comp {
+                    Comparator::Field(comp) => {
+                        let prefix = serialize_index_key_prefix(account, collection, comp.field);
+                        IndexType::DB(DBIndex {
+                            it: None,
+                            start_key: if !comp.ascending {
+                                let (account, collection, field) = if comp.field < FieldId::MAX {
+                                    (account, collection, comp.field + 1)
+                                } else if collection < CollectionId::MAX {
+                                    (account, collection + 1, comp.field)
+                                } else {
+                                    (account + 1, collection, comp.field)
+                                };
+                                serialize_index_key_prefix(account, collection, field)
+                            } else {
+                                prefix.clone()
+                            },
+                            prefix,
+                            ascending: comp.ascending,
+                        })
+                    }
+                    Comparator::DocumentSet(comp) => IndexType::DocumentSet(DocumentSetIndex {
+                        set: if !comp.ascending {
+                            let all_doc_ids = if let Some(all_doc_ids) = &all_doc_ids {
+                                all_doc_ids
+                            } else {
+                                all_doc_ids = db
+                                    .get_document_ids(account, collection)?
+                                    .unwrap_or_else(RoaringBitmap::new)
+                                    .into();
+                                &all_doc_ids.as_ref().unwrap()
+                            };
+                            if !comp.set.is_empty() {
+                                let mut set = comp.set.unwrap();
+                                set.bitxor_assign(all_doc_ids);
+                                set
+                            } else {
+                                all_doc_ids.clone()
+                            }
+                        } else {
+                            comp.set.unwrap()
+                        },
+                        it: None,
+                    }),
+                    _ => IndexType::None,
+                },
+                eof: false,
                 remaining: results,
                 next_item: None,
-            }]
-        };
-        RocksDBIterator {
-            cf_indexes,
-            db,
+            });
+
+            results = RoaringBitmap::new();
+        }
+
+        Ok(RocksDBIterator {
+            cf_indexes: db.get_handle("bitmaps")?,
+            db: db.get_db(),
             iterators,
             current: 0,
-        }
+        })
     }
 }
 
@@ -137,54 +163,92 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                 return Some(next);
             }
 
-            let it = if let Some(it) = &mut it_opts.it {
-                it
-            } else {
-                it_opts.it = Some(self.db.iterator_cf(
-                    &self.cf_indexes,
-                    IteratorMode::From(
-                        &it_opts.start_key,
-                        if it_opts.ascending {
-                            Direction::Forward
-                        } else {
-                            Direction::Reverse
-                        },
-                    ),
-                ));
-                it_opts.it.as_mut().unwrap()
-            };
-
-            let mut last_key: Option<Box<[u8]>> = None;
-            let mut last_key_prefix = &[][..];
-
-            while let Some((key, _)) = it.next() {
-                if !key.starts_with(&it_opts.prefix) {
-                    break;
-                }
-
-                let doc_id = deserialize_index_document_id(&key)?;
-                if it_opts.remaining.contains(doc_id) {
-                    it_opts.remaining.remove(doc_id);
-
-                    if let Some(next_it_opts) = &mut next_it_opts {
-                        if let Some(last_key) = &last_key {
-                            if key.len() != last_key.len() || !key.starts_with(last_key_prefix) {
-                                //println!("Saved next item {:?}", doc_id);
-                                it_opts.next_item = Some(doc_id);
-                                break;
-                            }
-                        } else {
-                            let last_key_len = key.len() - std::mem::size_of::<DocumentId>();
-                            last_key = Some(key);
-                            last_key_prefix = last_key.as_ref().unwrap().get(0..last_key_len)?;
-                        }
-                        //println!("Added to next iterator {:?}", doc_id);
-                        next_it_opts.remaining.insert(doc_id);
+            match &mut it_opts.index {
+                IndexType::DB(index) => {
+                    let it = if let Some(it) = &mut index.it {
+                        it
                     } else {
-                        return Some(doc_id);
+                        index.it = Some(self.db.iterator_cf(
+                            &self.cf_indexes,
+                            IteratorMode::From(
+                                &index.start_key,
+                                if index.ascending {
+                                    Direction::Forward
+                                } else {
+                                    Direction::Reverse
+                                },
+                            ),
+                        ));
+                        index.it.as_mut().unwrap()
+                    };
+
+                    let mut last_key: Option<Box<[u8]>> = None;
+                    let mut last_key_prefix = &[][..];
+
+                    while let Some((key, _)) = it.next() {
+                        if !key.starts_with(&index.prefix) {
+                            break;
+                        }
+
+                        let doc_id = deserialize_index_document_id(&key)?;
+                        if it_opts.remaining.contains(doc_id) {
+                            it_opts.remaining.remove(doc_id);
+
+                            if let Some(next_it_opts) = &mut next_it_opts {
+                                if let Some(last_key) = &last_key {
+                                    if key.len() != last_key.len()
+                                        || !key.starts_with(last_key_prefix)
+                                    {
+                                        //println!("Saved next item {:?}", doc_id);
+                                        it_opts.next_item = Some(doc_id);
+                                        break;
+                                    }
+                                } else {
+                                    let last_key_len =
+                                        key.len() - std::mem::size_of::<DocumentId>();
+                                    last_key = Some(key);
+                                    last_key_prefix =
+                                        last_key.as_ref().unwrap().get(0..last_key_len)?;
+                                }
+                                //println!("Added to next iterator {:?}", doc_id);
+                                next_it_opts.remaining.insert(doc_id);
+                            } else {
+                                return Some(doc_id);
+                            }
+                        }
                     }
                 }
-            }
+                IndexType::DocumentSet(index) => {
+                    if let Some(it) = &mut index.it {
+                        if let Some(doc_id) = it.next() {
+                            return Some(doc_id);
+                        }
+                    } else {
+                        let mut set = index.set.clone();
+                        set.bitand_assign(&it_opts.remaining);
+                        let set_len = set.len();
+                        if set_len > 0 {
+                            it_opts.remaining.bitxor_assign(&set);
+
+                            match &mut next_it_opts {
+                                Some(next_it_opts) if set_len > 1 => {
+                                    next_it_opts.remaining = set;
+                                }
+                                _ if set_len == 1 => {
+                                    return set.min();
+                                }
+                                _ => {
+                                    let mut it = set.into_iter();
+                                    let doc_id = it.next();
+                                    index.it = Some(it);
+                                    return doc_id;
+                                }
+                            }
+                        }
+                    };
+                }
+                IndexType::None => (),
+            };
 
             if let Some(next_it_opts) = next_it_opts {
                 if !next_it_opts.remaining.is_empty() {
@@ -194,16 +258,25 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                         //println!("Returning single item from next_it {:?}", next);
                         return Some(next);
                     } else {
-                        if let Some(it) = &mut next_it_opts.it {
-                            it.set_mode(IteratorMode::From(
-                                &it_opts.start_key,
-                                if it_opts.ascending {
-                                    Direction::Forward
-                                } else {
-                                    Direction::Reverse
-                                },
-                            ));
+                        match &mut next_it_opts.index {
+                            IndexType::DB(index) => {
+                                if let Some(it) = &mut index.it {
+                                    it.set_mode(IteratorMode::From(
+                                        &index.start_key,
+                                        if index.ascending {
+                                            Direction::Forward
+                                        } else {
+                                            Direction::Reverse
+                                        },
+                                    ));
+                                }
+                            }
+                            IndexType::DocumentSet(index) => {
+                                index.it = None;
+                            }
+                            IndexType::None => (),
                         }
+
                         self.current += 1;
                         //println!("Moving to iterator {}", self.current + 1);
                         next_it_opts.eof = false;

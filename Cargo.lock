@@ -339,6 +339,7 @@ name = "jmap-server"
 version = "0.1.0"
 dependencies = [
  "jmap_mail",
+ "jmap_store",
  "nlp",
  "rayon",
  "store",
@@ -351,10 +352,19 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "chrono",
+ "jmap_store",
  "lz4_flex",
  "mail-parser",
  "nlp",
  "serde",
+ "store",
+]
+
+[[package]]
+name = "jmap_store"
+version = "0.1.0"
+dependencies = [
+ "nlp",
  "store",
 ]
 
@@ -794,6 +804,7 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "jmap_mail",
+ "jmap_store",
  "nlp",
  "rayon",
  "store",
