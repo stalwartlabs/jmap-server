@@ -92,5 +92,3 @@ pub trait JMAPMailStore<'x>:
     JMAPMailStoreImport<'x> + JMAPMailStoreQuery<'x> + JMAPMailStoreGet<'x>
 {
 }
-
-pub trait JMAPMailStore<'x>: JMAPMailStoreImport<'x> + JMAPMailStoreQuery<'x> {}
