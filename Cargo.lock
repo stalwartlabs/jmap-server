@@ -429,7 +429,6 @@ dependencies = [
 [[package]]
 name = "mail-parser"
 version = "0.4.2"
-source = "git+https://github.com/stalwartlabs/mail-parser#a0448c31e94fafe84363d29cab5b5aa4fb678396"
 dependencies = [
  "encoding_rs",
  "serde",

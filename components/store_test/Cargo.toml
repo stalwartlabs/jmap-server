@@ -6,7 +6,8 @@ publish = false
 
 [dependencies]
 store = { path = "../store" }
-mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
+#mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
+mail-parser = { path = "/home/vagrant/code/mail-parser" }
 jmap_store = { path = "../jmap_store" }
 jmap_mail = { path = "../jmap_mail" }
 nlp = { path = "../nlp" }
