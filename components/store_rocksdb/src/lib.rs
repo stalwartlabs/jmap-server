@@ -8,20 +8,19 @@ pub mod query;
 pub mod tag;
 pub mod term;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use bitmaps::{bitmap_compact, bitmap_merge};
 use dashmap::DashMap;
-use document_id::DocumentIdAssigner;
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options,
 };
-use store::{BaseId, Result, Store, StoreError};
+use store::{mutex_map::MutexMap, AccountId, CollectionId, Result, Store, StoreError};
 use term::{get_last_term_id, TermLock};
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
-    id_assigner: DashMap<BaseId, DocumentIdAssigner>,
+    account_lock: MutexMap,
     term_id_lock: DashMap<String, TermLock>,
     term_id_last: Mutex<u64>,
 }
@@ -67,7 +66,7 @@ impl RocksDBStore {
         .map_err(|e| StoreError::InternalError(e.into_string()))?;
 
         Ok(Self {
-            id_assigner: DashMap::with_capacity(1024),
+            account_lock: MutexMap::with_capacity(1024),
             term_id_lock: DashMap::with_capacity(1024),
             term_id_last: get_last_term_id(&db)?.into(),
             db,
@@ -82,6 +81,22 @@ impl RocksDBStore {
                 name
             ))
         })
+    }
+
+    pub fn lock_collection(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> store::Result<MutexGuard<usize>> {
+        self.account_lock
+            .lock(
+                ((account as u64) << (8 * std::mem::size_of::<CollectionId>())) | collection as u64,
+            )
+            .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))
+    }
+
+    pub fn get_db(&self) -> &DBWithThreadMode<MultiThreaded> {
+        &self.db
     }
 
     pub fn compact(&self) -> Result<()> {
@@ -102,41 +117,68 @@ impl<'x> Store<'x> for RocksDBStore where RocksDBStore: store::StoreQuery<'x> {}
 #[cfg(test)]
 mod tests {
 
-    use store_test::{
-        test_artworks::{filter_artworks, insert_artworks, sort_artworks},
-        test_mail_threads::test_mail_threads,
-    };
-
     use crate::RocksDBStore;
 
     #[test]
-    fn test_artworks() {
+    fn test_insert_filter_sort() {
         let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_query_test");
-        /*if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }*/
+        temp_dir.push("strdb_filter_test");
 
-        let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
-        //db.compact().unwrap();
-        //insert_artworks(&db);
-        filter_artworks(&db);
-        sort_artworks(&db);
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::insert_filter_sort::test_insert_filter_sort(
+            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            true,
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 
     #[test]
-    fn test_message_threads() {
+    fn test_tombstones() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_tombstones_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::tombstones::test_tombstones(
+            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_merge_threads() {
         let mut temp_dir = std::env::temp_dir();
         temp_dir.push("strdb_threads_test");
         if temp_dir.exists() {
             std::fs::remove_dir_all(&temp_dir).unwrap();
         }
 
-        {
-            let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
-            test_mail_threads(&db);
-        }
+        store_test::jmap_merge_threads::test_jmap_merge_threads(
+            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+        );
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_mail_query() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_mail_query_test");
+        if temp_dir.exists() {
+            //std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mail_query::test_jmap_mail_query(
+            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            false,
+        );
+
+        //std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

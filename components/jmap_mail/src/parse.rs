@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
+use jmap_store::JMAP_MAIL;
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
     parsers::fields::thread::thread_name,
@@ -11,10 +12,10 @@ use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
     batch::{WriteOperation, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::Text,
-    AccountId, FieldNumber, Integer, LongInteger, StoreError,
+    AccountId, FieldNumber, Integer, LongInteger, StoreError, Tag,
 };
 
-use crate::{MessageField, MessageParts, MAIL_CID};
+use crate::{MessageField, MessageParts};
 
 fn parse_address<'x>(
     document: &mut WriteOperation<'x>,
@@ -258,6 +259,7 @@ fn parse_header<'x>(
 pub fn build_message_document<'x>(
     account: AccountId,
     mut message: Message<'x>,
+    received_at: Option<i64>,
 ) -> store::Result<(WriteOperation, Vec<Cow<'x, str>>, String)> {
     let mut message_parts = MessageParts {
         html_body: message.html_body,
@@ -265,9 +267,9 @@ pub fn build_message_document<'x>(
         attachments: message.attachments,
         offset_body: message.offset_body,
         size: message.raw_message.len(),
-        received_at: Utc::now().timestamp(),
+        received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
     };
-    let mut document = WriteOperation::insert_document(account, MAIL_CID);
+    let mut document = WriteOperation::insert_document(account, JMAP_MAIL);
     let mut total_message_parts = message.parts.len();
     let mut nested_headers = Vec::with_capacity(message.parts.len());
     let mut language_detector = LanguageDetector::new();
@@ -371,6 +373,7 @@ pub fn build_message_document<'x>(
         parse_header(&mut document, header_name, header_value);
     }
 
+    let mut has_attachment = false;
     for (part_id, part) in message.parts.into_iter().enumerate() {
         match part {
             MessagePart::Html(html) => {
@@ -383,6 +386,7 @@ pub fn build_message_document<'x>(
                     } else if message_parts.html_body.contains(&part_id) {
                         MessageField::Body
                     } else {
+                        has_attachment = true;
                         MessageField::Attachment
                     };
 
@@ -422,6 +426,7 @@ pub fn build_message_document<'x>(
                     } else if message_parts.text_body.contains(&part_id) {
                         MessageField::Body
                     } else {
+                        has_attachment = true;
                         MessageField::Attachment
                     };
 
@@ -433,7 +438,18 @@ pub fn build_message_document<'x>(
                     false,
                 );
             }
-            MessagePart::Binary(binary) | MessagePart::InlineBinary(binary) => {
+            MessagePart::Binary(binary) => {
+                if !has_attachment {
+                    has_attachment = true;
+                }
+                nested_headers.push(binary.headers);
+                document.add_blob(
+                    MessageField::Attachment.into(),
+                    part_id as FieldNumber,
+                    binary.body,
+                );
+            }
+            MessagePart::InlineBinary(binary) => {
                 nested_headers.push(binary.headers);
                 document.add_blob(
                     MessageField::Attachment.into(),
@@ -442,6 +458,9 @@ pub fn build_message_document<'x>(
                 );
             }
             MessagePart::Message(nested_message) => {
+                if !has_attachment {
+                    has_attachment = true;
+                }
                 nested_headers.push(nested_message.headers);
                 match nested_message.body {
                     MessageAttachment::Parsed(mut message) => {
@@ -545,6 +564,10 @@ pub fn build_message_document<'x>(
                 nested_headers.push(header);
             }
         };
+    }
+
+    if has_attachment {
+        document.add_tag(MessageField::Attachment.into(), Tag::Id(0));
     }
 
     document.add_blob(

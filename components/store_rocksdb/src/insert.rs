@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::Arc,
 };
 
@@ -11,32 +11,43 @@ use store::{
     serialize::{
         serialize_acd_key_leb128, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
-        serialize_stored_key_global, BM_USED_IDS,
+        serialize_stored_key_global, BM_FREED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
     AccountId, CollectionId, DocumentId, StoreError, StoreUpdate,
 };
 
-use crate::{bitmaps::set_bits, RocksDBStore};
+use crate::{
+    bitmaps::{clear_bits, set_bits},
+    document_id::DocumentIdAssignerResult,
+    RocksDBStore,
+};
 
 impl StoreUpdate for RocksDBStore {
-    fn update_bulk(&self, batches: Vec<WriteOperation>) -> store::Result<Vec<DocumentId>> {
+    fn update_bulk(&self, batches: Vec<WriteOperation>) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
         let cf_indexes = self.get_handle("indexes")?;
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut write_batch = rocksdb::WriteBatch::default();
-        let mut uncommitted_ids = Vec::with_capacity(batches.len());
-        let mut bitmap_list = HashMap::new();
+
+        let mut set_bitmap_list = HashMap::new();
+        let mut clear_bitmap_list = HashMap::new();
+
+        let mut account_locks = HashMap::new();
+        let mut id_assigners = HashMap::new();
 
         for batch in batches {
             match batch.get_action() {
                 WriteAction::UpdateDocument(account, collection, document_id, default_language) => {
+                    if let Entry::Vacant(e) = account_locks.entry((account, collection)) {
+                        e.insert(self.lock_collection(account, collection)?);
+                    }
                     if let Some(document_id) = document_id {
                         self._update_document(
                             &mut write_batch,
                             &cf_values,
                             &cf_indexes,
-                            &mut bitmap_list,
+                            &mut set_bitmap_list,
                             account,
                             collection,
                             document_id,
@@ -44,19 +55,49 @@ impl StoreUpdate for RocksDBStore {
                             batch,
                         )?
                     } else {
-                        let uncommitted_id = self.reserve_document_id(account, collection)?;
+                        let id_assigner =
+                            id_assigners
+                                .entry((account, collection))
+                                .or_insert_with(|| {
+                                    self.get_document_id_assigner(account, collection)
+                                        .unwrap_or_default()
+                                });
+
+                        if !id_assigner.success {
+                            return Err(StoreError::InternalError(
+                                "Failed to obtain document id assigner.".to_string(),
+                            ));
+                        }
+
+                        let document_id = match id_assigner.get_document_id() {
+                            DocumentIdAssignerResult::Freed(document_id) => {
+                                // Remove document id from freed ids
+                                clear_bitmap_list
+                                    .entry(serialize_bm_internal(account, collection, BM_FREED_IDS))
+                                    .or_insert_with(HashSet::new)
+                                    .insert(document_id);
+                                document_id
+                            }
+                            DocumentIdAssignerResult::New(document_id) => document_id,
+                        };
+
+                        // Add document id to collection
+                        set_bitmap_list
+                            .entry(serialize_bm_internal(account, collection, BM_USED_IDS))
+                            .or_insert_with(HashSet::new)
+                            .insert(document_id);
+
                         self._update_document(
                             &mut write_batch,
                             &cf_values,
                             &cf_indexes,
-                            &mut bitmap_list,
+                            &mut set_bitmap_list,
                             account,
                             collection,
-                            uncommitted_id.get_id(),
+                            document_id,
                             default_language,
                             batch,
                         )?;
-                        uncommitted_ids.push(uncommitted_id);
                     }
                 }
                 WriteAction::DeleteDocument(_, _, _) => unimplemented!(),
@@ -107,18 +148,19 @@ impl StoreUpdate for RocksDBStore {
             }
         }
 
-        for (key, doc_id_list) in bitmap_list {
+        for (key, doc_id_list) in set_bitmap_list {
             write_batch.merge_cf(&cf_bitmaps, key, set_bits(doc_id_list.into_iter()))
+        }
+
+        for (key, doc_id_list) in clear_bitmap_list {
+            write_batch.merge_cf(&cf_bitmaps, key, clear_bits(doc_id_list.into_iter()))
         }
 
         self.db
             .write(write_batch)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
 
-        Ok(uncommitted_ids
-            .into_iter()
-            .map(|mut id| id.commit())
-            .collect())
+        Ok(())
     }
 }
 
@@ -206,12 +248,6 @@ impl RocksDBStore {
         default_language: Language,
         document: WriteOperation,
     ) -> crate::Result<()> {
-        // Add document id to collection
-        bitmap_list
-            .entry(serialize_bm_internal(account, collection, BM_USED_IDS))
-            .or_insert_with(HashSet::new)
-            .insert(document_id);
-
         // Full text term positions
         let mut term_index = TermIndexBuilder::new();
 

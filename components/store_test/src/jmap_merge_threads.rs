@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
-use jmap_mail::{MessageField, MessageStore, MAIL_CID};
-use store::{Store, Tag, ThreadId};
+use jmap_mail::{import::JMAPMailImportItem, JMAPMailStoreImport, MessageField};
+use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL};
+use store::{Comparator, DocumentSet, Filter, Store, Tag, ThreadId};
 
 pub enum ThreadTest {
     Message,
@@ -55,7 +56,13 @@ fn build_messages(
     messages_per_thread
 }
 
-pub fn test_mail_threads<'x, T: 'x + Store<'x>>(db: &'x T) {
+pub fn test_jmap_merge_threads<T>(db: T)
+where
+    T: for<'x> Store<'x>,
+{
+    let mail_store = JMAPLocalStore::new(db);
+    let db = mail_store.get_store();
+
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
         let base_test_num = (base_test_num * 6) as u32;
         let mut messages = Vec::new();
@@ -64,29 +71,39 @@ pub fn test_mail_threads<'x, T: 'x + Store<'x>>(db: &'x T) {
             build_messages(test, &mut messages, &mut total_messages, None, 0);
         messages_per_thread.sort_unstable();
 
-        let mail_store = MessageStore::new(db);
-
         for message in &messages {
             mail_store
-                .ingest_message(base_test_num, message.as_bytes())
+                .mail_import_single(
+                    base_test_num,
+                    JMAPMailImportItem::new(message.as_bytes().into()),
+                )
                 .unwrap();
         }
 
         for message in messages.iter().rev() {
             mail_store
-                .ingest_message(base_test_num + 1, message.as_bytes())
+                .mail_import_single(
+                    base_test_num + 1,
+                    JMAPMailImportItem::new(message.as_bytes().into()),
+                )
                 .unwrap();
         }
 
         for chunk in messages.chunks(5) {
             for message in chunk {
                 mail_store
-                    .ingest_message(base_test_num + 2, message.as_bytes())
+                    .mail_import_single(
+                        base_test_num + 2,
+                        JMAPMailImportItem::new(message.as_bytes().into()),
+                    )
                     .unwrap();
             }
             for message in chunk.iter().rev() {
                 mail_store
-                    .ingest_message(base_test_num + 3, message.as_bytes())
+                    .mail_import_single(
+                        base_test_num + 3,
+                        JMAPMailImportItem::new(message.as_bytes().into()),
+                    )
                     .unwrap();
             }
         }
@@ -94,19 +111,30 @@ pub fn test_mail_threads<'x, T: 'x + Store<'x>>(db: &'x T) {
         for chunk in messages.chunks(5).rev() {
             for message in chunk {
                 mail_store
-                    .ingest_message(base_test_num + 4, message.as_bytes())
+                    .mail_import_single(
+                        base_test_num + 4,
+                        JMAPMailImportItem::new(message.as_bytes().into()),
+                    )
                     .unwrap();
             }
             for message in chunk.iter().rev() {
                 mail_store
-                    .ingest_message(base_test_num + 5, message.as_bytes())
+                    .mail_import_single(
+                        base_test_num + 5,
+                        JMAPMailImportItem::new(message.as_bytes().into()),
+                    )
                     .unwrap();
             }
         }
 
         for test_num in 0..=5 {
             let message_doc_ids = db
-                .query(base_test_num + test_num, MAIL_CID, None, None)
+                .query(
+                    base_test_num + test_num,
+                    JMAP_MAIL,
+                    Filter::None,
+                    Comparator::None,
+                )
                 .unwrap();
 
             assert_eq!(
@@ -123,7 +151,7 @@ pub fn test_mail_threads<'x, T: 'x + Store<'x>>(db: &'x T) {
                 thread_ids.insert(
                     db.get_document_value(
                         base_test_num + test_num,
-                        MAIL_CID,
+                        JMAP_MAIL,
                         message_doc_id,
                         MessageField::ThreadId.into(),
                         0,
@@ -146,14 +174,13 @@ pub fn test_mail_threads<'x, T: 'x + Store<'x>>(db: &'x T) {
                 messages_per_thread_db.push(
                     db.get_tag(
                         base_test_num + test_num,
-                        MAIL_CID,
+                        JMAP_MAIL,
                         MessageField::ThreadId.into(),
                         Tag::Id(thread_id),
                     )
                     .unwrap()
                     .unwrap()
-                    .size_hint()
-                    .0,
+                    .len(),
                 );
             }
             messages_per_thread_db.sort_unstable();

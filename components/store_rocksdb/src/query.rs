@@ -4,7 +4,7 @@ use std::{
     collections::HashSet,
     convert::TryFrom,
     ops::{BitAndAssign, BitXorAssign},
-    slice::Iter,
+    vec::IntoIter,
 };
 use store::{
     field::TokenIterator,
@@ -14,14 +14,18 @@ use store::{
     },
     term_index::TermIndex,
     AccountId, CollectionId, Comparator, FieldValue, Filter, FilterOperator, LogicalOperator,
-    StoreError, StoreQuery,
+    StoreError, StoreQuery, StoreTombstone,
 };
 
-use crate::{bitmaps::bitmap_op, iterator::RocksDBIterator, RocksDBStore};
+use crate::{
+    bitmaps::{bitmap_op, RocksDBDocumentSet},
+    iterator::RocksDBIterator,
+    RocksDBStore,
+};
 
 struct State<'x> {
     op: LogicalOperator,
-    it: Iter<'x, Filter<'x>>,
+    it: IntoIter<Filter<'x, RocksDBDocumentSet>>,
     bm: Option<RoaringBitmap>,
 }
 
@@ -33,42 +37,38 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
         &'x self,
         account: AccountId,
         collection: CollectionId,
-        filter: Option<Filter>,
-        sort: Option<Vec<Comparator>>,
+        filter: Filter<RocksDBDocumentSet>,
+        sort: Comparator<RocksDBDocumentSet>,
     ) -> crate::Result<RocksDBIterator<'x>> {
         let mut document_ids = self
-            .get_document_ids(account, collection)?
+            .get_document_ids_used(account, collection)?
             .unwrap_or_else(RoaringBitmap::new);
         let tombstoned_ids = self.get_tombstoned_ids(account, collection)?;
+
+        let filter = match filter {
+            Filter::Operator(filter) => filter,
+            Filter::None => {
+                if let Some(tombstoned_ids) = tombstoned_ids {
+                    document_ids.bitxor_assign(tombstoned_ids)
+                }
+                return RocksDBIterator::new(account, collection, document_ids, self, sort);
+            }
+            Filter::DocumentSet(set) => {
+                return RocksDBIterator::new(account, collection, set.unwrap(), self, sort);
+            }
+            _ => FilterOperator {
+                operator: LogicalOperator::And,
+                conditions: vec![filter],
+            },
+        };
 
         let cf_indexes = self.get_handle("indexes")?;
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let cf_values = self.get_handle("values")?;
 
-        let filter = match filter {
-            Some(Filter::Operator(filter)) => filter,
-            Some(filter) => FilterOperator {
-                operator: LogicalOperator::And,
-                conditions: vec![filter],
-            },
-            None => {
-                if let Some(tombstoned_ids) = tombstoned_ids {
-                    document_ids.bitxor_assign(tombstoned_ids)
-                }
-                return Ok(RocksDBIterator::new(
-                    account,
-                    collection,
-                    document_ids,
-                    &self.db,
-                    cf_indexes,
-                    sort,
-                ));
-            }
-        };
-
         let mut state = State {
             op: filter.operator,
-            it: filter.conditions.iter(),
+            it: filter.conditions.into_iter(),
             bm: None,
         };
 
@@ -118,7 +118,7 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
                             FieldValue::FullText(query) => {
                                 if let Some(match_terms) =
                                     self.get_match_terms(TokenIterator::new(
-                                        query.text,
+                                        query.text.as_ref(),
                                         query.language,
                                         !query.match_phrase,
                                     ))?
@@ -329,15 +329,19 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
                             }
                         }
                     }
+                    Filter::DocumentSet(set) => {
+                        bitmap_op(state.op, &mut state.bm, Some(set.unwrap()), &document_ids);
+                    }
                     Filter::Operator(filter_op) => {
                         stack.push(state);
                         state = State {
                             op: filter_op.operator,
-                            it: filter_op.conditions.iter(),
+                            it: filter_op.conditions.into_iter(),
                             bm: None,
                         };
                         continue 'outer;
                     }
+                    Filter::None => (),
                 }
 
                 if state.op == LogicalOperator::And && state.bm.as_ref().unwrap().is_empty() {
@@ -352,11 +356,11 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
             }
         }
 
-        Ok(RocksDBIterator::new(
+        RocksDBIterator::new(
             account,
             collection,
             match (state.bm, tombstoned_ids) {
-                (Some(mut results), Some(tombstoned_ids)) if !results.is_empty() => {
+                (Some(mut results), Some(tombstoned_ids)) => {
                     document_ids.bitxor_assign(tombstoned_ids);
                     results.bitand_assign(document_ids);
                     results
@@ -364,9 +368,8 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
                 (Some(results), None) => results,
                 _ => RoaringBitmap::new(),
             },
-            &self.db,
-            cf_indexes,
+            self,
             sort,
-        ))
+        )
     }
 }

@@ -1,14 +1,18 @@
 use std::ops::BitAndAssign;
 
 use store::{
-    serialize::serialize_bm_tag_key, AccountId, CollectionId, DocumentId, FieldId, StoreError,
-    StoreTag, Tag,
+    serialize::serialize_bm_tag_key, AccountId, CollectionId, DocumentId, FieldId,
+    StoreDocumentSet, StoreError, StoreTag, StoreTombstone, Tag,
 };
 
 use crate::{
-    bitmaps::{clear_bit, has_bit, into_bitmap, set_bit},
+    bitmaps::{clear_bit, has_bit, into_bitmap, set_bit, RocksDBDocumentSet},
     RocksDBStore,
 };
+
+impl StoreDocumentSet for RocksDBStore {
+    type Set = RocksDBDocumentSet;
+}
 
 impl StoreTag for RocksDBStore {
     fn set_tag(
@@ -72,18 +76,16 @@ impl StoreTag for RocksDBStore {
             })
     }
 
-    type Iter = roaring::bitmap::IntoIter;
-
     fn get_tags(
         &self,
         account: AccountId,
         collection: CollectionId,
         field: FieldId,
         tags: &[Tag],
-    ) -> store::Result<Vec<Option<Self::Iter>>> {
+    ) -> store::Result<Vec<Option<Self::Set>>> {
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut result = Vec::with_capacity(tags.len());
-        if let Some(document_ids) = self.get_winnowed_ids(account, collection)? {
+        if let Some(document_ids) = self.get_document_ids(account, collection)? {
             let mut keys = Vec::with_capacity(tags.len());
 
             for tag in tags {
@@ -100,7 +102,7 @@ impl StoreTag for RocksDBStore {
                     let mut tagged_docs = into_bitmap(&bytes)?;
                     tagged_docs.bitand_assign(&document_ids);
                     if !tagged_docs.is_empty() {
-                        result.push(Some(tagged_docs.into_iter()));
+                        result.push(Some(RocksDBDocumentSet::from_roaring(tagged_docs)));
                         continue;
                     }
                 }

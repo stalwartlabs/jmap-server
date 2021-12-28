@@ -1,115 +1,71 @@
-use std::{ops::BitXorAssign, time::Instant};
+use std::ops::BitXorAssign;
 
-use dashmap::DashMap;
 use roaring::RoaringBitmap;
 use store::{
-    serialize::{serialize_bm_internal, BM_TOMBSTONED_IDS, BM_USED_IDS},
-    AccountId, BaseId, CollectionId, DocumentId,
+    serialize::{serialize_bm_internal, BM_FREED_IDS, BM_USED_IDS},
+    AccountId, CollectionId, DocumentId, StoreTombstone,
 };
 
 use crate::RocksDBStore;
 
 pub struct DocumentIdAssigner {
-    available_ids: RoaringBitmap,
-    next_id: DocumentId,
-    last_access: Instant,
+    used_ids: RoaringBitmap,
+    freed_ids: Option<RoaringBitmap>,
+    pub success: bool,
 }
 
-impl DocumentIdAssigner {
-    pub fn get_next_id(&self) -> DocumentId {
-        self.next_id
-    }
-
-    pub fn get_last_access(&self) -> &Instant {
-        &self.last_access
-    }
-
-    pub fn get_available_ids(&self) -> &RoaringBitmap {
-        &self.available_ids
-    }
+pub enum DocumentIdAssignerResult {
+    New(DocumentId),
+    Freed(DocumentId),
 }
 
-pub struct UncommittedDocumentId<'x> {
-    account: AccountId,
-    collection: CollectionId,
-    id: DocumentId,
-    committed: bool,
-    id_assigner: &'x DashMap<BaseId, DocumentIdAssigner>,
-}
-
-impl<'x> Drop for UncommittedDocumentId<'x> {
-    fn drop(&mut self) {
-        if !self.committed {
-            if let Some(mut id_assigner) = self
-                .id_assigner
-                .get_mut(&BaseId::new(self.account, self.collection))
-            {
-                id_assigner.available_ids.insert(self.id);
-            }
+impl Default for DocumentIdAssigner {
+    fn default() -> Self {
+        Self {
+            used_ids: Default::default(),
+            freed_ids: None,
+            success: false,
         }
     }
 }
 
-impl<'x> UncommittedDocumentId<'x> {
-    pub fn commit(&mut self) -> DocumentId {
-        self.committed = true;
-        self.id
-    }
-
-    pub fn get_id(&self) -> DocumentId {
-        self.id
+impl DocumentIdAssigner {
+    pub fn get_document_id(&mut self) -> DocumentIdAssignerResult {
+        if let Some(ref mut freed_ids) = self.freed_ids {
+            let doc_id = freed_ids.min().unwrap();
+            freed_ids.remove(doc_id);
+            if freed_ids.is_empty() {
+                self.freed_ids = None;
+            }
+            DocumentIdAssignerResult::Freed(doc_id)
+        } else {
+            let doc_id = if let Some(max) = self.used_ids.max() {
+                max + 1
+            } else {
+                0
+            };
+            self.used_ids.insert(doc_id);
+            DocumentIdAssignerResult::New(doc_id)
+        }
     }
 }
 
 impl<'x> RocksDBStore {
-    pub fn reserve_document_id(
-        &'x self,
+    pub fn get_document_id_assigner(
+        &self,
         account: AccountId,
         collection: CollectionId,
-    ) -> crate::Result<UncommittedDocumentId<'x>> {
-        let mut id_assigner_entry = self
-            .id_assigner
-            .entry(BaseId::new(account, collection))
-            .or_try_insert_with(|| {
-                let (available_ids, next_id) =
-                    if let Some(used_ids) = self.get_document_ids(account, collection)? {
-                        let next_id = used_ids.max().unwrap() + 1;
-                        let mut available_ids: RoaringBitmap = (0..next_id).collect();
-                        available_ids.bitxor_assign(used_ids);
-                        (available_ids, next_id)
-                    } else {
-                        (RoaringBitmap::new(), 0)
-                    };
-                Ok(DocumentIdAssigner {
-                    available_ids,
-                    next_id,
-                    last_access: Instant::now(),
-                })
-            })?;
-
-        let id_assigner = id_assigner_entry.value_mut();
-        id_assigner.last_access = Instant::now();
-
-        let document_id = if !id_assigner.available_ids.is_empty() {
-            let document_id = id_assigner.available_ids.min().unwrap();
-            id_assigner.available_ids.remove(document_id);
-            document_id
-        } else {
-            let document_id = id_assigner.next_id;
-            id_assigner.next_id += 1;
-            document_id
-        };
-
-        Ok(UncommittedDocumentId {
-            id: document_id,
-            committed: false,
-            id_assigner: &self.id_assigner,
-            account,
-            collection,
+    ) -> crate::Result<DocumentIdAssigner> {
+        Ok(DocumentIdAssigner {
+            used_ids: self
+                .get_document_ids_used(account, collection)?
+                .unwrap_or_else(RoaringBitmap::new),
+            freed_ids: self.get_document_ids_freed(account, collection)?,
+            success: true,
         })
     }
 
-    pub fn get_document_ids(
+    pub fn get_document_ids_used(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -120,12 +76,23 @@ impl<'x> RocksDBStore {
         )
     }
 
-    pub fn get_winnowed_ids(
+    pub fn get_document_ids_freed(
         &self,
         account: AccountId,
         collection: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(mut docs) = self.get_document_ids(account, collection)? {
+        self.get_bitmap(
+            &self.get_handle("bitmaps")?,
+            &serialize_bm_internal(account, collection, BM_FREED_IDS),
+        )
+    }
+
+    pub fn get_document_ids(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        if let Some(mut docs) = self.get_document_ids_used(account, collection)? {
             if let Some(tombstoned_docs) = self.get_tombstoned_ids(account, collection)? {
                 docs.bitxor_assign(tombstoned_docs);
             }
@@ -133,21 +100,6 @@ impl<'x> RocksDBStore {
         } else {
             Ok(None)
         }
-    }
-
-    pub fn get_tombstoned_ids(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(
-            &self.get_handle("bitmaps")?,
-            &serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
-        )
-        .map(|bm| match &bm {
-            Some(v) if !v.is_empty() => bm,
-            _ => None,
-        })
     }
 
     #[cfg(test)]
@@ -175,19 +127,9 @@ impl<'x> RocksDBStore {
             )
             .map_err(|e| StoreError::InternalError(e.to_string()))
     }
-
-    pub fn remove_id_assigner(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> Option<DocumentIdAssigner> {
-        self.id_assigner
-            .remove(&BaseId::new(account, collection))?
-            .1
-            .into()
-    }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::{ops::BitXorAssign, sync::Arc, thread};
@@ -216,7 +158,7 @@ mod tests {
                     s.spawn(move |_| {
                         let mut uncommited_ids = Vec::new();
                         for _ in 0..100 {
-                            uncommited_ids.push(db.reserve_document_id(0, 0).unwrap());
+                            uncommited_ids.push(db.get_next_document_id(0, 0).unwrap());
                         }
                         thread::sleep(std::time::Duration::from_millis(100));
                     });
@@ -245,7 +187,7 @@ mod tests {
                 db.set_document_ids(0, 0, used_ids).unwrap();
 
                 for _ in 0..50 {
-                    let mut doc_id = db.reserve_document_id(0, 0).unwrap();
+                    let mut doc_id = db.get_next_document_id(0, 0).unwrap();
                     assert!(
                         expected_ids.contains(doc_id.get_id()),
                         "Unexpected id {}",
@@ -260,4 +202,4 @@ mod tests {
                 std::fs::remove_dir_all(&temp_dir).unwrap();
             });
     }
-}
+}*/

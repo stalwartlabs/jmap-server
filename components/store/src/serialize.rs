@@ -19,6 +19,7 @@ pub const BM_TAG_TEXT: u8 = 4;
 pub const BM_TAG_STATIC: u8 = 5;
 pub const BM_USED_IDS: u8 = 6;
 pub const BM_TOMBSTONED_IDS: u8 = 7;
+pub const BM_FREED_IDS: u8 = 8;
 
 pub fn serialize_stored_key(
     account: AccountId,

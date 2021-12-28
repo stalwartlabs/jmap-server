@@ -6,6 +6,8 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
+use std::{borrow::Cow, iter::FromIterator};
+
 use batch::WriteOperation;
 use nlp::Language;
 
@@ -33,24 +35,22 @@ pub type LongInteger = u64;
 pub type Float = f64;
 pub type TermId = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BaseId {
-    pub account_id: AccountId,
-    pub collection_id: CollectionId,
+pub trait DocumentSet: Eq + IntoIterator<Item = DocumentId> + Clone + Sized {
+    fn new() -> Self;
+    fn contains(&self, document: DocumentId) -> bool;
+
+    fn intersection(&mut self, other: &Self);
+    fn union(&mut self, other: &Self);
+    fn difference(&mut self, other: &Self);
+
+    fn is_empty(&self) -> bool;
+    fn len(&self) -> usize;
 }
 
-impl BaseId {
-    pub fn new(account_id: AccountId, collection_id: CollectionId) -> BaseId {
-        BaseId {
-            account_id,
-            collection_id,
-        }
-    }
-}
-
+#[derive(Debug)]
 pub enum FieldValue<'x> {
-    Keyword(&'x str),
-    Text(&'x str),
+    Keyword(Cow<'x, str>),
+    Text(Cow<'x, str>),
     FullText(TextQuery<'x>),
     Integer(Integer),
     LongInteger(LongInteger),
@@ -58,34 +58,36 @@ pub enum FieldValue<'x> {
     Tag(Tag<'x>),
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum Tag<'x> {
     Static(TagId),
     Id(LongInteger),
-    Text(&'x str),
+    Text(Cow<'x, str>),
 }
 
+#[derive(Debug)]
 pub struct TextQuery<'x> {
-    pub text: &'x str,
+    pub text: Cow<'x, str>,
     pub language: Language,
     pub match_phrase: bool,
 }
 
 impl<'x> TextQuery<'x> {
-    pub fn query(text: &'x str, language: Language) -> Self {
+    pub fn query(text: Cow<'x, str>, language: Language) -> Self {
         TextQuery {
-            text,
             language,
             match_phrase: (text.starts_with('"') && text.ends_with('"'))
                 || (text.starts_with('\'') && text.ends_with('\'')),
+            text,
         }
     }
 
-    pub fn query_english(text: &'x str) -> Self {
+    pub fn query_english(text: Cow<'x, str>) -> Self {
         TextQuery::query(text, Language::English)
     }
 }
 
+#[derive(Debug)]
 pub enum ComparisonOperator {
     LowerThan,
     LowerEqualThan,
@@ -94,6 +96,7 @@ pub enum ComparisonOperator {
     Equal,
 }
 
+#[derive(Debug)]
 pub struct FilterCondition<'x> {
     pub field: FieldId,
     pub op: ComparisonOperator,
@@ -107,12 +110,18 @@ pub enum LogicalOperator {
     Not,
 }
 
-pub enum Filter<'x> {
+#[derive(Debug)]
+pub enum Filter<'x, T: DocumentSet> {
     Condition(FilterCondition<'x>),
-    Operator(FilterOperator<'x>),
+    Operator(FilterOperator<'x, T>),
+    DocumentSet(T),
+    None,
 }
 
-impl<'x> Filter<'x> {
+impl<'x, T> Filter<'x, T>
+where
+    T: DocumentSet,
+{
     pub fn new_condition(field: FieldId, op: ComparisonOperator, value: FieldValue<'x>) -> Self {
         Filter::Condition(FilterCondition { field, op, value })
     }
@@ -157,21 +166,21 @@ impl<'x> Filter<'x> {
         })
     }
 
-    pub fn and(conditions: Vec<Filter<'x>>) -> Self {
+    pub fn and(conditions: Vec<Filter<'x, T>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::And,
             conditions,
         })
     }
 
-    pub fn or(conditions: Vec<Filter<'x>>) -> Self {
+    pub fn or(conditions: Vec<Filter<'x, T>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::Or,
             conditions,
         })
     }
 
-    pub fn not(conditions: Vec<Filter<'x>>) -> Self {
+    pub fn not(conditions: Vec<Filter<'x, T>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::Not,
             conditions,
@@ -179,50 +188,74 @@ impl<'x> Filter<'x> {
     }
 }
 
-pub struct FilterOperator<'x> {
+#[derive(Debug)]
+pub struct FilterOperator<'x, T: DocumentSet> {
     pub operator: LogicalOperator,
-    pub conditions: Vec<Filter<'x>>,
+    pub conditions: Vec<Filter<'x, T>>,
 }
 
-pub struct Comparator {
+pub struct FieldComparator {
     pub field: FieldId,
     pub ascending: bool,
 }
 
-impl Comparator {
+pub struct DocumentSetComparator<T: DocumentSet> {
+    pub set: T,
+    pub ascending: bool,
+}
+
+pub enum Comparator<T: DocumentSet> {
+    List(Vec<Comparator<T>>),
+    Field(FieldComparator),
+    DocumentSet(DocumentSetComparator<T>),
+    None,
+}
+
+impl<T> Default for Comparator<T>
+where
+    T: DocumentSet,
+{
+    fn default() -> Self {
+        Comparator::None
+    }
+}
+
+impl<T> Comparator<T>
+where
+    T: DocumentSet,
+{
     pub fn ascending(field: FieldId) -> Self {
-        Comparator {
+        Comparator::Field(FieldComparator {
             field,
             ascending: true,
-        }
+        })
     }
 
     pub fn descending(field: FieldId) -> Self {
-        Comparator {
+        Comparator::Field(FieldComparator {
             field,
             ascending: false,
-        }
+        })
     }
 }
 
 pub trait StoreUpdate {
-    fn update(&self, document: WriteOperation) -> crate::Result<DocumentId> {
-        self.update_bulk(vec![document])?
-            .pop()
-            .ok_or_else(|| StoreError::InternalError("No document id returned".to_string()))
+    fn update(&self, document: WriteOperation) -> crate::Result<()> {
+        self.update_bulk(vec![document])
     }
 
-    fn update_bulk(&self, documents: Vec<WriteOperation>) -> Result<Vec<DocumentId>>;
+    fn update_bulk(&self, documents: Vec<WriteOperation>) -> Result<()>;
 }
 
-pub trait StoreQuery<'x> {
+pub trait StoreQuery<'x>: StoreDocumentSet {
     type Iter: Iterator<Item = DocumentId>;
+
     fn query(
         &'x self,
         account: AccountId,
         collection: CollectionId,
-        filter: Option<Filter>,
-        sort: Option<Vec<Comparator>>,
+        filter: Filter<Self::Set>,
+        sort: Comparator<Self::Set>,
     ) -> Result<Self::Iter>;
 }
 
@@ -258,16 +291,18 @@ pub trait StoreGet {
         Vec<u8>: serialize::StoreDeserialize<T>;
 }
 
-pub trait StoreTag {
-    type Iter: Iterator<Item = DocumentId>;
+pub trait StoreDocumentSet {
+    type Set: DocumentSet + std::fmt::Debug;
+}
 
+pub trait StoreTag: StoreDocumentSet {
     fn get_tag(
         &self,
         account: AccountId,
         collection: CollectionId,
         field: FieldId,
         tag: Tag,
-    ) -> Result<Option<Self::Iter>> {
+    ) -> Result<Option<Self::Set>> {
         Ok(self
             .get_tags(account, collection, field, &[tag])?
             .pop()
@@ -280,7 +315,7 @@ pub trait StoreTag {
         collection: CollectionId,
         field: FieldId,
         tags: &[Tag],
-    ) -> Result<Vec<Option<Self::Iter>>>;
+    ) -> Result<Vec<Option<Self::Set>>>;
 
     fn set_tag(
         &self,
@@ -327,6 +362,21 @@ pub trait StoreDelete {
     ) -> Result<()>;
     fn delete_account(&self, account: AccountId) -> Result<()>;
     fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
+}
+
+pub trait StoreTombstone {
+    type Set: PartialEq
+        + std::fmt::Debug
+        + IntoIterator<Item = DocumentId>
+        + FromIterator<DocumentId>;
+
+    fn purge_tombstoned(&self, account: AccountId, collection: CollectionId) -> Result<()>;
+
+    fn get_tombstoned_ids(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<Option<Self::Set>>;
 }
 
 pub trait Store<'x>:
