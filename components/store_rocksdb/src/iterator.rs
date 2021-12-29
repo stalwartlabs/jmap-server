@@ -256,6 +256,10 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                                     return doc_id;
                                 }
                             }
+                        } else if !it_opts.remaining.is_empty() {
+                            if let Some(ref mut next_it_opts) = next_it_opts {
+                                next_it_opts.remaining = std::mem::take(&mut it_opts.remaining);
+                            }
                         }
                     };
                 }

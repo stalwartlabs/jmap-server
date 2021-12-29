@@ -8,6 +8,7 @@ use jmap_mail::{
     JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery, MessageField,
 };
 use jmap_store::{local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPQuery, JMAP_MAIL};
+use mail_parser::HeaderName;
 use store::{Store, Tag};
 
 use crate::insert_filter_sort::FIELDS;
@@ -143,7 +144,7 @@ where
                         .into(),
                         mailbox_ids: vec![
                             values_int["year"] as MailboxId,
-                            values_int["acquisitionYear"] as MailboxId,
+                            (values_int["acquisitionYear"] + 1000) as MailboxId,
                         ],
                         keywords: vec![
                             values_str["medium"].clone().into(),
@@ -206,24 +207,237 @@ fn test_filter<'x, T>(mail_store: &'x JMAPLocalStore<T>)
 where
     T: Store<'x>,
 {
-    for (filter, expected_results) in [(
-        JMAPFilter::and(vec![
-            JMAPFilter::condition(JMAPMailFilterCondition::After(1850)),
-            JMAPFilter::condition(JMAPMailFilterCondition::From("george".into())),
-        ]),
-        vec![
-            "N01389", "T10115", "N00618", "N03500", "T01587", "T00397", "N01561", "N05250",
-            "N03973", "N04973", "N04057", "N01940", "N01539", "N01612", "N04484", "N01954",
-            "N05998", "T02053", "AR00171", "AR00172", "AR00176",
-        ],
-    )] {
+    for (filter, sort, expected_results) in [
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1850)),
+                JMAPFilter::condition(JMAPMailFilterCondition::From("george".into())),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::Subject)],
+            vec![
+                "N01389", "T10115", "N00618", "N03500", "T01587", "T00397", "N01561", "N05250",
+                "N03973", "N04973", "N04057", "N01940", "N01539", "N01612", "N04484", "N01954",
+                "N05998", "T02053", "AR00171", "AR00172", "AR00176",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::InMailbox(1768)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Cc("canvas".into())),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec!["T01882", "N04689", "T00925", "N00121"],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::Subject("study".into())),
+                JMAPFilter::condition(JMAPMailFilterCondition::InMailboxOtherThan(vec![
+                    1991, 1870, 2011, 1951, 1902, 1808, 1963,
+                ])),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::Subject)],
+            vec![
+                "T10330", "N01744", "N01743", "N04885", "N02688", "N02122", "A00059", "A00058",
+                "N02123", "T00651", "T09439", "N05001", "T05848", "T05508",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::HasKeyword("N0".into())),
+                JMAPFilter::not(vec![JMAPFilter::condition(JMAPMailFilterCondition::From(
+                    "collins".into(),
+                ))]),
+                JMAPFilter::condition(JMAPMailFilterCondition::Body("bequeathed".into())),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::Subject)],
+            vec![
+                "N02640", "A01020", "N01250", "T03430", "N01800", "N00620", "N05250", "N04630",
+                "A01040",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![JMAPFilter::condition(
+                JMAPMailFilterCondition::NotKeyword("artist".into()),
+            )]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::Subject)],
+            vec!["T08626", "T09334", "T09455", "N01737", "T10965"],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1970)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1972)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Text("colour".into())),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec!["T01745", "P01436", "P01437"],
+        ),
+        (
+            JMAPFilter::and(vec![JMAPFilter::condition(JMAPMailFilterCondition::Text(
+                "'cats and dogs'".into(),
+            ))]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec!["P77623"],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::Header((
+                    HeaderName::Comments,
+                    Some("attributed".into()),
+                ))),
+                JMAPFilter::condition(JMAPMailFilterCondition::From("john".into())),
+                JMAPFilter::condition(JMAPMailFilterCondition::Cc("oil".into())),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec!["T10965"],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::AllInThreadHaveKeyword("N".into())),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1800)),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec![
+                "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273", "N01453",
+                "N02984",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::NoneInThreadHaveKeyword("N".into())),
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1995)),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec![
+                "AR00163", "AR00164", "AR00472", "P11481", "AR00066", "AR00178", "P77895",
+                "P77896", "P77897",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::SomeInThreadHaveKeyword(
+                    "Bronze".into(),
+                )),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1878)),
+            ]),
+            vec![JMAPComparator::ascending(JMAPMailComparator::From)],
+            vec![
+                "N04326", "N01610", "N02920", "N01587", "T00167", "T00168", "N01554", "N01535",
+                "N01536", "N01622", "N01754", "N01594",
+            ],
+        ),
+        // Sorting tests
+        (
+            JMAPFilter::and(vec![JMAPFilter::condition(
+                JMAPMailFilterCondition::Before(1800),
+            )]),
+            vec![
+                JMAPComparator::ascending(JMAPMailComparator::AllInThreadHaveKeyword("N".into())),
+                JMAPComparator::ascending(JMAPMailComparator::From),
+            ],
+            vec![
+                "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273", "N01453",
+                "N02984", "T09417", "T01882", "T08820", "N04689", "T08891", "T00986", "N00316",
+                "N03544", "N04296", "N04297", "T08234", "N00112", "T00211", "N01497", "N02639",
+                "N02640", "T00925", "T11683", "T08269", "D00001", "D00002", "D00046", "N00121",
+                "N00126", "T08626",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![JMAPFilter::condition(
+                JMAPMailFilterCondition::Before(1800),
+            )]),
+            vec![
+                JMAPComparator::descending(JMAPMailComparator::AllInThreadHaveKeyword("N".into())),
+                JMAPComparator::ascending(JMAPMailComparator::From),
+            ],
+            vec![
+                "T09417", "T01882", "T08820", "N04689", "T08891", "T00986", "N00316", "N03544",
+                "N04296", "N04297", "T08234", "N00112", "T00211", "N01497", "N02639", "N02640",
+                "T00925", "T11683", "T08269", "D00001", "D00002", "D00046", "N00121", "N00126",
+                "T08626", "N01496", "N05916", "N01046", "N00675", "N01320", "N01321", "N00273",
+                "N01453", "N02984",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1875)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1878)),
+            ]),
+            vec![
+                JMAPComparator::ascending(JMAPMailComparator::SomeInThreadHaveKeyword(
+                    "Bronze".into(),
+                )),
+                JMAPComparator::ascending(JMAPMailComparator::From),
+            ],
+            vec![
+                "N04326", "N01610", "N02920", "N01587", "T00167", "T00168", "N01554", "N01535",
+                "N01536", "N01622", "N01754", "N01594", "N01559", "N02123", "N01940", "N03594",
+                "N01494", "N04271",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1875)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1878)),
+            ]),
+            vec![
+                JMAPComparator::descending(JMAPMailComparator::SomeInThreadHaveKeyword(
+                    "Bronze".into(),
+                )),
+                JMAPComparator::ascending(JMAPMailComparator::From),
+            ],
+            vec![
+                "N01559", "N02123", "N01940", "N03594", "N01494", "N04271", "N04326", "N01610",
+                "N02920", "N01587", "T00167", "T00168", "N01554", "N01535", "N01536", "N01622",
+                "N01754", "N01594",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1786)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1840)),
+                JMAPFilter::condition(JMAPMailFilterCondition::HasKeyword("T".into())),
+            ]),
+            vec![
+                JMAPComparator::ascending(JMAPMailComparator::HasKeyword("attributed to".into())),
+                JMAPComparator::ascending(JMAPMailComparator::From),
+            ],
+            vec![
+                "T09455", "T09334", "T10965", "T08626", "T09417", "T08951", "T01851", "T01852",
+                "T08761", "T08123", "T08756", "T10561", "T10562", "T10563", "T00986", "T03424",
+                "T03427", "T08234", "T08133", "T06866", "T08897", "T00996", "T00997", "T01095",
+                "T03393", "T09456", "T00188", "T02362", "T09065", "T09547", "T10330", "T09187",
+                "T03433", "T08635", "T02366", "T03436", "T09150", "T01861", "T09759", "T11683",
+                "T02368", "T02369", "T08269", "T01018", "T10066", "T01710", "T01711", "T05764",
+            ],
+        ),
+        (
+            JMAPFilter::and(vec![
+                JMAPFilter::condition(JMAPMailFilterCondition::After(1786)),
+                JMAPFilter::condition(JMAPMailFilterCondition::Before(1840)),
+                JMAPFilter::condition(JMAPMailFilterCondition::HasKeyword("T".into())),
+            ]),
+            vec![
+                JMAPComparator::descending(JMAPMailComparator::HasKeyword("attributed to".into())),
+                JMAPComparator::ascending(JMAPMailComparator::From),
+            ],
+            vec![
+                "T09417", "T08951", "T01851", "T01852", "T08761", "T08123", "T08756", "T10561",
+                "T10562", "T10563", "T00986", "T03424", "T03427", "T08234", "T08133", "T06866",
+                "T08897", "T00996", "T00997", "T01095", "T03393", "T09456", "T00188", "T02362",
+                "T09065", "T09547", "T10330", "T09187", "T03433", "T08635", "T02366", "T03436",
+                "T09150", "T01861", "T09759", "T11683", "T02368", "T02369", "T08269", "T01018",
+                "T10066", "T01710", "T01711", "T05764", "T09455", "T09334", "T10965", "T08626",
+            ],
+        ),
+    ] {
         assert_eq!(
             mail_store
                 .mail_query(
                     JMAPQuery {
                         account_id: 0,
                         filter,
-                        sort: vec![JMAPComparator::ascending(JMAPMailComparator::Subject)],
+                        sort,
                         position: 0,
                         anchor: 0,
                         anchor_offset: 0,

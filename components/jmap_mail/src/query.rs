@@ -212,7 +212,7 @@ where
                                         MessageField::Body.into(),
                                         FieldValue::FullText(TextQuery::query(
                                             text.clone(),
-                                            Language::English,
+                                            Language::English, //TODO detect language
                                         )),
                                     ),
                                 ]));
@@ -226,7 +226,7 @@ where
                                 ));
                             }
                             JMAPMailFilterCondition::HasKeyword(keyword) => {
-                                // TODO text to id matching
+                                // TODO text to id conversion
                                 state.terms.push(Filter::eq(
                                     MessageField::Keyword.into(),
                                     FieldValue::Tag(Tag::Text(keyword)),
@@ -260,7 +260,7 @@ where
                                         self.get_store(),
                                         query.account_id,
                                         keyword,
-                                        true,
+                                        false,
                                     )?,
                                 )]));
                             }
@@ -460,10 +460,10 @@ where
                 let mut thread_tag_intersection = thread_doc_ids.clone();
                 thread_tag_intersection.intersection(&tagged_doc_ids);
 
-                if (match_all && thread_tag_intersection == tagged_doc_ids)
+                if (match_all && thread_tag_intersection == thread_doc_ids)
                     || (!match_all && !thread_tag_intersection.is_empty())
                 {
-                    matched_ids.union(&thread_tag_intersection);
+                    matched_ids.union(&thread_doc_ids);
                 } else if !thread_tag_intersection.is_empty() {
                     not_matched_ids.union(&thread_tag_intersection);
                 }
