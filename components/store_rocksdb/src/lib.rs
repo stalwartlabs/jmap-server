@@ -116,7 +116,6 @@ impl<'x> Store<'x> for RocksDBStore where RocksDBStore: store::StoreQuery<'x> {}
 
 #[cfg(test)]
 mod tests {
-
     use crate::RocksDBStore;
 
     #[test]
@@ -171,14 +170,14 @@ mod tests {
         let mut temp_dir = std::env::temp_dir();
         temp_dir.push("strdb_mail_query_test");
         if temp_dir.exists() {
-            //std::fs::remove_dir_all(&temp_dir).unwrap();
+            std::fs::remove_dir_all(&temp_dir).unwrap();
         }
 
         store_test::jmap_mail_query::test_jmap_mail_query(
             RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
-            false,
+            true,
         );
 
-        //std::fs::remove_dir_all(&temp_dir).unwrap();
+        std::fs::remove_dir_all(&temp_dir).unwrap();
     }
 }

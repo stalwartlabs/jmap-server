@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use jmap_store::{
     local_store::JMAPLocalStore, JMAPFilter, JMAPLogicalOperator, JMAPQuery, JMAPQueryResponse,
@@ -7,14 +7,16 @@ use jmap_store::{
 use mail_parser::HeaderName;
 use nlp::Language;
 use store::{
-    AccountId, Comparator, DocumentSet, DocumentSetComparator, FieldComparator, FieldValue, Filter,
-    FilterOperator, LogicalOperator, Store, StoreError, Tag, TextQuery,
+    AccountId, Comparator, DocumentId, DocumentSet, DocumentSetComparator, FieldComparator,
+    FieldValue, Filter, FilterOperator, LogicalOperator, Store, StoreError, Tag, TextQuery,
+    ThreadId,
 };
 
 use crate::{JMAPMailId, JMAPMailStoreQuery, MessageField};
 
 pub type MailboxId = u64;
 
+#[derive(Debug, Clone)]
 pub enum JMAPMailFilterCondition<'x> {
     InMailbox(MailboxId),
     InMailboxOtherThan(Vec<MailboxId>),
@@ -38,6 +40,7 @@ pub enum JMAPMailFilterCondition<'x> {
     Header((HeaderName, Option<Cow<'x, str>>)),
 }
 
+#[derive(Debug, Clone)]
 pub enum JMAPMailComparator<'x> {
     ReceivedAt,
     Size,
@@ -67,7 +70,7 @@ where
 
     fn mail_query(
         &'x self,
-        query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
+        mut query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>, JMAPMailId>,
         collapse_threads: bool,
     ) -> store::Result<JMAPQueryResponse<JMAPMailId>> {
         let state: Option<QueryState<Self::Set>> = match query.filter {
@@ -375,35 +378,146 @@ where
             .store
             .query(query.account_id, JMAP_MAIL, filter, sort)?;
         let num_results = doc_ids.size_hint().0;
-        let mut results = Vec::with_capacity(if query.limit > 0 {
-            query.limit
-        } else {
-            doc_ids.size_hint().0
-        });
 
-        for doc_id in doc_ids {
-            results.push(JMAPMailId {
-                thread_id: self
-                    .store
-                    .get_document_value(
-                        query.account_id,
-                        JMAP_MAIL,
-                        doc_id,
-                        MessageField::ThreadId.into(),
-                        0,
-                    )?
-                    .ok_or_else(|| {
-                        StoreError::InternalError(format!(
-                            "Thread id for document {} not found.",
-                            doc_id
-                        ))
-                    })?,
-                doc_id,
-            });
-            if query.limit > 0 && results.len() == query.limit {
-                break;
+        let results: Vec<JMAPMailId> = if collapse_threads || query.anchor.is_some() {
+            let has_anchor = query.anchor.is_some();
+            let results_len = if query.limit > 0 {
+                query.limit
+            } else {
+                num_results
+            };
+            let mut results = Vec::with_capacity(results_len);
+            let mut anchor_found = false;
+            let mut seen_threads = HashSet::with_capacity(results_len);
+
+            for doc_id in doc_ids {
+                if let Some(thread_id) = self.store.get_document_value::<ThreadId>(
+                    query.account_id,
+                    JMAP_MAIL,
+                    doc_id,
+                    MessageField::ThreadId.into(),
+                    0,
+                )? {
+                    if collapse_threads {
+                        if seen_threads.contains(&thread_id) {
+                            continue;
+                        }
+                        seen_threads.insert(thread_id);
+                    }
+                    let result = JMAPMailId::new(thread_id, doc_id);
+
+                    if !has_anchor {
+                        if query.position >= 0 {
+                            if query.position > 0 {
+                                query.position -= 1;
+                            } else {
+                                results.push(result);
+                                if query.limit > 0 && results.len() == query.limit {
+                                    break;
+                                }
+                            }
+                        } else {
+                            results.push(result);
+                        }
+                    } else if query.anchor_offset >= 0 {
+                        if !anchor_found {
+                            if &result != query.anchor.as_ref().unwrap() {
+                                continue;
+                            }
+                            anchor_found = true;
+                        }
+
+                        if query.anchor_offset > 0 {
+                            query.anchor_offset -= 1;
+                        } else {
+                            results.push(result);
+                            if query.limit > 0 && results.len() == query.limit {
+                                break;
+                            }
+                        }
+                    } else {
+                        anchor_found = &result == query.anchor.as_ref().unwrap();
+                        results.push(result);
+
+                        if !anchor_found {
+                            continue;
+                        }
+
+                        query.position = query.anchor_offset;
+
+                        break;
+                    }
+                }
             }
-        }
+
+            if !has_anchor || anchor_found {
+                if query.position >= 0 {
+                    results
+                } else {
+                    let position = query.position.abs() as usize;
+                    let start_offset = if position < results.len() {
+                        results.len() - position
+                    } else {
+                        0
+                    };
+                    let end_offset = if query.limit > 0 {
+                        std::cmp::min(start_offset + query.limit, results.len())
+                    } else {
+                        results.len()
+                    };
+
+                    results[start_offset..end_offset].to_vec()
+                }
+            } else {
+                return Err(StoreError::InternalError("Anchor not found".into()));
+                // TODO use correct error type
+            }
+        } else {
+            let doc_ids = if query.position != 0 && query.limit > 0 {
+                doc_ids
+                    .skip(if query.position > 0 {
+                        query.position as usize
+                    } else {
+                        let position = query.position.abs();
+                        if num_results > position as usize {
+                            num_results - position as usize
+                        } else {
+                            0
+                        }
+                    })
+                    .take(query.limit)
+                    .collect::<Vec<DocumentId>>()
+            } else if query.limit > 0 {
+                doc_ids.take(query.limit).collect::<Vec<DocumentId>>()
+            } else if query.position != 0 {
+                doc_ids
+                    .skip(if query.position > 0 {
+                        query.position as usize
+                    } else {
+                        let position = query.position.abs();
+                        if num_results > position as usize {
+                            num_results - position as usize
+                        } else {
+                            0
+                        }
+                    })
+                    .collect::<Vec<DocumentId>>()
+            } else {
+                doc_ids.collect::<Vec<DocumentId>>()
+            };
+
+            self.store
+                .get_multi_document_value(
+                    query.account_id,
+                    JMAP_MAIL,
+                    doc_ids.iter().copied(),
+                    MessageField::ThreadId.into(),
+                )?
+                .into_iter()
+                .zip(doc_ids.into_iter())
+                .filter_map(|(thread_id, doc_id)| JMAPMailId::new(thread_id?, doc_id).into())
+                .collect()
+        };
 
         Ok(JMAPQueryResponse {
             query_state: "".to_string(),

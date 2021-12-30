@@ -3,8 +3,8 @@ use std::{borrow::Cow, collections::HashSet};
 use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL};
 use mail_parser::Message;
 use store::{
-    batch::WriteOperation, field::Text, AccountId, Comparator, DocumentId, DocumentSet, FieldValue,
-    Filter, Store, StoreError, Tag, ThreadId,
+    batch::WriteOperation, field::Text, AccountId, Comparator, DocumentSet, FieldValue, Filter,
+    Store, StoreError, Tag, ThreadId,
 };
 
 use crate::{
@@ -84,60 +84,54 @@ where
 
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
-            // Query all document ids containing the reference ids
-            let message_doc_ids = self
+            // Obtain thread ids for all matching document ids
+            let thread_ids = self
                 .store
-                .query(
+                .get_multi_document_value(
                     account,
                     JMAP_MAIL,
-                    Filter::and(vec![
-                        Filter::eq(
-                            MessageField::ThreadName.into(),
-                            FieldValue::Keyword((&thread_name).into()),
-                        ),
-                        Filter::or(
-                            reference_ids
-                                .iter()
-                                .map(|id| {
-                                    Filter::eq(
-                                        MessageField::MessageIdRef.into(),
-                                        FieldValue::Keyword(id.as_ref().into()),
-                                    )
-                                })
-                                .collect(),
-                        ),
-                    ]),
-                    Comparator::None,
-                )?
-                .collect::<Vec<DocumentId>>();
-
-            // Obtain thread ids for all matching document ids
-            if !message_doc_ids.is_empty() {
-                let thread_ids = self
-                    .store
-                    .get_multi_document_value(
+                    self.store.query(
                         account,
                         JMAP_MAIL,
-                        &message_doc_ids,
-                        MessageField::ThreadId.into(),
-                    )?
-                    .into_iter()
-                    .flatten()
-                    .collect::<HashSet<ThreadId>>();
+                        Filter::and(vec![
+                            Filter::eq(
+                                MessageField::ThreadName.into(),
+                                FieldValue::Keyword((&thread_name).into()),
+                            ),
+                            Filter::or(
+                                reference_ids
+                                    .iter()
+                                    .map(|id| {
+                                        Filter::eq(
+                                            MessageField::MessageIdRef.into(),
+                                            FieldValue::Keyword(id.as_ref().into()),
+                                        )
+                                    })
+                                    .collect(),
+                            ),
+                        ]),
+                        Comparator::None,
+                    )?,
+                    MessageField::ThreadId.into(),
+                )?
+                .into_iter()
+                .flatten()
+                .collect::<HashSet<ThreadId>>();
 
-                if thread_ids.len() > 1 {
+            match thread_ids.len() {
+                1 => {
+                    // There was just one match, use it as the thread id
+                    thread_ids.into_iter().next()
+                }
+                0 => None,
+                _ => {
                     // Merge all matching threads
                     Some(self.mail_merge_threads(
                         account,
                         &mut batches,
                         thread_ids.into_iter().collect(),
                     )?)
-                } else {
-                    // There was just one match, use it as the thread id
-                    thread_ids.into_iter().next()
                 }
-            } else {
-                None
             }
         } else {
             None

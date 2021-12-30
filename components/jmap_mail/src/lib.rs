@@ -18,7 +18,7 @@ pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
 pub const MESSAGE_HEADERS_PARTS: FieldNumber = 5;
 pub const MESSAGE_HEADERS_STRUCTURE: FieldNumber = 6;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct JMAPMailId {
     pub thread_id: ThreadId,
     pub doc_id: DocumentId,
@@ -75,7 +75,7 @@ pub trait JMAPMailStoreQuery<'x> {
 
     fn mail_query(
         &'x self,
-        query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
+        query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>, JMAPMailId>,
         collapse_threads: bool,
     ) -> store::Result<JMAPQueryResponse<JMAPMailId>>;
 }

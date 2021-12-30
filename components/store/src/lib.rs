@@ -284,7 +284,7 @@ pub trait StoreGet {
         &self,
         account: AccountId,
         collection: CollectionId,
-        documents: &[DocumentId],
+        documents: impl Iterator<Item = DocumentId>,
         field: FieldId,
     ) -> Result<Vec<Option<T>>>
     where

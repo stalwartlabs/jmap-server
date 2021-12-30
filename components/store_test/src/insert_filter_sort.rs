@@ -10,6 +10,8 @@ use store::{
     TextQuery,
 };
 
+use crate::deflate_artwork_data;
+
 pub const FIELDS: [&str; 20] = [
     "id",
     "accession_number",
@@ -80,8 +82,7 @@ where
 
                 for record in csv::ReaderBuilder::new()
                     .has_headers(true)
-                    .from_path("/terastore/datasets/artwork_data.csv")
-                    .unwrap()
+                    .from_reader(&deflate_artwork_data()[..])
                     .records()
                     .into_iter()
                 {

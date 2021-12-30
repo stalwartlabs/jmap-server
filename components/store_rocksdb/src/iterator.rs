@@ -157,7 +157,6 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                 }
             } else if it_opts.remaining.len() == 1 || it_opts.eof {
                 let next = it_opts.remaining.min().unwrap();
-                //println!("Got {} from remaining {:?}", next, it_opts.eof);
                 it_opts.remaining.remove(next);
                 return Some(next);
             }
@@ -211,7 +210,6 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                                     if key.len() != prev_key.len()
                                         || !key.starts_with(prev_key_prefix)
                                     {
-                                        //println!("Saved next item {:?}", doc_id);
                                         index.prev_item = Some(doc_id);
                                         index.prev_key = Some(key);
                                         break;
@@ -222,7 +220,7 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                                         key.get(..key.len() - std::mem::size_of::<DocumentId>())
                                     })?;
                                 }
-                                //println!("Added to next iterator {:?}", doc_id);
+
                                 next_it_opts.remaining.insert(doc_id);
                             } else {
                                 return Some(doc_id);
@@ -271,7 +269,6 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                     if next_it_opts.remaining.len() == 1 {
                         let next = next_it_opts.remaining.min().unwrap();
                         next_it_opts.remaining.remove(next);
-                        //println!("Returning single item from next_it {:?}", next);
                         return Some(next);
                     } else {
                         match &mut next_it_opts.index {
@@ -296,11 +293,6 @@ impl<'x> Iterator for RocksDBIterator<'x> {
                         }
 
                         self.current += 1;
-                        /*println!(
-                            "Moving to iterator {} with {} items",
-                            self.current + 1,
-                            next_it_opts.remaining.len()
-                        );*/
                         next_it_opts.eof = false;
                         continue;
                     }

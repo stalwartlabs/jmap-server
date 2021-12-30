@@ -1,17 +1,18 @@
 use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap},
+    time::Instant,
 };
 
 use jmap_mail::{
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
-    JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery, MessageField,
+    JMAPMailId, JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery, MessageField,
 };
 use jmap_store::{local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPQuery, JMAP_MAIL};
 use mail_parser::HeaderName;
-use store::{Store, Tag};
+use store::{Comparator, FieldValue, Filter, Store, Tag};
 
-use crate::insert_filter_sort::FIELDS;
+use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
 
 pub fn test_jmap_mail_query<T>(db: T, do_insert: bool)
 where
@@ -24,6 +25,7 @@ where
     let mail_store = JMAPLocalStore::new(db);
 
     if do_insert {
+        let now = Instant::now();
         let mut fields = HashMap::new();
         for (field_num, field) in FIELDS.iter().enumerate() {
             fields.insert(field.to_string(), field_num);
@@ -34,14 +36,9 @@ where
         let mut thread_count = HashMap::new();
         let mut artist_count = HashMap::new();
 
-        /*println!(
-            "artist,medium,accession_number,year,artistRole,title,creditLine,inscription,accession_number,tag1,tag2"
-        );*/
-
         'outer: for record in csv::ReaderBuilder::new()
             .has_headers(true)
-            .from_path("/terastore/datasets/artwork_data.csv")
-            .unwrap()
+            .from_reader(&deflate_artwork_data()[..])
             .records()
             .into_iter()
         {
@@ -103,23 +100,6 @@ where
 
             total_messages += 1;
 
-            /*println!(
-                "{:?},{:?},{:?},{:?},{:?},{:?},{:?},{:?},{:?},{:?}",
-                values_str["artist"],
-                values_str["medium"],
-                values_str["accession_number"],
-                values_int["year"],
-                values_str["artistRole"],
-                values_str["title"],
-                values_str["creditLine"],
-                values_str["inscription"],
-                &values_str["accession_number"][0..1],
-                format!(
-                    "N{}",
-                    &values_str["accession_number"][values_str["accession_number"].len() - 1..]
-                )
-            );*/
-
             mail_store
                 .mail_import_single(
                     0,
@@ -166,6 +146,11 @@ where
                 break;
             }
         }
+        println!(
+            "Imported {} messages in {} ms.",
+            total_messages,
+            now.elapsed().as_millis()
+        );
     }
 
     for thread_id in 0..MAX_THREADS {
@@ -200,10 +185,14 @@ where
         MAX_THREADS
     );
 
-    test_filter(&mail_store);
+    println!("Running JMAP Mail query tests...");
+    test_query(&mail_store);
+
+    println!("Running JMAP Mail query options tests...");
+    test_query_options(&mail_store);
 }
 
-fn test_filter<'x, T>(mail_store: &'x JMAPLocalStore<T>)
+fn test_query<'x, T>(mail_store: &'x JMAPLocalStore<T>)
 where
     T: Store<'x>,
 {
@@ -439,7 +428,7 @@ where
                         filter,
                         sort,
                         position: 0,
-                        anchor: 0,
+                        anchor: None,
                         anchor_offset: 0,
                         limit: 0,
                         calculate_total: true,
@@ -461,4 +450,321 @@ where
             expected_results
         );
     }
+}
+
+fn test_query_options<'x, T>(mail_store: &'x JMAPLocalStore<T>)
+where
+    T: Store<'x>,
+{
+    for (query, expected_results, expected_results_collapsed) in [
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![
+                "N01496", "N01320", "N01321", "N05916", "N00273", "N01453", "N02984", "T08820",
+                "N00112", "T00211",
+            ],
+            vec![
+                "N01496", "N01320", "N05916", "N01453", "T08820", "N01046", "N00675", "T08891",
+                "T01882", "N04296",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 10,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![
+                "N01046", "N00675", "T08891", "N00126", "T01882", "N04689", "T00925", "N00121",
+                "N04296", "N04297",
+            ],
+            vec![
+                "T08234", "T09417", "N01110", "T08123", "N01039", "T09456", "T08951", "N01273",
+                "N00373", "T09547",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: -10,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 0,
+                calculate_total: true,
+            },
+            vec![
+                "T07236", "P11481", "AR00066", "P77895", "P77896", "P77897", "AR00163", "AR00164",
+                "AR00472", "AR00178",
+            ],
+            vec![
+                "P07639", "P07522", "AR00089", "P02949", "T05820", "P11441", "T06971", "P11481",
+                "AR00163", "AR00164",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: -20,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![
+                "P20079", "AR00024", "AR00182", "P20048", "P20044", "P20045", "P20046", "T06971",
+                "AR00177", "P77935",
+            ],
+            vec![
+                "T00300", "P06033", "T02310", "T02135", "P04006", "P03166", "P01358", "P07133",
+                "P03138", "T03562",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: -100000,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 1,
+                calculate_total: true,
+            },
+            vec!["N01496"],
+            vec!["N01496"],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: -1,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 100000,
+                calculate_total: true,
+            },
+            vec!["AR00178"],
+            vec!["AR00164"],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: get_anchor(mail_store, "N01205"),
+                anchor_offset: 0,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![
+                "N01205", "N01976", "T01139", "N01525", "T00176", "N01405", "N02396", "N04885",
+                "N01526", "N02134",
+            ],
+            vec![
+                "N01205", "N01526", "T01455", "N01969", "N05250", "N01781", "N00759", "A00057",
+                "N03527", "N01558",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: get_anchor(mail_store, "N01205"),
+                anchor_offset: 10,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![
+                "N01933", "N03618", "T03904", "N02398", "N02399", "N02688", "T01455", "N03051",
+                "N01500", "N03411",
+            ],
+            vec![
+                "N01559", "N04326", "N06017", "N01553", "N01617", "N01528", "N01539", "T09439",
+                "N01593", "N03988",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: get_anchor(mail_store, "N01205"),
+                anchor_offset: -10,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![
+                "N05779", "N04652", "N01534", "A00845", "N03409", "N03410", "N02061", "N02426",
+                "N00662", "N01205",
+            ],
+            vec![
+                "N00443", "N02237", "T03025", "N01722", "N01356", "N01800", "T05475", "T01587",
+                "N05779", "N01205",
+            ],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: get_anchor(mail_store, "N01496"),
+                anchor_offset: -10,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec!["N01496"],
+            vec!["N01496"],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: get_anchor(mail_store, "AR00164"),
+                anchor_offset: 10,
+                limit: 10,
+                calculate_total: true,
+            },
+            vec![],
+            vec![],
+        ),
+        (
+            JMAPQuery {
+                account_id: 0,
+                filter: JMAPFilter::<JMAPMailFilterCondition>::None,
+                sort: vec![
+                    JMAPComparator::ascending(JMAPMailComparator::Subject),
+                    JMAPComparator::ascending(JMAPMailComparator::From),
+                ],
+                position: 0,
+                anchor: get_anchor(mail_store, "AR00164"),
+                anchor_offset: 0,
+                limit: 0,
+                calculate_total: true,
+            },
+            vec!["AR00164", "AR00472", "AR00178"],
+            vec!["AR00164"],
+        ),
+    ] {
+        assert_eq!(
+            mail_store
+                .mail_query(query.clone(), false)
+                .unwrap()
+                .ids
+                .into_iter()
+                .map(|id| {
+                    mail_store
+                        .get_headers_rfc(0, id.doc_id)
+                        .unwrap()
+                        .remove(&mail_parser::HeaderName::MessageId)
+                        .unwrap()
+                        .unwrap_text()
+                })
+                .collect::<Vec<Cow<str>>>(),
+            expected_results
+        );
+        assert_eq!(
+            mail_store
+                .mail_query(query, true)
+                .unwrap()
+                .ids
+                .into_iter()
+                .map(|id| {
+                    mail_store
+                        .get_headers_rfc(0, id.doc_id)
+                        .unwrap()
+                        .remove(&mail_parser::HeaderName::MessageId)
+                        .unwrap()
+                        .unwrap_text()
+                })
+                .collect::<Vec<Cow<str>>>(),
+            expected_results_collapsed
+        );
+    }
+}
+
+fn get_anchor<'x, T>(mail_store: &'x JMAPLocalStore<T>, anchor: &'x str) -> Option<JMAPMailId>
+where
+    T: Store<'x>,
+{
+    let doc_id = mail_store
+        .get_store()
+        .query(
+            0,
+            JMAP_MAIL,
+            Filter::eq(
+                MessageField::MessageIdRef.into(),
+                FieldValue::Keyword(anchor.into()),
+            ),
+            Comparator::None,
+        )
+        .unwrap()
+        .next()
+        .unwrap();
+
+    let thread_id = mail_store
+        .get_store()
+        .get_document_value(0, JMAP_MAIL, doc_id, MessageField::ThreadId.into(), 0)
+        .unwrap()
+        .unwrap();
+
+    JMAPMailId::new(thread_id, doc_id).into()
 }

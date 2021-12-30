@@ -47,15 +47,15 @@ impl StoreGet for RocksDBStore {
         &self,
         account: AccountId,
         collection: CollectionId,
-        documents: &[DocumentId],
+        documents: impl Iterator<Item = DocumentId>,
         field: FieldId,
     ) -> store::Result<Vec<Option<T>>>
     where
         Vec<u8>: StoreDeserialize<T>,
     {
-        let mut result = Vec::with_capacity(documents.len());
-        for item in self.get_multi_document_raw_value(account, collection, documents, field, 0)? {
-            if let Some(bytes) = item {
+        let mut result = Vec::with_capacity(documents.size_hint().0);
+        for bytes in self.get_multi_document_raw_value(account, collection, documents, field, 0)? {
+            if let Some(bytes) = bytes {
                 result.push(Some(bytes.deserialize()?));
             } else {
                 result.push(None);
@@ -104,47 +104,25 @@ impl RocksDBStore {
         &self,
         account: AccountId,
         collection: CollectionId,
-        documents: &[DocumentId],
+        documents: impl Iterator<Item = DocumentId>,
         field: FieldId,
         pos: FieldNumber,
     ) -> store::Result<Vec<Option<Vec<u8>>>> {
         let cf_values = self.get_handle("values")?;
-        let mut query = Vec::new();
-        let mut query_result_pos = Vec::new();
-        let mut result = vec![None; documents.len()];
+        let mut result = Vec::with_capacity(documents.size_hint().0);
 
-        if let Some(tombstoned_ids) = self.get_tombstoned_ids(account, collection)? {
-            for (list_pos, &document) in documents.iter().enumerate() {
-                if !tombstoned_ids.contains(document) {
-                    query.push((
-                        &cf_values,
-                        serialize_stored_key(account, collection, document, field, pos),
-                    ));
-                    query_result_pos.push(list_pos);
-                }
-            }
-        } else {
-            for (list_pos, &document) in documents.iter().enumerate() {
-                query.push((
+        let query = documents
+            .map(|document| {
+                (
                     &cf_values,
                     serialize_stored_key(account, collection, document, field, pos),
-                ));
-                query_result_pos.push(list_pos);
-            }
-        }
+                )
+            })
+            .collect::<Vec<_>>();
 
         if !query.is_empty() {
-            for (value, list_pos) in self
-                .db
-                .multi_get_cf(query)
-                .into_iter()
-                .zip(query_result_pos.into_iter())
-            {
-                if let Some(value) =
-                    value.map_err(|e| StoreError::InternalError(e.into_string()))?
-                {
-                    result[list_pos] = Some(value);
-                }
+            for value in self.db.multi_get_cf(query) {
+                result.push(value.map_err(|e| StoreError::InternalError(e.into_string()))?);
             }
         }
 
