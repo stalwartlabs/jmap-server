@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 
 use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
-use jmap_store::JMAP_MAIL;
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
     parsers::fields::thread::thread_name,
@@ -10,15 +9,15 @@ use mail_parser::{
 };
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
-    batch::{WriteOperation, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    batch::{DocumentWriter, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::Text,
-    AccountId, FieldNumber, Integer, LongInteger, StoreError, Tag,
+    FieldNumber, Integer, LongInteger, StoreError, Tag, UncommittedDocumentId,
 };
 
 use crate::{MessageField, MessageParts};
 
 fn parse_address<'x>(
-    document: &mut WriteOperation<'x>,
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     header_name: HeaderName,
     address: Addr<'x>,
 ) {
@@ -39,7 +38,7 @@ fn parse_address<'x>(
 }
 
 fn parse_address_group<'x>(
-    document: &mut WriteOperation<'x>,
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     header_name: HeaderName,
     mut group: Group<'x>,
 ) {
@@ -52,7 +51,11 @@ fn parse_address_group<'x>(
     }
 }
 
-fn parse_text<'x>(document: &mut WriteOperation<'x>, header_name: HeaderName, text: Cow<'x, str>) {
+fn parse_text<'x>(
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    header_name: HeaderName,
+    text: Cow<'x, str>,
+) {
     match header_name {
         HeaderName::Keywords | HeaderName::ContentLanguage | HeaderName::MimeVersion => {
             if text.len() <= MAX_TOKEN_LENGTH {
@@ -79,7 +82,7 @@ fn parse_text<'x>(document: &mut WriteOperation<'x>, header_name: HeaderName, te
 }
 
 fn parse_content_type<'x>(
-    document: &mut WriteOperation<'x>,
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     header_name: HeaderName,
     content_type: ContentType<'x>,
 ) {
@@ -114,7 +117,11 @@ fn parse_content_type<'x>(
     }
 }
 
-fn parse_datetime(document: &mut WriteOperation, header_name: HeaderName, date_time: DateTime) {
+fn parse_datetime(
+    document: &mut DocumentWriter<impl UncommittedDocumentId>,
+    header_name: HeaderName,
+    date_time: DateTime,
+) {
     if (0..23).contains(&date_time.tz_hour)
         && (0..59).contains(&date_time.tz_minute)
         && (1970..2500).contains(&date_time.year)
@@ -146,7 +153,7 @@ fn parse_datetime(document: &mut WriteOperation, header_name: HeaderName, date_t
 
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort<'x>(
-    document: &mut WriteOperation<'x>,
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     header_name: HeaderName,
     header_value: &HeaderValue<'x>,
 ) {
@@ -212,7 +219,7 @@ fn add_addr_sort<'x>(
 }
 
 fn parse_header<'x>(
-    document: &mut WriteOperation<'x>,
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     header_name: HeaderName,
     header_value: HeaderValue<'x>,
 ) {
@@ -257,10 +264,10 @@ fn parse_header<'x>(
 }
 
 pub fn build_message_document<'x>(
-    account: AccountId,
+    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     mut message: Message<'x>,
     received_at: Option<i64>,
-) -> store::Result<(WriteOperation, Vec<Cow<'x, str>>, String)> {
+) -> store::Result<(Vec<Cow<'x, str>>, String)> {
     let mut message_parts = MessageParts {
         html_body: message.html_body,
         text_body: message.text_body,
@@ -269,7 +276,6 @@ pub fn build_message_document<'x>(
         size: message.raw_message.len(),
         received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
     };
-    let mut document = WriteOperation::insert_document(account, JMAP_MAIL);
     let mut total_message_parts = message.parts.len();
     let mut nested_headers = Vec::with_capacity(message.parts.len());
     let mut language_detector = LanguageDetector::new();
@@ -368,9 +374,9 @@ pub fn build_message_document<'x>(
 
     for (header_name, header_value) in message.headers_rfc {
         if let HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc = header_name {
-            add_addr_sort(&mut document, header_name, &header_value);
+            add_addr_sort(document, header_name, &header_value);
         }
-        parse_header(&mut document, header_name, header_value);
+        parse_header(document, header_name, header_value);
     }
 
     let mut has_attachment = false;
@@ -617,5 +623,5 @@ pub fn build_message_document<'x>(
     // TODO use content language when available
     // TODO index PDF, Doc, Excel, etc.
 
-    Ok((document, reference_ids, thread_name))
+    Ok((reference_ids, thread_name))
 }

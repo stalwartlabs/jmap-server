@@ -5,12 +5,13 @@ use rocksdb::{
 use std::{
     array::TryFromSliceError,
     convert::TryInto,
+    iter::FromIterator,
     ops::{BitAndAssign, BitOrAssign, BitXorAssign},
     sync::Arc,
 };
 use store::{
-    leb128::Leb128, serialize::PREFIX_LEN, ComparisonOperator, DocumentId, DocumentSet,
-    LogicalOperator, StoreError,
+    leb128::Leb128, serialize::FIELD_PREFIX_LEN, ComparisonOperator, DocumentId, DocumentSet,
+    DocumentSetBitOps, LogicalOperator, StoreError,
 };
 
 use crate::RocksDBStore;
@@ -196,8 +197,8 @@ impl RocksDBStore {
         op: &ComparisonOperator,
     ) -> crate::Result<Option<RoaringBitmap>> {
         let mut bm = RoaringBitmap::new();
-        let match_prefix = &match_key[0..PREFIX_LEN];
-        let match_value = &match_key[PREFIX_LEN..];
+        let match_prefix = &match_key[0..FIELD_PREFIX_LEN];
+        let match_value = &match_key[FIELD_PREFIX_LEN..];
 
         for (key, _) in self.db.iterator_cf(
             cf_indexes,
@@ -215,7 +216,7 @@ impl RocksDBStore {
                 break;
             }
             let doc_id_pos = key.len() - std::mem::size_of::<DocumentId>();
-            let value = key.get(PREFIX_LEN..doc_id_pos).ok_or_else(|| {
+            let value = key.get(FIELD_PREFIX_LEN..doc_id_pos).ok_or_else(|| {
                 StoreError::InternalError(
                     "Invalid key found in 'indexes' column family.".to_string(),
                 )
@@ -356,7 +357,7 @@ impl_bit!(clear_bit, clear_bits, BIT_CLEAR);
 
 #[derive(Debug)]
 pub struct RocksDBDocumentSet {
-    bitmap: RoaringBitmap,
+    pub bitmap: RoaringBitmap,
 }
 
 impl RocksDBDocumentSet {
@@ -382,6 +383,8 @@ impl Default for RocksDBDocumentSet {
 }
 
 impl DocumentSet for RocksDBDocumentSet {
+    type Item = DocumentId;
+
     fn new() -> RocksDBDocumentSet {
         RocksDBDocumentSet {
             bitmap: RoaringBitmap::new(),
@@ -399,17 +402,32 @@ impl DocumentSet for RocksDBDocumentSet {
     fn len(&self) -> usize {
         self.bitmap.len() as usize
     }
+}
 
-    fn intersection(&mut self, other: &Self) {
+impl DocumentSetBitOps for RocksDBDocumentSet {
+    fn intersection(&mut self, other: &RocksDBDocumentSet) {
         self.bitmap.bitand_assign(&other.bitmap);
     }
 
-    fn union(&mut self, other: &Self) {
+    fn union(&mut self, other: &RocksDBDocumentSet) {
         self.bitmap.bitor_assign(&other.bitmap);
     }
 
-    fn difference(&mut self, other: &Self) {
+    fn difference(&mut self, other: &RocksDBDocumentSet) {
         self.bitmap.bitxor_assign(&other.bitmap);
+    }
+}
+
+impl FromIterator<DocumentId> for RocksDBDocumentSet {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = DocumentId>,
+    {
+        let mut bitmap = RoaringBitmap::new();
+        for document in iter {
+            bitmap.insert(document);
+        }
+        RocksDBDocumentSet { bitmap }
     }
 }
 

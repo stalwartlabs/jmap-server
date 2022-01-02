@@ -3,68 +3,26 @@ use std::ops::BitXorAssign;
 use roaring::RoaringBitmap;
 use store::{
     serialize::{serialize_bm_internal, BM_FREED_IDS, BM_USED_IDS},
-    AccountId, CollectionId, DocumentId, StoreTombstone,
+    AccountId, CollectionId, DocumentId, StoreTombstone, UncommittedDocumentId,
 };
 
 use crate::RocksDBStore;
 
-pub struct DocumentIdAssigner {
-    used_ids: RoaringBitmap,
-    freed_ids: Option<RoaringBitmap>,
-    pub success: bool,
-}
-
-pub enum DocumentIdAssignerResult {
+#[derive(Clone)]
+pub enum AssignedDocumentId {
     New(DocumentId),
     Freed(DocumentId),
 }
 
-impl Default for DocumentIdAssigner {
-    fn default() -> Self {
-        Self {
-            used_ids: Default::default(),
-            freed_ids: None,
-            success: false,
-        }
-    }
-}
-
-impl DocumentIdAssigner {
-    pub fn get_document_id(&mut self) -> DocumentIdAssignerResult {
-        if let Some(ref mut freed_ids) = self.freed_ids {
-            let doc_id = freed_ids.min().unwrap();
-            freed_ids.remove(doc_id);
-            if freed_ids.is_empty() {
-                self.freed_ids = None;
-            }
-            DocumentIdAssignerResult::Freed(doc_id)
-        } else {
-            let doc_id = if let Some(max) = self.used_ids.max() {
-                max + 1
-            } else {
-                0
-            };
-            self.used_ids.insert(doc_id);
-            DocumentIdAssignerResult::New(doc_id)
+impl UncommittedDocumentId for AssignedDocumentId {
+    fn get_document_id(&self) -> DocumentId {
+        match self {
+            AssignedDocumentId::New(id) | AssignedDocumentId::Freed(id) => *id,
         }
     }
 }
 
 impl<'x> RocksDBStore {
-    pub fn get_document_id_assigner(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> crate::Result<DocumentIdAssigner> {
-        Ok(DocumentIdAssigner {
-            used_ids: self
-                .get_document_ids_used(account, collection)?
-                .unwrap_or_else(RoaringBitmap::new),
-            freed_ids: self.get_document_ids_freed(account, collection)?,
-            success: true,
-        })
-    }
-
     pub fn get_document_ids_used(
         &self,
         account: AccountId,
@@ -94,7 +52,7 @@ impl<'x> RocksDBStore {
     ) -> crate::Result<Option<RoaringBitmap>> {
         if let Some(mut docs) = self.get_document_ids_used(account, collection)? {
             if let Some(tombstoned_docs) = self.get_tombstoned_ids(account, collection)? {
-                docs.bitxor_assign(tombstoned_docs);
+                docs.bitxor_assign(tombstoned_docs.bitmap);
             }
             Ok(Some(docs))
         } else {

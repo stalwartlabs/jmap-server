@@ -6,7 +6,7 @@ use std::{
 
 use nlp::Language;
 use store::{
-    batch::WriteOperation, field::Text, Comparator, ComparisonOperator, FieldValue, Filter, Store,
+    batch::DocumentWriter, field::Text, Comparator, ComparisonOperator, FieldValue, Filter, Store,
     TextQuery,
 };
 
@@ -79,6 +79,7 @@ where
                 let db = Arc::new(&db);
                 let now = Instant::now();
                 let documents = Arc::new(Mutex::new(Vec::new()));
+                let mut last_assigned_id = None;
 
                 for record in csv::ReaderBuilder::new()
                     .has_headers(true)
@@ -88,8 +89,11 @@ where
                 {
                     let record = record.unwrap();
                     let documents = documents.clone();
+                    last_assigned_id = Some(db.assign_document_id(0, 0, last_assigned_id).unwrap());
+                    let record_id = last_assigned_id.clone().unwrap();
+
                     s.spawn_fifo(move |_| {
-                        let mut builder = WriteOperation::insert_document(0, 0);
+                        let mut builder = DocumentWriter::insert(0, 0, record_id);
                         for (pos, field) in record.iter().enumerate() {
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {
@@ -163,7 +167,7 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            db.update_bulk(chunk).unwrap();
+                            db.update_documents(chunk).unwrap();
                             println!(
                                 "Inserted {} entries in {} ms (Thread {}/{}).",
                                 num_docs,
@@ -500,7 +504,6 @@ pub fn test_sort<'x, T: Store<'x>>(db: &'x T) {
                 .get_document_value(0, 0, doc_id, fields["accession_number"], 0)
                 .unwrap()
                 .unwrap();
-            print!("[{} = {}] ", val, doc_id);
             results.push(val);
 
             if results.len() == expected_results.len() {

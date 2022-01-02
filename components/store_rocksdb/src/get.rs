@@ -1,6 +1,6 @@
 use store::{
     serialize::{serialize_stored_key, serialize_stored_key_global, StoreDeserialize},
-    AccountId, CollectionId, DocumentId, FieldId, FieldNumber, StoreError, StoreGet,
+    AccountId, CollectionId, DocumentId, DocumentSet, FieldId, FieldNumber, StoreError, StoreGet,
     StoreTombstone,
 };
 

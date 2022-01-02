@@ -1,10 +1,14 @@
+pub mod changes;
 pub mod get;
 pub mod import;
 pub mod parse;
 pub mod query;
 
 use import::JMAPMailImportItem;
-use jmap_store::{JMAPQuery, JMAPQueryResponse};
+use jmap_store::{
+    changes::JMAPState, JMAPChangesResponse, JMAPQuery, JMAPQueryChanges, JMAPQueryChangesResponse,
+    JMAPQueryResponse,
+};
 use mail_parser::{MessagePartId, RfcHeaders};
 use query::{JMAPMailComparator, JMAPMailFilterCondition};
 use serde::{Deserialize, Serialize};
@@ -18,15 +22,25 @@ pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
 pub const MESSAGE_HEADERS_PARTS: FieldNumber = 5;
 pub const MESSAGE_HEADERS_STRUCTURE: FieldNumber = 6;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct JMAPMailId {
-    pub thread_id: ThreadId,
-    pub doc_id: DocumentId,
+pub type JMAPMailId = u64;
+
+pub trait JMAPMailIdImpl {
+    fn new(thread_id: ThreadId, doc_id: DocumentId) -> Self;
+    fn get_document_id(&self) -> DocumentId;
+    fn get_thread_id(&self) -> ThreadId;
 }
 
-impl JMAPMailId {
-    pub fn new(thread_id: ThreadId, doc_id: DocumentId) -> Self {
-        Self { thread_id, doc_id }
+impl JMAPMailIdImpl for JMAPMailId {
+    fn new(thread_id: ThreadId, doc_id: DocumentId) -> JMAPMailId {
+        (thread_id as JMAPMailId) << 32 | doc_id as JMAPMailId
+    }
+
+    fn get_document_id(&self) -> DocumentId {
+        (self & 0xFFFFFFFF) as DocumentId
+    }
+
+    fn get_thread_id(&self) -> ThreadId {
+        (self >> 32) as ThreadId
     }
 }
 
@@ -80,6 +94,23 @@ pub trait JMAPMailStoreQuery<'x> {
     ) -> store::Result<JMAPQueryResponse<JMAPMailId>>;
 }
 
+pub trait JMAPMailStoreChanges<'x> {
+    type Set: DocumentSet;
+
+    fn mail_changes(
+        &'x self,
+        account: AccountId,
+        since_state: JMAPState,
+        max_changes: usize,
+    ) -> store::Result<JMAPChangesResponse>;
+
+    fn mail_query_changes(
+        &'x self,
+        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>, JMAPMailId>,
+        collapse_threads: bool,
+    ) -> store::Result<JMAPQueryChangesResponse<JMAPMailId>>;
+}
+
 pub trait JMAPMailStoreGet<'x> {
     fn get_headers_rfc(
         &'x self,
@@ -89,6 +120,6 @@ pub trait JMAPMailStoreGet<'x> {
 }
 
 pub trait JMAPMailStore<'x>:
-    JMAPMailStoreImport<'x> + JMAPMailStoreQuery<'x> + JMAPMailStoreGet<'x>
+    JMAPMailStoreImport<'x> + JMAPMailStoreQuery<'x> + JMAPMailStoreGet<'x> + JMAPMailStoreChanges<'x>
 {
 }

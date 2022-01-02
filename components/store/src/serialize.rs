@@ -1,15 +1,14 @@
 use std::convert::TryInto;
 
 use crate::{
-    leb128::Leb128, AccountId, CollectionId, DocumentId, FieldId, FieldNumber, Float, Integer,
-    LongInteger, StoreError, Tag, TermId,
+    leb128::Leb128, AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, FieldNumber, Float,
+    Integer, LongInteger, StoreError, Tag, TermId,
 };
 
-pub const PREFIX_LEN: usize = std::mem::size_of::<AccountId>()
-    + std::mem::size_of::<CollectionId>()
-    + std::mem::size_of::<FieldId>();
-
-pub const KEY_BASE_LEN: usize = PREFIX_LEN + std::mem::size_of::<DocumentId>();
+pub const COLLECTION_PREFIX_LEN: usize =
+    std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>();
+pub const FIELD_PREFIX_LEN: usize = COLLECTION_PREFIX_LEN + std::mem::size_of::<FieldId>();
+pub const KEY_BASE_LEN: usize = FIELD_PREFIX_LEN + std::mem::size_of::<DocumentId>();
 
 pub const BM_TEXT: u8 = 0;
 pub const BM_TERM_EXACT: u8 = 1;
@@ -210,6 +209,18 @@ pub fn serialize_ac_key_leb128(account: AccountId, collection: CollectionId) -> 
 pub fn serialize_a_key_leb128(account: AccountId) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
     account.to_leb128_bytes(&mut bytes);
+    bytes
+}
+
+pub fn serialize_changelog_key(
+    account: AccountId,
+    collection: CollectionId,
+    change_id: ChangeLogId,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(FIELD_PREFIX_LEN + std::mem::size_of::<ChangeLogId>());
+    bytes.extend_from_slice(&account.to_be_bytes());
+    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.extend_from_slice(&change_id.to_be_bytes());
     bytes
 }
 

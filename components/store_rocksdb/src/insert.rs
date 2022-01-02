@@ -6,145 +6,187 @@ use std::{
 use nlp::Language;
 use rocksdb::BoundColumnFamily;
 use store::{
-    batch::{WriteAction, WriteOperation},
-    field::{IndexField, Text, TokenIterator},
+    batch::{DocumentWriter, LogAction, WriteAction},
+    field::{Text, TokenIterator, UpdateField},
     serialize::{
         serialize_acd_key_leb128, serialize_bm_internal, serialize_bm_tag_key,
-        serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
-        serialize_stored_key_global, BM_FREED_IDS, BM_USED_IDS,
+        serialize_bm_term_key, serialize_bm_text_key, serialize_changelog_key, serialize_index_key,
+        serialize_stored_key, serialize_stored_key_global, BM_FREED_IDS, BM_TOMBSTONED_IDS,
+        BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, CollectionId, DocumentId, StoreError, StoreUpdate,
+    AccountId, CollectionId, DocumentId, StoreChangeLog, StoreError, StoreUpdate,
 };
 
 use crate::{
     bitmaps::{clear_bits, set_bits},
-    document_id::DocumentIdAssignerResult,
+    changelog::ChangeLogWriter,
+    document_id::AssignedDocumentId,
     RocksDBStore,
 };
 
 impl StoreUpdate for RocksDBStore {
-    fn update_bulk(&self, batches: Vec<WriteOperation>) -> store::Result<()> {
+    type UncommittedId = AssignedDocumentId;
+
+    fn update_documents(
+        &self,
+        batches: Vec<DocumentWriter<AssignedDocumentId>>,
+    ) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
         let cf_indexes = self.get_handle("indexes")?;
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut write_batch = rocksdb::WriteBatch::default();
 
+        let mut change_log_list = HashMap::new();
         let mut set_bitmap_list = HashMap::new();
         let mut clear_bitmap_list = HashMap::new();
 
-        let mut account_locks = HashMap::new();
-        let mut id_assigners = HashMap::new();
+        let mut collection_locks = HashMap::new();
 
         for batch in batches {
-            match batch.get_action() {
-                WriteAction::UpdateDocument(account, collection, document_id, default_language) => {
-                    if let Entry::Vacant(e) = account_locks.entry((account, collection)) {
-                        e.insert(self.lock_collection(account, collection)?);
+            match batch.action {
+                WriteAction::Insert(document_id) => {
+                    if let Entry::Vacant(e) =
+                        collection_locks.entry((batch.account, batch.collection))
+                    {
+                        e.insert(self.lock_collection(batch.account, batch.collection)?);
                     }
-                    if let Some(document_id) = document_id {
-                        self._update_document(
-                            &mut write_batch,
-                            &cf_values,
-                            &cf_indexes,
-                            &mut set_bitmap_list,
-                            account,
-                            collection,
-                            document_id,
-                            default_language,
-                            batch,
-                        )?
-                    } else {
-                        let id_assigner =
-                            id_assigners
-                                .entry((account, collection))
-                                .or_insert_with(|| {
-                                    self.get_document_id_assigner(account, collection)
-                                        .unwrap_or_default()
-                                });
-
-                        if !id_assigner.success {
-                            return Err(StoreError::InternalError(
-                                "Failed to obtain document id assigner.".to_string(),
-                            ));
+                    let document_id = match document_id {
+                        AssignedDocumentId::Freed(document_id) => {
+                            // Remove document id from freed ids
+                            clear_bitmap_list
+                                .entry(serialize_bm_internal(
+                                    batch.account,
+                                    batch.collection,
+                                    BM_FREED_IDS,
+                                ))
+                                .or_insert_with(HashSet::new)
+                                .insert(document_id);
+                            document_id
                         }
+                        AssignedDocumentId::New(document_id) => document_id,
+                    };
 
-                        let document_id = match id_assigner.get_document_id() {
-                            DocumentIdAssignerResult::Freed(document_id) => {
-                                // Remove document id from freed ids
-                                clear_bitmap_list
-                                    .entry(serialize_bm_internal(account, collection, BM_FREED_IDS))
-                                    .or_insert_with(HashSet::new)
-                                    .insert(document_id);
-                                document_id
-                            }
-                            DocumentIdAssignerResult::New(document_id) => document_id,
-                        };
+                    // Add document id to collection
+                    set_bitmap_list
+                        .entry(serialize_bm_internal(
+                            batch.account,
+                            batch.collection,
+                            BM_USED_IDS,
+                        ))
+                        .or_insert_with(HashSet::new)
+                        .insert(document_id);
 
-                        // Add document id to collection
-                        set_bitmap_list
-                            .entry(serialize_bm_internal(account, collection, BM_USED_IDS))
-                            .or_insert_with(HashSet::new)
-                            .insert(document_id);
-
-                        self._update_document(
-                            &mut write_batch,
-                            &cf_values,
-                            &cf_indexes,
-                            &mut set_bitmap_list,
-                            account,
-                            collection,
-                            document_id,
-                            default_language,
-                            batch,
-                        )?;
+                    self._update_document(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &mut set_bitmap_list,
+                        batch.account,
+                        batch.collection,
+                        document_id,
+                        batch.default_language,
+                        batch.fields,
+                    )?;
+                }
+                WriteAction::Update(document_id) => {
+                    if let Entry::Vacant(e) =
+                        collection_locks.entry((batch.account, batch.collection))
+                    {
+                        e.insert(self.lock_collection(batch.account, batch.collection)?);
                     }
+                    self._update_document(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &mut set_bitmap_list,
+                        batch.account,
+                        batch.collection,
+                        document_id,
+                        batch.default_language,
+                        batch.fields,
+                    )?
                 }
-                WriteAction::DeleteDocument(_, _, _) => unimplemented!(),
-                WriteAction::UpdateCollection(account, collection) => {
+                WriteAction::Delete(document_id) => {
+                    // Add document id to tombstoned ids
+                    set_bitmap_list
+                        .entry(serialize_bm_internal(
+                            batch.account,
+                            batch.collection,
+                            BM_TOMBSTONED_IDS,
+                        ))
+                        .or_insert_with(HashSet::new)
+                        .insert(document_id);
+                }
+                WriteAction::UpdateMany => {
                     self._update_global(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
                         &cf_bitmaps,
-                        account.into(),
-                        collection.into(),
-                        batch,
+                        batch.account.into(),
+                        batch.collection.into(),
+                        batch.fields,
                     )?;
                 }
-                WriteAction::DeleteCollection(account, collection) => {
+                WriteAction::DeleteMany => {
                     self._delete_global(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
                         &cf_bitmaps,
-                        account.into(),
-                        collection.into(),
-                        batch,
+                        batch.account.into(),
+                        batch.collection.into(),
+                        batch.fields,
                     )?;
                 }
-                WriteAction::Update => {
-                    self._update_global(
-                        &mut write_batch,
-                        &cf_values,
-                        &cf_indexes,
-                        &cf_bitmaps,
-                        None,
-                        None,
-                        batch,
-                    )?;
+            }
+
+            match batch.log_action {
+                LogAction::Insert(id) => change_log_list
+                    .entry((batch.account, batch.collection))
+                    .or_insert_with(ChangeLogWriter::default)
+                    .inserts
+                    .push(id),
+                LogAction::Update(id) => change_log_list
+                    .entry((batch.account, batch.collection))
+                    .or_insert_with(ChangeLogWriter::default)
+                    .updates
+                    .push(id),
+                LogAction::Delete(id) => change_log_list
+                    .entry((batch.account, batch.collection))
+                    .or_insert_with(ChangeLogWriter::default)
+                    .deletes
+                    .push(id),
+                LogAction::Move(old_id, id) => {
+                    let change_log_list = change_log_list
+                        .entry((batch.account, batch.collection))
+                        .or_insert_with(ChangeLogWriter::default);
+                    change_log_list.inserts.push(id);
+                    change_log_list.deletes.push(old_id);
                 }
-                WriteAction::Delete => {
-                    self._delete_global(
-                        &mut write_batch,
-                        &cf_values,
-                        &cf_indexes,
-                        &cf_bitmaps,
-                        None,
-                        None,
-                        batch,
-                    )?;
-                }
+                LogAction::None => (),
+            }
+        }
+
+        if !change_log_list.is_empty() {
+            let cf_log = self.get_handle("log")?;
+            for ((account, collection), change_log) in change_log_list {
+                let change_id = self
+                    .get_last_change_id(account, collection)?
+                    .map(|id| id + 1)
+                    .unwrap_or(0);
+                // TODO find better key name for change id
+                write_batch.put_cf(
+                    &cf_values,
+                    serialize_stored_key_global(account.into(), collection.into(), None),
+                    &change_id.to_le_bytes(),
+                );
+                write_batch.put_cf(
+                    &cf_log,
+                    serialize_changelog_key(account, collection, change_id),
+                    change_log.serialize(),
+                );
             }
         }
 
@@ -162,6 +204,39 @@ impl StoreUpdate for RocksDBStore {
 
         Ok(())
     }
+
+    fn assign_document_id(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        last_assigned_id: Option<Self::UncommittedId>,
+    ) -> store::Result<AssignedDocumentId> {
+        if let Some(last_assigned_id) = last_assigned_id {
+            match last_assigned_id {
+                AssignedDocumentId::Freed(last_assigned_id) => {
+                    if let Some(mut freed_ids) = self.get_document_ids_freed(account, collection)? {
+                        freed_ids.remove_range(0..=last_assigned_id);
+                        if !freed_ids.is_empty() {
+                            return Ok(AssignedDocumentId::Freed(freed_ids.min().unwrap()));
+                        }
+                    }
+                }
+                AssignedDocumentId::New(last_assigned_id) => {
+                    return Ok(AssignedDocumentId::New(last_assigned_id + 1));
+                }
+            }
+        } else if let Some(freed_ids) = self.get_document_ids_freed(account, collection)? {
+            return Ok(AssignedDocumentId::Freed(freed_ids.min().unwrap()));
+        };
+
+        Ok(
+            if let Some(used_ids) = self.get_document_ids_used(account, collection)? {
+                AssignedDocumentId::New(used_ids.max().unwrap() + 1)
+            } else {
+                AssignedDocumentId::New(0)
+            },
+        )
+    }
 }
 
 impl RocksDBStore {
@@ -174,25 +249,25 @@ impl RocksDBStore {
         _cf_bitmaps: &Arc<BoundColumnFamily>,
         account: Option<AccountId>,
         collection: Option<CollectionId>,
-        batch: WriteOperation,
+        fields: Vec<UpdateField>,
     ) -> crate::Result<()> {
-        for field in batch {
+        for field in fields {
             match field {
-                IndexField::LongInteger(ref i) => {
+                UpdateField::LongInteger(ref i) => {
                     write_batch.put_cf(
                         cf_values,
                         serialize_stored_key_global(account, collection, i.get_field().into()),
                         &i.value.to_le_bytes(),
                     );
                 }
-                IndexField::Integer(ref i) => {
+                UpdateField::Integer(ref i) => {
                     write_batch.put_cf(
                         cf_values,
                         serialize_stored_key_global(account, collection, i.get_field().into()),
                         &i.value.to_le_bytes(),
                     );
                 }
-                IndexField::Float(ref f) => {
+                UpdateField::Float(ref f) => {
                     write_batch.put_cf(
                         cf_values,
                         serialize_stored_key_global(account, collection, f.get_field().into()),
@@ -214,11 +289,11 @@ impl RocksDBStore {
         cf_bitmaps: &Arc<BoundColumnFamily>,
         account: Option<AccountId>,
         collection: Option<CollectionId>,
-        batch: WriteOperation,
+        fields: Vec<UpdateField>,
     ) -> crate::Result<()> {
-        for field in batch {
+        for field in fields {
             match field {
-                IndexField::Tag(ref tag) => {
+                UpdateField::Tag(ref tag) => {
                     write_batch.delete_cf(
                         cf_bitmaps,
                         &serialize_bm_tag_key(
@@ -246,14 +321,14 @@ impl RocksDBStore {
         collection: CollectionId,
         document_id: DocumentId,
         default_language: Language,
-        document: WriteOperation,
+        fields: Vec<UpdateField>,
     ) -> crate::Result<()> {
         // Full text term positions
         let mut term_index = TermIndexBuilder::new();
 
-        for field in document {
+        for field in fields {
             match &field {
-                IndexField::Text(t) => {
+                UpdateField::Text(t) => {
                     let text = match &t.value {
                         Text::Default(text) => text,
                         Text::Keyword(text) => {
@@ -354,7 +429,7 @@ impl RocksDBStore {
                     }
                 }
 
-                IndexField::Tag(t) => {
+                UpdateField::Tag(t) => {
                     bitmap_list
                         .entry(serialize_bm_tag_key(
                             account,
@@ -365,7 +440,7 @@ impl RocksDBStore {
                         .or_insert_with(HashSet::new)
                         .insert(document_id);
                 }
-                IndexField::Blob(b) => {
+                UpdateField::Blob(b) => {
                     batch.put_cf(
                         cf_values,
                         serialize_stored_key(
@@ -378,7 +453,7 @@ impl RocksDBStore {
                         &b.value,
                     );
                 }
-                IndexField::Integer(i) => {
+                UpdateField::Integer(i) => {
                     if i.is_stored() {
                         batch.put_cf(
                             cf_values,
@@ -407,7 +482,7 @@ impl RocksDBStore {
                         );
                     }
                 }
-                IndexField::LongInteger(i) => {
+                UpdateField::LongInteger(i) => {
                     if i.is_stored() {
                         batch.put_cf(
                             cf_values,
@@ -436,7 +511,7 @@ impl RocksDBStore {
                         );
                     }
                 }
-                IndexField::Float(f) => {
+                UpdateField::Float(f) => {
                     if f.is_stored() {
                         batch.put_cf(
                             cf_values,

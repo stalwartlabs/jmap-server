@@ -49,7 +49,7 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
             Filter::Operator(filter) => filter,
             Filter::None => {
                 if let Some(tombstoned_ids) = tombstoned_ids {
-                    document_ids.bitxor_assign(tombstoned_ids)
+                    document_ids.bitxor_assign(tombstoned_ids.bitmap)
                 }
                 return RocksDBIterator::new(account, collection, document_ids, self, sort);
             }
@@ -361,7 +361,7 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
             collection,
             match (state.bm, tombstoned_ids) {
                 (Some(mut results), Some(tombstoned_ids)) => {
-                    document_ids.bitxor_assign(tombstoned_ids);
+                    document_ids.bitxor_assign(tombstoned_ids.bitmap);
                     results.bitand_assign(document_ids);
                     results
                 }

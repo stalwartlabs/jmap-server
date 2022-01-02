@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum IndexField<'x> {
+pub enum UpdateField<'x> {
     Text(Field<Text<'x>>),
     Blob(Field<Cow<'x, [u8]>>),
     Integer(Field<Integer>),
@@ -21,15 +21,15 @@ pub enum IndexField<'x> {
     Float(Field<Float>),
 }
 
-impl<'x> IndexField<'x> {
+impl<'x> UpdateField<'x> {
     pub fn len(&'x self) -> usize {
         match self {
-            IndexField::Text(t) => t.value.len(),
-            IndexField::Blob(b) => b.value.len(),
-            IndexField::Integer(i) => i.size_of(),
-            IndexField::LongInteger(li) => li.size_of(),
-            IndexField::Tag(t) => t.value.len(),
-            IndexField::Float(f) => f.size_of(),
+            UpdateField::Text(t) => t.value.len(),
+            UpdateField::Blob(b) => b.value.len(),
+            UpdateField::Integer(i) => i.size_of(),
+            UpdateField::LongInteger(li) => li.size_of(),
+            UpdateField::Tag(t) => t.value.len(),
+            UpdateField::Float(f) => f.size_of(),
         }
     }
 
@@ -39,18 +39,18 @@ impl<'x> IndexField<'x> {
 
     pub fn get_field(&self) -> &FieldId {
         match self {
-            IndexField::Text(t) => &t.field,
-            IndexField::Blob(b) => &b.field,
-            IndexField::Integer(i) => &i.field,
-            IndexField::LongInteger(li) => &li.field,
-            IndexField::Tag(t) => &t.field,
-            IndexField::Float(f) => &f.field,
+            UpdateField::Text(t) => &t.field,
+            UpdateField::Blob(b) => &b.field,
+            UpdateField::Integer(i) => &i.field,
+            UpdateField::LongInteger(li) => &li.field,
+            UpdateField::Tag(t) => &t.field,
+            UpdateField::Float(f) => &f.field,
         }
     }
 
     pub fn unwrap_text(&'x self) -> &Field<Text<'x>> {
         match self {
-            IndexField::Text(t) => t,
+            UpdateField::Text(t) => t,
             _ => panic!("unwrap_text called on non-text field"),
         }
     }

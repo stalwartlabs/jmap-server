@@ -1,5 +1,5 @@
 use std::{
-    ops::{BitAndAssign, BitXorAssign},
+    ops::{BitAndAssign, BitOrAssign, BitXorAssign},
     sync::Arc,
 };
 
@@ -10,7 +10,7 @@ use rocksdb::{
 };
 use store::{
     serialize::{deserialize_index_document_id, serialize_index_key_prefix},
-    AccountId, CollectionId, Comparator, DocumentId, DocumentSet, FieldId,
+    AccountId, CollectionId, Comparator, DocumentId, DocumentSet, DocumentSetBitOps, FieldId,
 };
 
 use crate::{bitmaps::RocksDBDocumentSet, RocksDBStore};
@@ -324,5 +324,102 @@ impl<'x> Iterator for RocksDBIterator<'x> {
             it.remaining.len() as usize,
             Some(it.remaining.len() as usize),
         )
+    }
+}
+
+impl<'x> DocumentSet for RocksDBIterator<'x> {
+    type Item = DocumentId;
+
+    fn new() -> Self {
+        unimplemented!()
+    }
+
+    fn contains(&self, document: DocumentId) -> bool {
+        self.iterators[0].remaining.contains(document)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.iterators[0].remaining.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.iterators[0].remaining.len() as usize
+    }
+}
+
+impl<'x> DocumentSetBitOps for RocksDBIterator<'x> {
+    fn intersection(&mut self, other: &Self) {
+        self.iterators[0]
+            .remaining
+            .bitand_assign(&other.iterators[0].remaining);
+    }
+
+    fn union(&mut self, other: &Self) {
+        self.iterators[0]
+            .remaining
+            .bitor_assign(&other.iterators[0].remaining);
+    }
+
+    fn difference(&mut self, other: &Self) {
+        self.iterators[0]
+            .remaining
+            .bitxor_assign(&other.iterators[0].remaining);
+    }
+}
+
+impl<'x> DocumentSetBitOps<RocksDBDocumentSet> for RocksDBIterator<'x> {
+    fn intersection(&mut self, other: &RocksDBDocumentSet) {
+        self.iterators[0].remaining.bitand_assign(&other.bitmap);
+    }
+
+    fn union(&mut self, other: &RocksDBDocumentSet) {
+        self.iterators[0].remaining.bitor_assign(&other.bitmap);
+    }
+
+    fn difference(&mut self, other: &RocksDBDocumentSet) {
+        self.iterators[0].remaining.bitxor_assign(&other.bitmap);
+    }
+}
+
+impl<'x> DocumentSetBitOps<RocksDBIterator<'x>> for RocksDBDocumentSet {
+    fn intersection(&mut self, other: &RocksDBIterator) {
+        self.bitmap.bitand_assign(&other.iterators[0].remaining);
+    }
+
+    fn union(&mut self, other: &RocksDBIterator) {
+        self.bitmap.bitor_assign(&other.iterators[0].remaining);
+    }
+
+    fn difference(&mut self, other: &RocksDBIterator) {
+        self.bitmap.bitxor_assign(&other.iterators[0].remaining);
+    }
+}
+
+impl<'x> PartialEq for RocksDBIterator<'x> {
+    fn eq(&self, other: &Self) -> bool {
+        self.iterators[0].remaining == other.iterators[0].remaining
+    }
+}
+
+impl<'x> PartialEq<RocksDBDocumentSet> for RocksDBIterator<'x> {
+    fn eq(&self, other: &RocksDBDocumentSet) -> bool {
+        other.bitmap == self.iterators[0].remaining
+    }
+}
+
+impl<'x> Eq for RocksDBIterator<'x> {}
+
+impl<'x> Clone for RocksDBIterator<'x> {
+    fn clone(&self) -> Self {
+        RocksDBIterator {
+            cf_indexes: self.cf_indexes.clone(),
+            db: self.db,
+            iterators: vec![IndexIterator {
+                index: IndexType::None,
+                remaining: self.iterators[0].remaining.clone(),
+                eof: true,
+            }],
+            current: 0,
+        }
     }
 }

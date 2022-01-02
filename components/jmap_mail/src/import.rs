@@ -1,10 +1,11 @@
 use std::{borrow::Cow, collections::HashSet};
 
-use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL};
+use crate::JMAPMailIdImpl;
+use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL, JMAP_THREAD};
 use mail_parser::Message;
 use store::{
-    batch::WriteOperation, field::Text, AccountId, Comparator, DocumentSet, FieldValue, Filter,
-    Store, StoreError, Tag, ThreadId,
+    batch::DocumentWriter, field::Text, AccountId, ChangeLogId, Comparator, DocumentSet,
+    FieldValue, Filter, Store, StoreError, Tag, ThreadId, UncommittedDocumentId,
 };
 
 use crate::{
@@ -62,8 +63,16 @@ where
         message: JMAPMailImportItem<'x>,
     ) -> store::Result<JMAPMailId> {
         // Build message document
-        let (mut batch, reference_ids, thread_name) = build_message_document(
-            account,
+        let (mut batch, document_id) = {
+            let assigned_id = self.store.assign_document_id(account, JMAP_MAIL, None)?;
+            let document_id = assigned_id.get_document_id();
+            (
+                DocumentWriter::insert(account, JMAP_MAIL, assigned_id),
+                document_id,
+            )
+        };
+        let (reference_ids, thread_name) = build_message_document(
+            &mut batch,
             Message::parse(message.blob.as_ref()).ok_or(StoreError::ParseError)?,
             message.received_at,
         )?;
@@ -140,20 +149,13 @@ where
         let thread_id = if let Some(thread_id) = thread_id {
             thread_id
         } else {
-            let thread_id: ThreadId = if let Some(thread_id) = self.store.get_value::<ThreadId>(
-                account.into(),
-                JMAP_MAIL.into(),
-                Some(MessageField::ThreadId.into()),
-            )? {
-                thread_id + 1
-            } else {
-                0
-            };
-
-            let mut thread_op = WriteOperation::update_collection(account, JMAP_MAIL);
-            thread_op.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
-            batches.push(thread_op);
-            thread_id
+            let thread_id = self.store.assign_document_id(account, JMAP_THREAD, None)?;
+            batches.push(DocumentWriter::insert(
+                account,
+                JMAP_THREAD,
+                thread_id.clone(),
+            ));
+            thread_id.get_document_id()
         };
 
         for reference_id in reference_ids {
@@ -166,7 +168,7 @@ where
             );
         }
 
-        batch.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
+        batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
         batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
 
         batch.add_text(
@@ -176,13 +178,15 @@ where
             false,
             true,
         );
+
+        let jmap_mail_id = JMAPMailId::new(thread_id, document_id);
+        batch.log_as_insert(jmap_mail_id);
         batches.push(batch);
 
         // Write batches to store
-        self.store.update_bulk(batches)?;
+        self.store.update_documents(batches)?;
 
-        //TODO implement doc id
-        Ok(JMAPMailId::new(thread_id, 0))
+        Ok(jmap_mail_id)
     }
 }
 
@@ -190,7 +194,7 @@ trait JMAPMailStoreThreadMerge {
     fn mail_merge_threads(
         &self,
         account: AccountId,
-        batches: &mut Vec<WriteOperation>,
+        batches: &mut Vec<DocumentWriter<impl UncommittedDocumentId>>,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
 }
@@ -202,7 +206,7 @@ where
     fn mail_merge_threads(
         &self,
         account: AccountId,
-        batches: &mut Vec<WriteOperation>,
+        batches: &mut Vec<DocumentWriter<impl UncommittedDocumentId>>,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId> {
         // Query tags for all thread ids
@@ -234,22 +238,25 @@ where
         document_sets.sort_unstable_by_key(|i| i.0.len());
 
         let mut document_sets = document_sets.into_iter().rev();
-        let thread_id = if let Some((_, thread_id)) = document_sets.next() {
-            thread_id
-        } else {
-            thread_ids[0]
-        };
-
-        let mut deleted_threads = WriteOperation::delete_collection(account, JMAP_MAIL);
+        let mut deleted_threads = DocumentWriter::delete_many(account, JMAP_MAIL);
+        let thread_id = document_sets.next().unwrap().1;
 
         for (document_set, delete_thread_id) in document_sets {
             for document_id in document_set {
-                let mut batch = WriteOperation::update_document(account, JMAP_MAIL, document_id);
-                batch.add_long_int(MessageField::ThreadId.into(), 0, thread_id, true, false);
+                let mut batch = DocumentWriter::update(account, JMAP_MAIL, document_id);
+                batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
                 batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
+                batch.log_as_move(
+                    JMAPMailId::new(delete_thread_id, document_id),
+                    JMAPMailId::new(thread_id, document_id),
+                );
                 batches.push(batch);
             }
             deleted_threads.add_tag(MessageField::ThreadId.into(), Tag::Id(delete_thread_id));
+
+            let mut delete_thread = DocumentWriter::delete(account, JMAP_THREAD, delete_thread_id);
+            delete_thread.log_as_delete(delete_thread_id as ChangeLogId);
+            batches.push(delete_thread);
         }
 
         if !deleted_threads.is_empty() {

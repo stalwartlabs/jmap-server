@@ -5,12 +5,14 @@ use std::{
 };
 
 use jmap_mail::{
+    import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
-    JMAPMailId, JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery, MessageField,
+    JMAPMailId, JMAPMailIdImpl, JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery,
+    MessageField,
 };
 use jmap_store::{local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPQuery, JMAP_MAIL};
 use mail_parser::HeaderName;
-use store::{Comparator, FieldValue, Filter, Store, Tag};
+use store::{Comparator, FieldValue, Filter, Integer, Store, Tag};
 
 use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
 
@@ -103,7 +105,7 @@ where
             mail_store
                 .mail_import_single(
                     0,
-                    jmap_mail::import::JMAPMailImportItem {
+                    JMAPMailImportItem {
                         blob: format!(
                             concat!(
                                 "From: {}\nCc: {}\nMessage-ID: <{}>\n",
@@ -161,7 +163,7 @@ where
                     0,
                     JMAP_MAIL,
                     MessageField::ThreadId.into(),
-                    Tag::Id(thread_id as u64)
+                    Tag::Id(thread_id as Integer)
                 )
                 .unwrap()
                 .is_some(),
@@ -177,7 +179,7 @@ where
                 0,
                 JMAP_MAIL,
                 MessageField::ThreadId.into(),
-                Tag::Id(MAX_THREADS as u64)
+                Tag::Id(MAX_THREADS as Integer)
             )
             .unwrap()
             .is_none(),
@@ -440,7 +442,7 @@ where
                 .into_iter()
                 .map(|id| {
                     mail_store
-                        .get_headers_rfc(0, id.doc_id)
+                        .get_headers_rfc(0, id.get_document_id())
                         .unwrap()
                         .remove(&mail_parser::HeaderName::MessageId)
                         .unwrap()
@@ -712,7 +714,7 @@ where
                 .into_iter()
                 .map(|id| {
                     mail_store
-                        .get_headers_rfc(0, id.doc_id)
+                        .get_headers_rfc(0, id.get_document_id())
                         .unwrap()
                         .remove(&mail_parser::HeaderName::MessageId)
                         .unwrap()
@@ -729,7 +731,7 @@ where
                 .into_iter()
                 .map(|id| {
                     mail_store
-                        .get_headers_rfc(0, id.doc_id)
+                        .get_headers_rfc(0, id.get_document_id())
                         .unwrap()
                         .remove(&mail_parser::HeaderName::MessageId)
                         .unwrap()

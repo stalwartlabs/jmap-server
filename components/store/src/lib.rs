@@ -8,13 +8,15 @@ pub mod term_index;
 
 use std::{borrow::Cow, iter::FromIterator};
 
-use batch::WriteOperation;
+use batch::DocumentWriter;
 use nlp::Language;
 
 #[derive(Debug)]
 pub enum StoreError {
     InternalError(String),
     SerializeError(String),
+    DeserializeError(String),
+    InvalidArguments(String),
     ParseError,
     DataCorruption,
     NotFound,
@@ -26,7 +28,7 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 pub type AccountId = u32;
 pub type CollectionId = u8;
 pub type DocumentId = u32;
-pub type ThreadId = u64;
+pub type ThreadId = u32;
 pub type FieldId = u8;
 pub type FieldNumber = u16;
 pub type TagId = u8;
@@ -34,17 +36,26 @@ pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
 pub type TermId = u64;
+pub type ChangeLogId = u64;
 
-pub trait DocumentSet: Eq + IntoIterator<Item = DocumentId> + Clone + Sized {
+pub trait DocumentSet: DocumentSetBitOps + Eq + Clone + Sized {
+    type Item;
+
     fn new() -> Self;
-    fn contains(&self, document: DocumentId) -> bool;
-
-    fn intersection(&mut self, other: &Self);
-    fn union(&mut self, other: &Self);
-    fn difference(&mut self, other: &Self);
+    fn contains(&self, document: Self::Item) -> bool;
 
     fn is_empty(&self) -> bool;
     fn len(&self) -> usize;
+}
+
+pub trait DocumentSetBitOps<Rhs: Sized = Self> {
+    fn intersection(&mut self, other: &Rhs);
+    fn union(&mut self, other: &Rhs);
+    fn difference(&mut self, other: &Rhs);
+}
+
+pub trait UncommittedDocumentId: Clone + Send + Sync {
+    fn get_document_id(&self) -> DocumentId;
 }
 
 #[derive(Debug)]
@@ -61,7 +72,7 @@ pub enum FieldValue<'x> {
 #[derive(Debug, Clone)]
 pub enum Tag<'x> {
     Static(TagId),
-    Id(LongInteger),
+    Id(Integer),
     Text(Cow<'x, str>),
 }
 
@@ -240,15 +251,24 @@ where
 }
 
 pub trait StoreUpdate {
-    fn update(&self, document: WriteOperation) -> crate::Result<()> {
-        self.update_bulk(vec![document])
+    type UncommittedId: UncommittedDocumentId;
+
+    fn assign_document_id(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        last_assigned_id: Option<Self::UncommittedId>,
+    ) -> crate::Result<Self::UncommittedId>;
+
+    fn update_document(&self, document: DocumentWriter<Self::UncommittedId>) -> crate::Result<()> {
+        self.update_documents(vec![document])
     }
 
-    fn update_bulk(&self, documents: Vec<WriteOperation>) -> Result<()>;
+    fn update_documents(&self, documents: Vec<DocumentWriter<Self::UncommittedId>>) -> Result<()>;
 }
 
 pub trait StoreQuery<'x>: StoreDocumentSet {
-    type Iter: Iterator<Item = DocumentId>;
+    type Iter: DocumentSet + Iterator<Item = DocumentId>;
 
     fn query(
         &'x self,
@@ -292,7 +312,10 @@ pub trait StoreGet {
 }
 
 pub trait StoreDocumentSet {
-    type Set: DocumentSet + std::fmt::Debug;
+    type Set: DocumentSet<Item = DocumentId>
+        + IntoIterator<Item = DocumentId>
+        + FromIterator<DocumentId>
+        + std::fmt::Debug;
 }
 
 pub trait StoreTag: StoreDocumentSet {
@@ -364,12 +387,51 @@ pub trait StoreDelete {
     fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
 }
 
-pub trait StoreTombstone {
-    type Set: PartialEq
-        + std::fmt::Debug
-        + IntoIterator<Item = DocumentId>
-        + FromIterator<DocumentId>;
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ChangeLogEntry {
+    Insert(ChangeLogId),
+    Update(ChangeLogId),
+    Delete(ChangeLogId),
+}
 
+pub struct ChangeLog {
+    pub changes: Vec<ChangeLogEntry>,
+    pub from_change_id: ChangeLogId,
+    pub to_change_id: ChangeLogId,
+}
+
+impl Default for ChangeLog {
+    fn default() -> Self {
+        Self {
+            changes: Vec::with_capacity(10),
+            from_change_id: 0,
+            to_change_id: 0,
+        }
+    }
+}
+
+pub enum ChangeLogQuery {
+    All,
+    Since(ChangeLogId),
+    SinceInclusive(ChangeLogId),
+    RangeInclusive(ChangeLogId, ChangeLogId),
+}
+
+pub trait StoreChangeLog {
+    fn get_last_change_id(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> Result<Option<ChangeLogId>>;
+    fn get_changes(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        query: ChangeLogQuery,
+    ) -> Result<Option<ChangeLog>>;
+}
+
+pub trait StoreTombstone: StoreDocumentSet {
     fn purge_tombstoned(&self, account: AccountId, collection: CollectionId) -> Result<()>;
 
     fn get_tombstoned_ids(
@@ -380,6 +442,14 @@ pub trait StoreTombstone {
 }
 
 pub trait Store<'x>:
-    StoreUpdate + StoreQuery<'x> + StoreGet + StoreDelete + StoreTag + Send + Sync + Sized
+    StoreUpdate
+    + StoreQuery<'x>
+    + StoreGet
+    + StoreDelete
+    + StoreTag
+    + StoreChangeLog
+    + Send
+    + Sync
+    + Sized
 {
 }

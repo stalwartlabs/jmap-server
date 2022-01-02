@@ -1,4 +1,5 @@
 pub mod bitmaps;
+pub mod changelog;
 pub mod delete;
 pub mod document_id;
 pub mod get;
@@ -54,6 +55,12 @@ impl RocksDBStore {
             ColumnFamilyDescriptor::new("terms", cf_opts)
         };
 
+        // Raft log and change log
+        let cf_log = {
+            let cf_opts = Options::default();
+            ColumnFamilyDescriptor::new("log", cf_opts)
+        };
+
         let mut db_opts = Options::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
@@ -61,7 +68,7 @@ impl RocksDBStore {
         let db: DBWithThreadMode<MultiThreaded> = DBWithThreadMode::open_cf_descriptors(
             &db_opts,
             path,
-            vec![cf_bitmaps, cf_values, cf_indexes, cf_terms],
+            vec![cf_bitmaps, cf_values, cf_indexes, cf_terms, cf_log],
         )
         .map_err(|e| StoreError::InternalError(e.into_string()))?;
 
@@ -105,6 +112,7 @@ impl RocksDBStore {
             self.get_handle("indexes")?,
             self.get_handle("bitmaps")?,
             self.get_handle("terms")?,
+            self.get_handle("log")?,
         ] {
             self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
         }

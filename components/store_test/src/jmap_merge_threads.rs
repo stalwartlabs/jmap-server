@@ -138,7 +138,7 @@ where
                 .unwrap();
 
             assert_eq!(
-                message_doc_ids.size_hint().0,
+                message_doc_ids.len(),
                 total_messages,
                 "test# {}/{}",
                 base_test_num,

@@ -1,7 +1,7 @@
 use std::ops::BitAndAssign;
 
 use store::{
-    serialize::serialize_bm_tag_key, AccountId, CollectionId, DocumentId, FieldId,
+    serialize::serialize_bm_tag_key, AccountId, CollectionId, DocumentId, DocumentSet, FieldId,
     StoreDocumentSet, StoreError, StoreTag, StoreTombstone, Tag,
 };
 
@@ -67,7 +67,7 @@ impl StoreTag for RocksDBStore {
             .map_or(Ok(false), |b| {
                 if has_bit(&b, document)? {
                     match self.get_tombstoned_ids(account, collection)? {
-                        Some(tombstone_ids) if tombstone_ids.contains(document) => Ok(false),
+                        Some(tombstoned_ids) if tombstoned_ids.contains(document) => Ok(false),
                         _ => Ok(true),
                     }
                 } else {

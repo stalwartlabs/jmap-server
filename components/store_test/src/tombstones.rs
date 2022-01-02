@@ -1,7 +1,7 @@
 use std::iter::FromIterator;
 
 use nlp::Language;
-use store::batch::WriteOperation;
+use store::batch::DocumentWriter;
 use store::field::Text;
 use store::{
     Comparator, DocumentId, FieldId, FieldValue, Filter, Float, Integer, LongInteger, Store,
@@ -12,8 +12,10 @@ pub fn test_tombstones<T>(db: T)
 where
     T: for<'x> Store<'x> + StoreTombstone,
 {
+    let mut last_assigned_id = None;
     for raw_doc_num in 0..10 {
-        let mut builder = WriteOperation::insert_document(0, 0);
+        last_assigned_id = Some(db.assign_document_id(0, 0, last_assigned_id).unwrap());
+        let mut builder = DocumentWriter::insert(0, 0, last_assigned_id.clone().unwrap());
         builder.add_text(
             0,
             0,
@@ -45,7 +47,7 @@ where
         builder.add_tag(7, Tag::Static(0));
         builder.add_tag(8, Tag::Text("my custom tag".into()));
 
-        db.update(builder).unwrap();
+        db.update_document(builder).unwrap();
     }
 
     db.delete_document(0, 0, 9).unwrap();

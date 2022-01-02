@@ -3,8 +3,9 @@ use std::borrow::Cow;
 use nlp::Language;
 
 use crate::{
-    field::{Field, IndexField, Text},
-    AccountId, CollectionId, DocumentId, FieldId, FieldNumber, Float, Integer, LongInteger, Tag,
+    field::{Field, Text, UpdateField},
+    AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, FieldNumber, Float, Integer,
+    LongInteger, Tag, UncommittedDocumentId,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -12,68 +13,119 @@ pub const MAX_ID_LENGTH: usize = 80;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
-pub struct WriteOperation<'x> {
-    action: WriteAction,
-    fields: Vec<IndexField<'x>>,
+pub struct DocumentWriter<'x, T: UncommittedDocumentId> {
+    pub account: AccountId,
+    pub collection: CollectionId,
+    pub default_language: Language,
+    pub log_action: LogAction,
+    pub action: WriteAction<T>,
+    pub fields: Vec<UpdateField<'x>>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum WriteAction {
-    UpdateDocument(AccountId, CollectionId, Option<DocumentId>, Language),
-    DeleteDocument(AccountId, CollectionId, DocumentId),
-    UpdateCollection(AccountId, CollectionId),
-    DeleteCollection(AccountId, CollectionId),
-    Update,
-    Delete,
+pub enum LogAction {
+    Insert(ChangeLogId),
+    Update(ChangeLogId),
+    Delete(ChangeLogId),
+    Move(ChangeLogId, ChangeLogId),
+    None,
 }
 
-impl<'x> WriteOperation<'x> {
-    pub fn insert_document(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
-        WriteOperation {
-            action: WriteAction::UpdateDocument(account, collection, None, Language::English),
+#[derive(Debug, Clone, Copy)]
+pub enum WriteAction<T: UncommittedDocumentId> {
+    Insert(T),
+    Update(DocumentId),
+    Delete(DocumentId),
+    UpdateMany,
+    DeleteMany,
+}
+
+impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
+    pub fn insert(
+        account: AccountId,
+        collection: CollectionId,
+        uncommited_id: T,
+    ) -> DocumentWriter<'x, T> {
+        DocumentWriter {
+            account,
+            collection,
+            default_language: Language::English,
+            log_action: LogAction::None,
+            action: WriteAction::Insert(uncommited_id),
             fields: Vec::new(),
         }
     }
 
-    pub fn update_document(
+    pub fn update(
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
-    ) -> WriteOperation<'x> {
-        WriteOperation {
-            action: WriteAction::UpdateDocument(
-                account,
-                collection,
-                document.into(),
-                Language::English,
-            ),
+    ) -> DocumentWriter<'x, T> {
+        DocumentWriter {
+            account,
+            collection,
+            default_language: Language::English,
+            log_action: LogAction::None,
+            action: WriteAction::Update(document),
             fields: Vec::new(),
         }
     }
 
-    pub fn delete_document(
+    pub fn delete(
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
-    ) -> WriteOperation<'x> {
-        WriteOperation {
-            action: WriteAction::DeleteDocument(account, collection, document),
+    ) -> DocumentWriter<'x, T> {
+        DocumentWriter {
+            account,
+            collection,
+            default_language: Language::English,
+            log_action: LogAction::None,
+            action: WriteAction::Delete(document),
             fields: Vec::new(),
         }
     }
 
-    pub fn update_collection(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
-        WriteOperation {
-            action: WriteAction::UpdateCollection(account, collection),
+    pub fn update_many(account: AccountId, collection: CollectionId) -> DocumentWriter<'x, T> {
+        DocumentWriter {
+            account,
+            collection,
+            default_language: Language::English,
+            log_action: LogAction::None,
+            action: WriteAction::UpdateMany,
             fields: Vec::new(),
         }
     }
 
-    pub fn delete_collection(account: AccountId, collection: CollectionId) -> WriteOperation<'x> {
-        WriteOperation {
-            action: WriteAction::DeleteCollection(account, collection),
+    pub fn delete_many(account: AccountId, collection: CollectionId) -> DocumentWriter<'x, T> {
+        DocumentWriter {
+            account,
+            collection,
+            default_language: Language::English,
+            log_action: LogAction::None,
+            action: WriteAction::DeleteMany,
             fields: Vec::new(),
         }
+    }
+
+    pub fn log_as_insert(&mut self, changelog_id: ChangeLogId) {
+        self.log_action = LogAction::Insert(changelog_id);
+    }
+
+    pub fn log_as_update(&mut self, changelog_id: ChangeLogId) {
+        self.log_action = LogAction::Update(changelog_id);
+    }
+
+    pub fn log_as_delete(&mut self, changelog_id: ChangeLogId) {
+        self.log_action = LogAction::Delete(changelog_id);
+    }
+
+    pub fn log_as_move(&mut self, changelog_id: ChangeLogId, dest_changelog_id: ChangeLogId) {
+        self.log_action = LogAction::Move(changelog_id, dest_changelog_id);
+    }
+
+    pub fn set_default_language(&mut self, language: Language) {
+        self.default_language = language;
     }
 
     pub fn add_text(
@@ -84,13 +136,13 @@ impl<'x> WriteOperation<'x> {
         stored: bool,
         sorted: bool,
     ) {
-        self.fields.push(IndexField::Text(Field::new(
+        self.fields.push(UpdateField::Text(Field::new(
             field, field_num, value, stored, sorted,
         )));
     }
 
     pub fn add_blob(&mut self, field: FieldId, field_num: FieldNumber, value: Cow<'x, [u8]>) {
-        self.fields.push(IndexField::Blob(Field::new(
+        self.fields.push(UpdateField::Blob(Field::new(
             field, field_num, value, true, false,
         )));
     }
@@ -103,7 +155,7 @@ impl<'x> WriteOperation<'x> {
         stored: bool,
         sorted: bool,
     ) {
-        self.fields.push(IndexField::Integer(Field::new(
+        self.fields.push(UpdateField::Integer(Field::new(
             field, field_num, value, stored, sorted,
         )));
     }
@@ -116,14 +168,14 @@ impl<'x> WriteOperation<'x> {
         stored: bool,
         sorted: bool,
     ) {
-        self.fields.push(IndexField::LongInteger(Field::new(
+        self.fields.push(UpdateField::LongInteger(Field::new(
             field, field_num, value, stored, sorted,
         )));
     }
 
     pub fn add_tag(&mut self, field: FieldId, value: Tag<'x>) {
         self.fields
-            .push(IndexField::Tag(Field::new(field, 0, value, false, false)));
+            .push(UpdateField::Tag(Field::new(field, 0, value, false, false)));
     }
 
     pub fn add_float(
@@ -134,19 +186,9 @@ impl<'x> WriteOperation<'x> {
         stored: bool,
         sorted: bool,
     ) {
-        self.fields.push(IndexField::Float(Field::new(
+        self.fields.push(UpdateField::Float(Field::new(
             field, field_num, value, stored, sorted,
         )));
-    }
-
-    pub fn get_action(&self) -> WriteAction {
-        self.action
-    }
-
-    pub fn set_default_language(&mut self, set_language: Language) {
-        if let WriteAction::UpdateDocument(_, _, _, language) = &mut self.action {
-            *language = set_language;
-        };
     }
 
     pub fn is_empty(&self) -> bool {
@@ -154,8 +196,8 @@ impl<'x> WriteOperation<'x> {
     }
 }
 
-impl<'x> IntoIterator for WriteOperation<'x> {
-    type Item = IndexField<'x>;
+impl<'x, T: UncommittedDocumentId> IntoIterator for DocumentWriter<'x, T> {
+    type Item = UpdateField<'x>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {

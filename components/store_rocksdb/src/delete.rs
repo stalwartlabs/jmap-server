@@ -1,6 +1,5 @@
 use std::ops::BitAndAssign;
 
-use roaring::RoaringBitmap;
 use rocksdb::{Direction, IteratorMode, WriteBatch};
 use store::{
     serialize::{
@@ -12,7 +11,7 @@ use store::{
 };
 
 use crate::{
-    bitmaps::{clear_bits, into_bitmap, set_bits},
+    bitmaps::{clear_bits, into_bitmap, set_bits, RocksDBDocumentSet},
     RocksDBStore,
 };
 
@@ -149,26 +148,24 @@ impl StoreDelete for RocksDBStore {
 }
 
 impl StoreTombstone for RocksDBStore {
-    type Set = RoaringBitmap;
-
     fn get_tombstoned_ids(
         &self,
         account: AccountId,
         collection: CollectionId,
-    ) -> crate::Result<Option<RoaringBitmap>> {
+    ) -> crate::Result<Option<RocksDBDocumentSet>> {
         self.get_bitmap(
             &self.get_handle("bitmaps")?,
             &serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
         )
-        .map(|bm| match &bm {
-            Some(v) if !v.is_empty() => bm,
+        .map(|bm| match bm {
+            Some(bm) if !bm.is_empty() => RocksDBDocumentSet::from_roaring(bm).into(),
             _ => None,
         })
     }
 
     fn purge_tombstoned(&self, account: AccountId, collection: CollectionId) -> store::Result<()> {
         let documents = if let Some(documents) = self.get_tombstoned_ids(account, collection)? {
-            documents
+            documents.bitmap
         } else {
             return Ok(());
         };
