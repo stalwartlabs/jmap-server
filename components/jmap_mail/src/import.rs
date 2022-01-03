@@ -180,7 +180,7 @@ where
         );
 
         let jmap_mail_id = JMAPMailId::new(thread_id, document_id);
-        batch.log_as_insert(jmap_mail_id);
+        batch.log_insert(jmap_mail_id);
         batches.push(batch);
 
         // Write batches to store
@@ -246,7 +246,7 @@ where
                 let mut batch = DocumentWriter::update(account, JMAP_MAIL, document_id);
                 batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
                 batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
-                batch.log_as_move(
+                batch.log_move(
                     JMAPMailId::new(delete_thread_id, document_id),
                     JMAPMailId::new(thread_id, document_id),
                 );
@@ -255,7 +255,7 @@ where
             deleted_threads.add_tag(MessageField::ThreadId.into(), Tag::Id(delete_thread_id));
 
             let mut delete_thread = DocumentWriter::delete(account, JMAP_THREAD, delete_thread_id);
-            delete_thread.log_as_delete(delete_thread_id as ChangeLogId);
+            delete_thread.log_delete(delete_thread_id as ChangeLogId);
             batches.push(delete_thread);
         }
 

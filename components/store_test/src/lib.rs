@@ -3,8 +3,10 @@ use std::{io::Read, path::PathBuf};
 use flate2::read::GzDecoder;
 
 pub mod insert_filter_sort;
+pub mod jmap_changes;
+pub mod jmap_mail_merge_threads;
 pub mod jmap_mail_query;
-pub mod jmap_merge_threads;
+pub mod jmap_mail_query_changes;
 pub mod tombstones;
 
 pub fn deflate_artwork_data() -> Vec<u8> {

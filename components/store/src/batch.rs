@@ -108,20 +108,25 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         }
     }
 
-    pub fn log_as_insert(&mut self, changelog_id: ChangeLogId) {
+    pub fn log_insert(&mut self, changelog_id: ChangeLogId) {
         self.log_action = LogAction::Insert(changelog_id);
     }
 
-    pub fn log_as_update(&mut self, changelog_id: ChangeLogId) {
+    pub fn log_update(&mut self, changelog_id: ChangeLogId) {
         self.log_action = LogAction::Update(changelog_id);
     }
 
-    pub fn log_as_delete(&mut self, changelog_id: ChangeLogId) {
+    pub fn log_delete(&mut self, changelog_id: ChangeLogId) {
         self.log_action = LogAction::Delete(changelog_id);
     }
 
-    pub fn log_as_move(&mut self, changelog_id: ChangeLogId, dest_changelog_id: ChangeLogId) {
+    pub fn log_move(&mut self, changelog_id: ChangeLogId, dest_changelog_id: ChangeLogId) {
         self.log_action = LogAction::Move(changelog_id, dest_changelog_id);
+    }
+
+    pub fn log(mut self, log_action: LogAction) -> Self {
+        self.log_action = log_action;
+        self
     }
 
     pub fn set_default_language(&mut self, language: Language) {

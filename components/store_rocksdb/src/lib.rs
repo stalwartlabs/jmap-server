@@ -159,14 +159,14 @@ mod tests {
     }
 
     #[test]
-    fn test_jmap_merge_threads() {
+    fn test_jmap_mail_merge_threads() {
         let mut temp_dir = std::env::temp_dir();
         temp_dir.push("strdb_threads_test");
         if temp_dir.exists() {
             std::fs::remove_dir_all(&temp_dir).unwrap();
         }
 
-        store_test::jmap_merge_threads::test_jmap_merge_threads(
+        store_test::jmap_mail_merge_threads::test_jmap_mail_merge_threads(
             RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
         );
 
@@ -184,6 +184,36 @@ mod tests {
         store_test::jmap_mail_query::test_jmap_mail_query(
             RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
             true,
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_changes() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_changes_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_changes::test_jmap_changes(
+            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_mail_query_changes() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_query_changes_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mail_query_changes::test_jmap_mail_query_changes(
+            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
         );
 
         std::fs::remove_dir_all(&temp_dir).unwrap();

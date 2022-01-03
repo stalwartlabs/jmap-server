@@ -190,14 +190,14 @@ impl StoreChangeLog for RocksDBStore {
     ) -> store::Result<Option<ChangeLog>> {
         let mut changelog = ChangeLog::default();
         let (is_inclusive, mut match_from_change_id, from_change_id, to_change_id) = match query {
-            ChangeLogQuery::All => (false, false, 0, 0),
+            ChangeLogQuery::All => (true, false, 0, 0),
             ChangeLogQuery::Since(change_id) => (false, true, change_id, 0),
             ChangeLogQuery::SinceInclusive(change_id) => (true, true, change_id, 0),
             ChangeLogQuery::RangeInclusive(from_change_id, to_change_id) => {
                 (true, true, from_change_id, to_change_id)
             }
         };
-        let key = serialize_changelog_key(account, collection, changelog.from_change_id);
+        let key = serialize_changelog_key(account, collection, from_change_id);
         let prefix = &key[0..COLLECTION_PREFIX_LEN];
         let mut is_first = true;
 
@@ -224,6 +224,7 @@ impl StoreChangeLog for RocksDBStore {
                     match_from_change_id = false;
                 }
             }
+
             if change_id > from_change_id || (is_inclusive && change_id == from_change_id) {
                 if to_change_id > 0 && change_id > to_change_id {
                     break;

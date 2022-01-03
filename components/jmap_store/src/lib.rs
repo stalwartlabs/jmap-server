@@ -128,6 +128,7 @@ impl<T> JMAPFilter<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct JMAPChangesResponse {
     pub old_state: JMAPState,
     pub new_state: JMAPState,

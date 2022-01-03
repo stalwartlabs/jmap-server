@@ -56,7 +56,7 @@ fn build_messages(
     messages_per_thread
 }
 
-pub fn test_jmap_merge_threads<T>(db: T)
+pub fn test_jmap_mail_merge_threads<T>(db: T)
 where
     T: for<'x> Store<'x>,
 {
