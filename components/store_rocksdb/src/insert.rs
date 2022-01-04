@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     sync::Arc,
 };
 
@@ -19,9 +19,7 @@ use store::{
 };
 
 use crate::{
-    bitmaps::{clear_bits, set_bits},
-    changelog::ChangeLogWriter,
-    document_id::AssignedDocumentId,
+    bitmaps::set_clear_bits, changelog::ChangeLogWriter, document_id::AssignedDocumentId,
     RocksDBStore,
 };
 
@@ -38,8 +36,7 @@ impl StoreUpdate for RocksDBStore {
         let mut write_batch = rocksdb::WriteBatch::default();
 
         let mut change_log_list = HashMap::new();
-        let mut set_bitmap_list = HashMap::new();
-        let mut clear_bitmap_list = HashMap::new();
+        let mut bitmap_list = HashMap::new();
 
         let mut collection_locks = HashMap::new();
 
@@ -54,34 +51,34 @@ impl StoreUpdate for RocksDBStore {
                     let document_id = match document_id {
                         AssignedDocumentId::Freed(document_id) => {
                             // Remove document id from freed ids
-                            clear_bitmap_list
+                            bitmap_list
                                 .entry(serialize_bm_internal(
                                     batch.account,
                                     batch.collection,
                                     BM_FREED_IDS,
                                 ))
-                                .or_insert_with(HashSet::new)
-                                .insert(document_id);
+                                .or_insert_with(HashMap::new)
+                                .insert(document_id, false);
                             document_id
                         }
                         AssignedDocumentId::New(document_id) => document_id,
                     };
 
                     // Add document id to collection
-                    set_bitmap_list
+                    bitmap_list
                         .entry(serialize_bm_internal(
                             batch.account,
                             batch.collection,
                             BM_USED_IDS,
                         ))
-                        .or_insert_with(HashSet::new)
-                        .insert(document_id);
+                        .or_insert_with(HashMap::new)
+                        .insert(document_id, true);
 
                     self._update_document(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
-                        &mut set_bitmap_list,
+                        &mut bitmap_list,
                         batch.account,
                         batch.collection,
                         document_id,
@@ -99,7 +96,7 @@ impl StoreUpdate for RocksDBStore {
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
-                        &mut set_bitmap_list,
+                        &mut bitmap_list,
                         batch.account,
                         batch.collection,
                         document_id,
@@ -109,14 +106,14 @@ impl StoreUpdate for RocksDBStore {
                 }
                 WriteAction::Delete(document_id) => {
                     // Add document id to tombstoned ids
-                    set_bitmap_list
+                    bitmap_list
                         .entry(serialize_bm_internal(
                             batch.account,
                             batch.collection,
                             BM_TOMBSTONED_IDS,
                         ))
-                        .or_insert_with(HashSet::new)
-                        .insert(document_id);
+                        .or_insert_with(HashMap::new)
+                        .insert(document_id, true);
                 }
                 WriteAction::UpdateMany => {
                     self._update_global(
@@ -190,12 +187,8 @@ impl StoreUpdate for RocksDBStore {
             }
         }
 
-        for (key, doc_id_list) in set_bitmap_list {
-            write_batch.merge_cf(&cf_bitmaps, key, set_bits(doc_id_list.into_iter()))
-        }
-
-        for (key, doc_id_list) in clear_bitmap_list {
-            write_batch.merge_cf(&cf_bitmaps, key, clear_bits(doc_id_list.into_iter()))
+        for (key, doc_id_list) in bitmap_list {
+            write_batch.merge_cf(&cf_bitmaps, key, set_clear_bits(doc_id_list.into_iter()))
         }
 
         self.db
@@ -293,7 +286,7 @@ impl RocksDBStore {
     ) -> crate::Result<()> {
         for field in fields {
             match field {
-                UpdateField::Tag(ref tag) => {
+                UpdateField::TagSet(ref tag) | UpdateField::TagRemove(ref tag) => {
                     write_batch.delete_cf(
                         cf_bitmaps,
                         &serialize_bm_tag_key(
@@ -316,7 +309,7 @@ impl RocksDBStore {
         batch: &mut rocksdb::WriteBatch,
         cf_values: &Arc<BoundColumnFamily>,
         cf_indexes: &Arc<BoundColumnFamily>,
-        bitmap_list: &mut HashMap<Vec<u8>, HashSet<DocumentId>>,
+        bitmap_list: &mut HashMap<Vec<u8>, HashMap<DocumentId, bool>>,
         account: AccountId,
         collection: CollectionId,
         document_id: DocumentId,
@@ -339,8 +332,8 @@ impl RocksDBStore {
                                     t.get_field(),
                                     text,
                                 ))
-                                .or_insert_with(HashSet::new)
-                                .insert(document_id);
+                                .or_insert_with(HashMap::new)
+                                .insert(document_id, true);
                             text
                         }
                         Text::Tokenized(text) => {
@@ -352,8 +345,8 @@ impl RocksDBStore {
                                         t.get_field(),
                                         &token.word,
                                     ))
-                                    .or_insert_with(HashSet::new)
-                                    .insert(document_id);
+                                    .or_insert_with(HashMap::new)
+                                    .insert(document_id, true);
                             }
                             text
                         }
@@ -377,8 +370,8 @@ impl RocksDBStore {
                                             term.id,
                                             true,
                                         ))
-                                        .or_insert_with(HashSet::new)
-                                        .insert(document_id);
+                                        .or_insert_with(HashMap::new)
+                                        .insert(document_id, true);
 
                                     if term.id_stemmed > 0 {
                                         bitmap_list
@@ -389,8 +382,8 @@ impl RocksDBStore {
                                                 term.id_stemmed,
                                                 false,
                                             ))
-                                            .or_insert_with(HashSet::new)
-                                            .insert(document_id);
+                                            .or_insert_with(HashMap::new)
+                                            .insert(document_id, true);
                                     }
                                 }
 
@@ -428,8 +421,7 @@ impl RocksDBStore {
                         );
                     }
                 }
-
-                UpdateField::Tag(t) => {
+                UpdateField::TagSet(t) => {
                     bitmap_list
                         .entry(serialize_bm_tag_key(
                             account,
@@ -437,8 +429,19 @@ impl RocksDBStore {
                             t.get_field(),
                             &t.value,
                         ))
-                        .or_insert_with(HashSet::new)
-                        .insert(document_id);
+                        .or_insert_with(HashMap::new)
+                        .insert(document_id, true);
+                }
+                UpdateField::TagRemove(t) => {
+                    bitmap_list
+                        .entry(serialize_bm_tag_key(
+                            account,
+                            collection,
+                            t.get_field(),
+                            &t.value,
+                        ))
+                        .or_insert_with(HashMap::new)
+                        .insert(document_id, false);
                 }
                 UpdateField::Blob(b) => {
                     batch.put_cf(

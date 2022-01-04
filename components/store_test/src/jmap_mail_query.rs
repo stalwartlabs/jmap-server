@@ -7,10 +7,11 @@ use std::{
 use jmap_mail::{
     import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
-    JMAPMailId, JMAPMailIdImpl, JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery,
-    MessageField,
+    JMAPMailIdImpl, JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery, MessageField,
 };
-use jmap_store::{local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPQuery, JMAP_MAIL};
+use jmap_store::{
+    local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId, JMAPQuery, JMAP_MAIL,
+};
 use mail_parser::HeaderName;
 use store::{Comparator, FieldValue, Filter, Integer, Store, Tag};
 
@@ -129,15 +130,17 @@ where
                             (values_int["acquisitionYear"] + 1000) as MailboxId,
                         ],
                         keywords: vec![
-                            values_str["medium"].clone().into(),
-                            values_str["artistRole"].clone().into(),
-                            values_str["accession_number"][0..1].into(),
-                            format!(
-                                "N{}",
-                                &values_str["accession_number"]
-                                    [values_str["accession_number"].len() - 1..]
-                            )
-                            .into(),
+                            Tag::Text(values_str["medium"].clone().into()),
+                            Tag::Text(values_str["artistRole"].clone().into()),
+                            Tag::Text(values_str["accession_number"][0..1].into()),
+                            Tag::Text(
+                                format!(
+                                    "N{}",
+                                    &values_str["accession_number"]
+                                        [values_str["accession_number"].len() - 1..]
+                                )
+                                .into(),
+                            ),
                         ],
                         received_at: Some(values_int["year"] as i64),
                     },
@@ -743,7 +746,7 @@ where
     }
 }
 
-fn get_anchor<'x, T>(mail_store: &'x JMAPLocalStore<T>, anchor: &'x str) -> Option<JMAPMailId>
+fn get_anchor<'x, T>(mail_store: &'x JMAPLocalStore<T>, anchor: &'x str) -> Option<JMAPId>
 where
     T: Store<'x>,
 {
@@ -768,5 +771,5 @@ where
         .unwrap()
         .unwrap();
 
-    JMAPMailId::new(thread_id, doc_id).into()
+    JMAPId::from_email(thread_id, doc_id).into()
 }

@@ -10,6 +10,7 @@ use std::{borrow::Cow, iter::FromIterator};
 
 use batch::DocumentWriter;
 use nlp::Language;
+use serialize::StoreDeserialize;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -69,7 +70,7 @@ pub enum FieldValue<'x> {
     Tag(Tag<'x>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Tag<'x> {
     Static(TagId),
     Id(Integer),
@@ -285,9 +286,9 @@ pub trait StoreGet {
         account: Option<AccountId>,
         collection: Option<CollectionId>,
         field: Option<FieldId>,
-    ) -> Result<Option<T>>
+    ) -> crate::Result<Option<T>>
     where
-        Vec<u8>: serialize::StoreDeserialize<T>;
+        T: StoreDeserialize;
 
     fn get_document_value<T>(
         &self,
@@ -298,7 +299,7 @@ pub trait StoreGet {
         field_num: FieldNumber,
     ) -> Result<Option<T>>
     where
-        Vec<u8>: serialize::StoreDeserialize<T>;
+        T: StoreDeserialize;
 
     fn get_multi_document_value<T>(
         &self,
@@ -308,7 +309,7 @@ pub trait StoreGet {
         field: FieldId,
     ) -> Result<Vec<Option<T>>>
     where
-        Vec<u8>: serialize::StoreDeserialize<T>;
+        T: StoreDeserialize;
 }
 
 pub trait StoreDocumentSet {
@@ -316,6 +317,12 @@ pub trait StoreDocumentSet {
         + IntoIterator<Item = DocumentId>
         + FromIterator<DocumentId>
         + std::fmt::Debug;
+
+    fn get_document_ids(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<Self::Set>;
 }
 
 pub trait StoreTag: StoreDocumentSet {
@@ -339,33 +346,6 @@ pub trait StoreTag: StoreDocumentSet {
         field: FieldId,
         tags: &[Tag],
     ) -> Result<Vec<Option<Self::Set>>>;
-
-    fn set_tag(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        tag: Tag,
-    ) -> Result<()>;
-
-    fn clear_tag(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        tag: Tag,
-    ) -> Result<()>;
-
-    fn has_tag(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        tag: Tag,
-    ) -> Result<bool>;
 }
 
 pub trait StoreDelete {

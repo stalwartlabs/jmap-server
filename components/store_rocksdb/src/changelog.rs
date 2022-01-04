@@ -175,7 +175,7 @@ impl StoreChangeLog for RocksDBStore {
                 )
                 .map_err(|e| StoreError::InternalError(e.into_string()))?
             {
-                Some(change_id.deserialize()?)
+                Some(ChangeLogId::deserialize(change_id)?)
             } else {
                 None
             },

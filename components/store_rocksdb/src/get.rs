@@ -14,10 +14,10 @@ impl StoreGet for RocksDBStore {
         field: Option<FieldId>,
     ) -> store::Result<Option<T>>
     where
-        Vec<u8>: StoreDeserialize<T>,
+        T: StoreDeserialize,
     {
         if let Some(bytes) = self.get_raw_value(account, collection, field)? {
-            Ok(Some(bytes.deserialize()?))
+            Ok(Some(T::deserialize(bytes)?))
         } else {
             Ok(None)
         }
@@ -32,12 +32,12 @@ impl StoreGet for RocksDBStore {
         field_num: FieldNumber,
     ) -> store::Result<Option<T>>
     where
-        Vec<u8>: StoreDeserialize<T>,
+        T: StoreDeserialize,
     {
         if let Some(bytes) =
             self.get_document_raw_value(account, collection, document, field, field_num)?
         {
-            Ok(Some(bytes.deserialize()?))
+            Ok(Some(T::deserialize(bytes)?))
         } else {
             Ok(None)
         }
@@ -51,12 +51,12 @@ impl StoreGet for RocksDBStore {
         field: FieldId,
     ) -> store::Result<Vec<Option<T>>>
     where
-        Vec<u8>: StoreDeserialize<T>,
+        T: StoreDeserialize,
     {
         let mut result = Vec::with_capacity(documents.size_hint().0);
         for bytes in self.get_multi_document_raw_value(account, collection, documents, field, 0)? {
             if let Some(bytes) = bytes {
-                result.push(Some(bytes.deserialize()?));
+                result.push(Some(T::deserialize(bytes)?));
             } else {
                 result.push(None);
             }

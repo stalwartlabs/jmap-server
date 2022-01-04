@@ -573,7 +573,7 @@ pub fn build_message_document<'x>(
     }
 
     if has_attachment {
-        document.add_tag(MessageField::Attachment.into(), Tag::Id(0));
+        document.set_tag(MessageField::Attachment.into(), Tag::Id(0));
     }
 
     document.add_blob(

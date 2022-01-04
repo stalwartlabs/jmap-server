@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashSet};
 
 use crate::JMAPMailIdImpl;
 use jmap_store::{
-    changes::JMAPState, local_store::JMAPLocalStore, JMAPFilter, JMAPLogicalOperator, JMAPQuery,
+    local_store::JMAPLocalStore, JMAPError, JMAPFilter, JMAPId, JMAPLogicalOperator, JMAPQuery,
     JMAPQueryResponse, JMAP_MAIL,
 };
 use mail_parser::HeaderName;
@@ -13,7 +13,7 @@ use store::{
     TextQuery, ThreadId,
 };
 
-use crate::{JMAPMailId, JMAPMailStoreQuery, MessageField};
+use crate::{JMAPMailStoreQuery, MessageField};
 
 pub type MailboxId = u32;
 
@@ -71,9 +71,9 @@ where
 
     fn mail_query(
         &'x self,
-        mut query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>, JMAPMailId>,
+        mut query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
         collapse_threads: bool,
-    ) -> store::Result<JMAPQueryResponse<JMAPMailId>> {
+    ) -> jmap_store::Result<JMAPQueryResponse> {
         let mut is_immutable = true;
         let state: Option<QueryState<Self::Set>> = match query.filter {
             JMAPFilter::Operator(op) => Some(QueryState {
@@ -409,14 +409,10 @@ where
         let doc_ids = self
             .store
             .query(query.account_id, JMAP_MAIL, filter, sort)?;
-        let query_state = self
-            .store
-            .get_last_change_id(query.account_id, JMAP_MAIL)?
-            .map(JMAPState::new_exact)
-            .unwrap_or_else(JMAPState::new_initial);
+        let query_state = self.get_state(query.account_id, JMAP_MAIL)?;
         let num_results = doc_ids.len();
 
-        let results: Vec<JMAPMailId> = if collapse_threads || query.anchor.is_some() {
+        let results: Vec<JMAPId> = if collapse_threads || query.anchor.is_some() {
             let has_anchor = query.anchor.is_some();
             let results_len = if query.limit > 0 {
                 query.limit
@@ -441,7 +437,7 @@ where
                         }
                         seen_threads.insert(thread_id);
                     }
-                    let result = JMAPMailId::new(thread_id, doc_id);
+                    let result = JMAPId::from_email(thread_id, doc_id);
 
                     if !has_anchor {
                         if query.position >= 0 {
@@ -506,8 +502,7 @@ where
                     results[start_offset..end_offset].to_vec()
                 }
             } else {
-                return Err(StoreError::InternalError("Anchor not found".into()));
-                // TODO use correct error type
+                return Err(JMAPError::AnchorNotFound);
             }
         } else {
             let doc_ids = if query.position != 0 && query.limit > 0 {
@@ -552,7 +547,7 @@ where
                 )?
                 .into_iter()
                 .zip(doc_ids.into_iter())
-                .filter_map(|(thread_id, doc_id)| JMAPMailId::new(thread_id?, doc_id).into())
+                .filter_map(|(thread_id, doc_id)| JMAPId::from_email(thread_id?, doc_id).into())
                 .collect()
         };
 

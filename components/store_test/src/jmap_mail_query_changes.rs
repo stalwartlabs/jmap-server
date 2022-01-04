@@ -3,10 +3,11 @@ use std::collections::{HashMap, HashSet};
 use jmap_mail::{
     import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition},
-    JMAPMailId, JMAPMailIdImpl, JMAPMailStoreChanges, JMAPMailStoreImport, MessageField,
+    JMAPMailIdImpl, JMAPMailStoreChanges, JMAPMailStoreImport, MessageField,
 };
 use jmap_store::{
-    changes::JMAPState, local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPQueryChanges,
+    changes::JMAPState, local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId,
+    JMAPQueryChanges,
 };
 use store::{
     batch::{DocumentWriter, LogAction},
@@ -74,11 +75,11 @@ where
                             .as_bytes()
                             .into(),
                             mailbox_ids: vec![if change_num % 2 == 0 { 1 } else { 2 }],
-                            keywords: vec![if change_num % 2 == 0 {
+                            keywords: vec![Tag::Text(if change_num % 2 == 0 {
                                 "1".into()
                             } else {
                                 "2".into()
-                            }],
+                            })],
                             received_at: Some(*id as i64),
                         },
                     )
@@ -114,11 +115,11 @@ where
             }
             LogAction::Move(from, to) => {
                 let id = *id_map.get(from).unwrap();
-                let new_id = JMAPMailId::new(thread_id, id.get_document_id());
+                let new_id = JMAPId::from_email(thread_id, id.get_document_id());
 
                 let mut batch = DocumentWriter::update(0, 0, id.get_document_id());
                 batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
-                batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
+                batch.set_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
                 batch.log_move(id, new_id);
                 mail_store.get_store().update_document(batch).unwrap();
 

@@ -260,40 +260,40 @@ pub fn deserialize_document_id_from_leb128(bytes: &[u8]) -> Option<DocumentId> {
     DocumentId::from_leb128_bytes(bytes)?.0.into()
 }
 
-pub trait StoreDeserialize<T>: Sized {
-    fn deserialize(self) -> crate::Result<T>;
+pub trait StoreDeserialize: Sized {
+    fn deserialize(bytes: Vec<u8>) -> crate::Result<Self>;
 }
 
-impl StoreDeserialize<Vec<u8>> for Vec<u8> {
-    fn deserialize(self) -> crate::Result<Vec<u8>> {
-        Ok(self)
+impl StoreDeserialize for Vec<u8> {
+    fn deserialize(bytes: Vec<u8>) -> crate::Result<Vec<u8>> {
+        Ok(bytes)
     }
 }
 
-impl StoreDeserialize<String> for Vec<u8> {
-    fn deserialize(self) -> crate::Result<String> {
-        deserialize_text(self)
+impl StoreDeserialize for String {
+    fn deserialize(bytes: Vec<u8>) -> crate::Result<String> {
+        deserialize_text(bytes)
             .ok_or_else(|| StoreError::InternalError("Failed to decode UTF-8 string".to_string()))
     }
 }
 
-impl StoreDeserialize<Float> for Vec<u8> {
-    fn deserialize(self) -> crate::Result<Float> {
-        deserialize_float(self)
+impl StoreDeserialize for Float {
+    fn deserialize(bytes: Vec<u8>) -> crate::Result<Float> {
+        deserialize_float(bytes)
             .ok_or_else(|| StoreError::InternalError("Failed to decode float".to_string()))
     }
 }
 
-impl StoreDeserialize<LongInteger> for Vec<u8> {
-    fn deserialize(self) -> crate::Result<LongInteger> {
-        deserialize_long_integer(self)
+impl StoreDeserialize for LongInteger {
+    fn deserialize(bytes: Vec<u8>) -> crate::Result<LongInteger> {
+        deserialize_long_integer(bytes)
             .ok_or_else(|| StoreError::InternalError("Failed to decode long integer".to_string()))
     }
 }
 
-impl StoreDeserialize<Integer> for Vec<u8> {
-    fn deserialize(self) -> crate::Result<Integer> {
-        deserialize_integer(self)
+impl StoreDeserialize for Integer {
+    fn deserialize(bytes: Vec<u8>) -> crate::Result<Integer> {
+        deserialize_integer(bytes)
             .ok_or_else(|| StoreError::InternalError("Failed to decode integer".to_string()))
     }
 }

@@ -1,4 +1,4 @@
-use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL};
+use jmap_store::{local_store::JMAPLocalStore, JMAPError, JMAP_MAIL};
 use mail_parser::RfcHeaders;
 use store::{AccountId, DocumentId, Store, StoreError};
 
@@ -12,7 +12,7 @@ where
         &'x self,
         account: AccountId,
         document: DocumentId,
-    ) -> store::Result<RfcHeaders> {
+    ) -> jmap_store::Result<RfcHeaders> {
         bincode::deserialize(
             &self
                 .store
@@ -24,10 +24,13 @@ where
                     crate::MESSAGE_HEADERS,
                 )?
                 .ok_or_else(|| {
-                    StoreError::InternalError(format!("Headers for doc_id {} not found", document))
+                    JMAPError::InternalError(StoreError::InternalError(format!(
+                        "Headers for doc_id {} not found",
+                        document
+                    )))
                 })?,
         )
-        .map_err(|e| StoreError::InternalError(e.to_string()))
+        .map_err(|e| JMAPError::InternalError(StoreError::InternalError(e.to_string())))
         // TODO all errors have to include more info about context
     }
 }

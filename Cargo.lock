@@ -838,6 +838,7 @@ version = "0.1.0"
 dependencies = [
  "bitpacking",
  "nlp",
+ "serde",
 ]
 
 [[package]]

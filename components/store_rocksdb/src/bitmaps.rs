@@ -355,6 +355,66 @@ macro_rules! impl_bit {
 impl_bit!(set_bit, set_bits, BIT_SET);
 impl_bit!(clear_bit, clear_bits, BIT_CLEAR);
 
+#[inline(always)]
+pub fn set_clear_bits<T>(documents: T) -> Vec<u8>
+where
+    T: Iterator<Item = (DocumentId, bool)>,
+{
+    debug_assert!(documents.size_hint().0 > 0);
+
+    let total_docs = documents
+        .size_hint()
+        .1
+        .unwrap_or_else(|| documents.size_hint().0);
+    let buf_len = (std::mem::size_of::<DocumentId>() * total_docs) + (total_docs / 0x7F) + 2;
+    let mut set_buf = Vec::with_capacity(buf_len);
+    let mut clear_buf = Vec::with_capacity(buf_len);
+
+    let mut set_header_pos = 0;
+    let mut set_total_docs = 0;
+
+    let mut clear_header_pos = 0;
+    let mut clear_total_docs = 0;
+
+    set_buf.push(IS_BITLIST);
+    clear_buf.push(IS_BITLIST);
+
+    for (document, is_set) in documents {
+        if is_set {
+            if set_total_docs & 0x7F == 0 {
+                set_header_pos = set_buf.len();
+                set_buf.push(BIT_SET | 0x7F);
+            }
+            document.to_leb128_bytes(&mut set_buf);
+            set_total_docs += 1;
+        } else {
+            if clear_total_docs & 0x7F == 0 {
+                clear_header_pos = clear_buf.len();
+                clear_buf.push(BIT_CLEAR | 0x7F);
+            }
+            document.to_leb128_bytes(&mut clear_buf);
+            clear_total_docs += 1;
+        }
+    }
+
+    if set_total_docs > 0 {
+        set_buf[set_header_pos] = BIT_SET | ((set_total_docs & 0x7F) as u8);
+    }
+
+    if clear_total_docs > 0 {
+        clear_buf[clear_header_pos] = BIT_CLEAR | ((clear_total_docs & 0x7F) as u8);
+    }
+
+    if set_total_docs > 0 && clear_total_docs > 0 {
+        set_buf.extend_from_slice(&clear_buf[1..]);
+        set_buf
+    } else if set_total_docs > 0 {
+        set_buf
+    } else {
+        clear_buf
+    }
+}
+
 #[derive(Debug)]
 pub struct RocksDBDocumentSet {
     pub bitmap: RoaringBitmap,

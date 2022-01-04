@@ -1,81 +1,32 @@
 use std::ops::BitAndAssign;
 
+use roaring::RoaringBitmap;
 use store::{
-    serialize::serialize_bm_tag_key, AccountId, CollectionId, DocumentId, DocumentSet, FieldId,
-    StoreDocumentSet, StoreError, StoreTag, StoreTombstone, Tag,
+    serialize::serialize_bm_tag_key, AccountId, CollectionId, FieldId, StoreDocumentSet,
+    StoreError, StoreTag, Tag,
 };
 
 use crate::{
-    bitmaps::{clear_bit, has_bit, into_bitmap, set_bit, RocksDBDocumentSet},
+    bitmaps::{into_bitmap, RocksDBDocumentSet},
     RocksDBStore,
 };
 
 impl StoreDocumentSet for RocksDBStore {
     type Set = RocksDBDocumentSet;
+
+    fn get_document_ids(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<Self::Set> {
+        Ok(RocksDBDocumentSet::from_roaring(
+            self.get_document_ids(account, collection)?
+                .unwrap_or_else(RoaringBitmap::new),
+        ))
+    }
 }
 
 impl StoreTag for RocksDBStore {
-    fn set_tag(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        tag: Tag,
-    ) -> crate::Result<()> {
-        self.db
-            .merge_cf(
-                &self.get_handle("bitmaps")?,
-                &serialize_bm_tag_key(account, collection, field, &tag),
-                &set_bit(document),
-            )
-            .map_err(|e| StoreError::InternalError(e.into_string()))
-    }
-
-    fn clear_tag(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        tag: Tag,
-    ) -> crate::Result<()> {
-        self.db
-            .merge_cf(
-                &self.get_handle("bitmaps")?,
-                &serialize_bm_tag_key(account, collection, field, &tag),
-                &clear_bit(document),
-            )
-            .map_err(|e| StoreError::InternalError(e.into_string()))
-    }
-
-    fn has_tag(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-        tag: Tag,
-    ) -> crate::Result<bool> {
-        let cf_bitmaps = self.get_handle("bitmaps")?;
-        self.db
-            .get_cf(
-                &cf_bitmaps,
-                &serialize_bm_tag_key(account, collection, field, &tag),
-            )
-            .map_err(|e| StoreError::InternalError(e.into_string()))?
-            .map_or(Ok(false), |b| {
-                if has_bit(&b, document)? {
-                    match self.get_tombstoned_ids(account, collection)? {
-                        Some(tombstoned_ids) if tombstoned_ids.contains(document) => Ok(false),
-                        _ => Ok(true),
-                    }
-                } else {
-                    Ok(false)
-                }
-            })
-    }
-
     fn get_tags(
         &self,
         account: AccountId,

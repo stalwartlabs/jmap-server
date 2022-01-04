@@ -6,7 +6,7 @@ use store::Store;
 
 use crate::{
     query::{JMAPMailComparator, JMAPMailFilterCondition},
-    JMAPMailId, JMAPMailStoreChanges, JMAPMailStoreQuery,
+    JMAPMailStoreChanges, JMAPMailStoreQuery,
 };
 
 impl<'x, T> JMAPMailStoreChanges<'x> for JMAPLocalStore<T>
@@ -20,15 +20,16 @@ where
         account: store::AccountId,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse> {
+    ) -> jmap_store::Result<JMAPChangesResponse> {
         self.get_changes(account, JMAP_MAIL, since_state, max_changes)
+            .map_err(|e| e.into())
     }
 
     fn mail_query_changes(
         &'x self,
-        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>, JMAPMailId>,
+        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
         collapse_threads: bool,
-    ) -> store::Result<JMAPQueryChangesResponse<JMAPMailId>> {
+    ) -> jmap_store::Result<JMAPQueryChangesResponse> {
         let changes = self.get_changes(
             query.account_id,
             JMAP_MAIL,

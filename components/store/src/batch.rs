@@ -178,9 +178,16 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         )));
     }
 
-    pub fn add_tag(&mut self, field: FieldId, value: Tag<'x>) {
-        self.fields
-            .push(UpdateField::Tag(Field::new(field, 0, value, false, false)));
+    pub fn set_tag(&mut self, field: FieldId, value: Tag<'x>) {
+        self.fields.push(UpdateField::TagSet(Field::new(
+            field, 0, value, false, false,
+        )));
+    }
+
+    pub fn clear_tag(&mut self, field: FieldId, value: Tag<'x>) {
+        self.fields.push(UpdateField::TagRemove(Field::new(
+            field, 0, value, false, false,
+        )));
     }
 
     pub fn add_float(

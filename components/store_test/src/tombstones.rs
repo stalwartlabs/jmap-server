@@ -4,8 +4,8 @@ use nlp::Language;
 use store::batch::DocumentWriter;
 use store::field::Text;
 use store::{
-    Comparator, DocumentId, FieldId, FieldValue, Filter, Float, Integer, LongInteger, Store,
-    StoreTombstone, Tag, TextQuery,
+    Comparator, DocumentId, DocumentSet, FieldId, FieldValue, Filter, Float, Integer, LongInteger,
+    Store, StoreTombstone, Tag, TextQuery,
 };
 
 pub fn test_tombstones<T>(db: T)
@@ -43,9 +43,9 @@ where
         builder.add_float(3, 0, raw_doc_num as Float, true, true);
         builder.add_integer(4, 0, raw_doc_num as Integer, true, true);
         builder.add_long_int(5, 0, raw_doc_num as LongInteger, true, true);
-        builder.add_tag(6, Tag::Id(0));
-        builder.add_tag(7, Tag::Static(0));
-        builder.add_tag(8, Tag::Text("my custom tag".into()));
+        builder.set_tag(6, Tag::Id(0));
+        builder.set_tag(7, Tag::Static(0));
+        builder.set_tag(8, Tag::Text("my custom tag".into()));
 
         db.update_document(builder).unwrap();
     }
@@ -111,24 +111,19 @@ where
             Vec::from_iter(1..9)
         );
 
-        for (pos, tag) in [
+        for (pos, tag) in vec![
             Tag::Id(0),
             Tag::Static(0),
             Tag::Text("my custom tag".into()),
         ]
-        .iter()
+        .into_iter()
         .enumerate()
         {
-            assert!(!db
-                .has_tag(0, 0, 0, 6 + pos as FieldId, tag.clone())
-                .unwrap());
-            assert!(!db
-                .has_tag(0, 0, 9, 6 + pos as FieldId, tag.clone())
-                .unwrap());
+            let tags = db.get_tag(0, 0, 6 + pos as FieldId, tag).unwrap().unwrap();
+            assert!(!tags.contains(0));
+            assert!(!tags.contains(9));
             for doc_id in 1..9 {
-                assert!(db
-                    .has_tag(0, 0, doc_id, 6 + pos as FieldId, tag.clone())
-                    .unwrap());
+                assert!(tags.contains(doc_id));
             }
         }
 

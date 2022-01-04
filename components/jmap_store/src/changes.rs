@@ -21,6 +21,12 @@ pub enum JMAPState {
     Intermediate(JMAPIntermediateState),
 }
 
+impl Default for JMAPState {
+    fn default() -> Self {
+        JMAPState::Initial
+    }
+}
+
 pub struct HexWriter {
     pub result: String,
 }
@@ -65,7 +71,7 @@ impl JMAPState {
 }
 
 impl JMAPIdSerialize for JMAPState {
-    fn from_jmap_id(id: &str) -> Option<Self>
+    fn from_jmap_string(id: &str) -> Option<Self>
     where
         Self: Sized,
     {
@@ -96,7 +102,7 @@ impl JMAPIdSerialize for JMAPState {
         }
     }
 
-    fn to_jmap_id(&self) -> String {
+    fn to_jmap_string(&self) -> String {
         match self {
             JMAPState::Initial => "n".to_string(),
             JMAPState::Exact(id) => format!("s{:02x}", id),
@@ -267,7 +273,10 @@ mod tests {
                 ChangeLogId::MAX as usize,
             ),
         ] {
-            assert_eq!(JMAPState::from_jmap_id(&id.to_jmap_id()).unwrap(), id);
+            assert_eq!(
+                JMAPState::from_jmap_string(&id.to_jmap_string()).unwrap(),
+                id
+            );
         }
 
         for invalid_id in [
@@ -282,7 +291,7 @@ mod tests {
             "rffffffffffffffffff01ffffffffffffffffff01ffffffffffffffffff01",
             "rcec2f105e3bcf42300",
         ] {
-            assert!(JMAPState::from_jmap_id(invalid_id).is_none());
+            assert!(JMAPState::from_jmap_string(invalid_id).is_none());
         }
     }
 }

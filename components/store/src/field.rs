@@ -17,7 +17,8 @@ pub enum UpdateField<'x> {
     Blob(Field<Cow<'x, [u8]>>),
     Integer(Field<Integer>),
     LongInteger(Field<LongInteger>),
-    Tag(Field<Tag<'x>>),
+    TagSet(Field<Tag<'x>>),
+    TagRemove(Field<Tag<'x>>),
     Float(Field<Float>),
 }
 
@@ -28,7 +29,8 @@ impl<'x> UpdateField<'x> {
             UpdateField::Blob(b) => b.value.len(),
             UpdateField::Integer(i) => i.size_of(),
             UpdateField::LongInteger(li) => li.size_of(),
-            UpdateField::Tag(t) => t.value.len(),
+            UpdateField::TagSet(t) => t.value.len(),
+            UpdateField::TagRemove(t) => t.value.len(),
             UpdateField::Float(f) => f.size_of(),
         }
     }
@@ -43,7 +45,8 @@ impl<'x> UpdateField<'x> {
             UpdateField::Blob(b) => &b.field,
             UpdateField::Integer(i) => &i.field,
             UpdateField::LongInteger(li) => &li.field,
-            UpdateField::Tag(t) => &t.field,
+            UpdateField::TagSet(t) => &t.field,
+            UpdateField::TagRemove(t) => &t.field,
             UpdateField::Float(f) => &f.field,
         }
     }

@@ -1,16 +1,29 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use crate::JMAPMailIdImpl;
-use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL, JMAP_THREAD};
+use jmap_store::{local_store::JMAPLocalStore, JMAPId, JMAP_MAIL, JMAP_THREAD};
 use mail_parser::Message;
+use serde::{Deserialize, Serialize};
 use store::{
     batch::DocumentWriter, field::Text, AccountId, ChangeLogId, Comparator, DocumentSet,
     FieldValue, Filter, Store, StoreError, Tag, ThreadId, UncommittedDocumentId,
 };
 
-use crate::{
-    parse::build_message_document, query::MailboxId, JMAPMailId, JMAPMailStoreImport, MessageField,
-};
+use crate::{parse::build_message_document, query::MailboxId, JMAPMailStoreImport, MessageField};
+
+pub fn bincode_serialize<T>(value: &T) -> store::Result<Vec<u8>>
+where
+    T: Serialize,
+{
+    bincode::serialize(value).map_err(|e| StoreError::SerializeError(e.to_string()))
+}
+
+pub fn bincode_deserialize<'x, T>(bytes: &'x [u8]) -> store::Result<T>
+where
+    T: Deserialize<'x>,
+{
+    bincode::deserialize(bytes).map_err(|e| StoreError::DeserializeError(e.to_string()))
+}
 
 pub struct JMAPMailImport<'x> {
     pub account_id: AccountId,
@@ -31,7 +44,7 @@ impl<'x> JMAPMailImport<'x> {
 pub struct JMAPMailImportItem<'x> {
     pub blob: Cow<'x, [u8]>,
     pub mailbox_ids: Vec<MailboxId>,
-    pub keywords: Vec<Cow<'x, str>>,
+    pub keywords: Vec<Tag<'x>>,
     pub received_at: Option<i64>,
 }
 
@@ -50,7 +63,7 @@ pub struct JMAPMailImportResponse {
     pub account_id: AccountId,
     pub old_state: Option<String>,
     pub new_state: String,
-    pub results: Vec<store::Result<JMAPMailId>>,
+    pub results: Vec<store::Result<JMAPId>>,
 }
 
 impl<'x, T> JMAPMailStoreImport<'x> for JMAPLocalStore<T>
@@ -61,7 +74,7 @@ where
         &'x self,
         account: AccountId,
         message: JMAPMailImportItem<'x>,
-    ) -> store::Result<JMAPMailId> {
+    ) -> jmap_store::Result<JMAPId> {
         // Build message document
         let (mut batch, document_id) = {
             let assigned_id = self.store.assign_document_id(account, JMAP_MAIL, None)?;
@@ -79,13 +92,28 @@ where
         let mut batches = Vec::new();
 
         // Add mailbox tags
-        for mailbox_id in message.mailbox_ids {
-            batch.add_tag(MessageField::Mailbox.into(), Tag::Id(mailbox_id));
+        if !message.mailbox_ids.is_empty() {
+            //TODO validate mailbox ids
+            batch.add_blob(
+                MessageField::Mailbox.into(),
+                0,
+                bincode_serialize(&message.mailbox_ids)?.into(),
+            );
+            for mailbox_id in message.mailbox_ids {
+                batch.set_tag(MessageField::Mailbox.into(), Tag::Id(mailbox_id));
+            }
         }
 
         // Add keyword tags
-        for keyword in message.keywords {
-            batch.add_tag(MessageField::Keyword.into(), Tag::Text(keyword));
+        if !message.keywords.is_empty() {
+            batch.add_blob(
+                MessageField::Keyword.into(),
+                0,
+                bincode_serialize(&message.keywords)?.into(),
+            );
+            for keyword in message.keywords {
+                batch.set_tag(MessageField::Keyword.into(), keyword);
+            }
         }
 
         // Lock account
@@ -169,7 +197,7 @@ where
         }
 
         batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
-        batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
+        batch.set_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
 
         batch.add_text(
             MessageField::ThreadName.into(),
@@ -179,7 +207,7 @@ where
             true,
         );
 
-        let jmap_mail_id = JMAPMailId::new(thread_id, document_id);
+        let jmap_mail_id = JMAPId::from_email(thread_id, document_id);
         batch.log_insert(jmap_mail_id);
         batches.push(batch);
 
@@ -245,14 +273,14 @@ where
             for document_id in document_set {
                 let mut batch = DocumentWriter::update(account, JMAP_MAIL, document_id);
                 batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
-                batch.add_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
+                batch.set_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
                 batch.log_move(
-                    JMAPMailId::new(delete_thread_id, document_id),
-                    JMAPMailId::new(thread_id, document_id),
+                    JMAPId::from_email(delete_thread_id, document_id),
+                    JMAPId::from_email(thread_id, document_id),
                 );
                 batches.push(batch);
             }
-            deleted_threads.add_tag(MessageField::ThreadId.into(), Tag::Id(delete_thread_id));
+            deleted_threads.set_tag(MessageField::ThreadId.into(), Tag::Id(delete_thread_id));
 
             let mut delete_thread = DocumentWriter::delete(account, JMAP_THREAD, delete_thread_id);
             delete_thread.log_delete(delete_thread_id as ChangeLogId);

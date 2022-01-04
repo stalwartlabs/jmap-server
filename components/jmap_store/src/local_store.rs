@@ -1,6 +1,8 @@
 use std::sync::MutexGuard;
 
-use store::{mutex_map::MutexMap, AccountId, Store, StoreError};
+use store::{mutex_map::MutexMap, AccountId, CollectionId, Store, StoreError};
+
+use crate::changes::JMAPState;
 
 pub struct JMAPLocalStore<T> {
     pub store: T,
@@ -28,7 +30,15 @@ where
         &self.store
     }
 
-    pub fn test(&'x self) -> Option<usize> {
-        None
+    pub fn get_state(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> store::Result<JMAPState> {
+        Ok(self
+            .store
+            .get_last_change_id(account, collection)?
+            .map(JMAPState::Exact)
+            .unwrap_or(JMAPState::Initial))
     }
 }
