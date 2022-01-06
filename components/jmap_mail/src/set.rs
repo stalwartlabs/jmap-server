@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use jmap_store::json::JSONValue;
 use jmap_store::JMAPIdSerialize;
 use jmap_store::{
     json::JSONPointer, local_store::JMAPLocalStore, JMAPError, JMAPId, JMAPSet, JMAPSetError,
-    JMAPSetErrorType, JMAPSetResponse, PatchValue, JMAP_MAIL, JMAP_MAILBOX,
+    JMAPSetErrorType, JMAPSetResponse, JMAP_MAIL, JMAP_MAILBOX,
 };
 use store::{
     batch::{DocumentWriter, LogAction},
@@ -14,16 +15,16 @@ use store::{Tag, UncommittedDocumentId};
 
 use crate::import::{bincode_deserialize, bincode_serialize};
 use crate::query::MailboxId;
-use crate::{JMAPMailIdImpl, JMAPMailStoreSet, MessageField};
+use crate::{JMAPMailIdImpl, JMAPMailProperties, JMAPMailStoreSet, MessageField};
 
 //TODO make configurable
 pub const MAX_CHANGES: usize = 100;
 
 fn build_message<'x, T>(
     document: &mut DocumentWriter<'x, T>,
-    fields: HashMap<Cow<'x, str>, PatchValue<'x>>,
+    fields: HashMap<Cow<'x, str>, JSONValue<'x, JMAPMailProperties<'x>>>,
     mailbox_ids: &impl DocumentSet,
-) -> Result<PatchValue<'x>, JMAPSetError>
+) -> Result<JSONValue<'x, JMAPMailProperties<'x>>, JMAPSetError>
 where
     T: UncommittedDocumentId,
 {
@@ -31,14 +32,17 @@ where
 
     document.log_insert(jmap_id);
 
-    Ok(PatchValue::Null)
+    Ok(JSONValue::Null)
 }
 
 impl<'x, T> JMAPMailStoreSet<'x> for JMAPLocalStore<T>
 where
     T: Store<'x>,
 {
-    fn mail_set(&self, request: JMAPSet<'x>) -> jmap_store::Result<JMAPSetResponse<'x>> {
+    fn mail_set(
+        &self,
+        request: JMAPSet<'x, JMAPMailProperties<'x>>,
+    ) -> jmap_store::Result<JMAPSetResponse<'x, JMAPMailProperties<'x>>> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -127,8 +131,8 @@ where
 
                 for (field, value) in properties {
                     match field {
-                        JSONPointer::String(key) if key == "keywords" => {
-                            if let PatchValue::Map(value) = value {
+                        JSONPointer::Property(JMAPMailProperties::Keywords) => {
+                            if let JSONValue::Object(value) = value {
                                 if let Some(current_keywords) =
                                     self.store.get_document_value::<Vec<u8>>(
                                         request.account_id,
@@ -144,7 +148,7 @@ where
                                 }
                                 let mut new_keywords = Vec::with_capacity(value.len());
                                 for (keyword, value) in value {
-                                    if let PatchValue::True = value {
+                                    if let JSONValue::Bool(true) = value {
                                         new_keywords.push(Tag::Text(keyword));
                                     }
                                 }
@@ -154,11 +158,11 @@ where
                                     bincode_serialize(&new_keywords)?.into(),
                                 );
                             } else {
-                                invalid_properties.push(key.to_string());
+                                invalid_properties.push("keywords".to_string());
                             }
                         }
-                        JSONPointer::String(key) if key == "mailboxIds" => {
-                            if let PatchValue::Map(value) = value {
+                        JSONPointer::Property(JMAPMailProperties::MailboxIds) => {
+                            if let JSONValue::Object(value) = value {
                                 if let Some(current_mailboxes) =
                                     self.store.get_document_value::<Vec<u8>>(
                                         request.account_id,
@@ -179,7 +183,7 @@ where
                                 }
 
                                 for (mailbox_id, value) in value {
-                                    if let (Some(mailbox_id), PatchValue::True) =
+                                    if let (Some(mailbox_id), JSONValue::Bool(true)) =
                                         (JMAPId::from_jmap_string(mailbox_id.as_ref()), value)
                                     {
                                         let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
@@ -200,40 +204,38 @@ where
                                             continue;
                                         }
                                     }
-                                    invalid_properties.push(format!("{}/{}", key, mailbox_id));
+                                    invalid_properties.push(format!("mailboxIds/{}", mailbox_id));
                                 }
                             } else {
-                                invalid_properties.push(key.to_string());
+                                invalid_properties.push("mailboxIds".to_string());
                             }
                         }
                         JSONPointer::Path(mut path) if path.len() == 2 => {
                             match (path.pop().unwrap(), path.pop().unwrap()) {
-                                (JSONPointer::String(keyword), JSONPointer::String(property))
-                                    if property == "keywords" =>
-                                {
-                                    match value {
-                                        PatchValue::Null | PatchValue::False => {
-                                            document.clear_tag(
-                                                MessageField::Keyword.into(),
-                                                Tag::Text(keyword),
-                                            );
-                                        }
-                                        PatchValue::True => {
-                                            document.set_tag(
-                                                MessageField::Keyword.into(),
-                                                Tag::Text(keyword),
-                                            );
-                                        }
-                                        _ => {
-                                            invalid_properties
-                                                .push(format!("{}/{}", property, keyword));
-                                        }
+                                (
+                                    JSONPointer::String(keyword),
+                                    JSONPointer::Property(JMAPMailProperties::Keywords),
+                                ) => match value {
+                                    JSONValue::Null | JSONValue::Bool(false) => {
+                                        document.clear_tag(
+                                            MessageField::Keyword.into(),
+                                            Tag::Text(keyword),
+                                        );
                                     }
-                                }
+                                    JSONValue::Bool(true) => {
+                                        document.set_tag(
+                                            MessageField::Keyword.into(),
+                                            Tag::Text(keyword),
+                                        );
+                                    }
+                                    _ => {
+                                        invalid_properties.push(format!("keywords/{}", keyword));
+                                    }
+                                },
                                 (
                                     JSONPointer::String(mailbox_id),
-                                    JSONPointer::String(property),
-                                ) if property == "mailboxIds" => {
+                                    JSONPointer::Property(JMAPMailProperties::MailboxIds),
+                                ) => {
                                     if let Some(mailbox_id) =
                                         JMAPId::from_jmap_string(mailbox_id.as_ref())
                                     {
@@ -248,14 +250,14 @@ where
                                         };
                                         if mailbox_ids.contains(mailbox_id.get_document_id()) {
                                             match value {
-                                                PatchValue::Null | PatchValue::False => {
+                                                JSONValue::Null | JSONValue::Bool(false) => {
                                                     document.clear_tag(
                                                         MessageField::Mailbox.into(),
                                                         Tag::Id(mailbox_id.get_document_id()),
                                                     );
                                                     continue;
                                                 }
-                                                PatchValue::True => {
+                                                JSONValue::Bool(true) => {
                                                     document.set_tag(
                                                         MessageField::Mailbox.into(),
                                                         Tag::Id(mailbox_id.get_document_id()),
@@ -266,7 +268,7 @@ where
                                             }
                                         }
                                     }
-                                    invalid_properties.push(format!("{}/{}", property, mailbox_id));
+                                    invalid_properties.push(format!("mailboxIds/{}", mailbox_id));
                                 }
                                 (part2, part1) => {
                                     invalid_properties.push(format!("{}/{}", part1, part2));
@@ -291,7 +293,7 @@ where
                 } else if !document.is_empty() {
                     document.log_update(jmap_id);
                     changes.push(document);
-                    updated.insert(jmap_id, PatchValue::Null);
+                    updated.insert(jmap_id, JSONValue::Null);
                 } else {
                     not_updated.insert(
                         jmap_id,

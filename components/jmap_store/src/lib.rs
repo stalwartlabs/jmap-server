@@ -5,10 +5,11 @@ pub mod local_store;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    hash::Hash,
 };
 
 use changes::JMAPState;
-use json::JSONPointer;
+use json::{JSONPointer, JSONValue};
 use store::{AccountId, ChangeLogId, StoreError};
 
 pub const JMAP_MAIL: u8 = 0;
@@ -19,6 +20,7 @@ pub type JMAPId = u64;
 
 #[derive(Debug)]
 pub enum JMAPError {
+    InvalidArguments,
     RequestTooLarge,
     StateMismatch,
     AnchorNotFound,
@@ -188,27 +190,17 @@ pub struct JMAPChangesResponse {
     pub destroyed: HashSet<ChangeLogId>,
 }
 
-#[derive(Debug)]
-pub enum PatchValue<'x> {
-    Null,
-    True,
-    False,
-    String(Cow<'x, str>),
-    Reference(Cow<'x, str>),
-    Integer(u64),
-    SignedInteger(i64),
-    Float(f64),
-    Array(Vec<PatchValue<'x>>),
-    Map(HashMap<Cow<'x, str>, PatchValue<'x>>),
-}
+pub type JMAPSetIdList<'x, T, U, V> = HashMap<T, HashMap<U, JSONValue<'x, V>>>;
 
 #[derive(Debug)]
-#[allow(clippy::type_complexity)]
-pub struct JMAPSet<'x> {
+pub struct JMAPSet<'x, T>
+where
+    T: Hash + Eq + PartialEq,
+{
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub create: Option<HashMap<Cow<'x, str>, HashMap<Cow<'x, str>, PatchValue<'x>>>>,
-    pub update: Option<HashMap<JMAPId, HashMap<JSONPointer<'x>, PatchValue<'x>>>>,
+    pub create: Option<JMAPSetIdList<'x, Cow<'x, str>, Cow<'x, str>, T>>,
+    pub update: Option<JMAPSetIdList<'x, JMAPId, JSONPointer<'x, T>, T>>,
     pub destroy: Option<Vec<JMAPId>>,
 }
 
@@ -233,11 +225,14 @@ pub struct JMAPSetError {
 }
 
 #[derive(Debug, Default)]
-pub struct JMAPSetResponse<'x> {
+pub struct JMAPSetResponse<'x, T>
+where
+    T: Hash + Eq + PartialEq,
+{
     pub old_state: JMAPState,
     pub new_state: JMAPState,
-    pub created: Option<HashMap<Cow<'x, str>, PatchValue<'x>>>,
-    pub updated: Option<HashMap<JMAPId, PatchValue<'x>>>,
+    pub created: Option<HashMap<Cow<'x, str>, JSONValue<'x, T>>>,
+    pub updated: Option<HashMap<JMAPId, JSONValue<'x, T>>>,
     pub destroyed: Option<Vec<JMAPId>>,
     pub not_created: Option<HashMap<Cow<'x, str>, JMAPSetError>>,
     pub not_updated: Option<HashMap<JMAPId, JMAPSetError>>,
@@ -259,4 +254,19 @@ impl JMAPSetError {
             properties: None,
         }
     }
+}
+
+pub struct JMAPGet<T> {
+    pub account_id: AccountId,
+    pub ids: Option<Vec<JMAPId>>,
+    pub properties: Option<Vec<T>>,
+}
+
+pub struct JMAPGetResponse<'x, T>
+where
+    T: Hash + Eq + PartialEq,
+{
+    pub state: JMAPState,
+    pub list: JSONValue<'x, T>,
+    pub not_found: Option<Vec<JMAPId>>,
 }

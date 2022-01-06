@@ -393,6 +393,7 @@ name = "jmap_store"
 version = "0.1.0"
 dependencies = [
  "nlp",
+ "serde",
  "store",
 ]
 

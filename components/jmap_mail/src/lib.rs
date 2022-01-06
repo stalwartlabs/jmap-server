@@ -5,12 +5,15 @@ pub mod parse;
 pub mod query;
 pub mod set;
 
+use std::{borrow::Cow, collections::HashMap};
+
 use import::JMAPMailImportItem;
 use jmap_store::{
-    changes::JMAPState, local_store::JMAPLocalStore, JMAPChangesResponse, JMAPId, JMAPQuery,
-    JMAPQueryChanges, JMAPQueryChangesResponse, JMAPQueryResponse, JMAPSet, JMAPSetResponse,
+    changes::JMAPState, json::JSONValue, local_store::JMAPLocalStore, JMAPChangesResponse, JMAPGet,
+    JMAPGetResponse, JMAPId, JMAPQuery, JMAPQueryChanges, JMAPQueryChangesResponse,
+    JMAPQueryResponse, JMAPSet, JMAPSetResponse,
 };
-use mail_parser::{MessagePartId, RfcHeaders};
+use mail_parser::{HeaderName, MessagePartId, RfcHeaders};
 use query::{JMAPMailComparator, JMAPMailFilterCondition};
 use serde::{Deserialize, Serialize};
 use store::{AccountId, DocumentId, DocumentSet, FieldNumber, Store, ThreadId};
@@ -20,8 +23,10 @@ pub const MESSAGE_HEADERS: FieldNumber = 1;
 pub const MESSAGE_HEADERS_OTHER: FieldNumber = 2;
 pub const MESSAGE_HEADERS_OFFSETS: FieldNumber = 3;
 pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
-pub const MESSAGE_HEADERS_PARTS: FieldNumber = 5;
-pub const MESSAGE_HEADERS_STRUCTURE: FieldNumber = 6;
+pub const MESSAGE_PARTS: FieldNumber = 5;
+pub const MESSAGE_STRUCTURE: FieldNumber = 6;
+
+pub type JMAPMailHeaders<'x> = HashMap<HeaderName, JSONValue<'x, JMAPMailProperties<'x>>>;
 
 pub trait JMAPMailIdImpl {
     fn from_email(thread_id: ThreadId, doc_id: DocumentId) -> Self;
@@ -51,6 +56,7 @@ pub struct MessageParts {
     pub offset_body: usize,
     pub size: usize,
     pub received_at: i64,
+    pub has_attachments: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +81,82 @@ impl From<MessageField> for u8 {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub enum JMAPMailHeaderForm {
+    Raw,
+    Text,
+    Addresses,
+    GroupedAddresses,
+    MessageIds,
+    Date,
+    URLs,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub struct JMAPMailHeaderProperty<T> {
+    pub form: JMAPMailHeaderForm,
+    pub header: T,
+    pub all: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum JMAPMailProperties<'x> {
+    Id,
+    BlobId,
+    ThreadId,
+    MailboxIds,
+    Keywords,
+    Size,
+    ReceivedAt,
+    MessageId,
+    InReplyTo,
+    References,
+    Sender,
+    From,
+    To,
+    Cc,
+    Bcc,
+    ReplyTo,
+    Subject,
+    SentAt,
+    HasAttachment,
+    Preview,
+    BodyValues,
+    TextBody,
+    HtmlBody,
+    Attachments,
+    BodyStructure,
+    RfcHeader(JMAPMailHeaderProperty<HeaderName>),
+    OtherHeader(JMAPMailHeaderProperty<Cow<'x, str>>),
+
+    // EmailAddress and EmailAddressGroup object properties
+    Name,
+    Email,
+    Addresses,
+}
+
+impl<'x> Default for JMAPMailProperties<'x> {
+    fn default() -> Self {
+        JMAPMailProperties::Id
+    }
+}
+
+#[derive(Debug)]
+pub enum JMAPMailBodyProperties {
+    PartId,
+    BlobId,
+    Size,
+    Name,
+    Type,
+    Charset,
+    Headers,
+    Disposition,
+    Cid,
+    Language,
+    Location,
+    Subparts,
+}
+
 pub trait JMAPMailStoreImport<'x> {
     fn mail_import_single(
         &'x self,
@@ -84,7 +166,10 @@ pub trait JMAPMailStoreImport<'x> {
 }
 
 pub trait JMAPMailStoreSet<'x> {
-    fn mail_set(&self, request: JMAPSet<'x>) -> jmap_store::Result<JMAPSetResponse<'x>>;
+    fn mail_set(
+        &self,
+        request: JMAPSet<'x, JMAPMailProperties<'x>>,
+    ) -> jmap_store::Result<JMAPSetResponse<'x, JMAPMailProperties<'x>>>;
 }
 
 pub trait JMAPMailStoreQuery<'x> {
@@ -114,12 +199,26 @@ pub trait JMAPMailStoreChanges<'x> {
     ) -> jmap_store::Result<JMAPQueryChangesResponse>;
 }
 
+pub struct JMAPMailStoreGetArguments {
+    pub body_properties: Vec<JMAPMailBodyProperties>,
+    pub fetch_text_body_values: bool,
+    pub fetch_html_body_values: bool,
+    pub fetch_all_body_values: bool,
+    pub max_body_value_bytes: usize,
+}
+
 pub trait JMAPMailStoreGet<'x> {
     fn get_headers_rfc(
         &'x self,
         account: AccountId,
         document: DocumentId,
     ) -> jmap_store::Result<RfcHeaders>;
+
+    fn mail_get(
+        &self,
+        request: JMAPGet<JMAPMailProperties<'x>>,
+        arguments: JMAPMailStoreGetArguments,
+    ) -> jmap_store::Result<JMAPGetResponse<'x, JMAPMailProperties<'x>>>;
 }
 
 pub trait JMAPMailStore<'x>:
