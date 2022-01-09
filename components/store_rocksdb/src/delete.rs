@@ -4,20 +4,22 @@ use rocksdb::{Direction, IteratorMode, WriteBatch};
 use store::{
     serialize::{
         deserialize_document_id_from_leb128, deserialize_index_document_id, serialize_a_key_be,
-        serialize_a_key_leb128, serialize_ac_key_be, serialize_ac_key_leb128,
-        serialize_bm_internal, BM_FREED_IDS, BM_TOMBSTONED_IDS, BM_USED_IDS,
+        serialize_a_key_leb128, serialize_ac_key_be, serialize_ac_key_leb128, serialize_blob_key,
+        serialize_bm_internal, BLOB_KEY, BM_FREED_IDS, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
-    AccountId, CollectionId, DocumentId, StoreDelete, StoreError, StoreTombstone,
+    AccountId, CollectionId, DocumentId, StoreDelete, StoreError, StoreTombstone, StoreUpdate,
 };
 
 use crate::{
     bitmaps::{clear_bits, into_bitmap, set_bits, RocksDBDocumentSet},
+    blob::serialize_blob_key_from_value,
     RocksDBStore,
 };
 
 const DELETE_BATCH_SIZE: usize = 1000;
 
 impl StoreDelete for RocksDBStore {
+    //TODO delete blobs
     fn delete_account(&self, account: AccountId) -> store::Result<()> {
         let mut batch = WriteBatch::default();
         let mut batch_size = 0;
@@ -130,21 +132,6 @@ impl StoreDelete for RocksDBStore {
 
         Ok(())
     }
-
-    fn delete_document_bulk(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        documents: &[DocumentId],
-    ) -> store::Result<()> {
-        self.db
-            .merge_cf(
-                &self.get_handle("bitmaps")?,
-                &serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
-                &set_bits(documents.iter().copied()),
-            )
-            .map_err(|e| StoreError::InternalError(e.into_string()))
-    }
 }
 
 impl StoreTombstone for RocksDBStore {
@@ -172,19 +159,21 @@ impl StoreTombstone for RocksDBStore {
         let mut batch = WriteBatch::default();
         let mut batch_size = 0;
 
-        for (cf, prefix, deserialize_fnc) in [
+        for (cf, prefix, deserialize_fnc, delete_blobs) in [
             (
                 self.get_handle("values")?,
                 serialize_ac_key_leb128(account, collection),
                 deserialize_document_id_from_leb128 as fn(&[u8]) -> Option<DocumentId>,
+                true,
             ),
             (
                 self.get_handle("indexes")?,
                 serialize_ac_key_be(account, collection),
                 deserialize_index_document_id as fn(&[u8]) -> Option<DocumentId>,
+                false,
             ),
         ] {
-            for (key, _) in self
+            for (key, value) in self
                 .db
                 .iterator_cf(&cf, IteratorMode::From(&prefix, Direction::Forward))
             {
@@ -194,10 +183,26 @@ impl StoreTombstone for RocksDBStore {
                 if key.len() > prefix.len() {
                     if let Some(doc_id) = deserialize_fnc(&key[prefix.len()..]) {
                         if documents.contains(doc_id) {
+                            if delete_blobs
+                                && key.ends_with(BLOB_KEY)
+                                && serialize_blob_key(account, collection, doc_id)[..] == key[..]
+                            {
+                                batch.merge_cf(
+                                    &cf,
+                                    serialize_blob_key_from_value(&value).ok_or_else(|| {
+                                        StoreError::InternalError(
+                                            "Failed to deserialize blob name".to_string(),
+                                        )
+                                    })?,
+                                    (-1i64).to_le_bytes(),
+                                );
+                                batch_size += 1;
+                            }
+
                             batch.delete_cf(&cf, key);
                             batch_size += 1;
 
-                            if batch_size == DELETE_BATCH_SIZE {
+                            if batch_size >= DELETE_BATCH_SIZE {
                                 self.db
                                     .write(batch)
                                     .map_err(|e| StoreError::InternalError(e.to_string()))?;
@@ -217,8 +222,8 @@ impl StoreTombstone for RocksDBStore {
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let prefix = serialize_a_key_leb128(account);
 
-        // Lock collection before modifying bitmaps
-        let _collection_lock = self.lock_collection(account, collection)?;
+        // TODO delete files using a separate process
+        // TODO delete empty bitmaps
 
         for (key, value) in self
             .db
@@ -228,17 +233,10 @@ impl StoreTombstone for RocksDBStore {
                 break;
             } else if key.len() > 3 && key[key.len() - 3] == collection {
                 let mut bm = into_bitmap(&value)?;
-                let total_docs = bm.len();
                 bm.bitand_assign(&documents);
-                let matched_docs = bm.len();
 
-                if matched_docs > 0 {
-                    if matched_docs == total_docs {
-                        // Bitmap is empty, delete key
-                        batch.delete_cf(&cf_bitmaps, key);
-                    } else {
-                        batch.merge_cf(&cf_bitmaps, key, clear_bits(bm.iter()));
-                    }
+                if !bm.is_empty() {
+                    batch.merge_cf(&cf_bitmaps, key, clear_bits(bm.iter()));
                     batch_size += 1;
 
                     if batch_size == DELETE_BATCH_SIZE {

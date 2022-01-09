@@ -5,7 +5,7 @@ use std::{
 
 use nlp::tokenizers::Token;
 
-use crate::{leb128::Leb128, FieldId, FieldNumber, TermId};
+use crate::{leb128::Leb128, BlobId, FieldId, TermId};
 
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
@@ -32,13 +32,13 @@ pub struct Term {
 #[derive(Debug)]
 pub struct TermGroup {
     pub field_id: FieldId,
-    pub field_num: FieldNumber,
+    pub blob_id: BlobId,
     pub terms: Vec<Term>,
 }
 
 pub struct TermIndexBuilderItem {
     field: FieldId,
-    field_num: FieldNumber,
+    blob_id: BlobId,
     terms: Vec<Term>,
 }
 
@@ -48,7 +48,7 @@ pub struct TermIndexBuilder {
 
 pub struct TermIndexItem<'x> {
     pub field_id: FieldId,
-    pub field_num: FieldNumber,
+    pub blob_id: BlobId,
     pub terms_len: usize,
     pub terms: &'x [u8],
 }
@@ -206,10 +206,10 @@ impl TermIndexBuilder {
         TermIndexBuilder { items: Vec::new() }
     }
 
-    pub fn add_item(&mut self, field: FieldId, field_num: FieldNumber, terms: Vec<Term>) {
+    pub fn add_item(&mut self, field: FieldId, blob_id: BlobId, terms: Vec<Term>) {
         self.items.push(TermIndexBuilderItem {
             field,
-            field_num,
+            blob_id,
             terms,
         });
     }
@@ -231,7 +231,7 @@ impl TermIndexBuilder {
             let header_pos = bytes.len();
             bytes.extend_from_slice(&[0u8; LENGTH_SIZE]);
             bytes.push(term_index.field);
-            term_index.field_num.to_leb128_bytes(&mut bytes);
+            term_index.blob_id.to_leb128_bytes(&mut bytes);
             term_index.terms.len().to_leb128_bytes(&mut bytes);
 
             let terms_pos = bytes.len();
@@ -319,8 +319,8 @@ impl<'x> TryFrom<&'x [u8]> for TermIndex<'x> {
             let field = bytes.get(pos).ok_or(Error::DataCorruption)?;
             pos += 1;
 
-            let (field_num, bytes_read) =
-                FieldNumber::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+            let (blob_id, bytes_read) =
+                BlobId::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
                     .ok_or(Error::Leb128DecodeError)?;
             pos += bytes_read;
 
@@ -331,7 +331,7 @@ impl<'x> TryFrom<&'x [u8]> for TermIndex<'x> {
 
             term_index.items.push(TermIndexItem {
                 field_id: *field,
-                field_num,
+                blob_id,
                 terms_len,
                 terms: bytes
                     .get(pos..pos + item_len)
@@ -563,7 +563,7 @@ impl<'x> TermIndex<'x> {
 
                 result.push(TermGroup {
                     field_id: item.field_id,
-                    field_num: item.field_num,
+                    blob_id: item.blob_id,
                     terms,
                 });
 
@@ -594,7 +594,10 @@ mod tests {
         Language,
     };
 
-    use crate::term_index::{MatchTerm, Term, TermIndexBuilder};
+    use crate::{
+        term_index::{MatchTerm, Term, TermIndexBuilder},
+        BlobId,
+    };
 
     use super::TermIndex;
 
@@ -704,7 +707,7 @@ mod tests {
         let mut term_id_dict = HashMap::new();
 
         // Build the term index
-        for (field_num, (text, field_id)) in parts.iter().enumerate() {
+        for (blob_id, (text, field_id)) in parts.iter().enumerate() {
             let mut terms = Vec::new();
             for token in tokenize(text, Language::English, 40) {
                 let dict_len = term_dict.len() as u64 + 1;
@@ -721,7 +724,7 @@ mod tests {
                 };
                 terms.push(Term::new(term_id, term_id_stemmed, &token));
             }
-            builder.add_item(*field_id, field_num as u16, terms);
+            builder.add_item(*field_id, blob_id as BlobId, terms);
         }
 
         // Build the term id dictionary
@@ -798,7 +801,7 @@ mod tests {
 
             for term_group in &result {
                 'outer: for term in &term_group.terms {
-                    let text_word = parts[term_group.field_num as usize].0
+                    let text_word = parts[term_group.blob_id as usize].0
                         [term.offset as usize..term.offset as usize + term.len as usize]
                         .to_lowercase();
                     let token_stemmed_word = if term.id_stemmed > 0 {

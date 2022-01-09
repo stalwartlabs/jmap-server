@@ -3,22 +3,19 @@ use std::collections::{HashMap, HashSet};
 use jmap_mail::{
     import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition},
-    JMAPMailIdImpl, JMAPMailStoreChanges, JMAPMailStoreImport, MessageField,
+    JMAPMailIdImpl, JMAPMailLocalStore, MessageField,
 };
-use jmap_store::{
-    changes::JMAPState, local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId,
-    JMAPQueryChanges,
-};
+use jmap_store::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPId, JMAPQueryChanges};
 use store::{
     batch::{DocumentWriter, LogAction},
-    Store, Tag,
+    field::FieldOptions,
+    Tag,
 };
 
-pub fn test_jmap_mail_query_changes<T>(db: T)
+pub fn test_jmap_mail_query_changes<T>(mail_store: T)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> JMAPMailLocalStore<'x>,
 {
-    let mail_store = JMAPLocalStore::new(db);
     let mut states = vec![JMAPState::Initial];
     let mut id_map = HashMap::new();
 
@@ -94,10 +91,10 @@ where
                 let id = *id_map.get(id).unwrap();
 
                 mail_store
-                    .get_store()
                     .update_document(
-                        DocumentWriter::update(0, 0, id.get_document_id())
-                            .log(LogAction::Update(id)),
+                        0,
+                        DocumentWriter::update(0, id.get_document_id()).log(LogAction::Update(id)),
+                        0.into(),
                     )
                     .unwrap();
                 updated_ids.insert(id);
@@ -105,10 +102,10 @@ where
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
                 mail_store
-                    .get_store()
                     .update_document(
-                        DocumentWriter::delete(0, 0, id.get_document_id())
-                            .log(LogAction::Delete(id)),
+                        0,
+                        DocumentWriter::delete(0, id.get_document_id()).log(LogAction::Delete(id)),
+                        0.into(),
                     )
                     .unwrap();
                 removed_ids.insert(id);
@@ -117,11 +114,15 @@ where
                 let id = *id_map.get(from).unwrap();
                 let new_id = JMAPId::from_email(thread_id, id.get_document_id());
 
-                let mut batch = DocumentWriter::update(0, 0, id.get_document_id());
-                batch.add_integer(MessageField::ThreadId.into(), 0, thread_id, true, false);
+                let mut batch = DocumentWriter::update(0, id.get_document_id());
+                batch.add_integer(
+                    MessageField::ThreadId.into(),
+                    thread_id,
+                    FieldOptions::Store,
+                );
                 batch.set_tag(MessageField::ThreadId.into(), Tag::Id(thread_id));
                 batch.log_move(id, new_id);
-                mail_store.get_store().update_document(batch).unwrap();
+                mail_store.update_document(0, batch, 0.into()).unwrap();
 
                 id_map.insert(*to, new_id);
                 if type1_ids.contains(&id) {

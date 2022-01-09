@@ -11,7 +11,7 @@ pub enum JSONPointer<'x, T> {
     Path(Vec<JSONPointer<'x, T>>),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub enum JSONValue<'x, T>
 where
     T: Hash + Eq + PartialEq,
@@ -19,7 +19,7 @@ where
     Null,
     Bool(bool),
     String(Cow<'x, str>),
-    Number(f64),
+    Number(i64),
     Array(Vec<JSONValue<'x, T>>),
     Object(HashMap<Cow<'x, str>, JSONValue<'x, T>>),
     Properties(HashMap<T, JSONValue<'x, T>>),

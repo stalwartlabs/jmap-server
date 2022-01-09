@@ -1,6 +1,5 @@
 pub mod changes;
 pub mod json;
-pub mod local_store;
 
 use std::{
     borrow::Cow,

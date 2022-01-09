@@ -1,6 +1,6 @@
 use store::{
     serialize::{serialize_stored_key, serialize_stored_key_global, StoreDeserialize},
-    AccountId, CollectionId, DocumentId, DocumentSet, FieldId, FieldNumber, StoreError, StoreGet,
+    AccountId, CollectionId, DocumentId, DocumentSet, FieldId, StoreError, StoreGet,
     StoreTombstone,
 };
 
@@ -29,14 +29,11 @@ impl StoreGet for RocksDBStore {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        field_num: FieldNumber,
     ) -> store::Result<Option<T>>
     where
         T: StoreDeserialize,
     {
-        if let Some(bytes) =
-            self.get_document_raw_value(account, collection, document, field, field_num)?
-        {
+        if let Some(bytes) = self.get_document_raw_value(account, collection, document, field)? {
             Ok(Some(T::deserialize(bytes)?))
         } else {
             Ok(None)
@@ -54,7 +51,7 @@ impl StoreGet for RocksDBStore {
         T: StoreDeserialize,
     {
         let mut result = Vec::with_capacity(documents.size_hint().0);
-        for bytes in self.get_multi_document_raw_value(account, collection, documents, field, 0)? {
+        for bytes in self.get_multi_document_raw_value(account, collection, documents, field)? {
             if let Some(bytes) = bytes {
                 result.push(Some(T::deserialize(bytes)?));
             } else {
@@ -62,6 +59,16 @@ impl StoreGet for RocksDBStore {
             }
         }
         Ok(result)
+    }
+
+    fn get_document_blob(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        blob: store::BlobId,
+    ) -> store::Result<Option<Vec<u8>>> {
+        todo!()
     }
 }
 
@@ -86,7 +93,6 @@ impl RocksDBStore {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        pos: FieldNumber,
     ) -> crate::Result<Option<Vec<u8>>> {
         match self.get_tombstoned_ids(account, collection)? {
             Some(tombstoned_ids) if tombstoned_ids.contains(document) => Ok(None),
@@ -94,7 +100,7 @@ impl RocksDBStore {
                 .db
                 .get_cf(
                     &self.get_handle("values")?,
-                    &serialize_stored_key(account, collection, document, field, pos),
+                    &serialize_stored_key(account, collection, document, field),
                 )
                 .map_err(|e| StoreError::InternalError(e.into_string())),
         }
@@ -106,7 +112,6 @@ impl RocksDBStore {
         collection: CollectionId,
         documents: impl Iterator<Item = DocumentId>,
         field: FieldId,
-        pos: FieldNumber,
     ) -> store::Result<Vec<Option<Vec<u8>>>> {
         let cf_values = self.get_handle("values")?;
         let mut result = Vec::with_capacity(documents.size_hint().0);
@@ -115,7 +120,7 @@ impl RocksDBStore {
             .map(|document| {
                 (
                     &cf_values,
-                    serialize_stored_key(account, collection, document, field, pos),
+                    serialize_stored_key(account, collection, document, field),
                 )
             })
             .collect::<Vec<_>>();

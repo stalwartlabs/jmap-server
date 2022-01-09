@@ -1,4 +1,5 @@
 pub mod bitmaps;
+pub mod blob;
 pub mod changelog;
 pub mod delete;
 pub mod document_id;
@@ -9,25 +10,59 @@ pub mod query;
 pub mod tag;
 pub mod term;
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    convert::TryInto,
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use bitmaps::{bitmap_compact, bitmap_merge};
 use dashmap::DashMap;
-use rocksdb::{
-    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options,
+use jmap_mail::{
+    changes::JMAPMailLocalStoreChanges, get::JMAPMailLocalStoreGet,
+    import::JMAPMailLocalStoreImport, query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet,
+    JMAPMailLocalStore,
 };
-use store::{mutex_map::MutexMap, AccountId, CollectionId, Result, Store, StoreError};
-use term::{get_last_term_id, TermLock};
+use jmap_store::changes::JMAPLocalChanges;
+use rocksdb::{
+    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded,
+    Options,
+};
+use store::{mutex_map::MutexMap, serialize::LAST_TERM_ID_KEY, Result, Store, StoreError};
+use term::TermLock;
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
-    account_lock: MutexMap,
+    account_lock: MutexMap<usize>,
+    blob_path: PathBuf,
+    blob_lock: MutexMap<usize>,
     term_id_lock: DashMap<String, TermLock>,
-    term_id_last: Mutex<u64>,
+    term_id_last: AtomicU64,
 }
 
 impl RocksDBStore {
     pub fn open(path: &str) -> Result<RocksDBStore> {
+        // Create the database directory if it doesn't exist
+        let path = PathBuf::from(path);
+        let mut blob_path = path.clone();
+        let mut idx_path = path;
+        blob_path.push("blobs");
+        idx_path.push("idx");
+        std::fs::create_dir_all(&blob_path).map_err(|err| {
+            StoreError::InternalError(format!(
+                "Failed to create blob directory {}: {:?}",
+                blob_path.display(),
+                err
+            ))
+        })?;
+        std::fs::create_dir_all(&idx_path).map_err(|err| {
+            StoreError::InternalError(format!(
+                "Failed to create index directory {}: {:?}",
+                idx_path.display(),
+                err
+            ))
+        })?;
+
         // Bitmaps
         let cf_bitmaps = {
             let mut cf_opts = Options::default();
@@ -39,7 +74,8 @@ impl RocksDBStore {
 
         // Stored values
         let cf_values = {
-            let cf_opts = Options::default();
+            let mut cf_opts = Options::default();
+            cf_opts.set_merge_operator_associative("merge", numeric_value_merge);
             ColumnFamilyDescriptor::new("values", cf_opts)
         };
 
@@ -67,15 +103,17 @@ impl RocksDBStore {
 
         let db: DBWithThreadMode<MultiThreaded> = DBWithThreadMode::open_cf_descriptors(
             &db_opts,
-            path,
+            idx_path,
             vec![cf_bitmaps, cf_values, cf_indexes, cf_terms, cf_log],
         )
         .map_err(|e| StoreError::InternalError(e.into_string()))?;
 
         Ok(Self {
+            term_id_last: get_last_id(&db, LAST_TERM_ID_KEY)?.into(),
             account_lock: MutexMap::with_capacity(1024),
+            blob_lock: MutexMap::with_capacity(1024),
             term_id_lock: DashMap::with_capacity(1024),
-            term_id_last: get_last_term_id(&db)?.into(),
+            blob_path,
             db,
         })
     }
@@ -88,18 +126,6 @@ impl RocksDBStore {
                 name
             ))
         })
-    }
-
-    pub fn lock_collection(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<MutexGuard<usize>> {
-        self.account_lock
-            .lock(
-                ((account as u64) << (8 * std::mem::size_of::<CollectionId>())) | collection as u64,
-            )
-            .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))
     }
 
     pub fn get_db(&self) -> &DBWithThreadMode<MultiThreaded> {
@@ -120,7 +146,60 @@ impl RocksDBStore {
     }
 }
 
+pub fn numeric_value_merge(
+    key: &[u8],
+    value: Option<&[u8]>,
+    operands: &mut MergeOperands,
+) -> Option<Vec<u8>> {
+    if key == LAST_TERM_ID_KEY {
+        let mut value = if let Some(value) = value {
+            usize::from_le_bytes(value.try_into().ok()?)
+        } else {
+            0
+        };
+        for op in operands {
+            value += usize::from_le_bytes(op.try_into().ok()?);
+        }
+        println!("Merging last term: {}", value);
+        let mut bytes = Vec::with_capacity(std::mem::size_of::<usize>());
+        bytes.extend_from_slice(&value.to_le_bytes());
+        Some(bytes)
+    } else {
+        let mut value = if let Some(value) = value {
+            i64::from_le_bytes(value.try_into().ok()?)
+        } else {
+            0
+        };
+        for op in operands {
+            value += i64::from_le_bytes(op.try_into().ok()?);
+        }
+        println!("Merging key {:?}: {}", key, value);
+        let mut bytes = Vec::with_capacity(std::mem::size_of::<i64>());
+        bytes.extend_from_slice(&value.to_le_bytes());
+        Some(bytes)
+    }
+}
+
+pub fn get_last_id(db: &DBWithThreadMode<MultiThreaded>, key: &[u8]) -> crate::Result<u64> {
+    Ok(db
+        .get_cf(
+            &db.cf_handle("values")
+                .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?,
+            key,
+        )
+        .map_err(|e| StoreError::InternalError(e.into_string()))?
+        .map(|v| u64::from_le_bytes(v.try_into().unwrap()))
+        .unwrap_or(0))
+}
+
 impl<'x> Store<'x> for RocksDBStore where RocksDBStore: store::StoreQuery<'x> {}
+impl<'x> JMAPMailLocalStore<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreSet<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreChanges<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreQuery<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreGet<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreImport<'x> for RocksDBStore {}
+impl<'x> JMAPLocalChanges<'x> for RocksDBStore {}
 
 #[cfg(test)]
 mod tests {

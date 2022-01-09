@@ -1,58 +1,42 @@
 use std::collections::HashMap;
 
 use jmap_store::{
-    json::JSONValue, local_store::JMAPLocalStore, JMAPError, JMAPGet, JMAPGetResponse, JMAPId,
-    JMAPIdSerialize, JMAP_MAIL,
+    json::JSONValue, JMAPError, JMAPGet, JMAPGetResponse, JMAPId, JMAPIdSerialize, JMAP_MAIL,
 };
-use mail_parser::{HeaderName, RfcHeaders};
-use store::{AccountId, DocumentId, Store, StoreError};
+use mail_parser::{
+    parsers::{
+        fields::{
+            address::parse_address, date::parse_date, id::parse_id,
+            unstructured::parse_unstructured,
+        },
+        message::MessageStream,
+    },
+    HeaderName, HeaderOffsetName, HeaderValue,
+};
+use store::{DocumentId, Store};
 
 use crate::{
-    import::bincode_deserialize, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailHeaders,
-    JMAPMailIdImpl, JMAPMailProperties, JMAPMailStoreGet, JMAPMailStoreGetArguments, MessageField,
-    MESSAGE_HEADERS,
+    changes::JMAPMailLocalStoreChanges,
+    import::bincode_deserialize,
+    parse::{
+        header_to_jmap_address, header_to_jmap_date, header_to_jmap_id, header_to_jmap_text,
+        header_to_jmap_url,
+    },
+    JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailHeaders, JMAPMailIdImpl,
+    JMAPMailProperties, JMAPMailStoreGetArguments, MessageField, MessageRawHeaders,
+    MESSAGE_HEADERS, MESSAGE_HEADERS_RAW,
 };
 
 //TODO make parameter configurable
 const MAX_RESULTS: usize = 100;
 
-impl<'x, T> JMAPMailStoreGet<'x> for JMAPLocalStore<T>
-where
-    T: Store<'x>,
-{
-    fn get_headers_rfc(
-        &'x self,
-        account: AccountId,
-        document: DocumentId,
-    ) -> jmap_store::Result<RfcHeaders> {
-        bincode::deserialize(
-            &self
-                .store
-                .get_document_value::<Vec<u8>>(
-                    account,
-                    JMAP_MAIL,
-                    document,
-                    MessageField::Internal.into(),
-                    crate::MESSAGE_HEADERS,
-                )?
-                .ok_or_else(|| {
-                    JMAPError::InternalError(StoreError::InternalError(format!(
-                        "Headers for doc_id {} not found",
-                        document
-                    )))
-                })?,
-        )
-        .map_err(|e| JMAPError::InternalError(StoreError::InternalError(e.to_string())))
-        // TODO all errors have to include more info about context
-    }
-
+pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties<'x>>,
         arguments: JMAPMailStoreGetArguments,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse<'x, JMAPMailProperties<'x>>> {
         let mut rfc_headers = Vec::new();
-        let mut other_headers = Vec::new();
         let mut raw_headers = Vec::new();
         let mut message_parts = Vec::new();
         let mut other_parts = Vec::new();
@@ -110,13 +94,17 @@ where
 
                 JMAPMailProperties::RfcHeader(JMAPMailHeaderProperty {
                     form: JMAPMailHeaderForm::Raw,
-                    ..
-                })
-                | JMAPMailProperties::OtherHeader(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
-                    ..
+                    header,
+                    all,
                 }) => {
-                    raw_headers.push(property);
+                    raw_headers.push((HeaderOffsetName::Rfc(header), JMAPMailHeaderForm::Raw, all));
+                }
+                JMAPMailProperties::OtherHeader(header) => {
+                    raw_headers.push((
+                        HeaderOffsetName::Other(header.header),
+                        header.form,
+                        header.all,
+                    ));
                 }
 
                 JMAPMailProperties::MessageId => {
@@ -200,10 +188,6 @@ where
                     rfc_headers.push(rfc_header);
                 }
 
-                JMAPMailProperties::OtherHeader(_) => {
-                    other_headers.push(property);
-                }
-
                 // Ignore, used internally
                 JMAPMailProperties::Name
                 | JMAPMailProperties::Email
@@ -219,25 +203,23 @@ where
             }
         } else {
             let document_ids = self
-                .store
                 .get_document_ids(request.account_id, JMAP_MAIL)?
                 .into_iter()
                 .take(MAX_RESULTS)
                 .collect::<Vec<DocumentId>>();
             if !document_ids.is_empty() {
-                self.store
-                    .get_multi_document_value(
-                        request.account_id,
-                        JMAP_MAIL,
-                        document_ids.iter().copied(),
-                        MessageField::ThreadId.into(),
-                    )?
-                    .into_iter()
-                    .zip(document_ids)
-                    .filter_map(|(thread_id, document_id)| {
-                        JMAPId::from_email(thread_id?, document_id).into()
-                    })
-                    .collect::<Vec<u64>>()
+                self.get_multi_document_value(
+                    request.account_id,
+                    JMAP_MAIL,
+                    document_ids.iter().copied(),
+                    MessageField::ThreadId.into(),
+                )?
+                .into_iter()
+                .zip(document_ids)
+                .filter_map(|(thread_id, document_id)| {
+                    JMAPId::from_email(thread_id?, document_id).into()
+                })
+                .collect::<Vec<u64>>()
             } else {
                 Vec::new()
             }
@@ -250,14 +232,12 @@ where
             let mut result = HashMap::new();
 
             if !rfc_headers.is_empty() {
-                let mut jmap_headers = if let Some(jmap_headers) =
-                    self.store.get_document_value::<Vec<u8>>(
-                        request.account_id,
-                        JMAP_MAIL,
-                        jmap_id.get_document_id(),
-                        MessageField::Internal.into(),
-                        MESSAGE_HEADERS,
-                    )? {
+                let mut jmap_headers = if let Some(jmap_headers) = self.get_document_blob(
+                    request.account_id,
+                    JMAP_MAIL,
+                    jmap_id.get_document_id(),
+                    MESSAGE_HEADERS,
+                )? {
                     bincode_deserialize::<JMAPMailHeaders>(&jmap_headers)?
                 } else {
                     not_found.push(jmap_id);
@@ -281,23 +261,10 @@ where
                                 | HeaderName::ListId),
                             form: JMAPMailHeaderForm::Text,
                             all,
-                        } => match jmap_headers.remove(header).unwrap_or_default() {
-                            JSONValue::Array(mut list) => {
-                                if !*all {
-                                    list.pop().unwrap_or_default()
-                                } else {
-                                    JSONValue::Array(list)
-                                }
-                            }
-                            value @ JSONValue::String(_) => {
-                                if !*all {
-                                    value
-                                } else {
-                                    JSONValue::Array(vec![value])
-                                }
-                            }
-                            _ => JSONValue::Null,
-                        },
+                        } => transform_json_string(
+                            jmap_headers.remove(header).unwrap_or_default(),
+                            *all,
+                        ),
                         JMAPMailHeaderProperty {
                             header:
                                 header
@@ -321,27 +288,10 @@ where
                                 | HeaderName::ListUnsubscribe),
                             form: JMAPMailHeaderForm::URLs,
                             all,
-                        } => {
-                            if let JSONValue::Array(mut list) =
-                                jmap_headers.remove(header).unwrap_or_default()
-                            {
-                                let is_collection =
-                                    matches!(list.get(0), Some(JSONValue::Array(_)));
-                                if !all {
-                                    if !is_collection {
-                                        JSONValue::Array(list)
-                                    } else {
-                                        list.pop().unwrap_or_default()
-                                    }
-                                } else if is_collection {
-                                    JSONValue::Array(list)
-                                } else {
-                                    JSONValue::Array(vec![JSONValue::Array(list)])
-                                }
-                            } else {
-                                JSONValue::Null
-                            }
-                        }
+                        } => transform_json_stringlist(
+                            jmap_headers.remove(header).unwrap_or_default(),
+                            *all,
+                        ),
                         JMAPMailHeaderProperty {
                             header:
                                 header
@@ -363,104 +313,11 @@ where
                                 (JMAPMailHeaderForm::Addresses
                                 | JMAPMailHeaderForm::GroupedAddresses),
                             all,
-                        } => {
-                            if let JSONValue::Array(mut list) =
-                                jmap_headers.remove(header).unwrap_or_default()
-                            {
-                                let grouped = matches!(form, JMAPMailHeaderForm::GroupedAddresses);
-                                let (is_collection, is_grouped) = match list.get(0) {
-                                    Some(JSONValue::Array(list)) => (
-                                        true,
-                                        matches!(list.get(0), Some(JSONValue::Properties(obj)) if obj.contains_key(&JMAPMailProperties::Addresses)),
-                                    ),
-                                    Some(JSONValue::Properties(obj)) => {
-                                        (false, obj.contains_key(&JMAPMailProperties::Addresses))
-                                    }
-                                    _ => (false, false),
-                                };
-
-                                if ((grouped && is_grouped) || (!grouped && !is_grouped))
-                                    && ((is_collection && *all) || (!is_collection && !*all))
-                                {
-                                    JSONValue::Array(list)
-                                } else if (grouped && is_grouped) || (!grouped && !is_grouped) {
-                                    if *all && !is_collection {
-                                        JSONValue::Array(vec![JSONValue::Array(list)])
-                                    } else {
-                                        // !*all && is_collection
-                                        list.pop().unwrap_or_default()
-                                    }
-                                } else {
-                                    let list = if *all && !is_collection {
-                                        vec![JSONValue::Array(list)]
-                                    } else if !*all && is_collection {
-                                        if let JSONValue::Array(list) =
-                                            list.pop().unwrap_or_default()
-                                        {
-                                            list
-                                        } else {
-                                            vec![]
-                                        }
-                                    } else {
-                                        list
-                                    };
-
-                                    if grouped && !is_grouped {
-                                        let list_to_group = |list: JSONValue<'x, JMAPMailProperties<'x>>| -> JSONValue<'x, JMAPMailProperties<'x>> {
-                                            let mut group = HashMap::new();
-                                            group.insert(JMAPMailProperties::Name, JSONValue::Null);
-                                            group.insert(JMAPMailProperties::Addresses, list);
-                                            JSONValue::Properties(group)
-                                        };
-                                        JSONValue::Array(if !*all {
-                                            list.into_iter().map(list_to_group).collect()
-                                        } else {
-                                            list.into_iter()
-                                                .map(|field| {
-                                                    if let JSONValue::Array(list) = field {
-                                                        JSONValue::Array(
-                                                            list.into_iter()
-                                                                .map(list_to_group)
-                                                                .collect(),
-                                                        )
-                                                    } else {
-                                                        field
-                                                    }
-                                                })
-                                                .collect()
-                                        })
-                                    } else {
-                                        // !grouped && is_grouped
-                                        let flatten_group = |list: Vec<JSONValue<'x, JMAPMailProperties<'x>>>| -> Vec<JSONValue<'x, JMAPMailProperties<'x>>> {
-                                            let mut addresses = Vec::with_capacity(list.len() * 2);
-                                            for group in list {
-                                                if let JSONValue::Properties(mut group) = group {
-                                                    if let Some(JSONValue::Array(mut group_addresses)) = group.remove(&JMAPMailProperties::Addresses) {
-                                                        addresses.append(&mut group_addresses);
-                                                    }
-                                                }
-                                            }
-                                            addresses
-                                        };
-                                        JSONValue::Array(if !*all {
-                                            flatten_group(list)
-                                        } else {
-                                            list.into_iter()
-                                                .map(|field| {
-                                                    if let JSONValue::Array(list) = field {
-                                                        JSONValue::Array(flatten_group(list))
-                                                    } else {
-                                                        field
-                                                    }
-                                                })
-                                                .collect()
-                                        })
-                                    }
-                                }
-                            } else {
-                                JSONValue::Null
-                            }
-                        }
+                        } => transform_json_emailaddress(
+                            jmap_headers.remove(header).unwrap_or_default(),
+                            matches!(form, JMAPMailHeaderForm::GroupedAddresses),
+                            *all,
+                        ),
                         _ => return Err(JMAPError::InvalidArguments),
                     };
 
@@ -468,13 +325,124 @@ where
                         result.insert(JMAPMailProperties::RfcHeader(rfc_header.clone()), value);
                     }
                 }
-
-                result.insert(
-                    JMAPMailProperties::Id,
-                    JSONValue::String(jmap_id.to_jmap_string().into()),
-                );
-                results.push(JSONValue::Properties(result));
             }
+
+            if !raw_headers.is_empty() {
+                let mut jmap_headers = if let Some(jmap_headers) = self.get_document_blob(
+                    request.account_id,
+                    JMAP_MAIL,
+                    jmap_id.get_document_id(),
+                    MESSAGE_HEADERS_RAW,
+                )? {
+                    bincode_deserialize::<MessageRawHeaders>(&jmap_headers)?
+                } else {
+                    not_found.push(jmap_id);
+                    continue;
+                };
+
+                let header_bytes: Vec<u8> = Vec::new();
+
+                for (header_name, form, all) in &raw_headers {
+                    result.insert(
+                        match header_name {
+                            HeaderOffsetName::Rfc(rfc_header) => {
+                                JMAPMailProperties::RfcHeader(JMAPMailHeaderProperty {
+                                    form: form.clone(),
+                                    header: *rfc_header,
+                                    all: *all,
+                                })
+                            }
+                            HeaderOffsetName::Other(other_header) => {
+                                JMAPMailProperties::OtherHeader(JMAPMailHeaderProperty {
+                                    form: form.clone(),
+                                    header: other_header.clone(),
+                                    all: *all,
+                                })
+                            }
+                        },
+                        if let Some(offsets) = jmap_headers.headers.remove(header_name) {
+                            let mut header_values: Vec<HeaderValue> = offsets
+                                .iter()
+                                .skip(if !*all && offsets.len() > 1 {
+                                    offsets.len() - 1
+                                } else {
+                                    0
+                                })
+                                .map(|offset| {
+                                    (header_bytes.get(offset.start..offset.end).map_or(
+                                        HeaderValue::Empty,
+                                        |bytes| match form {
+                                            JMAPMailHeaderForm::Raw => HeaderValue::Text(
+                                                std::str::from_utf8(bytes).map_or_else(
+                                                    |_| {
+                                                        String::from_utf8_lossy(bytes)
+                                                            .trim()
+                                                            .to_string()
+                                                            .into()
+                                                    },
+                                                    |str| str.trim().to_string().into(),
+                                                ),
+                                            ),
+                                            JMAPMailHeaderForm::Text => {
+                                                parse_unstructured(&mut MessageStream::new(bytes))
+                                            }
+                                            JMAPMailHeaderForm::Addresses => {
+                                                parse_address(&mut MessageStream::new(bytes))
+                                            }
+                                            JMAPMailHeaderForm::GroupedAddresses => {
+                                                parse_address(&mut MessageStream::new(bytes))
+                                            }
+                                            JMAPMailHeaderForm::MessageIds => {
+                                                parse_id(&mut MessageStream::new(bytes))
+                                            }
+                                            JMAPMailHeaderForm::Date => {
+                                                parse_date(&mut MessageStream::new(bytes))
+                                            }
+                                            JMAPMailHeaderForm::URLs => {
+                                                parse_address(&mut MessageStream::new(bytes))
+                                            }
+                                        },
+                                    ))
+                                    .into_owned()
+                                })
+                                .collect();
+                            let header_values = if *all {
+                                HeaderValue::Collection(header_values)
+                            } else {
+                                header_values.pop().unwrap_or_default()
+                            };
+                            match form {
+                                JMAPMailHeaderForm::Raw | JMAPMailHeaderForm::Text => {
+                                    header_to_jmap_text(header_values)
+                                }
+                                JMAPMailHeaderForm::Addresses => transform_json_emailaddress(
+                                    header_to_jmap_address(header_values, false),
+                                    false,
+                                    *all,
+                                ),
+                                JMAPMailHeaderForm::GroupedAddresses => {
+                                    transform_json_emailaddress(
+                                        header_to_jmap_address(header_values, false),
+                                        true,
+                                        *all,
+                                    )
+                                }
+                                JMAPMailHeaderForm::MessageIds => header_to_jmap_id(header_values),
+                                JMAPMailHeaderForm::Date => header_to_jmap_date(header_values),
+                                JMAPMailHeaderForm::URLs => header_to_jmap_url(header_values),
+                            }
+                        } else {
+                            JSONValue::Null
+                        },
+                    );
+                }
+            }
+
+            result.insert(
+                JMAPMailProperties::Id,
+                JSONValue::String(jmap_id.to_jmap_string().into()),
+            );
+            results.push(JSONValue::Properties(result));
         }
 
         Ok(JMAPGetResponse {
@@ -490,5 +458,558 @@ where
                 not_found.into()
             },
         })
+    }
+}
+
+pub fn transform_json_emailaddress<'x>(
+    value: JSONValue<'x, JMAPMailProperties<'x>>,
+    as_grouped: bool,
+    as_collection: bool,
+) -> JSONValue<'x, JMAPMailProperties<'x>> {
+    if let JSONValue::Array(mut list) = value {
+        let (is_collection, is_grouped) = match list.get(0) {
+            Some(JSONValue::Array(list)) => (
+                true,
+                matches!(list.get(0), Some(JSONValue::Properties(obj)) if obj.contains_key(&JMAPMailProperties::Addresses)),
+            ),
+            Some(JSONValue::Properties(obj)) => {
+                (false, obj.contains_key(&JMAPMailProperties::Addresses))
+            }
+            _ => (false, false),
+        };
+
+        if ((as_grouped && is_grouped) || (!as_grouped && !is_grouped))
+            && ((is_collection && as_collection) || (!is_collection && !as_collection))
+        {
+            JSONValue::Array(list)
+        } else if (as_grouped && is_grouped) || (!as_grouped && !is_grouped) {
+            if as_collection && !is_collection {
+                JSONValue::Array(vec![JSONValue::Array(list)])
+            } else {
+                // !as_collection && is_collection
+                list.pop().unwrap_or_default()
+            }
+        } else {
+            let mut list = if as_collection && !is_collection {
+                vec![JSONValue::Array(list)]
+            } else if !as_collection && is_collection {
+                if let JSONValue::Array(list) = list.pop().unwrap_or_default() {
+                    list
+                } else {
+                    vec![]
+                }
+            } else {
+                list
+            };
+
+            if as_grouped && !is_grouped {
+                let list_to_group = |list: Vec<JSONValue<'x, JMAPMailProperties<'x>>>| -> JSONValue<'x, JMAPMailProperties<'x>> {
+                let mut group = HashMap::new();
+                group.insert(JMAPMailProperties::Name, JSONValue::Null);
+                group.insert(JMAPMailProperties::Addresses, JSONValue::Array(list));
+                JSONValue::Properties(group)
+            };
+                JSONValue::Array(if !as_collection {
+                    vec![list_to_group(list)]
+                } else {
+                    list.iter_mut().for_each(|field| {
+                        if let JSONValue::Array(list) = field {
+                            *field = JSONValue::Array(vec![list_to_group(std::mem::take(list))]);
+                        }
+                    });
+                    list
+                })
+            } else {
+                // !as_grouped && is_grouped
+                let flatten_group = |list: Vec<JSONValue<'x, JMAPMailProperties<'x>>>| -> Vec<JSONValue<'x, JMAPMailProperties<'x>>> {
+                let mut addresses = Vec::with_capacity(list.len() * 2);
+                list.into_iter().for_each(|group| {
+                    if let JSONValue::Properties(mut group) = group {
+                        if let Some(JSONValue::Array(mut group_addresses)) = group.remove(&JMAPMailProperties::Addresses) {
+                            addresses.append(&mut group_addresses);
+                        }
+                    }
+                });
+                addresses
+            };
+                JSONValue::Array(if !as_collection {
+                    flatten_group(list)
+                } else {
+                    list.into_iter()
+                        .map(|field| {
+                            if let JSONValue::Array(list) = field {
+                                JSONValue::Array(flatten_group(list))
+                            } else {
+                                field
+                            }
+                        })
+                        .collect()
+                })
+            }
+        }
+    } else {
+        JSONValue::Null
+    }
+}
+
+pub fn transform_json_stringlist<'x>(
+    value: JSONValue<'x, JMAPMailProperties<'x>>,
+    as_collection: bool,
+) -> JSONValue<'x, JMAPMailProperties<'x>> {
+    if let JSONValue::Array(mut list) = value {
+        let is_collection = matches!(list.get(0), Some(JSONValue::Array(_)));
+        if !as_collection {
+            if !is_collection {
+                JSONValue::Array(list)
+            } else {
+                list.pop().unwrap_or_default()
+            }
+        } else if is_collection {
+            JSONValue::Array(list)
+        } else {
+            JSONValue::Array(vec![JSONValue::Array(list)])
+        }
+    } else {
+        JSONValue::Null
+    }
+}
+
+pub fn transform_json_string<'x>(
+    value: JSONValue<'x, JMAPMailProperties<'x>>,
+    as_collection: bool,
+) -> JSONValue<'x, JMAPMailProperties<'x>> {
+    match value {
+        JSONValue::Array(mut list) => {
+            if !as_collection {
+                list.pop().unwrap_or_default()
+            } else {
+                JSONValue::Array(list)
+            }
+        }
+        value @ JSONValue::String(_) => {
+            if !as_collection {
+                value
+            } else {
+                JSONValue::Array(vec![value])
+            }
+        }
+        _ => JSONValue::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use jmap_store::json::JSONValue;
+
+    use crate::JMAPMailProperties;
+
+    #[test]
+    fn test_json_transform() {
+        for (value, expected_result, expected_result_all) in [
+            (
+                JSONValue::String("hello".into()),
+                JSONValue::String("hello".into()),
+                JSONValue::Array::<JMAPMailProperties>(vec![JSONValue::String("hello".into())]),
+            ),
+            (
+                JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+                JSONValue::String("world".into()),
+                JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+            ),
+        ] {
+            assert_eq!(
+                super::transform_json_string(value.clone(), false),
+                expected_result
+            );
+            assert_eq!(
+                super::transform_json_string(value, true),
+                expected_result_all
+            );
+        }
+
+        for (value, expected_result, expected_result_all) in [
+            (
+                JSONValue::Array::<JMAPMailProperties>(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+                JSONValue::Array::<JMAPMailProperties>(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+                JSONValue::Array::<JMAPMailProperties>(vec![JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ])]),
+            ),
+            (
+                JSONValue::Array(vec![
+                    JSONValue::Array::<JMAPMailProperties>(vec![
+                        JSONValue::String("hello".into()),
+                        JSONValue::String("world".into()),
+                    ]),
+                    JSONValue::Array::<JMAPMailProperties>(vec![
+                        JSONValue::String("hola".into()),
+                        JSONValue::String("mundo".into()),
+                    ]),
+                ]),
+                JSONValue::Array::<JMAPMailProperties>(vec![
+                    JSONValue::String("hola".into()),
+                    JSONValue::String("mundo".into()),
+                ]),
+                JSONValue::Array(vec![
+                    JSONValue::Array::<JMAPMailProperties>(vec![
+                        JSONValue::String("hello".into()),
+                        JSONValue::String("world".into()),
+                    ]),
+                    JSONValue::Array::<JMAPMailProperties>(vec![
+                        JSONValue::String("hola".into()),
+                        JSONValue::String("mundo".into()),
+                    ]),
+                ]),
+            ),
+        ] {
+            assert_eq!(
+                super::transform_json_stringlist(value.clone(), false),
+                expected_result
+            );
+            assert_eq!(
+                super::transform_json_stringlist(value, true),
+                expected_result_all
+            );
+        }
+
+        fn make_email<'x>(name: &str, addr: &str) -> JSONValue<'x, JMAPMailProperties<'x>> {
+            let mut email = HashMap::new();
+            email.insert(
+                JMAPMailProperties::Name,
+                JSONValue::String(name.to_string().into()),
+            );
+            email.insert(
+                JMAPMailProperties::Email,
+                JSONValue::String(addr.to_string().into()),
+            );
+            JSONValue::Properties(email)
+        }
+
+        fn make_group<'x>(
+            name: Option<&str>,
+            addresses: JSONValue<'x, JMAPMailProperties<'x>>,
+        ) -> JSONValue<'x, JMAPMailProperties<'x>> {
+            let mut email = HashMap::new();
+            email.insert(
+                JMAPMailProperties::Name,
+                name.map_or(JSONValue::Null, |name| {
+                    JSONValue::String(name.to_string().into())
+                }),
+            );
+            email.insert(JMAPMailProperties::Addresses, addresses);
+            JSONValue::Properties(email)
+        }
+
+        fn make_list<'x>(
+            value1: JSONValue<'x, JMAPMailProperties<'x>>,
+            value2: JSONValue<'x, JMAPMailProperties<'x>>,
+        ) -> JSONValue<'x, JMAPMailProperties<'x>> {
+            JSONValue::Array(vec![value1, value2])
+        }
+
+        fn make_list_many<'x>(
+            value1: JSONValue<'x, JMAPMailProperties<'x>>,
+            value2: JSONValue<'x, JMAPMailProperties<'x>>,
+            value3: JSONValue<'x, JMAPMailProperties<'x>>,
+            value4: JSONValue<'x, JMAPMailProperties<'x>>,
+        ) -> JSONValue<'x, JMAPMailProperties<'x>> {
+            JSONValue::Array(vec![value1, value2, value3, value4])
+        }
+
+        fn make_list_single<'x>(
+            value: JSONValue<'x, JMAPMailProperties<'x>>,
+        ) -> JSONValue<'x, JMAPMailProperties<'x>> {
+            JSONValue::Array(vec![value])
+        }
+
+        for (
+            value,
+            expected_result_single_addr,
+            expected_result_all_addr,
+            expected_result_single_group,
+            expected_result_all_group,
+        ) in [
+            (
+                make_list(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                ),
+                make_list(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                ),
+                make_list_single(make_list(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                )),
+                make_list_single(make_group(
+                    None,
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                )),
+                make_list_single(make_list_single(make_group(
+                    None,
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                ))),
+            ),
+            (
+                make_list(
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                    make_list(
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                ),
+                make_list(
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                ),
+                make_list(
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                    make_list(
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                ),
+                make_list_single(make_group(
+                    None,
+                    make_list(
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                )),
+                make_list(
+                    make_list_single(make_group(
+                        None,
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    )),
+                    make_list_single(make_group(
+                        None,
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    )),
+                ),
+            ),
+            (
+                make_list(
+                    make_group(
+                        "Group 1".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 2".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                ),
+                make_list_many(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                ),
+                make_list_single(make_list_many(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                )),
+                make_list(
+                    make_group(
+                        "Group 1".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 2".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                ),
+                make_list_single(make_list(
+                    make_group(
+                        "Group 1".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 2".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                )),
+            ),
+            (
+                make_list(
+                    make_list(
+                        make_group(
+                            "Group 1".into(),
+                            make_list(
+                                make_email("Tim Hortons", "tim@hortos.com"),
+                                make_email("Ronald McDowell", "ronnie@mac.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 2".into(),
+                            make_list(
+                                make_email("Wendy D", "wendy@d.com"),
+                                make_email("Kentucky Frango", "kentucky@frango.com"),
+                            ),
+                        ),
+                    ),
+                    make_list(
+                        make_group(
+                            "Group 3".into(),
+                            make_list(
+                                make_email("John Doe", "jdoe@domain.com"),
+                                make_email("Jane Smith", "jsmith@test.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 4".into(),
+                            make_list(
+                                make_email("Juan Gomez", "jgomez@dominio.com"),
+                                make_email("Juanita Perez", "jperez@prueba.com"),
+                            ),
+                        ),
+                    ),
+                ),
+                make_list_many(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                ),
+                make_list(
+                    make_list_many(
+                        make_email("Tim Hortons", "tim@hortos.com"),
+                        make_email("Ronald McDowell", "ronnie@mac.com"),
+                        make_email("Wendy D", "wendy@d.com"),
+                        make_email("Kentucky Frango", "kentucky@frango.com"),
+                    ),
+                    make_list_many(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                ),
+                make_list(
+                    make_group(
+                        "Group 3".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 4".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                ),
+                make_list(
+                    make_list(
+                        make_group(
+                            "Group 1".into(),
+                            make_list(
+                                make_email("Tim Hortons", "tim@hortos.com"),
+                                make_email("Ronald McDowell", "ronnie@mac.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 2".into(),
+                            make_list(
+                                make_email("Wendy D", "wendy@d.com"),
+                                make_email("Kentucky Frango", "kentucky@frango.com"),
+                            ),
+                        ),
+                    ),
+                    make_list(
+                        make_group(
+                            "Group 3".into(),
+                            make_list(
+                                make_email("John Doe", "jdoe@domain.com"),
+                                make_email("Jane Smith", "jsmith@test.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 4".into(),
+                            make_list(
+                                make_email("Juan Gomez", "jgomez@dominio.com"),
+                                make_email("Juanita Perez", "jperez@prueba.com"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ] {
+            assert_eq!(
+                super::transform_json_emailaddress(value.clone(), false, false),
+                expected_result_single_addr,
+                "single+address"
+            );
+            assert_eq!(
+                super::transform_json_emailaddress(value.clone(), false, true),
+                expected_result_all_addr,
+                "all+address"
+            );
+            assert_eq!(
+                super::transform_json_emailaddress(value.clone(), true, false),
+                expected_result_single_group,
+                "single+group"
+            );
+            assert_eq!(
+                super::transform_json_emailaddress(value.clone(), true, true),
+                expected_result_all_group,
+                "all+group"
+            );
+        }
     }
 }

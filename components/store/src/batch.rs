@@ -3,9 +3,9 @@ use std::borrow::Cow;
 use nlp::Language;
 
 use crate::{
-    field::{Field, Text, UpdateField},
-    AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, FieldNumber, Float, Integer,
-    LongInteger, Tag, UncommittedDocumentId,
+    field::{Field, FieldOptions, Text, UpdateField},
+    ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
+    UncommittedDocumentId,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -14,7 +14,6 @@ pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
 pub struct DocumentWriter<'x, T: UncommittedDocumentId> {
-    pub account: AccountId,
     pub collection: CollectionId,
     pub default_language: Language,
     pub log_action: LogAction,
@@ -41,13 +40,8 @@ pub enum WriteAction<T: UncommittedDocumentId> {
 }
 
 impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
-    pub fn insert(
-        account: AccountId,
-        collection: CollectionId,
-        uncommited_id: T,
-    ) -> DocumentWriter<'x, T> {
+    pub fn insert(collection: CollectionId, uncommited_id: T) -> DocumentWriter<'x, T> {
         DocumentWriter {
-            account,
             collection,
             default_language: Language::English,
             log_action: LogAction::None,
@@ -56,13 +50,8 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         }
     }
 
-    pub fn update(
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-    ) -> DocumentWriter<'x, T> {
+    pub fn update(collection: CollectionId, document: DocumentId) -> DocumentWriter<'x, T> {
         DocumentWriter {
-            account,
             collection,
             default_language: Language::English,
             log_action: LogAction::None,
@@ -71,13 +60,8 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         }
     }
 
-    pub fn delete(
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-    ) -> DocumentWriter<'x, T> {
+    pub fn delete(collection: CollectionId, document: DocumentId) -> DocumentWriter<'x, T> {
         DocumentWriter {
-            account,
             collection,
             default_language: Language::English,
             log_action: LogAction::None,
@@ -86,9 +70,8 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         }
     }
 
-    pub fn update_many(account: AccountId, collection: CollectionId) -> DocumentWriter<'x, T> {
+    pub fn update_many(collection: CollectionId) -> DocumentWriter<'x, T> {
         DocumentWriter {
-            account,
             collection,
             default_language: Language::English,
             log_action: LogAction::None,
@@ -97,9 +80,8 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         }
     }
 
-    pub fn delete_many(account: AccountId, collection: CollectionId) -> DocumentWriter<'x, T> {
+    pub fn delete_many(collection: CollectionId) -> DocumentWriter<'x, T> {
         DocumentWriter {
-            account,
             collection,
             default_language: Language::English,
             log_action: LogAction::None,
@@ -133,74 +115,45 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         self.default_language = language;
     }
 
-    pub fn add_text(
-        &mut self,
-        field: FieldId,
-        field_num: FieldNumber,
-        value: Text<'x>,
-        stored: bool,
-        sorted: bool,
-    ) {
-        self.fields.push(UpdateField::Text(Field::new(
-            field, field_num, value, stored, sorted,
-        )));
+    pub fn add_text(&mut self, field: FieldId, value: Text<'x>, options: FieldOptions) {
+        self.fields
+            .push(UpdateField::Text(Field::new(field, value, options)));
     }
 
-    pub fn add_blob(&mut self, field: FieldId, field_num: FieldNumber, value: Cow<'x, [u8]>) {
-        self.fields.push(UpdateField::Blob(Field::new(
-            field, field_num, value, true, false,
-        )));
+    pub fn add_blob(&mut self, field: FieldId, value: Cow<'x, [u8]>, options: FieldOptions) {
+        self.fields
+            .push(UpdateField::Blob(Field::new(field, value, options)));
     }
 
-    pub fn add_integer(
-        &mut self,
-        field: FieldId,
-        field_num: FieldNumber,
-        value: Integer,
-        stored: bool,
-        sorted: bool,
-    ) {
-        self.fields.push(UpdateField::Integer(Field::new(
-            field, field_num, value, stored, sorted,
-        )));
+    pub fn add_integer(&mut self, field: FieldId, value: Integer, options: FieldOptions) {
+        self.fields
+            .push(UpdateField::Integer(Field::new(field, value, options)));
     }
 
-    pub fn add_long_int(
-        &mut self,
-        field: FieldId,
-        field_num: FieldNumber,
-        value: LongInteger,
-        stored: bool,
-        sorted: bool,
-    ) {
-        self.fields.push(UpdateField::LongInteger(Field::new(
-            field, field_num, value, stored, sorted,
-        )));
+    pub fn add_long_int(&mut self, field: FieldId, value: LongInteger, options: FieldOptions) {
+        self.fields
+            .push(UpdateField::LongInteger(Field::new(field, value, options)));
     }
 
     pub fn set_tag(&mut self, field: FieldId, value: Tag<'x>) {
         self.fields.push(UpdateField::TagSet(Field::new(
-            field, 0, value, false, false,
+            field,
+            value,
+            FieldOptions::None,
         )));
     }
 
     pub fn clear_tag(&mut self, field: FieldId, value: Tag<'x>) {
         self.fields.push(UpdateField::TagRemove(Field::new(
-            field, 0, value, false, false,
+            field,
+            value,
+            FieldOptions::None,
         )));
     }
 
-    pub fn add_float(
-        &mut self,
-        field: FieldId,
-        field_num: FieldNumber,
-        value: Float,
-        stored: bool,
-        sorted: bool,
-    ) {
-        self.fields.push(UpdateField::Float(Field::new(
-            field, field_num, value, stored, sorted,
-        )));
+    pub fn add_float(&mut self, field: FieldId, value: Float, options: FieldOptions) {
+        self.fields
+            .push(UpdateField::Float(Field::new(field, value, options)));
     }
 
     pub fn is_empty(&self) -> bool {

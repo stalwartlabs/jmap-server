@@ -7,25 +7,24 @@ use std::{
 use jmap_mail::{
     import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
-    JMAPMailIdImpl, JMAPMailStoreGet, JMAPMailStoreImport, JMAPMailStoreQuery, MessageField,
+    JMAPMailIdImpl, JMAPMailLocalStore, JMAPMailProperties, JMAPMailStoreGetArguments,
+    MessageField,
 };
 use jmap_store::{
-    local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId, JMAPQuery, JMAP_MAIL,
+    json::JSONValue, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQuery, JMAP_MAIL,
 };
 use mail_parser::HeaderName;
-use store::{Comparator, FieldValue, Filter, Integer, Store, Tag};
+use store::{Comparator, FieldValue, Filter, Integer, Tag};
 
 use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
 
-pub fn test_jmap_mail_query<T>(db: T, do_insert: bool)
+pub fn test_jmap_mail_query<T>(mail_store: T, do_insert: bool)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> JMAPMailLocalStore<'x>,
 {
     const MAX_THREADS: usize = 100;
     const MAX_MESSAGES: usize = 1000;
     const MAX_MESSAGES_PER_THREAD: usize = 100;
-
-    let mail_store = JMAPLocalStore::new(db);
 
     if do_insert {
         let now = Instant::now();
@@ -161,7 +160,6 @@ where
     for thread_id in 0..MAX_THREADS {
         assert!(
             mail_store
-                .get_store()
                 .get_tag(
                     0,
                     JMAP_MAIL,
@@ -177,7 +175,6 @@ where
 
     assert!(
         mail_store
-            .get_store()
             .get_tag(
                 0,
                 JMAP_MAIL,
@@ -197,10 +194,7 @@ where
     test_query_options(&mail_store);
 }
 
-fn test_query<'x, T>(mail_store: &'x JMAPLocalStore<T>)
-where
-    T: Store<'x>,
-{
+fn test_query<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
     for (filter, sort, expected_results) in [
         (
             JMAPFilter::and(vec![
@@ -443,24 +437,14 @@ where
                 .unwrap()
                 .ids
                 .into_iter()
-                .map(|id| {
-                    mail_store
-                        .get_headers_rfc(0, id.get_document_id())
-                        .unwrap()
-                        .remove(&mail_parser::HeaderName::MessageId)
-                        .unwrap()
-                        .unwrap_text()
-                })
+                .map(|id| { get_message_id(mail_store, id) })
                 .collect::<Vec<Cow<str>>>(),
             expected_results
         );
     }
 }
 
-fn test_query_options<'x, T>(mail_store: &'x JMAPLocalStore<T>)
-where
-    T: Store<'x>,
-{
+fn test_query_options<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
     for (query, expected_results, expected_results_collapsed) in [
         (
             JMAPQuery {
@@ -715,14 +699,7 @@ where
                 .unwrap()
                 .ids
                 .into_iter()
-                .map(|id| {
-                    mail_store
-                        .get_headers_rfc(0, id.get_document_id())
-                        .unwrap()
-                        .remove(&mail_parser::HeaderName::MessageId)
-                        .unwrap()
-                        .unwrap_text()
-                })
+                .map(|id| { get_message_id(mail_store, id) })
                 .collect::<Vec<Cow<str>>>(),
             expected_results
         );
@@ -732,26 +709,15 @@ where
                 .unwrap()
                 .ids
                 .into_iter()
-                .map(|id| {
-                    mail_store
-                        .get_headers_rfc(0, id.get_document_id())
-                        .unwrap()
-                        .remove(&mail_parser::HeaderName::MessageId)
-                        .unwrap()
-                        .unwrap_text()
-                })
+                .map(|id| { get_message_id(mail_store, id) })
                 .collect::<Vec<Cow<str>>>(),
             expected_results_collapsed
         );
     }
 }
 
-fn get_anchor<'x, T>(mail_store: &'x JMAPLocalStore<T>, anchor: &'x str) -> Option<JMAPId>
-where
-    T: Store<'x>,
-{
+fn get_anchor<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, anchor: &'x str) -> Option<JMAPId> {
     let doc_id = mail_store
-        .get_store()
         .query(
             0,
             JMAP_MAIL,
@@ -766,10 +732,37 @@ where
         .unwrap();
 
     let thread_id = mail_store
-        .get_store()
-        .get_document_value(0, JMAP_MAIL, doc_id, MessageField::ThreadId.into(), 0)
+        .get_document_value(0, JMAP_MAIL, doc_id, MessageField::ThreadId.into())
         .unwrap()
         .unwrap();
 
     JMAPId::from_email(thread_id, doc_id).into()
+}
+
+fn get_message_id<'x>(
+    mail_store: &'x impl JMAPMailLocalStore<'x>,
+    jmap_id: JMAPId,
+) -> Cow<'x, str> {
+    if let JSONValue::Array(mut list) = mail_store
+        .mail_get(
+            JMAPGet {
+                account_id: 0,
+                ids: vec![jmap_id].into(),
+                properties: vec![JMAPMailProperties::MessageId].into(),
+            },
+            JMAPMailStoreGetArguments::default(),
+        )
+        .unwrap()
+        .list
+    {
+        if let JSONValue::Properties(mut obj) = list.pop().unwrap() {
+            if let JSONValue::String(message_id) =
+                obj.remove(&JMAPMailProperties::MessageId).unwrap()
+            {
+                return message_id;
+            }
+        }
+    }
+
+    panic!("Could not get message id");
 }

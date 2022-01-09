@@ -6,8 +6,9 @@ use std::{
 
 use nlp::Language;
 use store::{
-    batch::DocumentWriter, field::Text, Comparator, ComparisonOperator, FieldValue, Filter, Store,
-    TextQuery,
+    batch::DocumentWriter,
+    field::{FieldOptions, FullText, Text},
+    Comparator, ComparisonOperator, FieldValue, Filter, Store, TextQuery,
 };
 
 use crate::deflate_artwork_data;
@@ -93,17 +94,15 @@ where
                     let record_id = last_assigned_id.clone().unwrap();
 
                     s.spawn_fifo(move |_| {
-                        let mut builder = DocumentWriter::insert(0, 0, record_id);
+                        let mut builder = DocumentWriter::insert(0, record_id);
                         for (pos, field) in record.iter().enumerate() {
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {
                                     if !field.is_empty() {
                                         builder.add_text(
                                             pos as u8,
-                                            0,
                                             Text::Tokenized(field.to_lowercase().into()),
-                                            false,
-                                            true,
+                                            FieldOptions::Sort,
                                         );
                                     }
                                 }
@@ -111,33 +110,27 @@ where
                                     if !field.is_empty() {
                                         builder.add_text(
                                             pos as u8,
-                                            0,
-                                            Text::Full((
+                                            Text::Full(FullText::new_lang(
                                                 field.to_lowercase().into(),
                                                 Language::English,
                                             )),
-                                            false,
-                                            true,
+                                            FieldOptions::Sort,
                                         );
                                     }
                                 }
                                 FieldType::Integer => {
                                     builder.add_integer(
                                         pos as u8,
-                                        0,
                                         field.parse::<u32>().unwrap_or(0),
-                                        true,
-                                        true,
+                                        FieldOptions::StoreAndSort,
                                     );
                                 }
                                 FieldType::Keyword => {
                                     if !field.is_empty() {
                                         builder.add_text(
                                             pos as u8,
-                                            0,
                                             Text::Keyword(field.to_lowercase().into()),
-                                            true,
-                                            true,
+                                            FieldOptions::StoreAndSort,
                                         );
                                     }
                                 }
@@ -167,7 +160,7 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            db.update_documents(chunk).unwrap();
+                            db.update_documents(0, chunk, 0.into()).unwrap();
                             println!(
                                 "Inserted {} entries in {} ms (Thread {}/{}).",
                                 num_docs,
@@ -428,7 +421,7 @@ pub fn test_filter<'x, T: Store<'x>>(db: &'x T) {
             .unwrap()
         {
             results.push(
-                db.get_document_value(0, 0, doc_id, fields["accession_number"], 0)
+                db.get_document_value(0, 0, doc_id, fields["accession_number"])
                     .unwrap()
                     .unwrap(),
             );
@@ -501,7 +494,7 @@ pub fn test_sort<'x, T: Store<'x>>(db: &'x T) {
 
         for doc_id in db.query(0, 0, filter, Comparator::List(sort)).unwrap() {
             let val = db
-                .get_document_value(0, 0, doc_id, fields["accession_number"], 0)
+                .get_document_value(0, 0, doc_id, fields["accession_number"])
                 .unwrap()
                 .unwrap();
             results.push(val);

@@ -123,14 +123,6 @@ impl LanguageDetector {
         }
     }
 
-    pub fn detect_wrap<T>(&mut self, text: T) -> (T, Language)
-    where
-        T: AsRef<str>,
-    {
-        let language = self.detect(text.as_ref(), MIN_LANGUAGE_SCORE);
-        (text, language)
-    }
-
     pub fn most_frequent_language(&self) -> Option<&Language> {
         self.lang_detected
             .iter()

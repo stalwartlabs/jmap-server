@@ -2,7 +2,7 @@ use std::iter::FromIterator;
 
 use nlp::Language;
 use store::batch::DocumentWriter;
-use store::field::Text;
+use store::field::{FieldOptions, FullText, Text};
 use store::{
     Comparator, DocumentId, DocumentSet, FieldId, FieldValue, Filter, Float, Integer, LongInteger,
     Store, StoreTombstone, Tag, TextQuery,
@@ -15,43 +15,39 @@ where
     let mut last_assigned_id = None;
     for raw_doc_num in 0..10 {
         last_assigned_id = Some(db.assign_document_id(0, 0, last_assigned_id).unwrap());
-        let mut builder = DocumentWriter::insert(0, 0, last_assigned_id.clone().unwrap());
+        let mut builder = DocumentWriter::insert(0, last_assigned_id.clone().unwrap());
         builder.add_text(
             0,
-            0,
             Text::Keyword(format!("keyword_{}", raw_doc_num).into()),
-            true,
-            true,
+            FieldOptions::StoreAndSort,
         );
         builder.add_text(
             1,
-            0,
             Text::Tokenized(format!("this is the text number {}", raw_doc_num).into()),
-            true,
-            true,
+            FieldOptions::StoreAndSort,
         );
         builder.add_text(
             2,
-            0,
-            Text::Full((
+            Text::Full(FullText::new_lang(
                 format!("and here goes the full text number {}", raw_doc_num).into(),
                 Language::English,
             )),
-            true,
-            true,
+            FieldOptions::StoreAndSort,
         );
-        builder.add_float(3, 0, raw_doc_num as Float, true, true);
-        builder.add_integer(4, 0, raw_doc_num as Integer, true, true);
-        builder.add_long_int(5, 0, raw_doc_num as LongInteger, true, true);
+        builder.add_float(3, raw_doc_num as Float, FieldOptions::StoreAndSort);
+        builder.add_integer(4, raw_doc_num as Integer, FieldOptions::StoreAndSort);
+        builder.add_long_int(5, raw_doc_num as LongInteger, FieldOptions::StoreAndSort);
         builder.set_tag(6, Tag::Id(0));
         builder.set_tag(7, Tag::Static(0));
         builder.set_tag(8, Tag::Text("my custom tag".into()));
 
-        db.update_document(builder).unwrap();
+        db.update_document(0, builder, 0.into()).unwrap();
     }
 
-    db.delete_document(0, 0, 9).unwrap();
-    db.delete_document(0, 0, 0).unwrap();
+    db.update_document(0, DocumentWriter::delete(0, 9), None)
+        .unwrap();
+    db.update_document(0, DocumentWriter::delete(0, 0), None)
+        .unwrap();
 
     for do_purge in [true, false] {
         for field in 0..6 {
@@ -66,16 +62,16 @@ where
 
             for field in 0..6 {
                 assert!(db
-                    .get_document_value::<Vec<u8>>(0, 0, 0, field, 0)
+                    .get_document_value::<Vec<u8>>(0, 0, 0, field)
                     .unwrap()
                     .is_none());
                 assert!(db
-                    .get_document_value::<Vec<u8>>(0, 0, 9, field, 0)
+                    .get_document_value::<Vec<u8>>(0, 0, 9, field)
                     .unwrap()
                     .is_none());
                 for doc_id in 1..9 {
                     assert!(db
-                        .get_document_value::<Vec<u8>>(0, 0, doc_id, field, 0)
+                        .get_document_value::<Vec<u8>>(0, 0, doc_id, field)
                         .unwrap()
                         .is_some());
                 }

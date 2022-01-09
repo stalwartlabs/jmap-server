@@ -11,43 +11,42 @@ use mail_parser::{
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
     batch::{DocumentWriter, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
-    field::Text,
-    FieldNumber, Integer, LongInteger, StoreError, Tag, UncommittedDocumentId,
+    field::{FieldOptions, FullText, Text},
+    Integer, LongInteger, StoreError, Tag, UncommittedDocumentId,
 };
 
-use crate::{JMAPMailProperties, MessageField, MessageParts};
+use crate::{
+    JMAPMailProperties, MessageField, MessageMetadata, MessageRawHeaders, MESSAGE_HEADERS,
+    MESSAGE_HEADERS_PARTS, MESSAGE_HEADERS_RAW, MESSAGE_METADATA, MESSAGE_PARTS, MESSAGE_RAW,
+    MESSAGE_STRUCTURE,
+};
 
 pub fn build_message_document<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     message: Message<'x>,
     received_at: Option<i64>,
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
-    let mut message_parts = MessageParts {
+    let mut message_metadata = MessageMetadata {
         html_body: message.html_body,
         text_body: message.text_body,
         attachments: message.attachments,
-        offset_body: message.offset_body,
         size: message.raw_message.len(),
         received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
         has_attachments: false,
     };
-    let mut total_message_parts = message.parts.len();
-    let mut nested_headers = Vec::with_capacity(message.parts.len());
+    let mut total_parts = message.parts.len();
+    let mut part_headers = Vec::with_capacity(message.parts.len());
     let mut language_detector = LanguageDetector::new();
 
     document.add_integer(
         MessageField::Size.into(),
-        0,
-        message_parts.size as Integer,
-        false,
-        true,
+        message_metadata.size as Integer,
+        FieldOptions::Sort,
     );
     document.add_long_int(
         MessageField::ReceivedAt.into(),
-        0,
-        message_parts.received_at as LongInteger,
-        false,
-        true,
+        message_metadata.received_at as LongInteger,
+        FieldOptions::Sort,
     );
 
     let mut reference_ids = Vec::new();
@@ -100,7 +99,7 @@ pub fn build_message_document<'x>(
             HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc => {
                 // Build sort index
                 add_addr_sort(document, header_name, &header_value);
-                jmap_headers.insert(header_name, header_to_jmap_address(header_value));
+                jmap_headers.insert(header_name, header_to_jmap_address(header_value, false));
             }
             HeaderName::ReplyTo
             | HeaderName::Sender
@@ -109,7 +108,7 @@ pub fn build_message_document<'x>(
             | HeaderName::ResentBcc
             | HeaderName::ResentCc
             | HeaderName::ResentSender => {
-                jmap_headers.insert(header_name, header_to_jmap_address(header_value));
+                jmap_headers.insert(header_name, header_to_jmap_address(header_value, false));
             }
             HeaderName::Date | HeaderName::ResentDate => {
                 jmap_headers.insert(header_name, header_to_jmap_date(header_value));
@@ -137,10 +136,8 @@ pub fn build_message_document<'x>(
 
                     document.add_text(
                         HeaderName::Subject.into(),
-                        0,
-                        Text::Full((subject.to_string().into(), language)),
-                        false,
-                        false,
+                        Text::Full(FullText::new_lang(subject.to_string().into(), language)),
+                        FieldOptions::None,
                     );
 
                     base_subject = Some(thread_name);
@@ -164,189 +161,178 @@ pub fn build_message_document<'x>(
         }
     }
 
-    nested_headers.push(mime_headers);
+    part_headers.push(mime_headers);
 
     for (part_id, part) in message.parts.into_iter().enumerate() {
         match part {
             MessagePart::Html(html) => {
-                nested_headers.push(html.headers);
+                part_headers.push(html.headers);
 
-                let field =
-                    if let Some(pos) = message_parts.text_body.iter().position(|&p| p == part_id) {
-                        message_parts.text_body[pos] = total_message_parts;
-                        MessageField::Body
-                    } else if message_parts.html_body.contains(&part_id) {
-                        MessageField::Body
-                    } else {
-                        message_parts.has_attachments = true;
-                        MessageField::Attachment
-                    };
+                let field = if let Some(pos) = message_metadata
+                    .text_body
+                    .iter()
+                    .position(|&p| p == part_id)
+                {
+                    message_metadata.text_body[pos] = total_parts;
+                    MessageField::Body
+                } else if message_metadata.html_body.contains(&part_id) {
+                    MessageField::Body
+                } else {
+                    message_metadata.has_attachments = true;
+                    MessageField::Attachment
+                };
 
                 document.add_text(
                     field.clone().into(),
-                    total_message_parts as FieldNumber,
-                    Text::Full(
-                        language_detector.detect_wrap(html_to_text(html.body.as_ref()).into()),
-                    ),
-                    true,
-                    field == MessageField::Body,
+                    Text::Full(FullText::new(
+                        html_to_text(html.body.as_ref()).into(),
+                        &mut language_detector,
+                    )),
+                    if field == MessageField::Body {
+                        let blob_id = total_parts;
+                        total_parts += 1;
+                        FieldOptions::BlobStore(blob_id + MESSAGE_PARTS)
+                    } else {
+                        FieldOptions::None
+                    },
                 );
 
                 document.add_text(
                     field.into(),
-                    part_id as FieldNumber,
                     Text::Default(html.body),
-                    true,
-                    false,
+                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
                 );
-                total_message_parts += 1;
             }
             MessagePart::Text(text) => {
-                nested_headers.push(text.headers);
-                let field =
-                    if let Some(pos) = message_parts.html_body.iter().position(|&p| p == part_id) {
-                        document.add_text(
-                            MessageField::Body.into(),
-                            total_message_parts as FieldNumber,
-                            Text::Default(text_to_html(text.body.as_ref()).into()),
-                            true,
-                            false,
-                        );
-                        message_parts.html_body[pos] = total_message_parts;
-                        total_message_parts += 1;
-                        MessageField::Body
-                    } else if message_parts.text_body.contains(&part_id) {
-                        MessageField::Body
-                    } else {
-                        message_parts.has_attachments = true;
-                        MessageField::Attachment
-                    };
+                part_headers.push(text.headers);
+                let field = if let Some(pos) = message_metadata
+                    .html_body
+                    .iter()
+                    .position(|&p| p == part_id)
+                {
+                    document.add_text(
+                        MessageField::Body.into(),
+                        Text::Default(text_to_html(text.body.as_ref()).into()),
+                        FieldOptions::BlobStore(total_parts + MESSAGE_PARTS),
+                    );
+                    message_metadata.html_body[pos] = total_parts;
+                    total_parts += 1;
+                    MessageField::Body
+                } else if message_metadata.text_body.contains(&part_id) {
+                    MessageField::Body
+                } else {
+                    message_metadata.has_attachments = true;
+                    MessageField::Attachment
+                };
 
                 document.add_text(
                     field.into(),
-                    part_id as FieldNumber,
-                    Text::Full(language_detector.detect_wrap(text.body)),
-                    true,
-                    false,
+                    Text::Full(FullText::new(text.body, &mut language_detector)),
+                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::Binary(binary) => {
-                if !message_parts.has_attachments {
-                    message_parts.has_attachments = true;
+                if !message_metadata.has_attachments {
+                    message_metadata.has_attachments = true;
                 }
-                nested_headers.push(binary.headers);
+                part_headers.push(binary.headers);
                 document.add_blob(
                     MessageField::Attachment.into(),
-                    part_id as FieldNumber,
                     binary.body,
+                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::InlineBinary(binary) => {
-                nested_headers.push(binary.headers);
+                part_headers.push(binary.headers);
                 document.add_blob(
                     MessageField::Attachment.into(),
-                    part_id as FieldNumber,
                     binary.body,
+                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::Message(nested_message) => {
-                if !message_parts.has_attachments {
-                    message_parts.has_attachments = true;
+                if !message_metadata.has_attachments {
+                    message_metadata.has_attachments = true;
                 }
-                nested_headers.push(nested_message.headers);
+                part_headers.push(nested_message.headers);
                 match nested_message.body {
                     MessageAttachment::Parsed(mut message) => {
-                        parse_attached_message(
-                            document,
-                            &mut message,
-                            part_id,
-                            &mut language_detector,
-                        );
+                        parse_attached_message(document, &mut message, &mut language_detector);
                         document.add_blob(
                             MessageField::Attachment.into(),
-                            part_id as FieldNumber,
                             message.raw_message,
+                            FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
                         );
                     }
                     MessageAttachment::Raw(raw_message) => {
                         if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                            parse_attached_message(
-                                document,
-                                message,
-                                part_id,
-                                &mut language_detector,
-                            )
+                            parse_attached_message(document, message, &mut language_detector)
                         }
                         document.add_blob(
                             MessageField::Attachment.into(),
-                            part_id as FieldNumber,
                             raw_message,
+                            FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
                         );
                     }
                 }
             }
             MessagePart::Multipart(header) => {
-                nested_headers.push(header);
+                part_headers.push(header);
             }
         };
     }
 
-    if message_parts.has_attachments {
+    if message_metadata.has_attachments {
         document.set_tag(MessageField::Attachment.into(), Tag::Id(0));
     }
 
     document.add_blob(
         MessageField::Internal.into(),
-        crate::MESSAGE_HEADERS,
         bincode::serialize(&jmap_headers)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
+        FieldOptions::BlobStore(MESSAGE_HEADERS),
     );
 
     document.add_blob(
         MessageField::Internal.into(),
-        crate::MESSAGE_RAW,
         message.raw_message,
+        FieldOptions::BlobStore(MESSAGE_RAW),
     );
 
     document.add_blob(
         MessageField::Internal.into(),
-        crate::MESSAGE_HEADERS_OTHER,
-        bincode::serialize(&message.headers_other)
+        bincode::serialize(&MessageRawHeaders {
+            size: message.offset_body,
+            headers: message.headers_raw,
+        })
+        .map_err(|e| StoreError::SerializeError(e.to_string()))?
+        .into(),
+        FieldOptions::BlobStore(MESSAGE_HEADERS_RAW),
+    );
+
+    document.add_blob(
+        MessageField::Internal.into(),
+        bincode::serialize(&part_headers)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
+        FieldOptions::BlobStore(MESSAGE_HEADERS_PARTS),
     );
 
     document.add_blob(
         MessageField::Internal.into(),
-        crate::MESSAGE_HEADERS_OFFSETS,
-        bincode::serialize(&message.headers_offsets)
+        bincode::serialize(&message_metadata)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
+        FieldOptions::BlobStore(MESSAGE_METADATA),
     );
 
     document.add_blob(
         MessageField::Internal.into(),
-        crate::MESSAGE_HEADERS_NESTED,
-        bincode::serialize(&nested_headers)
-            .map_err(|e| StoreError::SerializeError(e.to_string()))?
-            .into(),
-    );
-
-    document.add_blob(
-        MessageField::Internal.into(),
-        crate::MESSAGE_PARTS,
-        bincode::serialize(&message_parts)
-            .map_err(|e| StoreError::SerializeError(e.to_string()))?
-            .into(),
-    );
-
-    document.add_blob(
-        MessageField::Internal.into(),
-        crate::MESSAGE_STRUCTURE,
         bincode::serialize(&message.structure)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
+        FieldOptions::BlobStore(MESSAGE_STRUCTURE),
     );
 
     if let Some(default_language) = language_detector.most_frequent_language() {
@@ -366,16 +352,16 @@ pub fn build_message_document<'x>(
 fn parse_attached_message<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
     message: &mut Message,
-    part_id: usize,
     language_detector: &mut LanguageDetector,
 ) {
     if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&HeaderName::Subject) {
         document.add_text(
             MessageField::Attachment.into(),
-            part_id as FieldNumber,
-            Text::Full(language_detector.detect_wrap(subject.into_owned().into())),
-            false,
-            false,
+            Text::Full(FullText::new(
+                subject.into_owned().into(),
+                language_detector,
+            )),
+            FieldOptions::None,
         );
     }
     for part in message.parts.drain(..) {
@@ -383,19 +369,21 @@ fn parse_attached_message<'x>(
             MessagePart::Text(text) => {
                 document.add_text(
                     MessageField::Attachment.into(),
-                    part_id as FieldNumber,
-                    Text::Full(language_detector.detect_wrap(text.body.into_owned().into())),
-                    false,
-                    false,
+                    Text::Full(FullText::new(
+                        text.body.into_owned().into(),
+                        language_detector,
+                    )),
+                    FieldOptions::None,
                 );
             }
             MessagePart::Html(html) => {
                 document.add_text(
                     MessageField::Attachment.into(),
-                    part_id as FieldNumber,
-                    Text::Full(language_detector.detect_wrap(html_to_text(&html.body).into())),
-                    false,
-                    false,
+                    Text::Full(FullText::new(
+                        html_to_text(&html.body).into(),
+                        language_detector,
+                    )),
+                    FieldOptions::None,
                 );
             }
             _ => (),
@@ -415,10 +403,8 @@ fn parse_address<'x>(
         if addr.len() <= MAX_TOKEN_LENGTH {
             document.add_text(
                 header_name.into(),
-                0,
                 Text::Keyword(addr.to_lowercase().into()),
-                false,
-                false,
+                FieldOptions::None,
             );
         }
     };
@@ -454,10 +440,8 @@ fn parse_text<'x>(
             if text.len() <= MAX_TOKEN_LENGTH {
                 document.add_text(
                     header_name.into(),
-                    0,
                     Text::Keyword(text.to_lowercase().into()),
-                    false,
-                    false,
+                    FieldOptions::None,
                 );
             }
         }
@@ -467,10 +451,8 @@ fn parse_text<'x>(
         _ => {
             document.add_text(
                 header_name.into(),
-                0,
                 Text::Tokenized(text.to_string().into()),
-                false,
-                false,
+                FieldOptions::None,
             );
         }
     }
@@ -484,20 +466,16 @@ fn parse_content_type<'x>(
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
         document.add_text(
             header_name.into(),
-            0,
             Text::Keyword(content_type.c_type.clone()),
-            false,
-            false,
+            FieldOptions::None,
         );
     }
     if let Some(subtype) = &content_type.c_subtype {
         if subtype.len() <= MAX_TOKEN_LENGTH {
             document.add_text(
                 header_name.into(),
-                0,
                 Text::Keyword(subtype.clone()),
-                false,
-                false,
+                FieldOptions::None,
             );
         }
     }
@@ -506,18 +484,14 @@ fn parse_content_type<'x>(
             if key == "name" || key == "filename" {
                 document.add_text(
                     header_name.into(),
-                    0,
                     Text::Tokenized(value.clone()),
-                    false,
-                    false,
+                    FieldOptions::None,
                 );
             } else if value.len() <= MAX_TOKEN_LENGTH {
                 document.add_text(
                     header_name.into(),
-                    0,
                     Text::Keyword(value.to_lowercase().into()),
-                    false,
-                    false,
+                    FieldOptions::None,
                 );
             }
         }
@@ -549,10 +523,8 @@ fn parse_datetime(
         {
             document.add_long_int(
                 header_name.into(),
-                0,
                 datetime.timestamp() as u64,
-                false,
-                true,
+                FieldOptions::Sort,
             );
         }
     }
@@ -617,10 +589,8 @@ fn add_addr_sort<'x>(
         }
         document.add_text(
             header_name.into(),
-            0,
             Text::Tokenized(text.into()),
-            false,
-            true,
+            FieldOptions::Sort,
         );
     };
 }
@@ -752,8 +722,11 @@ pub fn header_to_jmap_url(header: HeaderValue) -> JSONValue<JMAPMailProperties> 
     }
 }
 
-pub fn header_to_jmap_address<'x>(header: HeaderValue<'x>) -> JSONValue<'x, JMAPMailProperties> {
-    let addr_to_jmap = |addr: Addr<'x>| -> JSONValue<'x, JMAPMailProperties> {
+pub fn header_to_jmap_address<'x>(
+    header: HeaderValue<'x>,
+    convert_to_group: bool,
+) -> JSONValue<'x, JMAPMailProperties> {
+    fn addr_to_jmap<'x>(addr: Addr<'x>) -> JSONValue<'x, JMAPMailProperties> {
         let mut jmap_addr = HashMap::with_capacity(2);
         jmap_addr.insert(
             JMAPMailProperties::Email,
@@ -761,16 +734,12 @@ pub fn header_to_jmap_address<'x>(header: HeaderValue<'x>) -> JSONValue<'x, JMAP
         );
         jmap_addr.insert(
             JMAPMailProperties::Name,
-            if let Some(name) = addr.name {
-                JSONValue::String(name)
-            } else {
-                JSONValue::Null
-            },
+            addr.name.map_or(JSONValue::Null, JSONValue::String),
         );
         JSONValue::Properties(jmap_addr)
-    };
+    }
 
-    let addrlist_to_jmap = |addrlist: Vec<Addr<'x>>| -> JSONValue<'x, JMAPMailProperties> {
+    fn addrlist_to_jmap<'x>(addrlist: Vec<Addr<'x>>) -> JSONValue<'x, JMAPMailProperties> {
         JSONValue::Array(
             addrlist
                 .into_iter()
@@ -783,9 +752,9 @@ pub fn header_to_jmap_address<'x>(header: HeaderValue<'x>) -> JSONValue<'x, JMAP
                 })
                 .collect(),
         )
-    };
+    }
 
-    let group_to_jmap = |group: Group<'x>| -> JSONValue<'x, JMAPMailProperties> {
+    fn group_to_jmap<'x>(group: Group<'x>) -> JSONValue<'x, JMAPMailProperties> {
         let mut jmap_addr = HashMap::with_capacity(2);
         jmap_addr.insert(
             JMAPMailProperties::Addresses,
@@ -793,35 +762,58 @@ pub fn header_to_jmap_address<'x>(header: HeaderValue<'x>) -> JSONValue<'x, JMAP
         );
         jmap_addr.insert(
             JMAPMailProperties::Name,
-            if let Some(name) = group.name {
-                JSONValue::String(name)
-            } else {
-                JSONValue::Null
-            },
+            group.name.map_or(JSONValue::Null, JSONValue::String),
         );
         JSONValue::Properties(jmap_addr)
-    };
+    }
+
+    fn into_group<'x>(
+        addresses: JSONValue<'x, JMAPMailProperties<'x>>,
+    ) -> JSONValue<'x, JMAPMailProperties<'x>> {
+        let mut email = HashMap::new();
+        email.insert(JMAPMailProperties::Name, JSONValue::Null);
+        email.insert(JMAPMailProperties::Addresses, addresses);
+        JSONValue::Array(vec![JSONValue::Properties(email)])
+    }
 
     match header {
         HeaderValue::Address(
             addr @ Addr {
                 address: Some(_), ..
             },
-        ) => JSONValue::Array(vec![addr_to_jmap(addr)]),
-        HeaderValue::AddressList(addrlist) => addrlist_to_jmap(addrlist),
-        HeaderValue::Group(group) => group_to_jmap(group),
-
+        ) => {
+            let value = JSONValue::Array(vec![addr_to_jmap(addr)]);
+            if !convert_to_group {
+                value
+            } else {
+                into_group(value)
+            }
+        }
+        HeaderValue::AddressList(addrlist) => {
+            let value = addrlist_to_jmap(addrlist);
+            if !convert_to_group {
+                value
+            } else {
+                into_group(value)
+            }
+        }
+        HeaderValue::Group(group) => JSONValue::Array(vec![group_to_jmap(group)]),
         HeaderValue::GroupList(grouplist) => {
             JSONValue::Array(grouplist.into_iter().map(group_to_jmap).collect())
         }
-        HeaderValue::Collection(list) => JSONValue::Array(
-            list.into_iter()
-                .filter_map(|ids| match header_to_jmap_address(ids) {
-                    JSONValue::Null => None,
-                    value => Some(value),
-                })
-                .collect(),
-        ),
+        HeaderValue::Collection(list) => {
+            let convert_to_group = list
+                .iter()
+                .any(|item| matches!(item, HeaderValue::Group(_) | HeaderValue::GroupList(_)));
+            JSONValue::Array(
+                list.into_iter()
+                    .filter_map(|ids| match header_to_jmap_address(ids, convert_to_group) {
+                        JSONValue::Null => None,
+                        value => Some(value),
+                    })
+                    .collect(),
+            )
+        }
         _ => JSONValue::Null,
     }
 }

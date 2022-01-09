@@ -1,8 +1,9 @@
 use std::convert::TryInto;
 
 use crate::{
-    leb128::Leb128, AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, FieldNumber, Float,
-    Integer, LongInteger, StoreError, Tag, TermId,
+    leb128::{skip_leb128_value, Leb128},
+    AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, LongInteger,
+    StoreError, Tag, TermId,
 };
 
 pub const COLLECTION_PREFIX_LEN: usize =
@@ -20,21 +21,21 @@ pub const BM_USED_IDS: u8 = 6;
 pub const BM_TOMBSTONED_IDS: u8 = 7;
 pub const BM_FREED_IDS: u8 = 8;
 
+pub const INTERNAL_KEY_PREFIX: u8 = 0;
+pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
+pub const BLOB_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
+
 pub fn serialize_stored_key(
     account: AccountId,
     collection: CollectionId,
     document: DocumentId,
     field: FieldId,
-    pos: FieldNumber,
 ) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<FieldNumber>());
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN);
     account.to_leb128_bytes(&mut bytes);
     bytes.push(collection);
     document.to_leb128_bytes(&mut bytes);
     bytes.push(field);
-    if pos > 0 {
-        pos.to_leb128_bytes(&mut bytes);
-    }
     bytes
 }
 
@@ -53,6 +54,19 @@ pub fn serialize_stored_key_global(
     if let Some(field) = field {
         bytes.push(field);
     }
+    bytes
+}
+
+pub fn serialize_blob_key(
+    account: AccountId,
+    collection: CollectionId,
+    document: DocumentId,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + BLOB_KEY.len());
+    account.to_leb128_bytes(&mut bytes);
+    bytes.push(collection);
+    document.to_leb128_bytes(&mut bytes);
+    bytes.extend_from_slice(BLOB_KEY);
     bytes
 }
 

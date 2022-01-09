@@ -5,7 +5,7 @@ use store::{
     StoreError,
 };
 
-use crate::{local_store::JMAPLocalStore, JMAPChangesResponse, JMAPIdSerialize};
+use crate::{JMAPChangesResponse, JMAPIdSerialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
@@ -123,11 +123,15 @@ impl JMAPIdSerialize for JMAPState {
     }
 }
 
-impl<'x, T> JMAPLocalStore<T>
-where
-    T: Store<'x>,
-{
-    pub fn get_changes(
+pub trait JMAPLocalChanges<'x>: Store<'x> {
+    fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState> {
+        Ok(self
+            .get_last_change_id(account, collection)?
+            .map(JMAPState::Exact)
+            .unwrap_or(JMAPState::Initial))
+    }
+
+    fn get_jmap_changes(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -137,7 +141,6 @@ where
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self
-                    .store
                     .get_changes(account, collection, ChangeLogQuery::All)?
                     .unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
@@ -156,13 +159,11 @@ where
             }
             JMAPState::Exact(change_id) => (
                 0,
-                self.store
-                    .get_changes(account, collection, ChangeLogQuery::Since(*change_id))?
+                self.get_changes(account, collection, ChangeLogQuery::Since(*change_id))?
                     .ok_or(StoreError::NotFound)?,
             ),
             JMAPState::Intermediate(intermediate_state) => {
                 let mut changelog = self
-                    .store
                     .get_changes(
                         account,
                         collection,
@@ -175,13 +176,12 @@ where
                 if intermediate_state.items_sent >= changelog.changes.len() {
                     (
                         0,
-                        self.store
-                            .get_changes(
-                                account,
-                                collection,
-                                ChangeLogQuery::Since(intermediate_state.to_id),
-                            )?
-                            .ok_or(StoreError::NotFound)?,
+                        self.get_changes(
+                            account,
+                            collection,
+                            ChangeLogQuery::Since(intermediate_state.to_id),
+                        )?
+                        .ok_or(StoreError::NotFound)?,
                     )
                 } else {
                     changelog.changes.drain(

@@ -91,6 +91,17 @@ macro_rules! impl_unsigned_leb128 {
     };
 }
 
+pub fn skip_leb128_value(bytes: &[u8]) -> Option<usize> {
+    let mut position = 0;
+    loop {
+        let byte = *bytes.get(position)?;
+        position += 1;
+        if (byte & 0x80) == 0 {
+            return position.into();
+        }
+    }
+}
+
 impl_unsigned_leb128!(u16);
 impl_unsigned_leb128!(u32);
 impl_unsigned_leb128!(u64);

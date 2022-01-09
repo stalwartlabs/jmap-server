@@ -1,14 +1,14 @@
 use std::borrow::Cow;
 
 use nlp::{
+    lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
     stemmer::Stemmer,
     tokenizers::{tokenize, Token},
     Language,
 };
 
 use crate::{
-    batch::MAX_TOKEN_LENGTH, DocumentId, FieldId, FieldNumber, Float, Integer, LongInteger, Tag,
-    TagId,
+    batch::MAX_TOKEN_LENGTH, BlobId, DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
 };
 
 #[derive(Debug)]
@@ -67,26 +67,25 @@ pub trait FieldLen {
 #[derive(Debug)]
 pub struct Field<T> {
     pub field: FieldId,
-    pub field_num: FieldNumber,
-    pub sorted: bool,
-    pub stored: bool,
+    pub options: FieldOptions,
     pub value: T,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum FieldOptions {
+    None,
+    Store,
+    Sort,
+    StoreAndSort,
+    BlobStore(BlobId),
+}
+
 impl<T> Field<T> {
-    pub fn new(
-        field: FieldId,
-        field_num: FieldNumber,
-        value: T,
-        stored: bool,
-        sorted: bool,
-    ) -> Self {
+    pub fn new(field: FieldId, value: T, options: FieldOptions) -> Self {
         Self {
             field,
-            field_num,
             value,
-            sorted,
-            stored,
+            options,
         }
     }
 
@@ -94,16 +93,29 @@ impl<T> Field<T> {
         self.field
     }
 
-    pub fn get_field_num(&self) -> FieldNumber {
-        self.field_num
+    pub fn get_options(&self) -> FieldOptions {
+        self.options
+    }
+
+    pub fn get_blob_id(&self) -> Option<BlobId> {
+        match self.options {
+            FieldOptions::BlobStore(id) => Some(id),
+            _ => None,
+        }
     }
 
     pub fn is_sorted(&self) -> bool {
-        self.sorted
+        matches!(
+            self.options,
+            FieldOptions::Sort | FieldOptions::StoreAndSort
+        )
     }
 
     pub fn is_stored(&self) -> bool {
-        self.stored
+        matches!(
+            self.options,
+            FieldOptions::Store | FieldOptions::StoreAndSort
+        )
     }
 
     pub fn size_of(&self) -> usize {
@@ -126,11 +138,30 @@ impl<'x> Tag<'x> {
 }
 
 #[derive(Debug)]
+pub struct FullText<'x> {
+    pub text: Cow<'x, str>,
+    pub language: Language,
+}
+
+impl<'x> FullText<'x> {
+    pub fn new(text: Cow<'x, str>, detector: &mut LanguageDetector) -> Self {
+        Self {
+            language: detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE),
+            text,
+        }
+    }
+
+    pub fn new_lang(text: Cow<'x, str>, language: Language) -> Self {
+        Self { text, language }
+    }
+}
+
+#[derive(Debug)]
 pub enum Text<'x> {
     Default(Cow<'x, str>),
     Keyword(Cow<'x, str>),
     Tokenized(Cow<'x, str>),
-    Full((Cow<'x, str>, Language)),
+    Full(FullText<'x>),
 }
 
 impl<'x> Text<'x> {
@@ -139,7 +170,7 @@ impl<'x> Text<'x> {
             Text::Default(s) => s.len(),
             Text::Keyword(s) => s.len(),
             Text::Tokenized(s) => s.len(),
-            Text::Full((s, _)) => s.len(),
+            Text::Full(ft) => ft.text.len(),
         }
     }
 

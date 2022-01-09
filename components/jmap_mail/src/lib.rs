@@ -7,24 +7,28 @@ pub mod set;
 
 use std::{borrow::Cow, collections::HashMap};
 
-use import::JMAPMailImportItem;
+use changes::JMAPMailLocalStoreChanges;
+use get::JMAPMailLocalStoreGet;
+use import::{JMAPMailImportItem, JMAPMailLocalStoreImport};
 use jmap_store::{
-    changes::JMAPState, json::JSONValue, local_store::JMAPLocalStore, JMAPChangesResponse, JMAPGet,
-    JMAPGetResponse, JMAPId, JMAPQuery, JMAPQueryChanges, JMAPQueryChangesResponse,
-    JMAPQueryResponse, JMAPSet, JMAPSetResponse,
+    changes::{JMAPLocalChanges, JMAPState},
+    json::JSONValue,
+    JMAPChangesResponse, JMAPGet, JMAPGetResponse, JMAPId, JMAPQuery, JMAPQueryChanges,
+    JMAPQueryChangesResponse, JMAPQueryResponse, JMAPSet, JMAPSetResponse,
 };
-use mail_parser::{HeaderName, MessagePartId, RfcHeaders};
-use query::{JMAPMailComparator, JMAPMailFilterCondition};
+use mail_parser::{HeaderName, MessagePartId, RawHeaders};
+use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery};
 use serde::{Deserialize, Serialize};
-use store::{AccountId, DocumentId, DocumentSet, FieldNumber, Store, ThreadId};
+use set::JMAPMailLocalStoreSet;
+use store::{AccountId, BlobId, DocumentId, ThreadId};
 
-pub const MESSAGE_RAW: FieldNumber = 0;
-pub const MESSAGE_HEADERS: FieldNumber = 1;
-pub const MESSAGE_HEADERS_OTHER: FieldNumber = 2;
-pub const MESSAGE_HEADERS_OFFSETS: FieldNumber = 3;
-pub const MESSAGE_HEADERS_NESTED: FieldNumber = 4;
-pub const MESSAGE_PARTS: FieldNumber = 5;
-pub const MESSAGE_STRUCTURE: FieldNumber = 6;
+pub const MESSAGE_RAW: BlobId = 0;
+pub const MESSAGE_HEADERS: BlobId = 1;
+pub const MESSAGE_HEADERS_RAW: BlobId = 2;
+pub const MESSAGE_HEADERS_PARTS: BlobId = 3;
+pub const MESSAGE_STRUCTURE: BlobId = 4;
+pub const MESSAGE_METADATA: BlobId = 5;
+pub const MESSAGE_PARTS: BlobId = 6;
 
 pub type JMAPMailHeaders<'x> = HashMap<HeaderName, JSONValue<'x, JMAPMailProperties<'x>>>;
 
@@ -49,14 +53,19 @@ impl JMAPMailIdImpl for JMAPId {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MessageParts {
+pub struct MessageMetadata {
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
     pub attachments: Vec<MessagePartId>,
-    pub offset_body: usize,
     pub size: usize,
     pub received_at: i64,
     pub has_attachments: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessageRawHeaders<'x> {
+    pub size: usize,
+    pub headers: RawHeaders<'x>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +108,7 @@ pub struct JMAPMailHeaderProperty<T> {
     pub all: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
 pub enum JMAPMailProperties<'x> {
     Id,
     BlobId,
@@ -173,8 +182,6 @@ pub trait JMAPMailStoreSet<'x> {
 }
 
 pub trait JMAPMailStoreQuery<'x> {
-    type Set: DocumentSet;
-
     fn mail_query(
         &'x self,
         query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
@@ -182,9 +189,7 @@ pub trait JMAPMailStoreQuery<'x> {
     ) -> jmap_store::Result<JMAPQueryResponse>;
 }
 
-pub trait JMAPMailStoreChanges<'x> {
-    type Set: DocumentSet;
-
+pub trait JMAPMailStoreChanges<'x>: JMAPLocalChanges<'x> {
     fn mail_changes(
         &'x self,
         account: AccountId,
@@ -199,6 +204,7 @@ pub trait JMAPMailStoreChanges<'x> {
     ) -> jmap_store::Result<JMAPQueryChangesResponse>;
 }
 
+#[derive(Debug, Default)]
 pub struct JMAPMailStoreGetArguments {
     pub body_properties: Vec<JMAPMailBodyProperties>,
     pub fetch_text_body_values: bool,
@@ -208,12 +214,6 @@ pub struct JMAPMailStoreGetArguments {
 }
 
 pub trait JMAPMailStoreGet<'x> {
-    fn get_headers_rfc(
-        &'x self,
-        account: AccountId,
-        document: DocumentId,
-    ) -> jmap_store::Result<RfcHeaders>;
-
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties<'x>>,
@@ -230,4 +230,11 @@ pub trait JMAPMailStore<'x>:
 {
 }
 
-impl<'x, T> JMAPMailStore<'x> for JMAPLocalStore<T> where T: Store<'x> {}
+pub trait JMAPMailLocalStore<'x>:
+    JMAPMailLocalStoreGet<'x>
+    + JMAPMailLocalStoreQuery<'x>
+    + JMAPMailLocalStoreImport<'x>
+    + JMAPMailLocalStoreSet<'x>
+    + JMAPMailLocalStoreChanges<'x>
+{
+}

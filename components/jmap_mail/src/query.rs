@@ -1,9 +1,9 @@
 use std::{borrow::Cow, collections::HashSet};
 
-use crate::JMAPMailIdImpl;
+use crate::{changes::JMAPMailLocalStoreChanges, JMAPMailIdImpl};
 use jmap_store::{
-    local_store::JMAPLocalStore, JMAPError, JMAPFilter, JMAPId, JMAPLogicalOperator, JMAPQuery,
-    JMAPQueryResponse, JMAP_MAIL,
+    JMAPError, JMAPFilter, JMAPId, JMAPLogicalOperator, JMAPQuery, JMAPQueryChanges,
+    JMAPQueryChangesResponse, JMAPQueryChangesResponseItem, JMAPQueryResponse, JMAP_MAIL,
 };
 use mail_parser::HeaderName;
 use nlp::Language;
@@ -13,7 +13,7 @@ use store::{
     TextQuery, ThreadId,
 };
 
-use crate::{JMAPMailStoreQuery, MessageField};
+use crate::MessageField;
 
 pub type MailboxId = u32;
 
@@ -63,12 +63,7 @@ where
     it: std::vec::IntoIter<JMAPFilter<JMAPMailFilterCondition<'x>>>,
 }
 
-impl<'x, T> JMAPMailStoreQuery<'x> for JMAPLocalStore<T>
-where
-    T: Store<'x>,
-{
-    type Set = T::Set;
-
+pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
     fn mail_query(
         &'x self,
         mut query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
@@ -96,201 +91,197 @@ where
             'outer: loop {
                 while let Some(term) = state.it.next() {
                     match term {
-                        JMAPFilter::Condition(cond) => match cond {
-                            JMAPMailFilterCondition::InMailbox(mailbox) => {
-                                state.terms.push(Filter::eq(
-                                    MessageField::Mailbox.into(),
-                                    FieldValue::Tag(Tag::Id(mailbox)),
-                                ));
-                                if is_immutable {
-                                    is_immutable = false;
+                        JMAPFilter::Condition(cond) => {
+                            match cond {
+                                JMAPMailFilterCondition::InMailbox(mailbox) => {
+                                    state.terms.push(Filter::eq(
+                                        MessageField::Mailbox.into(),
+                                        FieldValue::Tag(Tag::Id(mailbox)),
+                                    ));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
                                 }
-                            }
-                            JMAPMailFilterCondition::InMailboxOtherThan(mailboxes) => {
-                                state.terms.push(Filter::not(
-                                    mailboxes
-                                        .into_iter()
-                                        .map(|mailbox| {
-                                            Filter::eq(
-                                                MessageField::Mailbox.into(),
-                                                FieldValue::Tag(Tag::Id(mailbox)),
-                                            )
-                                        })
-                                        .collect::<Vec<Filter<Self::Set>>>(),
-                                ));
-                                if is_immutable {
-                                    is_immutable = false;
+                                JMAPMailFilterCondition::InMailboxOtherThan(mailboxes) => {
+                                    state.terms.push(Filter::not(
+                                        mailboxes
+                                            .into_iter()
+                                            .map(|mailbox| {
+                                                Filter::eq(
+                                                    MessageField::Mailbox.into(),
+                                                    FieldValue::Tag(Tag::Id(mailbox)),
+                                                )
+                                            })
+                                            .collect::<Vec<Filter<Self::Set>>>(),
+                                    ));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
                                 }
-                            }
-                            JMAPMailFilterCondition::Before(timestamp) => {
-                                state.terms.push(Filter::lt(
-                                    MessageField::ReceivedAt.into(),
-                                    FieldValue::LongInteger(timestamp),
-                                ));
-                            }
-                            JMAPMailFilterCondition::After(timestamp) => {
-                                state.terms.push(Filter::gt(
-                                    MessageField::ReceivedAt.into(),
-                                    FieldValue::LongInteger(timestamp),
-                                ));
-                            }
-                            JMAPMailFilterCondition::MinSize(size) => {
-                                state.terms.push(Filter::ge(
-                                    MessageField::Size.into(),
-                                    FieldValue::LongInteger(size as u64),
-                                ));
-                            }
-                            JMAPMailFilterCondition::MaxSize(size) => {
-                                state.terms.push(Filter::le(
-                                    MessageField::Size.into(),
-                                    FieldValue::LongInteger(size as u64),
-                                ));
-                            }
-                            JMAPMailFilterCondition::HasAttachment(has_attachment) => {
-                                let filter: Filter<Self::Set> = Filter::eq(
-                                    MessageField::Attachment.into(),
-                                    FieldValue::Tag(Tag::Static(0)),
-                                );
-                                state.terms.push(if !has_attachment {
-                                    Filter::not(vec![filter])
-                                } else {
-                                    filter
-                                });
-                            }
-                            JMAPMailFilterCondition::From(from) => {
-                                state.terms.push(Filter::eq(
-                                    HeaderName::From.into(),
-                                    FieldValue::Text(from),
-                                ));
-                            }
-                            JMAPMailFilterCondition::To(to) => {
-                                state
-                                    .terms
-                                    .push(Filter::eq(HeaderName::To.into(), FieldValue::Text(to)));
-                            }
-                            JMAPMailFilterCondition::Cc(cc) => {
-                                state
-                                    .terms
-                                    .push(Filter::eq(HeaderName::Cc.into(), FieldValue::Text(cc)));
-                            }
-                            JMAPMailFilterCondition::Bcc(bcc) => {
-                                state.terms.push(Filter::eq(
-                                    HeaderName::Bcc.into(),
-                                    FieldValue::Text(bcc),
-                                ));
-                            }
-                            JMAPMailFilterCondition::Subject(subject) => {
-                                state.terms.push(Filter::eq(
-                                    HeaderName::Subject.into(),
-                                    FieldValue::FullText(TextQuery::query(
-                                        subject,
-                                        Language::English,
-                                    )),
-                                ));
-                            }
-                            JMAPMailFilterCondition::Body(body) => {
-                                state.terms.push(Filter::eq(
-                                    MessageField::Body.into(),
-                                    FieldValue::FullText(TextQuery::query(body, Language::English)),
-                                ));
-                            }
-                            JMAPMailFilterCondition::Text(text) => {
-                                state.terms.push(Filter::or(vec![
-                                    Filter::eq(
+                                JMAPMailFilterCondition::Before(timestamp) => {
+                                    state.terms.push(Filter::lt(
+                                        MessageField::ReceivedAt.into(),
+                                        FieldValue::LongInteger(timestamp),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::After(timestamp) => {
+                                    state.terms.push(Filter::gt(
+                                        MessageField::ReceivedAt.into(),
+                                        FieldValue::LongInteger(timestamp),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::MinSize(size) => {
+                                    state.terms.push(Filter::ge(
+                                        MessageField::Size.into(),
+                                        FieldValue::LongInteger(size as u64),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::MaxSize(size) => {
+                                    state.terms.push(Filter::le(
+                                        MessageField::Size.into(),
+                                        FieldValue::LongInteger(size as u64),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::HasAttachment(has_attachment) => {
+                                    let filter: Filter<Self::Set> = Filter::eq(
+                                        MessageField::Attachment.into(),
+                                        FieldValue::Tag(Tag::Static(0)),
+                                    );
+                                    state.terms.push(if !has_attachment {
+                                        Filter::not(vec![filter])
+                                    } else {
+                                        filter
+                                    });
+                                }
+                                JMAPMailFilterCondition::From(from) => {
+                                    state.terms.push(Filter::eq(
                                         HeaderName::From.into(),
-                                        FieldValue::Text(text.clone()),
-                                    ),
-                                    Filter::eq(
+                                        FieldValue::Text(from),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::To(to) => {
+                                    state.terms.push(Filter::eq(
                                         HeaderName::To.into(),
-                                        FieldValue::Text(text.clone()),
-                                    ),
-                                    Filter::eq(
+                                        FieldValue::Text(to),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::Cc(cc) => {
+                                    state.terms.push(Filter::eq(
                                         HeaderName::Cc.into(),
-                                        FieldValue::Text(text.clone()),
-                                    ),
-                                    Filter::eq(
+                                        FieldValue::Text(cc),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::Bcc(bcc) => {
+                                    state.terms.push(Filter::eq(
                                         HeaderName::Bcc.into(),
-                                        FieldValue::Text(text.clone()),
-                                    ),
-                                    Filter::eq(
+                                        FieldValue::Text(bcc),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::Subject(subject) => {
+                                    state.terms.push(Filter::eq(
                                         HeaderName::Subject.into(),
                                         FieldValue::FullText(TextQuery::query(
-                                            text.clone(),
+                                            subject,
                                             Language::English,
                                         )),
-                                    ),
-                                    Filter::eq(
+                                    ));
+                                }
+                                JMAPMailFilterCondition::Body(body) => {
+                                    state.terms.push(Filter::eq(
                                         MessageField::Body.into(),
                                         FieldValue::FullText(TextQuery::query(
-                                            text.clone(),
-                                            Language::English, //TODO detect language
+                                            body,
+                                            Language::English,
                                         )),
-                                    ),
-                                ]));
-                            }
-                            JMAPMailFilterCondition::Header((header, value)) => {
-                                // TODO special case for message references
-                                // TODO implement empty header matching
-                                state.terms.push(Filter::eq(
-                                    header.into(),
-                                    FieldValue::Text(value.unwrap_or_else(|| "".into())),
-                                ));
-                            }
-                            JMAPMailFilterCondition::HasKeyword(keyword) => {
-                                // TODO text to id conversion
-                                state.terms.push(Filter::eq(
-                                    MessageField::Keyword.into(),
-                                    FieldValue::Tag(Tag::Text(keyword)),
-                                ));
-                                if is_immutable {
-                                    is_immutable = false;
+                                    ));
+                                }
+                                JMAPMailFilterCondition::Text(text) => {
+                                    state.terms.push(Filter::or(vec![
+                                        Filter::eq(
+                                            HeaderName::From.into(),
+                                            FieldValue::Text(text.clone()),
+                                        ),
+                                        Filter::eq(
+                                            HeaderName::To.into(),
+                                            FieldValue::Text(text.clone()),
+                                        ),
+                                        Filter::eq(
+                                            HeaderName::Cc.into(),
+                                            FieldValue::Text(text.clone()),
+                                        ),
+                                        Filter::eq(
+                                            HeaderName::Bcc.into(),
+                                            FieldValue::Text(text.clone()),
+                                        ),
+                                        Filter::eq(
+                                            HeaderName::Subject.into(),
+                                            FieldValue::FullText(TextQuery::query(
+                                                text.clone(),
+                                                Language::English,
+                                            )),
+                                        ),
+                                        Filter::eq(
+                                            MessageField::Body.into(),
+                                            FieldValue::FullText(TextQuery::query(
+                                                text.clone(),
+                                                Language::English, //TODO detect language
+                                            )),
+                                        ),
+                                    ]));
+                                }
+                                JMAPMailFilterCondition::Header((header, value)) => {
+                                    // TODO special case for message references
+                                    // TODO implement empty header matching
+                                    state.terms.push(Filter::eq(
+                                        header.into(),
+                                        FieldValue::Text(value.unwrap_or_else(|| "".into())),
+                                    ));
+                                }
+                                JMAPMailFilterCondition::HasKeyword(keyword) => {
+                                    // TODO text to id conversion
+                                    state.terms.push(Filter::eq(
+                                        MessageField::Keyword.into(),
+                                        FieldValue::Tag(Tag::Text(keyword)),
+                                    ));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
+                                }
+                                JMAPMailFilterCondition::NotKeyword(keyword) => {
+                                    state.terms.push(Filter::not(vec![Filter::eq(
+                                        MessageField::Keyword.into(),
+                                        FieldValue::Tag(Tag::Text(keyword)),
+                                    )]));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
+                                }
+                                JMAPMailFilterCondition::AllInThreadHaveKeyword(keyword) => {
+                                    state.terms.push(Filter::DocumentSet(
+                                        self.get_thread_keywords(query.account_id, keyword, true)?,
+                                    ));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
+                                }
+                                JMAPMailFilterCondition::SomeInThreadHaveKeyword(keyword) => {
+                                    state.terms.push(Filter::DocumentSet(
+                                        self.get_thread_keywords(query.account_id, keyword, false)?,
+                                    ));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
+                                }
+                                JMAPMailFilterCondition::NoneInThreadHaveKeyword(keyword) => {
+                                    state.terms.push(Filter::not(vec![Filter::DocumentSet(
+                                        self.get_thread_keywords(query.account_id, keyword, false)?,
+                                    )]));
+                                    if is_immutable {
+                                        is_immutable = false;
+                                    }
                                 }
                             }
-                            JMAPMailFilterCondition::NotKeyword(keyword) => {
-                                state.terms.push(Filter::not(vec![Filter::eq(
-                                    MessageField::Keyword.into(),
-                                    FieldValue::Tag(Tag::Text(keyword)),
-                                )]));
-                                if is_immutable {
-                                    is_immutable = false;
-                                }
-                            }
-                            JMAPMailFilterCondition::AllInThreadHaveKeyword(keyword) => {
-                                state.terms.push(Filter::DocumentSet(get_thread_keywords(
-                                    self.get_store(),
-                                    query.account_id,
-                                    keyword,
-                                    true,
-                                )?));
-                                if is_immutable {
-                                    is_immutable = false;
-                                }
-                            }
-                            JMAPMailFilterCondition::SomeInThreadHaveKeyword(keyword) => {
-                                state.terms.push(Filter::DocumentSet(get_thread_keywords(
-                                    self.get_store(),
-                                    query.account_id,
-                                    keyword,
-                                    false,
-                                )?));
-                                if is_immutable {
-                                    is_immutable = false;
-                                }
-                            }
-                            JMAPMailFilterCondition::NoneInThreadHaveKeyword(keyword) => {
-                                state.terms.push(Filter::not(vec![Filter::DocumentSet(
-                                    get_thread_keywords(
-                                        self.get_store(),
-                                        query.account_id,
-                                        keyword,
-                                        false,
-                                    )?,
-                                )]));
-                                if is_immutable {
-                                    is_immutable = false;
-                                }
-                            }
-                        },
+                        }
                         JMAPFilter::Operator(op) => {
                             let new_state = QueryState {
                                 op: op.operator,
@@ -360,14 +351,13 @@ where
                         }
                         Comparator::DocumentSet(DocumentSetComparator {
                             set: self
-                                .store
                                 .get_tag(
                                     query.account_id,
                                     JMAP_MAIL,
                                     MessageField::Keyword.into(),
                                     Tag::Text(keyword),
                                 )?
-                                .unwrap_or_else(Self::Set::new),
+                                .unwrap_or_else(DocumentSet::new),
                             ascending: comp.is_ascending,
                         })
                     }
@@ -376,12 +366,7 @@ where
                             is_immutable = false;
                         }
                         Comparator::DocumentSet(DocumentSetComparator {
-                            set: get_thread_keywords(
-                                self.get_store(),
-                                query.account_id,
-                                keyword,
-                                true,
-                            )?,
+                            set: self.get_thread_keywords(query.account_id, keyword, true)?,
                             ascending: comp.is_ascending,
                         })
                     }
@@ -390,12 +375,7 @@ where
                             is_immutable = false;
                         }
                         Comparator::DocumentSet(DocumentSetComparator {
-                            set: get_thread_keywords(
-                                self.get_store(),
-                                query.account_id,
-                                keyword,
-                                false,
-                            )?,
+                            set: self.get_thread_keywords(query.account_id, keyword, false)?,
                             ascending: comp.is_ascending,
                         })
                     }
@@ -406,9 +386,7 @@ where
             Comparator::None
         };
 
-        let doc_ids = self
-            .store
-            .query(query.account_id, JMAP_MAIL, filter, sort)?;
+        let doc_ids = self.query(query.account_id, JMAP_MAIL, filter, sort)?;
         let query_state = self.get_state(query.account_id, JMAP_MAIL)?;
         let num_results = doc_ids.len();
 
@@ -424,12 +402,11 @@ where
             let mut seen_threads = HashSet::with_capacity(results_len);
 
             for doc_id in doc_ids {
-                if let Some(thread_id) = self.store.get_document_value::<ThreadId>(
+                if let Some(thread_id) = self.get_document_value::<ThreadId>(
                     query.account_id,
                     JMAP_MAIL,
                     doc_id,
                     MessageField::ThreadId.into(),
-                    0,
                 )? {
                     if collapse_threads {
                         if seen_threads.contains(&thread_id) {
@@ -538,17 +515,16 @@ where
                 doc_ids.collect::<Vec<DocumentId>>()
             };
 
-            self.store
-                .get_multi_document_value(
-                    query.account_id,
-                    JMAP_MAIL,
-                    doc_ids.iter().copied(),
-                    MessageField::ThreadId.into(),
-                )?
-                .into_iter()
-                .zip(doc_ids.into_iter())
-                .filter_map(|(thread_id, doc_id)| JMAPId::from_email(thread_id?, doc_id).into())
-                .collect()
+            self.get_multi_document_value(
+                query.account_id,
+                JMAP_MAIL,
+                doc_ids.iter().copied(),
+                MessageField::ThreadId.into(),
+            )?
+            .into_iter()
+            .zip(doc_ids.into_iter())
+            .filter_map(|(thread_id, doc_id)| JMAPId::from_email(thread_id?, doc_id).into())
+            .collect()
         };
 
         Ok(JMAPQueryResponse {
@@ -558,43 +534,37 @@ where
             is_immutable,
         })
     }
-}
 
-fn get_thread_keywords<'x, T>(
-    store: &T,
-    account: AccountId,
-    keyword: Cow<'x, str>,
-    match_all: bool,
-) -> store::Result<T::Set>
-where
-    T: Store<'x>,
-{
-    if let Some(tagged_doc_ids) = store.get_tag(
-        account,
-        JMAP_MAIL,
-        MessageField::Keyword.into(),
-        Tag::Text(keyword),
-    )? {
-        let mut not_matched_ids = T::Set::new();
-        let mut matched_ids = T::Set::new();
+    fn get_thread_keywords(
+        &self,
+        account: AccountId,
+        keyword: Cow<'x, str>,
+        match_all: bool,
+    ) -> store::Result<Self::Set> {
+        if let Some(tagged_doc_ids) = self.get_tag(
+            account,
+            JMAP_MAIL,
+            MessageField::Keyword.into(),
+            Tag::Text(keyword),
+        )? {
+            let mut not_matched_ids = Self::Set::new();
+            let mut matched_ids = Self::Set::new();
 
-        for tagged_doc_id in tagged_doc_ids.clone().into_iter() {
-            if matched_ids.contains(tagged_doc_id) || not_matched_ids.contains(tagged_doc_id) {
-                continue;
-            }
+            for tagged_doc_id in tagged_doc_ids.clone().into_iter() {
+                if matched_ids.contains(tagged_doc_id) || not_matched_ids.contains(tagged_doc_id) {
+                    continue;
+                }
 
-            if let Some(thread_doc_ids) = store.get_tag(
-                account,
-                JMAP_MAIL,
-                MessageField::ThreadId.into(),
-                Tag::Id(
-                    store
-                        .get_document_value(
+                if let Some(thread_doc_ids) = self.get_tag(
+                    account,
+                    JMAP_MAIL,
+                    MessageField::ThreadId.into(),
+                    Tag::Id(
+                        self.get_document_value(
                             account,
                             JMAP_MAIL,
                             tagged_doc_id,
                             MessageField::ThreadId.into(),
-                            0,
                         )?
                         .ok_or_else(|| {
                             StoreError::InternalError(format!(
@@ -602,22 +572,100 @@ where
                                 tagged_doc_id
                             ))
                         })?,
-                ),
-            )? {
-                let mut thread_tag_intersection = thread_doc_ids.clone();
-                thread_tag_intersection.intersection(&tagged_doc_ids);
+                    ),
+                )? {
+                    let mut thread_tag_intersection = thread_doc_ids.clone();
+                    thread_tag_intersection.intersection(&tagged_doc_ids);
 
-                if (match_all && thread_tag_intersection == thread_doc_ids)
-                    || (!match_all && !thread_tag_intersection.is_empty())
-                {
-                    matched_ids.union(&thread_doc_ids);
-                } else if !thread_tag_intersection.is_empty() {
-                    not_matched_ids.union(&thread_tag_intersection);
+                    if (match_all && thread_tag_intersection == thread_doc_ids)
+                        || (!match_all && !thread_tag_intersection.is_empty())
+                    {
+                        matched_ids.union(&thread_doc_ids);
+                    } else if !thread_tag_intersection.is_empty() {
+                        not_matched_ids.union(&thread_tag_intersection);
+                    }
                 }
             }
+            Ok(matched_ids)
+        } else {
+            Ok(Self::Set::new())
         }
-        Ok(matched_ids)
-    } else {
-        Ok(T::Set::new())
+    }
+
+    fn mail_query_changes(
+        &'x self,
+        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
+        collapse_threads: bool,
+    ) -> jmap_store::Result<JMAPQueryChangesResponse> {
+        let changes = self.get_jmap_changes(
+            query.account_id,
+            JMAP_MAIL,
+            query.since_query_state,
+            query.max_changes,
+        )?;
+
+        let mut removed;
+        let mut added;
+
+        let total = if changes.total_changes > 0 || query.calculate_total {
+            let query_results = self.mail_query(
+                JMAPQuery {
+                    account_id: query.account_id,
+                    filter: query.filter,
+                    sort: query.sort,
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 0,
+                    calculate_total: true,
+                },
+                collapse_threads,
+            )?;
+
+            removed = Vec::with_capacity(changes.total_changes);
+            added = Vec::with_capacity(changes.total_changes);
+
+            if changes.total_changes > 0 {
+                if !query_results.is_immutable {
+                    for updated_id in &changes.updated {
+                        removed.push(*updated_id);
+                    }
+                    for (index, id) in query_results.ids.into_iter().enumerate() {
+                        if changes.created.contains(&id) || changes.updated.contains(&id) {
+                            added.push(JMAPQueryChangesResponseItem { id, index });
+                        }
+                    }
+                } else {
+                    for (index, id) in query_results.ids.into_iter().enumerate() {
+                        //TODO test up to id properly
+                        if let Some(up_to_id) = &query.up_to_id {
+                            if &id == up_to_id {
+                                break;
+                            }
+                        }
+                        if changes.created.contains(&id) {
+                            added.push(JMAPQueryChangesResponseItem { id, index });
+                        }
+                    }
+                }
+                for deleted_id in changes.destroyed {
+                    removed.push(deleted_id);
+                }
+            }
+
+            query_results.total
+        } else {
+            removed = Vec::new();
+            added = Vec::new();
+            0
+        };
+
+        Ok(JMAPQueryChangesResponse {
+            old_query_state: changes.old_state,
+            new_query_state: changes.new_state,
+            total,
+            removed,
+            added,
+        })
     }
 }

@@ -1,15 +1,12 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, sync::atomic::Ordering};
 
-use rocksdb::{DBWithThreadMode, MultiThreaded};
 use store::{
     field::TokenIterator,
     term_index::{MatchTerm, Term},
     StoreError, TermId,
 };
 
-use crate::RocksDBStore;
-
-const LAST_TERM_KEY: &[u8; 1] = &[0];
+use crate::{get_last_id, RocksDBStore, LAST_TERM_ID_KEY};
 
 #[derive(Debug, Default)]
 pub struct TermLock {
@@ -80,6 +77,7 @@ impl RocksDBStore {
 
     pub fn get_terms(&self, tokens: TokenIterator) -> crate::Result<Vec<Term>> {
         let cf_terms = self.get_handle("terms")?;
+        let cf_values = self.get_handle("values")?;
 
         let mut result = Vec::with_capacity(10);
         let mut query = Vec::with_capacity(10);
@@ -138,14 +136,11 @@ impl RocksDBStore {
                 }
                 term_id
             } else if term_lock.term_id == 0 {
-                let term_id = {
-                    let mut last_term = self.term_id_last.lock().unwrap();
-                    *last_term += 1;
-                    self.db
-                        .put_cf(&cf_terms, LAST_TERM_KEY, (*last_term).to_le_bytes())
-                        .map_err(|e| StoreError::InternalError(e.to_string()))?;
-                    *last_term
-                };
+                let term_id = self.term_id_last.fetch_add(1, Ordering::Relaxed);
+                //TODO on unclean exists retrieve last id manually
+                self.db
+                    .merge_cf(&cf_values, LAST_TERM_ID_KEY, (1u64).to_le_bytes())
+                    .map_err(|e| StoreError::InternalError(e.to_string()))?;
                 self.db
                     .put_cf(&cf_terms, word.as_bytes(), term_id.to_le_bytes())
                     .map_err(|e| StoreError::InternalError(e.to_string()))?;
@@ -173,20 +168,8 @@ impl RocksDBStore {
     }
 
     pub fn get_last_term_id(&self) -> crate::Result<TermId> {
-        get_last_term_id(&self.db)
+        get_last_id(&self.db, LAST_TERM_ID_KEY)
     }
-}
-
-pub fn get_last_term_id(db: &DBWithThreadMode<MultiThreaded>) -> crate::Result<TermId> {
-    Ok(db
-        .get_cf(
-            &db.cf_handle("terms")
-                .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?,
-            LAST_TERM_KEY,
-        )
-        .map_err(|e| StoreError::InternalError(e.into_string()))?
-        .map(|v| TermId::from_le_bytes(v.try_into().unwrap()))
-        .unwrap_or(0))
 }
 
 #[cfg(test)]

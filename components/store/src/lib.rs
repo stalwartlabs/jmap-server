@@ -6,7 +6,7 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use std::{borrow::Cow, iter::FromIterator};
+use std::{borrow::Cow, iter::FromIterator, sync::MutexGuard};
 
 use batch::DocumentWriter;
 use nlp::Language;
@@ -31,7 +31,7 @@ pub type CollectionId = u8;
 pub type DocumentId = u32;
 pub type ThreadId = u32;
 pub type FieldId = u8;
-pub type FieldNumber = u16;
+pub type BlobId = usize;
 pub type TagId = u8;
 pub type Integer = u32;
 pub type LongInteger = u64;
@@ -261,11 +261,27 @@ pub trait StoreUpdate {
         last_assigned_id: Option<Self::UncommittedId>,
     ) -> crate::Result<Self::UncommittedId>;
 
-    fn update_document(&self, document: DocumentWriter<Self::UncommittedId>) -> crate::Result<()> {
-        self.update_documents(vec![document])
+    fn update_document(
+        &self,
+        account: AccountId,
+        document: DocumentWriter<Self::UncommittedId>,
+        lock_collection: Option<CollectionId>,
+    ) -> crate::Result<()> {
+        self.update_documents(account, vec![document], lock_collection)
     }
 
-    fn update_documents(&self, documents: Vec<DocumentWriter<Self::UncommittedId>>) -> Result<()>;
+    fn update_documents(
+        &self,
+        account: AccountId,
+        documents: Vec<DocumentWriter<Self::UncommittedId>>,
+        lock_collection: Option<CollectionId>,
+    ) -> Result<()>;
+
+    fn lock_collection(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> Result<MutexGuard<usize>>;
 }
 
 pub trait StoreQuery<'x>: StoreDocumentSet {
@@ -296,7 +312,6 @@ pub trait StoreGet {
         collection: CollectionId,
         document: DocumentId,
         field: FieldId,
-        field_num: FieldNumber,
     ) -> Result<Option<T>>
     where
         T: StoreDeserialize;
@@ -310,6 +325,14 @@ pub trait StoreGet {
     ) -> Result<Vec<Option<T>>>
     where
         T: StoreDeserialize;
+
+    fn get_document_blob(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        blob: BlobId,
+    ) -> Result<Option<Vec<u8>>>;
 }
 
 pub trait StoreDocumentSet {
@@ -349,20 +372,6 @@ pub trait StoreTag: StoreDocumentSet {
 }
 
 pub trait StoreDelete {
-    fn delete_document(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-    ) -> Result<()> {
-        self.delete_document_bulk(account, collection, &[document])
-    }
-    fn delete_document_bulk(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        documents: &[DocumentId],
-    ) -> Result<()>;
     fn delete_account(&self, account: AccountId) -> Result<()>;
     fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
 }

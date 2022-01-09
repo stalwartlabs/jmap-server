@@ -4,18 +4,20 @@ use std::collections::HashMap;
 use jmap_store::json::JSONValue;
 use jmap_store::JMAPIdSerialize;
 use jmap_store::{
-    json::JSONPointer, local_store::JMAPLocalStore, JMAPError, JMAPId, JMAPSet, JMAPSetError,
-    JMAPSetErrorType, JMAPSetResponse, JMAP_MAIL, JMAP_MAILBOX,
+    json::JSONPointer, JMAPError, JMAPId, JMAPSet, JMAPSetError, JMAPSetErrorType, JMAPSetResponse,
+    JMAP_MAIL, JMAP_MAILBOX,
 };
+use store::field::FieldOptions;
 use store::{
     batch::{DocumentWriter, LogAction},
-    DocumentSet, Store,
+    DocumentSet,
 };
 use store::{Tag, UncommittedDocumentId};
 
+use crate::changes::JMAPMailLocalStoreChanges;
 use crate::import::{bincode_deserialize, bincode_serialize};
 use crate::query::MailboxId;
-use crate::{JMAPMailIdImpl, JMAPMailProperties, JMAPMailStoreSet, MessageField};
+use crate::{JMAPMailIdImpl, JMAPMailProperties, MessageField};
 
 //TODO make configurable
 pub const MAX_CHANGES: usize = 100;
@@ -35,10 +37,7 @@ where
     Ok(JSONValue::Null)
 }
 
-impl<'x, T> JMAPMailStoreSet<'x> for JMAPLocalStore<T>
-where
-    T: Store<'x>,
-{
+pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
     fn mail_set(
         &self,
         request: JMAPSet<'x, JMAPMailProperties<'x>>,
@@ -62,7 +61,7 @@ where
             old_state,
             ..Default::default()
         };
-        let document_ids = self.store.get_document_ids(request.account_id, JMAP_MAIL)?;
+        let document_ids = self.get_document_ids(request.account_id, JMAP_MAIL)?;
         let mut mailbox_ids = None;
 
         if let Some(create) = request.create {
@@ -71,18 +70,16 @@ where
             let mut last_assigned_id = None;
 
             for (create_id, message_fields) in create {
-                let document_id = self.store.assign_document_id(
+                let document_id = self.assign_document_id(
                     request.account_id,
                     JMAP_MAIL,
                     last_assigned_id.clone(),
                 )?;
-                let mut document =
-                    DocumentWriter::insert(request.account_id, JMAP_MAIL, document_id.clone());
+                let mut document = DocumentWriter::insert(JMAP_MAIL, document_id.clone());
                 let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
                     mailbox_ids
                 } else {
                     mailbox_ids = self
-                        .store
                         .get_document_ids(request.account_id, JMAP_MAILBOX)?
                         .into();
                     mailbox_ids.as_ref().unwrap()
@@ -125,23 +122,19 @@ where
                         continue;
                     }
                 }
-                let mut document =
-                    DocumentWriter::update(request.account_id, JMAP_MAIL, document_id);
+                let mut document = DocumentWriter::update(JMAP_MAIL, document_id);
                 let mut invalid_properties = Vec::new();
 
                 for (field, value) in properties {
                     match field {
                         JSONPointer::Property(JMAPMailProperties::Keywords) => {
                             if let JSONValue::Object(value) = value {
-                                if let Some(current_keywords) =
-                                    self.store.get_document_value::<Vec<u8>>(
-                                        request.account_id,
-                                        JMAP_MAIL,
-                                        document_id,
-                                        MessageField::Keyword.into(),
-                                        0,
-                                    )?
-                                {
+                                if let Some(current_keywords) = self.get_document_value::<Vec<u8>>(
+                                    request.account_id,
+                                    JMAP_MAIL,
+                                    document_id,
+                                    MessageField::Keyword.into(),
+                                )? {
                                     for tag in bincode_deserialize::<Vec<Tag>>(&current_keywords)? {
                                         document.clear_tag(MessageField::Keyword.into(), tag);
                                     }
@@ -154,8 +147,8 @@ where
                                 }
                                 document.add_blob(
                                     MessageField::Keyword.into(),
-                                    0,
                                     bincode_serialize(&new_keywords)?.into(),
+                                    FieldOptions::Store,
                                 );
                             } else {
                                 invalid_properties.push("keywords".to_string());
@@ -163,13 +156,12 @@ where
                         }
                         JSONPointer::Property(JMAPMailProperties::MailboxIds) => {
                             if let JSONValue::Object(value) = value {
-                                if let Some(current_mailboxes) =
-                                    self.store.get_document_value::<Vec<u8>>(
+                                if let Some(current_mailboxes) = self
+                                    .get_document_value::<Vec<u8>>(
                                         request.account_id,
                                         JMAP_MAIL,
                                         document_id,
                                         MessageField::Keyword.into(),
-                                        0,
                                     )?
                                 {
                                     for mailbox_id in
@@ -190,7 +182,6 @@ where
                                             mailbox_ids
                                         } else {
                                             mailbox_ids = self
-                                                .store
                                                 .get_document_ids(request.account_id, JMAP_MAILBOX)?
                                                 .into();
                                             mailbox_ids.as_ref().unwrap()
@@ -243,7 +234,6 @@ where
                                             mailbox_ids
                                         } else {
                                             mailbox_ids = self
-                                                .store
                                                 .get_document_ids(request.account_id, JMAP_MAILBOX)?
                                                 .into();
                                             mailbox_ids.as_ref().unwrap()
@@ -322,7 +312,7 @@ where
                 let document_id = destroy_id.get_document_id();
                 if document_ids.contains(document_id) {
                     changes.push(
-                        DocumentWriter::delete(request.account_id, JMAP_MAIL, document_id)
+                        DocumentWriter::delete(JMAP_MAIL, document_id)
                             .log(LogAction::Delete(destroy_id)),
                     );
                     destroyed.push(destroy_id);
@@ -348,7 +338,7 @@ where
         }
 
         if !changes.is_empty() {
-            self.store.update_documents(changes)?;
+            self.update_documents(request.account_id, changes, JMAP_MAIL.into())?;
             response.new_state = self.get_state(request.account_id, JMAP_MAIL)?;
         } else {
             response.new_state = response.old_state.clone();
