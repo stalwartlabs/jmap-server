@@ -2,6 +2,7 @@ use std::{io::Read, path::PathBuf};
 
 use flate2::read::GzDecoder;
 
+pub mod blobs;
 pub mod insert_filter_sort;
 pub mod jmap_changes;
 pub mod jmap_mail_merge_threads;

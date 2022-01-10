@@ -8,13 +8,14 @@ use nlp::{
 };
 
 use crate::{
-    batch::MAX_TOKEN_LENGTH, BlobId, DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
+    batch::MAX_TOKEN_LENGTH, BlobIndex, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
+    TagId,
 };
 
 #[derive(Debug)]
 pub enum UpdateField<'x> {
     Text(Field<Text<'x>>),
-    Blob(Field<Cow<'x, [u8]>>),
+    Binary(Field<Cow<'x, [u8]>>),
     Integer(Field<Integer>),
     LongInteger(Field<LongInteger>),
     TagSet(Field<Tag<'x>>),
@@ -26,7 +27,7 @@ impl<'x> UpdateField<'x> {
     pub fn len(&'x self) -> usize {
         match self {
             UpdateField::Text(t) => t.value.len(),
-            UpdateField::Blob(b) => b.value.len(),
+            UpdateField::Binary(b) => b.value.len(),
             UpdateField::Integer(i) => i.size_of(),
             UpdateField::LongInteger(li) => li.size_of(),
             UpdateField::TagSet(t) => t.value.len(),
@@ -42,7 +43,7 @@ impl<'x> UpdateField<'x> {
     pub fn get_field(&self) -> &FieldId {
         match self {
             UpdateField::Text(t) => &t.field,
-            UpdateField::Blob(b) => &b.field,
+            UpdateField::Binary(b) => &b.field,
             UpdateField::Integer(i) => &i.field,
             UpdateField::LongInteger(li) => &li.field,
             UpdateField::TagSet(t) => &t.field,
@@ -77,7 +78,7 @@ pub enum FieldOptions {
     Store,
     Sort,
     StoreAndSort,
-    BlobStore(BlobId),
+    StoreAsBlob(BlobIndex),
 }
 
 impl<T> Field<T> {
@@ -97,9 +98,9 @@ impl<T> Field<T> {
         self.options
     }
 
-    pub fn get_blob_id(&self) -> Option<BlobId> {
+    pub fn get_blob_index(&self) -> Option<BlobIndex> {
         match self.options {
-            FieldOptions::BlobStore(id) => Some(id),
+            FieldOptions::StoreAsBlob(idx) => Some(idx),
             _ => None,
         }
     }

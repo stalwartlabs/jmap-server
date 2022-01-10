@@ -13,7 +13,7 @@ use mail_parser::{
     },
     HeaderName, HeaderOffsetName, HeaderValue,
 };
-use store::{DocumentId, Store};
+use store::{BlobEntry, DocumentId, Store};
 
 use crate::{
     changes::JMAPMailLocalStoreChanges,
@@ -26,9 +26,6 @@ use crate::{
     JMAPMailProperties, JMAPMailStoreGetArguments, MessageField, MessageRawHeaders,
     MESSAGE_HEADERS, MESSAGE_HEADERS_RAW,
 };
-
-//TODO make parameter configurable
-const MAX_RESULTS: usize = 100;
 
 pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
     fn mail_get(
@@ -196,7 +193,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
         }
 
         let request_ids = if let Some(request_ids) = request.ids {
-            if request_ids.len() > MAX_RESULTS {
+            if request_ids.len() > self.get_config().jmap_mail_options.get_max_results {
                 return Err(JMAPError::RequestTooLarge);
             } else {
                 request_ids
@@ -205,7 +202,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
             let document_ids = self
                 .get_document_ids(request.account_id, JMAP_MAIL)?
                 .into_iter()
-                .take(MAX_RESULTS)
+                .take(self.get_config().jmap_mail_options.get_max_results)
                 .collect::<Vec<DocumentId>>();
             if !document_ids.is_empty() {
                 self.get_multi_document_value(
@@ -232,17 +229,16 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
             let mut result = HashMap::new();
 
             if !rfc_headers.is_empty() {
-                let mut jmap_headers = if let Some(jmap_headers) = self.get_document_blob(
-                    request.account_id,
-                    JMAP_MAIL,
-                    jmap_id.get_document_id(),
-                    MESSAGE_HEADERS,
-                )? {
-                    bincode_deserialize::<JMAPMailHeaders>(&jmap_headers)?
-                } else {
-                    not_found.push(jmap_id);
-                    continue;
-                };
+                let mut jmap_headers = bincode_deserialize::<JMAPMailHeaders>(
+                    &self
+                        .get_document_blob_entry(
+                            request.account_id,
+                            JMAP_MAIL,
+                            jmap_id.get_document_id(),
+                            BlobEntry::new(MESSAGE_HEADERS),
+                        )?
+                        .value,
+                )?;
 
                 for rfc_header in &rfc_headers {
                     let value = match rfc_header {
@@ -328,17 +324,16 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
             }
 
             if !raw_headers.is_empty() {
-                let mut jmap_headers = if let Some(jmap_headers) = self.get_document_blob(
-                    request.account_id,
-                    JMAP_MAIL,
-                    jmap_id.get_document_id(),
-                    MESSAGE_HEADERS_RAW,
-                )? {
-                    bincode_deserialize::<MessageRawHeaders>(&jmap_headers)?
-                } else {
-                    not_found.push(jmap_id);
-                    continue;
-                };
+                let mut jmap_headers = bincode_deserialize::<MessageRawHeaders>(
+                    &self
+                        .get_document_blob_entry(
+                            request.account_id,
+                            JMAP_MAIL,
+                            jmap_id.get_document_id(),
+                            BlobEntry::new(MESSAGE_HEADERS_RAW),
+                        )?
+                        .value,
+                )?;
 
                 let header_bytes: Vec<u8> = Vec::new();
 

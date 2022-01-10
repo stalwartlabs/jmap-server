@@ -20,15 +20,15 @@ use mail_parser::{HeaderName, MessagePartId, RawHeaders};
 use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery};
 use serde::{Deserialize, Serialize};
 use set::JMAPMailLocalStoreSet;
-use store::{AccountId, BlobId, DocumentId, ThreadId};
+use store::{AccountId, BlobIndex, DocumentId, ThreadId};
 
-pub const MESSAGE_RAW: BlobId = 0;
-pub const MESSAGE_HEADERS: BlobId = 1;
-pub const MESSAGE_HEADERS_RAW: BlobId = 2;
-pub const MESSAGE_HEADERS_PARTS: BlobId = 3;
-pub const MESSAGE_STRUCTURE: BlobId = 4;
-pub const MESSAGE_METADATA: BlobId = 5;
-pub const MESSAGE_PARTS: BlobId = 6;
+pub const MESSAGE_RAW: BlobIndex = 0;
+pub const MESSAGE_HEADERS: BlobIndex = 1;
+pub const MESSAGE_HEADERS_RAW: BlobIndex = 2;
+pub const MESSAGE_HEADERS_PARTS: BlobIndex = 3;
+pub const MESSAGE_STRUCTURE: BlobIndex = 4;
+pub const MESSAGE_METADATA: BlobIndex = 5;
+pub const MESSAGE_PARTS: BlobIndex = 6;
 
 pub type JMAPMailHeaders<'x> = HashMap<HeaderName, JSONValue<'x, JMAPMailProperties<'x>>>;
 
@@ -153,7 +153,7 @@ impl<'x> Default for JMAPMailProperties<'x> {
 #[derive(Debug)]
 pub enum JMAPMailBodyProperties {
     PartId,
-    BlobId,
+    BlobIndex,
     Size,
     Name,
     Type,

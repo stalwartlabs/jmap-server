@@ -90,7 +90,7 @@ pub trait JMAPMailLocalStoreImport<'x>: Store<'x> {
         // Add mailbox tags
         if !message.mailbox_ids.is_empty() {
             //TODO validate mailbox ids
-            batch.add_blob(
+            batch.add_binary(
                 MessageField::Mailbox.into(),
                 bincode_serialize(&message.mailbox_ids)?.into(),
                 FieldOptions::Store,
@@ -102,7 +102,7 @@ pub trait JMAPMailLocalStoreImport<'x>: Store<'x> {
 
         // Add keyword tags
         if !message.keywords.is_empty() {
-            batch.add_blob(
+            batch.add_binary(
                 MessageField::Keyword.into(),
                 bincode_serialize(&message.keywords)?.into(),
                 FieldOptions::Store,

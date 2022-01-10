@@ -191,7 +191,7 @@ pub fn build_message_document<'x>(
                     if field == MessageField::Body {
                         let blob_id = total_parts;
                         total_parts += 1;
-                        FieldOptions::BlobStore(blob_id + MESSAGE_PARTS)
+                        FieldOptions::StoreAsBlob(blob_id + MESSAGE_PARTS)
                     } else {
                         FieldOptions::None
                     },
@@ -200,7 +200,7 @@ pub fn build_message_document<'x>(
                 document.add_text(
                     field.into(),
                     Text::Default(html.body),
-                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::Text(text) => {
@@ -213,7 +213,7 @@ pub fn build_message_document<'x>(
                     document.add_text(
                         MessageField::Body.into(),
                         Text::Default(text_to_html(text.body.as_ref()).into()),
-                        FieldOptions::BlobStore(total_parts + MESSAGE_PARTS),
+                        FieldOptions::StoreAsBlob(total_parts + MESSAGE_PARTS),
                     );
                     message_metadata.html_body[pos] = total_parts;
                     total_parts += 1;
@@ -228,7 +228,7 @@ pub fn build_message_document<'x>(
                 document.add_text(
                     field.into(),
                     Text::Full(FullText::new(text.body, &mut language_detector)),
-                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::Binary(binary) => {
@@ -236,18 +236,18 @@ pub fn build_message_document<'x>(
                     message_metadata.has_attachments = true;
                 }
                 part_headers.push(binary.headers);
-                document.add_blob(
+                document.add_binary(
                     MessageField::Attachment.into(),
                     binary.body,
-                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::InlineBinary(binary) => {
                 part_headers.push(binary.headers);
-                document.add_blob(
+                document.add_binary(
                     MessageField::Attachment.into(),
                     binary.body,
-                    FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
                 );
             }
             MessagePart::Message(nested_message) => {
@@ -258,20 +258,20 @@ pub fn build_message_document<'x>(
                 match nested_message.body {
                     MessageAttachment::Parsed(mut message) => {
                         parse_attached_message(document, &mut message, &mut language_detector);
-                        document.add_blob(
+                        document.add_binary(
                             MessageField::Attachment.into(),
                             message.raw_message,
-                            FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
+                            FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
                         );
                     }
                     MessageAttachment::Raw(raw_message) => {
                         if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
                             parse_attached_message(document, message, &mut language_detector)
                         }
-                        document.add_blob(
+                        document.add_binary(
                             MessageField::Attachment.into(),
                             raw_message,
-                            FieldOptions::BlobStore(part_id + MESSAGE_PARTS),
+                            FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
                         );
                     }
                 }
@@ -286,21 +286,21 @@ pub fn build_message_document<'x>(
         document.set_tag(MessageField::Attachment.into(), Tag::Id(0));
     }
 
-    document.add_blob(
+    document.add_binary(
         MessageField::Internal.into(),
         bincode::serialize(&jmap_headers)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
-        FieldOptions::BlobStore(MESSAGE_HEADERS),
+        FieldOptions::StoreAsBlob(MESSAGE_HEADERS),
     );
 
-    document.add_blob(
+    document.add_binary(
         MessageField::Internal.into(),
         message.raw_message,
-        FieldOptions::BlobStore(MESSAGE_RAW),
+        FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
 
-    document.add_blob(
+    document.add_binary(
         MessageField::Internal.into(),
         bincode::serialize(&MessageRawHeaders {
             size: message.offset_body,
@@ -308,31 +308,31 @@ pub fn build_message_document<'x>(
         })
         .map_err(|e| StoreError::SerializeError(e.to_string()))?
         .into(),
-        FieldOptions::BlobStore(MESSAGE_HEADERS_RAW),
+        FieldOptions::StoreAsBlob(MESSAGE_HEADERS_RAW),
     );
 
-    document.add_blob(
+    document.add_binary(
         MessageField::Internal.into(),
         bincode::serialize(&part_headers)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
-        FieldOptions::BlobStore(MESSAGE_HEADERS_PARTS),
+        FieldOptions::StoreAsBlob(MESSAGE_HEADERS_PARTS),
     );
 
-    document.add_blob(
+    document.add_binary(
         MessageField::Internal.into(),
         bincode::serialize(&message_metadata)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
-        FieldOptions::BlobStore(MESSAGE_METADATA),
+        FieldOptions::StoreAsBlob(MESSAGE_METADATA),
     );
 
-    document.add_blob(
+    document.add_binary(
         MessageField::Internal.into(),
         bincode::serialize(&message.structure)
             .map_err(|e| StoreError::SerializeError(e.to_string()))?
             .into(),
-        FieldOptions::BlobStore(MESSAGE_STRUCTURE),
+        FieldOptions::StoreAsBlob(MESSAGE_STRUCTURE),
     );
 
     if let Some(default_language) = language_detector.most_frequent_language() {

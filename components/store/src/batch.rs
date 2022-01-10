@@ -120,9 +120,9 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
             .push(UpdateField::Text(Field::new(field, value, options)));
     }
 
-    pub fn add_blob(&mut self, field: FieldId, value: Cow<'x, [u8]>, options: FieldOptions) {
+    pub fn add_binary(&mut self, field: FieldId, value: Cow<'x, [u8]>, options: FieldOptions) {
         self.fields
-            .push(UpdateField::Blob(Field::new(field, value, options)));
+            .push(UpdateField::Binary(Field::new(field, value, options)));
     }
 
     pub fn add_integer(&mut self, field: FieldId, value: Integer, options: FieldOptions) {

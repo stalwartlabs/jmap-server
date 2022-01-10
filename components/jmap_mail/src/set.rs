@@ -19,9 +19,6 @@ use crate::import::{bincode_deserialize, bincode_serialize};
 use crate::query::MailboxId;
 use crate::{JMAPMailIdImpl, JMAPMailProperties, MessageField};
 
-//TODO make configurable
-pub const MAX_CHANGES: usize = 100;
-
 fn build_message<'x, T>(
     document: &mut DocumentWriter<'x, T>,
     fields: HashMap<Cow<'x, str>, JSONValue<'x, JMAPMailProperties<'x>>>,
@@ -52,7 +49,7 @@ pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
         let total_changes = request.create.as_ref().map_or(0, |c| c.len())
             + request.update.as_ref().map_or(0, |c| c.len())
             + request.destroy.as_ref().map_or(0, |c| c.len());
-        if total_changes > MAX_CHANGES {
+        if total_changes > self.get_config().jmap_mail_options.set_max_changes {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -145,7 +142,7 @@ pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
                                         new_keywords.push(Tag::Text(keyword));
                                     }
                                 }
-                                document.add_blob(
+                                document.add_binary(
                                     MessageField::Keyword.into(),
                                     bincode_serialize(&new_keywords)?.into(),
                                     FieldOptions::Store,

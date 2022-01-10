@@ -6,11 +6,47 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use std::{borrow::Cow, iter::FromIterator, sync::MutexGuard};
+use std::{borrow::Cow, iter::FromIterator, ops::Range, sync::MutexGuard};
 
 use batch::DocumentWriter;
 use nlp::Language;
 use serialize::StoreDeserialize;
+
+pub struct JMAPMailConfig {
+    pub get_max_results: usize,
+    pub set_max_changes: usize,
+}
+
+impl JMAPMailConfig {
+    pub fn new() -> Self {
+        JMAPMailConfig {
+            get_max_results: 100,
+            set_max_changes: 100,
+        }
+    }
+}
+
+impl Default for JMAPMailConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct StoreConfig<T> {
+    pub default_language: Language,
+    pub db_options: T,
+    pub jmap_mail_options: JMAPMailConfig,
+}
+
+impl<T> StoreConfig<T> {
+    pub fn new(db_options: T) -> Self {
+        Self {
+            default_language: Language::English,
+            db_options,
+            jmap_mail_options: JMAPMailConfig::new(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -31,7 +67,7 @@ pub type CollectionId = u8;
 pub type DocumentId = u32;
 pub type ThreadId = u32;
 pub type FieldId = u8;
-pub type BlobId = usize;
+pub type BlobIndex = usize;
 pub type TagId = u8;
 pub type Integer = u32;
 pub type LongInteger = u64;
@@ -325,14 +361,52 @@ pub trait StoreGet {
     ) -> Result<Vec<Option<T>>>
     where
         T: StoreDeserialize;
+}
 
-    fn get_document_blob(
+pub struct BlobEntry<T> {
+    pub index: BlobIndex,
+    pub value: T,
+}
+
+impl BlobEntry<Option<Range<usize>>> {
+    pub fn new(index: BlobIndex) -> Self {
+        Self { index, value: None }
+    }
+    pub fn new_range(index: BlobIndex, range: Range<usize>) -> Self {
+        Self {
+            index,
+            value: range.into(),
+        }
+    }
+}
+
+pub trait StoreBlob {
+    fn get_document_blob_entry(
         &self,
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
-        blob: BlobId,
-    ) -> Result<Option<Vec<u8>>>;
+        entry: BlobEntry<Option<Range<usize>>>,
+    ) -> Result<BlobEntry<Vec<u8>>> {
+        Ok(self
+            .get_document_blob_entries(account, collection, document, &[entry])?
+            .pop()
+            .unwrap())
+    }
+
+    fn get_document_blob_entries(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        entries: &[BlobEntry<Option<Range<usize>>>],
+    ) -> Result<Vec<BlobEntry<Vec<u8>>>>;
+
+    fn purge_deleted_blobs(&self) -> Result<()>;
+}
+
+pub trait StoreBlobTest {
+    fn get_all_blobs(&self) -> Result<Vec<(std::path::PathBuf, i64)>>;
 }
 
 pub trait StoreDocumentSet {
@@ -437,8 +511,11 @@ pub trait Store<'x>:
     + StoreDelete
     + StoreTag
     + StoreChangeLog
+    + StoreBlob
     + Send
     + Sync
     + Sized
 {
+    type Config;
+    fn get_config(&self) -> &StoreConfig<Self::Config>;
 }

@@ -20,12 +20,15 @@ use store::{
         BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, CollectionId, DocumentId, StoreChangeLog, StoreError, StoreUpdate,
+    AccountId, CollectionId, DocumentId, Store, StoreChangeLog, StoreError, StoreUpdate,
 };
 
 use crate::{
-    bitmaps::set_clear_bits, blob::BlobFile, changelog::ChangeLogWriter,
-    document_id::AssignedDocumentId, RocksDBStore,
+    bitmaps::set_clear_bits,
+    blob::{deserialize_blob_entries, serialize_blob_key_from_value, BlobFile},
+    changelog::ChangeLogWriter,
+    document_id::AssignedDocumentId,
+    RocksDBStore,
 };
 
 impl StoreUpdate for RocksDBStore {
@@ -127,7 +130,12 @@ impl StoreUpdate for RocksDBStore {
                         .map_err(|e| StoreError::InternalError(e.into_string()))?
                     {
                         // Decrement blob count
-                        write_batch.merge_cf(&cf_values, &blob, (-1i64).to_le_bytes());
+                        write_batch.merge_cf(
+                            &cf_values,
+                            &serialize_blob_key_from_value(&blob)
+                                .ok_or(StoreError::DataCorruption)?,
+                            (-1i64).to_le_bytes(),
+                        );
                     }
 
                     // Add document id to tombstoned ids
@@ -367,12 +375,12 @@ impl RocksDBStore {
         for field in fields.iter() {
             match field {
                 UpdateField::Text(t) => {
-                    let (is_db_stored, is_sorted, blob_id) = match t.get_options() {
+                    let (is_stored, is_sorted, blob_index) = match t.get_options() {
                         FieldOptions::None => (false, false, None),
                         FieldOptions::Store => (true, false, None),
                         FieldOptions::Sort => (false, true, None),
                         FieldOptions::StoreAndSort => (true, true, None),
-                        FieldOptions::BlobStore(blob_id) => (false, false, Some(blob_id)),
+                        FieldOptions::StoreAsBlob(blob_index) => (false, false, Some(blob_index)),
                     };
 
                     let text = match &t.value {
@@ -440,16 +448,16 @@ impl RocksDBStore {
                                     }
                                 }
 
-                                term_index.add_item(t.get_field(), blob_id.unwrap_or(0), terms);
+                                term_index.add_item(t.get_field(), blob_index.unwrap_or(0), terms);
                             }
                             &ft.text
                         }
                     };
 
-                    if let Some(blob_id) = blob_id {
-                        blob_fields.push((blob_id, text.as_bytes()));
+                    if let Some(blob_index) = blob_index {
+                        blob_fields.push((blob_index, text.as_bytes()));
                     } else {
-                        if is_db_stored {
+                        if is_stored {
                             batch.put_cf(
                                 cf_values,
                                 serialize_stored_key(
@@ -499,9 +507,9 @@ impl RocksDBStore {
                         .or_insert_with(HashMap::new)
                         .insert(document_id, false);
                 }
-                UpdateField::Blob(b) => {
-                    if let FieldOptions::BlobStore(blob_id) = b.get_options() {
-                        blob_fields.push((blob_id, b.value.as_ref()));
+                UpdateField::Binary(b) => {
+                    if let FieldOptions::StoreAsBlob(blob_index) = b.get_options() {
+                        blob_fields.push((blob_index, b.value.as_ref()));
                     } else {
                         batch.put_cf(
                             cf_values,
@@ -591,32 +599,33 @@ impl RocksDBStore {
             );
         }
 
-        // Store external blob
+        // Store external blobs
         Ok(if !blob_fields.is_empty() {
             let mut hasher = Sha256::new();
             let mut blob_size = 0;
-            let mut blob_id_last = None;
-            let num_blobs = blob_fields.len() + 1;
-            let mut blob_index = Vec::with_capacity(num_blobs);
+            let mut blob_index_last = None;
+            let num_blobs = blob_fields.len();
+            let mut blob_entries = Vec::with_capacity(num_blobs);
 
-            blob_fields.sort_unstable_by_key(|(id, _)| *id);
+            blob_fields.sort_unstable_by_key(|(blob_index, _)| *blob_index);
 
-            for (blob_id, blob) in &blob_fields {
-                if let Some(blob_id_last) = blob_id_last {
-                    if blob_id_last + 1 != *blob_id {
+            for (blob_index, blob) in &blob_fields {
+                if let Some(blob_index_last) = blob_index_last {
+                    if blob_index_last + 1 != *blob_index {
                         return Err(StoreError::InternalError(
-                            "Blob IDs are not sequential".into(),
+                            "Blob indexes are not sequential".into(),
                         ));
                     }
-                } else if *blob_id != 0 {
-                    return Err(StoreError::InternalError("First Blob ID is not 0".into()));
+                } else if *blob_index != 0 {
+                    return Err(StoreError::InternalError(
+                        "First blob index is not 0".into(),
+                    ));
                 }
-                blob_id_last = Some(blob_id);
-                blob_index.push(blob_size);
+                blob_index_last = Some(blob_index);
                 blob_size += blob.len();
+                blob_entries.push(blob_size);
                 hasher.update(blob);
             }
-            blob_index.push(blob_size);
 
             // Create blob key
             let result = hasher.finalize();
@@ -643,12 +652,16 @@ impl RocksDBStore {
                 .map_err(|e| StoreError::InternalError(e.into_string()))?
                 .is_none()
             {
-                // TODO customize hash levels
-                let blob = BlobFile::new(self.blob_path.clone(), &blob_key, &[1], true)
-                    .map_err(|err| {
-                        StoreError::InternalError(format!("Failed to create blob file: {:?}", err))
-                    })?
-                    .needs_commit();
+                let blob = BlobFile::new(
+                    self.blob_path.clone(),
+                    &blob_key[BLOB_KEY.len()..],
+                    &self.get_config().db_options.hash_levels,
+                    true,
+                )
+                .map_err(|err| {
+                    StoreError::InternalError(format!("Failed to create blob file: {:?}", err))
+                })?
+                .needs_commit();
                 let mut blob_file = File::create(blob.get_path()).map_err(|err| {
                     StoreError::InternalError(format!(
                         "Failed to create blob file {:?}: {:?}",
@@ -675,7 +688,7 @@ impl RocksDBStore {
 
             // Store blob index
             blob_key.drain(0..BLOB_KEY.len());
-            blob_index
+            blob_entries
                 .into_iter()
                 .for_each(|pos| pos.to_leb128_bytes(&mut blob_key));
 

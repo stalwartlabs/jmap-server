@@ -1,8 +1,16 @@
+use std::convert::TryInto;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::ops::Range;
 use std::path::PathBuf;
 
+use rocksdb::{Direction, IteratorMode};
 use store::leb128::Leb128;
-use store::StoreError;
+use store::serialize::serialize_blob_key;
 use store::{leb128::skip_leb128_value, serialize::BLOB_KEY};
+use store::{AccountId, BlobEntry, CollectionId, DocumentId, StoreBlob, StoreBlobTest, StoreError};
+
+use crate::RocksDBStore;
 pub struct BlobFile {
     pub path: PathBuf,
     pub is_commited: bool,
@@ -78,7 +86,7 @@ impl Drop for BlobFile {
     }
 }
 
-pub struct BlobIndex {
+pub struct BlobEntries {
     pub file: BlobFile,
     pub index: Vec<usize>,
 }
@@ -90,11 +98,11 @@ pub fn serialize_blob_key_from_value(bytes: &[u8]) -> Option<Vec<u8>> {
     key.into()
 }
 
-pub fn deserialize_blob_index(
+pub fn deserialize_blob_entries(
     base_path: PathBuf,
     hash_levels: &[usize],
     bytes: &[u8],
-) -> store::Result<BlobIndex> {
+) -> store::Result<BlobEntries> {
     let (mut num_entries, bytes_read) =
         usize::from_leb128_bytes(bytes.get(32..).ok_or(StoreError::DataCorruption)?)
             .ok_or(StoreError::DataCorruption)?;
@@ -102,12 +110,15 @@ pub fn deserialize_blob_index(
         .get(0..32 + bytes_read)
         .ok_or(StoreError::DataCorruption)?;
     let mut index = Vec::with_capacity(num_entries);
-    let mut bytes_it = bytes.get(32 + bytes_read).into_iter();
+    let mut bytes_it = bytes
+        .get(32 + bytes_read..)
+        .ok_or(StoreError::DataCorruption)?
+        .iter();
 
     while num_entries > 0 {
         index.push(usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
             StoreError::DeserializeError(format!(
-                "Failed to deserialize total inserts from bytes: {:?}",
+                "Failed to deserialize blob entry from bytes: {:?}",
                 bytes
             ))
         })?);
@@ -120,9 +131,185 @@ pub fn deserialize_blob_index(
         ));
     }
 
-    Ok(BlobIndex {
+    Ok(BlobEntries {
         file: BlobFile::new(base_path, blob_name, hash_levels, false)
             .map_err(|err| StoreError::DeserializeError(err.to_string()))?,
         index,
     })
+}
+
+impl StoreBlob for RocksDBStore {
+    fn get_document_blob_entries(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        entries: &[BlobEntry<Option<Range<usize>>>],
+    ) -> store::Result<Vec<BlobEntry<Vec<u8>>>> {
+        let mut result = Vec::with_capacity(entries.len());
+        let blob_entries = deserialize_blob_entries(
+            self.blob_path.clone(),
+            &self.config.db_options.hash_levels,
+            &self
+                .db
+                .get_cf(
+                    &self.get_handle("values")?,
+                    &serialize_blob_key(account, collection, document),
+                )
+                .map_err(|e| StoreError::InternalError(e.into_string()))?
+                .ok_or_else(|| {
+                    StoreError::InternalError(format!(
+                        "No blob index found for account: {}, collection: {}, document: {}",
+                        account, collection, document
+                    ))
+                })?,
+        )?;
+
+        let mut blob = File::open(&blob_entries.file.get_path()).map_err(|err| {
+            StoreError::InternalError(format!(
+                "Failed to open blob file {}: {:}",
+                blob_entries.file.get_path().display(),
+                err
+            ))
+        })?;
+
+        for entry in entries {
+            if entry.index >= blob_entries.index.len() {
+                return Err(StoreError::InternalError(format!(
+                    "Blob index out of bounds: {}",
+                    entry.index
+                )));
+            }
+            let (from_offset, buf_len) = if let Some(range) = &entry.value {
+                (
+                    if entry.index > 0 {
+                        blob_entries.index[entry.index - 1]
+                    } else {
+                        0
+                    } + range.start,
+                    range.end - range.start,
+                )
+            } else if entry.index > 0 {
+                (
+                    blob_entries.index[entry.index - 1],
+                    blob_entries.index[entry.index] - blob_entries.index[entry.index - 1],
+                )
+            } else {
+                (0, blob_entries.index[entry.index])
+            };
+
+            let mut buf = vec![0; buf_len];
+            blob.seek(SeekFrom::Start(from_offset as u64))
+                .map_err(|err| {
+                    StoreError::InternalError(format!(
+                        "Failed to seek blob file {} to offset {}: {:}",
+                        blob_entries.file.get_path().display(),
+                        from_offset,
+                        err
+                    ))
+                })?;
+            blob.read_exact(&mut buf).map_err(|err| {
+                StoreError::InternalError(format!(
+                    "Failed to read blob file {} at offset {}: {:}",
+                    blob_entries.file.get_path().display(),
+                    from_offset,
+                    err
+                ))
+            })?;
+            result.push(BlobEntry {
+                index: entry.index,
+                value: buf,
+            });
+        }
+
+        Ok(result)
+    }
+
+    fn purge_deleted_blobs(&self) -> store::Result<()> {
+        let cf_values = self.get_handle("values")?;
+
+        for (key, value) in self
+            .db
+            .iterator_cf(&cf_values, IteratorMode::From(BLOB_KEY, Direction::Forward))
+        {
+            if key.starts_with(BLOB_KEY) {
+                let value = i64::from_le_bytes(value.as_ref().try_into().map_err(|err| {
+                    StoreError::InternalError(format!(
+                        "Failed to convert blob key to i64: {:}",
+                        err
+                    ))
+                })?);
+                debug_assert!(value >= 0);
+                if value == 0 {
+                    self.db.delete_cf(&cf_values, &key).map_err(|err| {
+                        StoreError::InternalError(format!("Failed to delete blob key: {:}", err))
+                    })?;
+
+                    BlobFile::new(
+                        self.blob_path.clone(),
+                        &key[BLOB_KEY.len()..],
+                        &self.config.db_options.hash_levels,
+                        false,
+                    )
+                    .map_err(|err| {
+                        StoreError::InternalError(format!("Failed to create blob file: {:}", err))
+                    })?
+                    .delete()
+                    .map_err(|err| {
+                        StoreError::InternalError(format!("Failed to delete blob file: {:}", err))
+                    })?;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+impl StoreBlobTest for RocksDBStore {
+    fn get_all_blobs(&self) -> store::Result<Vec<(std::path::PathBuf, i64)>> {
+        let cf_values = self.get_handle("values")?;
+        let mut result = Vec::new();
+
+        for (key, value) in self
+            .db
+            .iterator_cf(&cf_values, IteratorMode::From(BLOB_KEY, Direction::Forward))
+        {
+            if key.starts_with(BLOB_KEY) {
+                let value = i64::from_le_bytes(value.as_ref().try_into().map_err(|err| {
+                    StoreError::InternalError(format!(
+                        "Failed to convert blob key to i64: {:}",
+                        err
+                    ))
+                })?);
+                debug_assert!(value >= 0);
+                if value == 0 {
+                    result.push((
+                        BlobFile::new(
+                            self.blob_path.clone(),
+                            &key[BLOB_KEY.len()..],
+                            &self.config.db_options.hash_levels,
+                            false,
+                        )
+                        .map_err(|err| {
+                            StoreError::InternalError(format!(
+                                "Failed to create blob file: {:}",
+                                err
+                            ))
+                        })?
+                        .path
+                        .clone(),
+                        value,
+                    ));
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(result)
+    }
 }

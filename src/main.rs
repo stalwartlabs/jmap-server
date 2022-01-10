@@ -1,20 +1,16 @@
 use store_rocksdb::RocksDBStore;
 
-
 fn main() {
-
     let mut temp_dir = std::env::temp_dir();
     temp_dir.push("strdb_query_test");
     /*if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).unwrap();
     }*/
 
-    let _db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
+    //let _db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
     //insert_artworks(RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap());
     //sort_artworks(&db);
-    
 }
-
 
 /*
 

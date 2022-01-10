@@ -182,7 +182,7 @@ mod tests {
         term_index::{MatchTerm, Term},
     };
 
-    use crate::RocksDBStore;
+    use crate::{RocksDBStore, RocksDBStoreConfig};
 
     const NUM_TOKENS: u64 = 10;
     const NUM_THREADS: usize = 20;
@@ -197,7 +197,10 @@ mod tests {
             std::fs::remove_dir_all(&temp_dir).unwrap();
         }
 
-        let db = RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap();
+        let db = RocksDBStore::open(RocksDBStoreConfig::default_config(
+            temp_dir.to_str().unwrap(),
+        ))
+        .unwrap();
 
         assert_eq!(
             db.get_terms(TokenIterator::new(TEXT, Language::English, true))
@@ -279,7 +282,12 @@ mod tests {
                 if temp_dir.exists() {
                     std::fs::remove_dir_all(&temp_dir).unwrap();
                 }
-                let db = Arc::new(RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap());
+                let db = Arc::new(
+                    RocksDBStore::open(RocksDBStoreConfig::default_config(
+                        temp_dir.to_str().unwrap(),
+                    ))
+                    .unwrap(),
+                );
 
                 for _ in 0..NUM_THREADS {
                     let t_db = db.clone();

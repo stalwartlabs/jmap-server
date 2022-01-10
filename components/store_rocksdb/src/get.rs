@@ -1,6 +1,6 @@
 use store::{
     serialize::{serialize_stored_key, serialize_stored_key_global, StoreDeserialize},
-    AccountId, CollectionId, DocumentId, DocumentSet, FieldId, StoreError, StoreGet,
+    AccountId, BlobIndex, CollectionId, DocumentId, DocumentSet, FieldId, StoreError, StoreGet,
     StoreTombstone,
 };
 
@@ -59,16 +59,6 @@ impl StoreGet for RocksDBStore {
             }
         }
         Ok(result)
-    }
-
-    fn get_document_blob(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-        document: DocumentId,
-        blob: store::BlobId,
-    ) -> store::Result<Option<Vec<u8>>> {
-        todo!()
     }
 }
 

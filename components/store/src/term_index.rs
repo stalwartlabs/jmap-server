@@ -5,7 +5,7 @@ use std::{
 
 use nlp::tokenizers::Token;
 
-use crate::{leb128::Leb128, BlobId, FieldId, TermId};
+use crate::{leb128::Leb128, BlobIndex, FieldId, TermId};
 
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
@@ -32,13 +32,13 @@ pub struct Term {
 #[derive(Debug)]
 pub struct TermGroup {
     pub field_id: FieldId,
-    pub blob_id: BlobId,
+    pub blob_id: BlobIndex,
     pub terms: Vec<Term>,
 }
 
 pub struct TermIndexBuilderItem {
     field: FieldId,
-    blob_id: BlobId,
+    blob_id: BlobIndex,
     terms: Vec<Term>,
 }
 
@@ -48,7 +48,7 @@ pub struct TermIndexBuilder {
 
 pub struct TermIndexItem<'x> {
     pub field_id: FieldId,
-    pub blob_id: BlobId,
+    pub blob_id: BlobIndex,
     pub terms_len: usize,
     pub terms: &'x [u8],
 }
@@ -206,7 +206,7 @@ impl TermIndexBuilder {
         TermIndexBuilder { items: Vec::new() }
     }
 
-    pub fn add_item(&mut self, field: FieldId, blob_id: BlobId, terms: Vec<Term>) {
+    pub fn add_item(&mut self, field: FieldId, blob_id: BlobIndex, terms: Vec<Term>) {
         self.items.push(TermIndexBuilderItem {
             field,
             blob_id,
@@ -320,7 +320,7 @@ impl<'x> TryFrom<&'x [u8]> for TermIndex<'x> {
             pos += 1;
 
             let (blob_id, bytes_read) =
-                BlobId::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
+                BlobIndex::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
                     .ok_or(Error::Leb128DecodeError)?;
             pos += bytes_read;
 
@@ -596,7 +596,7 @@ mod tests {
 
     use crate::{
         term_index::{MatchTerm, Term, TermIndexBuilder},
-        BlobId,
+        BlobIndex,
     };
 
     use super::TermIndex;
@@ -724,7 +724,7 @@ mod tests {
                 };
                 terms.push(Term::new(term_id, term_id_stemmed, &token));
             }
-            builder.add_item(*field_id, blob_id as BlobId, terms);
+            builder.add_item(*field_id, blob_id as BlobIndex, terms);
         }
 
         // Build the term id dictionary

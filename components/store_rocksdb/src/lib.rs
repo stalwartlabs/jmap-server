@@ -28,8 +28,24 @@ use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded,
     Options,
 };
-use store::{mutex_map::MutexMap, serialize::LAST_TERM_ID_KEY, Result, Store, StoreError};
+use store::{
+    mutex_map::MutexMap, serialize::LAST_TERM_ID_KEY, Result, Store, StoreConfig, StoreError,
+};
 use term::TermLock;
+
+pub struct RocksDBStoreConfig {
+    pub path: String,
+    pub hash_levels: Vec<usize>,
+}
+
+impl RocksDBStoreConfig {
+    pub fn default_config(path: &str) -> StoreConfig<RocksDBStoreConfig> {
+        StoreConfig::new(RocksDBStoreConfig {
+            path: path.to_string(),
+            hash_levels: vec![1],
+        })
+    }
+}
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
@@ -38,12 +54,13 @@ pub struct RocksDBStore {
     blob_lock: MutexMap<usize>,
     term_id_lock: DashMap<String, TermLock>,
     term_id_last: AtomicU64,
+    config: StoreConfig<RocksDBStoreConfig>,
 }
 
 impl RocksDBStore {
-    pub fn open(path: &str) -> Result<RocksDBStore> {
+    pub fn open(config: StoreConfig<RocksDBStoreConfig>) -> Result<RocksDBStore> {
         // Create the database directory if it doesn't exist
-        let path = PathBuf::from(path);
+        let path = PathBuf::from(&config.db_options.path);
         let mut blob_path = path.clone();
         let mut idx_path = path;
         blob_path.push("blobs");
@@ -115,6 +132,7 @@ impl RocksDBStore {
             term_id_lock: DashMap::with_capacity(1024),
             blob_path,
             db,
+            config,
         })
     }
 
@@ -160,7 +178,7 @@ pub fn numeric_value_merge(
         for op in operands {
             value += usize::from_le_bytes(op.try_into().ok()?);
         }
-        println!("Merging last term: {}", value);
+        //println!("Merging last term: {}", value);
         let mut bytes = Vec::with_capacity(std::mem::size_of::<usize>());
         bytes.extend_from_slice(&value.to_le_bytes());
         Some(bytes)
@@ -173,7 +191,7 @@ pub fn numeric_value_merge(
         for op in operands {
             value += i64::from_le_bytes(op.try_into().ok()?);
         }
-        println!("Merging key {:?}: {}", key, value);
+        //println!("Merging key {:?}: {}", key, value);
         let mut bytes = Vec::with_capacity(std::mem::size_of::<i64>());
         bytes.extend_from_slice(&value.to_le_bytes());
         Some(bytes)
@@ -192,7 +210,16 @@ pub fn get_last_id(db: &DBWithThreadMode<MultiThreaded>, key: &[u8]) -> crate::R
         .unwrap_or(0))
 }
 
-impl<'x> Store<'x> for RocksDBStore where RocksDBStore: store::StoreQuery<'x> {}
+impl<'x> Store<'x> for RocksDBStore
+where
+    RocksDBStore: store::StoreQuery<'x>,
+{
+    type Config = RocksDBStoreConfig;
+
+    fn get_config(&self) -> &StoreConfig<Self::Config> {
+        &self.config
+    }
+}
 impl<'x> JMAPMailLocalStore<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreSet<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreChanges<'x> for RocksDBStore {}
@@ -203,7 +230,7 @@ impl<'x> JMAPLocalChanges<'x> for RocksDBStore {}
 
 #[cfg(test)]
 mod tests {
-    use crate::RocksDBStore;
+    use crate::{RocksDBStore, RocksDBStoreConfig};
 
     #[test]
     fn test_insert_filter_sort() {
@@ -215,7 +242,10 @@ mod tests {
         }
 
         store_test::insert_filter_sort::test_insert_filter_sort(
-            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
             true,
         );
 
@@ -231,7 +261,28 @@ mod tests {
         }
 
         store_test::tombstones::test_tombstones(
-            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_blobs() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_blobs_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::blobs::test_blobs(
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
         );
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
@@ -246,7 +297,10 @@ mod tests {
         }
 
         store_test::jmap_mail_merge_threads::test_jmap_mail_merge_threads(
-            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
         );
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
@@ -261,7 +315,10 @@ mod tests {
         }
 
         store_test::jmap_mail_query::test_jmap_mail_query(
-            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
             true,
         );
 
@@ -277,7 +334,10 @@ mod tests {
         }
 
         store_test::jmap_changes::test_jmap_changes(
-            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
         );
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
@@ -292,7 +352,10 @@ mod tests {
         }
 
         store_test::jmap_mail_query_changes::test_jmap_mail_query_changes(
-            RocksDBStore::open(temp_dir.to_str().unwrap()).unwrap(),
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
         );
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
