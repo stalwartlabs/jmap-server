@@ -25,12 +25,13 @@ use store::{AccountId, BlobIndex, DocumentId, ThreadId};
 pub const MESSAGE_RAW: BlobIndex = 0;
 pub const MESSAGE_HEADERS: BlobIndex = 1;
 pub const MESSAGE_HEADERS_RAW: BlobIndex = 2;
-pub const MESSAGE_HEADERS_PARTS: BlobIndex = 3;
-pub const MESSAGE_STRUCTURE: BlobIndex = 4;
-pub const MESSAGE_METADATA: BlobIndex = 5;
-pub const MESSAGE_PARTS: BlobIndex = 6;
+pub const MESSAGE_BODY: BlobIndex = 3;
+pub const MESSAGE_BODY_STRUCTURE: BlobIndex = 4;
+pub const MESSAGE_PARTS: BlobIndex = 5;
 
 pub type JMAPMailHeaders<'x> = HashMap<HeaderName, JSONValue<'x, JMAPMailProperties<'x>>>;
+pub type JMAPMailMimeHeaders<'x> =
+    HashMap<JMAPMailProperties<'x>, JSONValue<'x, JMAPMailProperties<'x>>>;
 
 pub trait JMAPMailIdImpl {
     fn from_email(thread_id: ThreadId, doc_id: DocumentId) -> Self;
@@ -53,7 +54,8 @@ impl JMAPMailIdImpl for JMAPId {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MessageMetadata {
+pub struct MessageBody<'x> {
+    pub parts_headers: Vec<JMAPMailMimeHeaders<'x>>,
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
     pub attachments: Vec<MessagePartId>,
@@ -66,6 +68,7 @@ pub struct MessageMetadata {
 pub struct MessageRawHeaders<'x> {
     pub size: usize,
     pub headers: RawHeaders<'x>,
+    pub parts_headers: Vec<RawHeaders<'x>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,10 +141,77 @@ pub enum JMAPMailProperties<'x> {
     RfcHeader(JMAPMailHeaderProperty<HeaderName>),
     OtherHeader(JMAPMailHeaderProperty<Cow<'x, str>>),
 
-    // EmailAddress and EmailAddressGroup object properties
+    // Sub-properties
     Name,
     Email,
     Addresses,
+    PartId,
+    Type,
+    Charset,
+    Headers,
+    Disposition,
+    Cid,
+    Language,
+    Location,
+    Subparts,
+}
+
+impl<'x> JMAPMailProperties<'x> {
+    pub fn into_owned<'y>(&self) -> JMAPMailProperties<'y> {
+        match self {
+            JMAPMailProperties::Id => JMAPMailProperties::Id,
+            JMAPMailProperties::BlobId => JMAPMailProperties::BlobId,
+            JMAPMailProperties::ThreadId => JMAPMailProperties::ThreadId,
+            JMAPMailProperties::MailboxIds => JMAPMailProperties::MailboxIds,
+            JMAPMailProperties::Keywords => JMAPMailProperties::Keywords,
+            JMAPMailProperties::Size => JMAPMailProperties::Size,
+            JMAPMailProperties::ReceivedAt => JMAPMailProperties::ReceivedAt,
+            JMAPMailProperties::MessageId => JMAPMailProperties::MessageId,
+            JMAPMailProperties::InReplyTo => JMAPMailProperties::InReplyTo,
+            JMAPMailProperties::References => JMAPMailProperties::References,
+            JMAPMailProperties::Sender => JMAPMailProperties::Sender,
+            JMAPMailProperties::From => JMAPMailProperties::From,
+            JMAPMailProperties::To => JMAPMailProperties::To,
+            JMAPMailProperties::Cc => JMAPMailProperties::Cc,
+            JMAPMailProperties::Bcc => JMAPMailProperties::Bcc,
+            JMAPMailProperties::ReplyTo => JMAPMailProperties::ReplyTo,
+            JMAPMailProperties::Subject => JMAPMailProperties::Subject,
+            JMAPMailProperties::SentAt => JMAPMailProperties::SentAt,
+            JMAPMailProperties::HasAttachment => JMAPMailProperties::HasAttachment,
+            JMAPMailProperties::Preview => JMAPMailProperties::Preview,
+            JMAPMailProperties::BodyValues => JMAPMailProperties::BodyValues,
+            JMAPMailProperties::TextBody => JMAPMailProperties::TextBody,
+            JMAPMailProperties::HtmlBody => JMAPMailProperties::HtmlBody,
+            JMAPMailProperties::Attachments => JMAPMailProperties::Attachments,
+            JMAPMailProperties::BodyStructure => JMAPMailProperties::BodyStructure,
+            JMAPMailProperties::RfcHeader(header) => {
+                JMAPMailProperties::RfcHeader(JMAPMailHeaderProperty {
+                    form: header.form.clone(),
+                    header: header.header,
+                    all: header.all,
+                })
+            }
+            JMAPMailProperties::OtherHeader(header) => {
+                JMAPMailProperties::OtherHeader(JMAPMailHeaderProperty {
+                    form: header.form.clone(),
+                    header: header.header.clone().into_owned().into(),
+                    all: header.all,
+                })
+            }
+            JMAPMailProperties::Name => JMAPMailProperties::Name,
+            JMAPMailProperties::Email => JMAPMailProperties::Email,
+            JMAPMailProperties::Addresses => JMAPMailProperties::Addresses,
+            JMAPMailProperties::PartId => JMAPMailProperties::PartId,
+            JMAPMailProperties::Type => JMAPMailProperties::Type,
+            JMAPMailProperties::Charset => JMAPMailProperties::Charset,
+            JMAPMailProperties::Headers => JMAPMailProperties::Headers,
+            JMAPMailProperties::Disposition => JMAPMailProperties::Disposition,
+            JMAPMailProperties::Cid => JMAPMailProperties::Cid,
+            JMAPMailProperties::Language => JMAPMailProperties::Language,
+            JMAPMailProperties::Location => JMAPMailProperties::Location,
+            JMAPMailProperties::Subparts => JMAPMailProperties::Subparts,
+        }
+    }
 }
 
 impl<'x> Default for JMAPMailProperties<'x> {
@@ -153,7 +223,7 @@ impl<'x> Default for JMAPMailProperties<'x> {
 #[derive(Debug)]
 pub enum JMAPMailBodyProperties {
     PartId,
-    BlobIndex,
+    BlobId,
     Size,
     Name,
     Type,

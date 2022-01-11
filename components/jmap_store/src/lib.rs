@@ -1,4 +1,5 @@
 pub mod changes;
+pub mod id;
 pub mod json;
 
 use std::{
@@ -35,30 +36,6 @@ impl From<StoreError> for JMAPError {
 }
 
 pub type Result<T> = std::result::Result<T, JMAPError>;
-
-pub trait JMAPIdSerialize {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized;
-    fn to_jmap_string(&self) -> String;
-}
-
-impl JMAPIdSerialize for JMAPId {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        if id.as_bytes().get(0)? == &b'i' {
-            JMAPId::from_str_radix(id.get(1..)?, 16).ok()?.into()
-        } else {
-            None
-        }
-    }
-
-    fn to_jmap_string(&self) -> String {
-        format!("i{:02x}", self)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct JMAPQuery<T, U> {

@@ -1,8 +1,7 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fs::File,
     io::Write,
-    slice::SliceIndex,
     sync::{Arc, MutexGuard},
 };
 
@@ -25,7 +24,7 @@ use store::{
 
 use crate::{
     bitmaps::set_clear_bits,
-    blob::{deserialize_blob_entries, serialize_blob_key_from_value, BlobFile},
+    blob::{serialize_blob_key_from_value, BlobFile},
     changelog::ChangeLogWriter,
     document_id::AssignedDocumentId,
     RocksDBStore,

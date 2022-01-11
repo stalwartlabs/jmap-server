@@ -8,7 +8,7 @@ use rocksdb::{Direction, IteratorMode};
 use store::leb128::Leb128;
 use store::serialize::serialize_blob_key;
 use store::{leb128::skip_leb128_value, serialize::BLOB_KEY};
-use store::{AccountId, BlobEntry, CollectionId, DocumentId, StoreBlob, StoreBlobTest, StoreError};
+use store::{AccountId, BlobEntry, CollectionId, DocumentId, StoreBlob, StoreError};
 
 use crate::RocksDBStore;
 pub struct BlobFile {
@@ -144,26 +144,26 @@ impl StoreBlob for RocksDBStore {
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
-        entries: &[BlobEntry<Option<Range<usize>>>],
+        entries: impl Iterator<Item = BlobEntry<Option<Range<usize>>>>,
     ) -> store::Result<Vec<BlobEntry<Vec<u8>>>> {
-        let mut result = Vec::with_capacity(entries.len());
-        let blob_entries = deserialize_blob_entries(
-            self.blob_path.clone(),
-            &self.config.db_options.hash_levels,
-            &self
-                .db
-                .get_cf(
-                    &self.get_handle("values")?,
-                    &serialize_blob_key(account, collection, document),
-                )
-                .map_err(|e| StoreError::InternalError(e.into_string()))?
-                .ok_or_else(|| {
-                    StoreError::InternalError(format!(
-                        "No blob index found for account: {}, collection: {}, document: {}",
-                        account, collection, document
-                    ))
-                })?,
-        )?;
+        let mut result = Vec::with_capacity(entries.size_hint().0);
+
+        let blob_entries = if let Some(blob_entries) = self
+            .db
+            .get_cf(
+                &self.get_handle("values")?,
+                &serialize_blob_key(account, collection, document),
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))?
+        {
+            deserialize_blob_entries(
+                self.blob_path.clone(),
+                &self.config.db_options.hash_levels,
+                &blob_entries,
+            )?
+        } else {
+            return Ok(result);
+        };
 
         let mut blob = File::open(&blob_entries.file.get_path()).map_err(|err| {
             StoreError::InternalError(format!(
@@ -268,6 +268,8 @@ impl StoreBlob for RocksDBStore {
     }
 }
 
+#[cfg(test)]
+use store::StoreBlobTest;
 #[cfg(test)]
 impl StoreBlobTest for RocksDBStore {
     fn get_all_blobs(&self) -> store::Result<Vec<(std::path::PathBuf, i64)>> {

@@ -1,11 +1,14 @@
-use std::{collections::HashSet, fmt::Write};
+use std::collections::HashSet;
 
 use store::{
     leb128::Leb128, AccountId, ChangeLogEntry, ChangeLogId, ChangeLogQuery, CollectionId, Store,
     StoreError,
 };
 
-use crate::{JMAPChangesResponse, JMAPIdSerialize};
+use crate::{
+    id::{hex_reader, HexWriter, JMAPIdSerialize},
+    JMAPChangesResponse,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
@@ -24,31 +27,6 @@ pub enum JMAPState {
 impl Default for JMAPState {
     fn default() -> Self {
         JMAPState::Initial
-    }
-}
-
-pub struct HexWriter {
-    pub result: String,
-}
-
-impl HexWriter {
-    pub fn with_capacity(capacity: usize) -> Self {
-        HexWriter {
-            result: String::with_capacity(capacity),
-        }
-    }
-}
-
-impl std::io::Write for HexWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        for &byte in buf {
-            write!(&mut self.result, "{:02x}", byte).unwrap();
-        }
-        Ok(2 * buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
 
@@ -79,9 +57,7 @@ impl JMAPIdSerialize for JMAPState {
             b'n' => JMAPState::Initial.into(),
             b's' => JMAPState::Exact(ChangeLogId::from_str_radix(id.get(1..)?, 16).ok()?).into(),
             b'r' => {
-                let mut it = (1..id.len()).step_by(2).map(|i| {
-                    u8::from_str_radix(id.get(i..i + 2).unwrap_or(""), 16).unwrap_or(u8::MAX)
-                });
+                let mut it = hex_reader(id, 1);
 
                 let from_id = ChangeLogId::from_leb128_it(&mut it)?;
                 let to_id = from_id.checked_add(ChangeLogId::from_leb128_it(&mut it)?)?;
@@ -249,7 +225,7 @@ pub trait JMAPLocalChanges<'x>: Store<'x> {
 mod tests {
     use store::ChangeLogId;
 
-    use crate::JMAPIdSerialize;
+    use crate::id::JMAPIdSerialize;
 
     use super::JMAPState;
 

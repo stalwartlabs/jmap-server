@@ -389,7 +389,7 @@ pub trait StoreBlob {
         entry: BlobEntry<Option<Range<usize>>>,
     ) -> Result<BlobEntry<Vec<u8>>> {
         Ok(self
-            .get_document_blob_entries(account, collection, document, &[entry])?
+            .get_document_blob_entries(account, collection, document, vec![entry].into_iter())?
             .pop()
             .unwrap())
     }
@@ -399,7 +399,7 @@ pub trait StoreBlob {
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
-        entries: &[BlobEntry<Option<Range<usize>>>],
+        entries: impl Iterator<Item = BlobEntry<Option<Range<usize>>>>,
     ) -> Result<Vec<BlobEntry<Vec<u8>>>>;
 
     fn purge_deleted_blobs(&self) -> Result<()>;

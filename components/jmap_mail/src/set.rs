@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use jmap_store::id::JMAPIdSerialize;
 use jmap_store::json::JSONValue;
-use jmap_store::JMAPIdSerialize;
 use jmap_store::{
     json::JSONPointer, JMAPError, JMAPId, JMAPSet, JMAPSetError, JMAPSetErrorType, JMAPSetResponse,
     JMAP_MAIL, JMAP_MAILBOX,
@@ -158,7 +158,7 @@ pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
                                         request.account_id,
                                         JMAP_MAIL,
                                         document_id,
-                                        MessageField::Keyword.into(),
+                                        MessageField::Mailbox.into(),
                                     )?
                                 {
                                     for mailbox_id in

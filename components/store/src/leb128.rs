@@ -102,6 +102,7 @@ pub fn skip_leb128_value(bytes: &[u8]) -> Option<usize> {
     }
 }
 
+impl_unsigned_leb128!(u8);
 impl_unsigned_leb128!(u16);
 impl_unsigned_leb128!(u32);
 impl_unsigned_leb128!(u64);

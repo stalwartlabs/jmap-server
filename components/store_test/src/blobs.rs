@@ -40,29 +40,20 @@ where
         });
 
     for account in 0..100 {
-        db.get_document_blob_entries(
-            account,
-            0,
-            0,
-            &(0..10)
-                .into_iter()
-                .map(BlobEntry::new)
-                .collect::<Vec<BlobEntry<_>>>(),
-        )
-        .unwrap()
-        .into_iter()
-        .for_each(|entry| {
-            assert_eq!(entry.value, blobs[(account & 3) as usize][entry.index]);
-        });
+        db.get_document_blob_entries(account, 0, 0, (0..10).into_iter().map(BlobEntry::new))
+            .unwrap()
+            .into_iter()
+            .for_each(|entry| {
+                assert_eq!(entry.value, blobs[(account & 3) as usize][entry.index]);
+            });
 
         db.get_document_blob_entries(
             account,
             0,
             0,
-            &(0..10)
+            (0..10)
                 .into_iter()
-                .map(|idx| BlobEntry::new_range(idx, 0..1))
-                .collect::<Vec<BlobEntry<_>>>(),
+                .map(|idx| BlobEntry::new_range(idx, 0..1)),
         )
         .unwrap()
         .into_iter()
@@ -74,15 +65,16 @@ where
         });
     }
 
+    let blobs = db.get_all_blobs().unwrap();
+    assert_eq!(blobs.len(), 4);
+
     for account in 0..100 {
         db.update_document(account, DocumentWriter::delete(0, 0), None)
             .unwrap();
     }
 
-    let blobs = db.get_all_blobs().unwrap();
-    assert_eq!(blobs.len(), 4);
-    for (_, ref_count) in &blobs {
-        assert_eq!(0, *ref_count);
+    for (_, ref_count) in db.get_all_blobs().unwrap() {
+        assert_eq!(0, ref_count);
     }
 
     db.purge_deleted_blobs().unwrap();

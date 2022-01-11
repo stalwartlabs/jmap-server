@@ -1,9 +1,8 @@
 use std::convert::TryInto;
 
 use crate::{
-    leb128::{skip_leb128_value, Leb128},
-    AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, LongInteger,
-    StoreError, Tag, TermId,
+    leb128::Leb128, AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer,
+    LongInteger, StoreError, Tag, TermId,
 };
 
 pub const COLLECTION_PREFIX_LEN: usize =

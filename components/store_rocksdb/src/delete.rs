@@ -7,7 +7,7 @@ use store::{
         serialize_a_key_leb128, serialize_ac_key_be, serialize_ac_key_leb128, serialize_blob_key,
         serialize_bm_internal, BLOB_KEY, BM_FREED_IDS, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
-    AccountId, CollectionId, DocumentId, StoreDelete, StoreError, StoreTombstone, StoreUpdate,
+    AccountId, CollectionId, DocumentId, StoreDelete, StoreError, StoreTombstone,
 };
 
 use crate::{
