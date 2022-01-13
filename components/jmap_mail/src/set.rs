@@ -21,7 +21,7 @@ use crate::{JMAPMailIdImpl, JMAPMailProperties, MessageField};
 
 fn build_message<'x, T>(
     document: &mut DocumentWriter<'x, T>,
-    fields: HashMap<Cow<'x, str>, JSONValue<'x, JMAPMailProperties<'x>>>,
+    fields: HashMap<Cow<'x, str>, JSONValue<'x, Cow<'x, str>>>,
     mailbox_ids: &impl DocumentSet,
 ) -> Result<JSONValue<'x, JMAPMailProperties<'x>>, JMAPSetError>
 where

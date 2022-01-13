@@ -1,0 +1,190 @@
+---
+Array:
+  - Object:
+      blobId:
+        String: b00000000
+      threadId:
+        String: i00
+      messageId: "Null"
+      size:
+        Number: 2651
+      keywords:
+        Object:
+          tag:
+            Bool: true
+      inReplyTo: "Null"
+      to:
+        Array:
+          - Object:
+              email:
+                String: transport@whitehouse.gov
+              name:
+                String: White House Transportation Coordinator
+      bcc: "Null"
+      id:
+        String: i00
+      replyTo: "Null"
+      sentAt: "Null"
+      hasAttachment:
+        Bool: true
+      sender: "Null"
+      preview:
+        String: "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl"
+      cc: "Null"
+      bodyValues: "Null"
+      htmlBody:
+        Array: []
+      receivedAt:
+        String: "2022-01-13T16:58:24Z"
+      mailboxIds:
+        Object:
+          i01:
+            Bool: true
+          i02:
+            Bool: true
+          i00:
+            Bool: true
+      references: "Null"
+      from:
+        Array:
+          - Object:
+              name:
+                String: Al Gore
+              email:
+                String: vice-president@whitehouse.gov
+      subject:
+        String: "[Fwd: Map of Argentina with Description]"
+      attachments:
+        Array:
+          - Object:
+              size:
+                Number: 1980
+              type:
+                String: message/rfc822
+              blobId:
+                String: b00000006
+              partId:
+                Number: 1
+              disposition:
+                String: inline
+              headers:
+                Array:
+                  - Object:
+                      value:
+                        String: 7bit
+                      name:
+                        String: "header:Content-Transfer-Encoding"
+                  - Object:
+                      name:
+                        String: "header:Content-Disposition"
+                      value:
+                        String: inline
+                  - Object:
+                      value:
+                        String: message/rfc822
+                      name:
+                        String: "header:Content-Type"
+      bodyStructure:
+        Object:
+          headers:
+            Array:
+              - Object:
+                  value:
+                    String: Al Gore <vice-president@whitehouse.gov>
+                  name:
+                    String: "header:From"
+              - Object:
+                  name:
+                    String: "header:Content-Type"
+                  value:
+                    String: "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
+              - Object:
+                  name:
+                    String: "header:To"
+                  value:
+                    String: "White House Transportation Coordinator\n     <transport@whitehouse.gov>"
+              - Object:
+                  value:
+                    String: "[Fwd: Map of Argentina with Description]"
+                  name:
+                    String: "header:Subject"
+          subparts:
+            Array:
+              - Object:
+                  partId:
+                    Number: 0
+                  type:
+                    String: text/plain
+                  size:
+                    Number: 61
+                  headers:
+                    Array:
+                      - Object:
+                          name:
+                            String: "header:Content-Transfer-Encoding"
+                          value:
+                            String: 7bit
+                      - Object:
+                          value:
+                            String: text/plain; charset=us-ascii
+                          name:
+                            String: "header:Content-Type"
+                  blobId:
+                    String: b00000005
+                  charset:
+                    String: us-ascii
+              - Object:
+                  headers:
+                    Array:
+                      - Object:
+                          value:
+                            String: 7bit
+                          name:
+                            String: "header:Content-Transfer-Encoding"
+                      - Object:
+                          value:
+                            String: inline
+                          name:
+                            String: "header:Content-Disposition"
+                      - Object:
+                          value:
+                            String: message/rfc822
+                          name:
+                            String: "header:Content-Type"
+                  size:
+                    Number: 1980
+                  partId:
+                    Number: 1
+                  disposition:
+                    String: inline
+                  type:
+                    String: message/rfc822
+                  blobId:
+                    String: b00000006
+          type:
+            String: multipart/mixed
+      textBody:
+        Array:
+          - Object:
+              blobId:
+                String: b00000005
+              partId:
+                Number: 0
+              size:
+                Number: 61
+              headers:
+                Array:
+                  - Object:
+                      name:
+                        String: "header:Content-Type"
+                      value:
+                        String: text/plain; charset=us-ascii
+                  - Object:
+                      value:
+                        String: 7bit
+                      name:
+                        String: "header:Content-Transfer-Encoding"
+              type:
+                String: text/plain
+              charset:
+                String: us-ascii

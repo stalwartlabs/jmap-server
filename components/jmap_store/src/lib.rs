@@ -166,7 +166,7 @@ pub struct JMAPChangesResponse {
     pub destroyed: HashSet<ChangeLogId>,
 }
 
-pub type JMAPSetIdList<'x, T, U, V> = HashMap<T, HashMap<U, JSONValue<'x, V>>>;
+pub type JMAPSetIdList<'x, T, U> = HashMap<T, HashMap<U, JSONValue<'x, Cow<'x, str>>>>;
 
 #[derive(Debug)]
 pub struct JMAPSet<'x, T>
@@ -175,8 +175,8 @@ where
 {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub create: Option<JMAPSetIdList<'x, Cow<'x, str>, Cow<'x, str>, T>>,
-    pub update: Option<JMAPSetIdList<'x, JMAPId, JSONPointer<'x, T>, T>>,
+    pub create: Option<JMAPSetIdList<'x, Cow<'x, str>, Cow<'x, str>>>,
+    pub update: Option<JMAPSetIdList<'x, JMAPId, JSONPointer<'x, T>>>,
     pub destroy: Option<Vec<JMAPId>>,
 }
 
@@ -238,11 +238,8 @@ pub struct JMAPGet<T> {
     pub properties: Option<Vec<T>>,
 }
 
-pub struct JMAPGetResponse<'x, T>
-where
-    T: Hash + Eq + PartialEq,
-{
+pub struct JMAPGetResponse<'x> {
     pub state: JMAPState,
-    pub list: JSONValue<'x, T>,
+    pub list: JSONValue<'x, Cow<'x, str>>,
     pub not_found: Option<Vec<JMAPId>>,
 }

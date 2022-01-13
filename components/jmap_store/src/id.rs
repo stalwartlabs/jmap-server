@@ -67,6 +67,22 @@ pub struct BlobId {
     pub blob_index: BlobIndex,
 }
 
+impl BlobId {
+    pub fn new(
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        blob_index: BlobIndex,
+    ) -> Self {
+        BlobId {
+            account,
+            collection,
+            document,
+            blob_index,
+        }
+    }
+}
+
 impl JMAPIdSerialize for BlobId {
     fn from_jmap_string(id: &str) -> Option<Self>
     where

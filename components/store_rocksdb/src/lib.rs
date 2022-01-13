@@ -360,4 +360,22 @@ mod tests {
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
     }
+
+    #[test]
+    fn test_jmap_mail_get() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_get_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mail_get::test_jmap_mail_get(
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
 }

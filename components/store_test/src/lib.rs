@@ -5,6 +5,7 @@ use flate2::read::GzDecoder;
 pub mod blobs;
 pub mod insert_filter_sort;
 pub mod jmap_changes;
+pub mod jmap_mail_get;
 pub mod jmap_mail_merge_threads;
 pub mod jmap_mail_query;
 pub mod jmap_mail_query_changes;

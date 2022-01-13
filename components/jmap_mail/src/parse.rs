@@ -8,8 +8,8 @@ use jmap_store::json::JSONValue;
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
     parsers::fields::thread::thread_name,
-    Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessageAttachment,
-    MessagePart, RfcHeaders,
+    Addr, ContentType, DateTime, Group, HeaderValue, Message, MessageAttachment, MessagePart,
+    RfcHeader, RfcHeaders,
 };
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
@@ -20,8 +20,8 @@ use store::{
 
 use crate::{
     JMAPMailMimeHeaders, JMAPMailProperties, MessageBody, MessageField, MessageRawHeaders,
-    MESSAGE_BODY, MESSAGE_BODY_STRUCTURE, MESSAGE_HEADERS, MESSAGE_HEADERS_RAW, MESSAGE_PARTS,
-    MESSAGE_RAW,
+    MimePart, MESSAGE_BODY, MESSAGE_BODY_STRUCTURE, MESSAGE_HEADERS, MESSAGE_HEADERS_RAW,
+    MESSAGE_PARTS, MESSAGE_RAW,
 };
 
 pub fn build_message_document<'x>(
@@ -31,7 +31,7 @@ pub fn build_message_document<'x>(
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
     let mut total_parts = message.parts.len();
     let mut message_body = MessageBody {
-        parts_headers: Vec::with_capacity(total_parts + 1),
+        mime_parts: Vec::with_capacity(total_parts + 1),
         html_body: message.html_body,
         text_body: message.text_body,
         attachments: message.attachments,
@@ -55,7 +55,7 @@ pub fn build_message_document<'x>(
 
     let mut reference_ids = Vec::new();
     let mut jmap_headers = HashMap::with_capacity(message.headers_rfc.len());
-    let mut mime_headers = HashMap::with_capacity(5);
+    let mut mime_parts = HashMap::with_capacity(5);
     let mut base_subject = None;
 
     for (header_name, header_value) in message.headers_rfc {
@@ -64,10 +64,10 @@ pub fn build_message_document<'x>(
 
         // Build JMAP headers
         match header_name {
-            HeaderName::MessageId
-            | HeaderName::InReplyTo
-            | HeaderName::References
-            | HeaderName::ResentMessageId => {
+            RfcHeader::MessageId
+            | RfcHeader::InReplyTo
+            | RfcHeader::References
+            | RfcHeader::ResentMessageId => {
                 // Build a list containing all IDs that appear in the header
                 match &header_value {
                     HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
@@ -100,32 +100,32 @@ pub fn build_message_document<'x>(
 
                 jmap_headers.insert(header_name, header_to_jmap_id(header_value));
             }
-            HeaderName::From | HeaderName::To | HeaderName::Cc | HeaderName::Bcc => {
+            RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
                 // Build sort index
                 add_addr_sort(document, header_name, &header_value);
                 jmap_headers.insert(header_name, header_to_jmap_address(header_value, false));
             }
-            HeaderName::ReplyTo
-            | HeaderName::Sender
-            | HeaderName::ResentTo
-            | HeaderName::ResentFrom
-            | HeaderName::ResentBcc
-            | HeaderName::ResentCc
-            | HeaderName::ResentSender => {
+            RfcHeader::ReplyTo
+            | RfcHeader::Sender
+            | RfcHeader::ResentTo
+            | RfcHeader::ResentFrom
+            | RfcHeader::ResentBcc
+            | RfcHeader::ResentCc
+            | RfcHeader::ResentSender => {
                 jmap_headers.insert(header_name, header_to_jmap_address(header_value, false));
             }
-            HeaderName::Date | HeaderName::ResentDate => {
+            RfcHeader::Date | RfcHeader::ResentDate => {
                 jmap_headers.insert(header_name, header_to_jmap_date(header_value));
             }
-            HeaderName::ListArchive
-            | HeaderName::ListHelp
-            | HeaderName::ListOwner
-            | HeaderName::ListPost
-            | HeaderName::ListSubscribe
-            | HeaderName::ListUnsubscribe => {
+            RfcHeader::ListArchive
+            | RfcHeader::ListHelp
+            | RfcHeader::ListOwner
+            | RfcHeader::ListPost
+            | RfcHeader::ListSubscribe
+            | RfcHeader::ListUnsubscribe => {
                 jmap_headers.insert(header_name, header_to_jmap_url(header_value));
             }
-            HeaderName::Subject => {
+            RfcHeader::Subject => {
                 if let HeaderValue::Text(subject) = &header_value {
                     let (thread_name, language) = match thread_name(subject) {
                         thread_name if !thread_name.is_empty() => (
@@ -139,7 +139,7 @@ pub fn build_message_document<'x>(
                     };
 
                     document.add_text(
-                        HeaderName::Subject.into(),
+                        RfcHeader::Subject.into(),
                         Text::Full(FullText::new_lang(subject.to_string().into(), language)),
                         FieldOptions::None,
                     );
@@ -148,33 +148,35 @@ pub fn build_message_document<'x>(
                 }
                 jmap_headers.insert(header_name, header_to_jmap_text(header_value));
             }
-            HeaderName::Comments | HeaderName::Keywords | HeaderName::ListId => {
+            RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId => {
                 jmap_headers.insert(header_name, header_to_jmap_text(header_value));
             }
-            HeaderName::ContentType
-            | HeaderName::ContentDisposition
-            | HeaderName::ContentId
-            | HeaderName::ContentLanguage
-            | HeaderName::ContentLocation => {
-                mime_header_to_jmap(&mut mime_headers, header_name, header_value);
+            RfcHeader::ContentType
+            | RfcHeader::ContentDisposition
+            | RfcHeader::ContentId
+            | RfcHeader::ContentLanguage
+            | RfcHeader::ContentLocation => {
+                mime_header_to_jmap(&mut mime_parts, header_name, header_value);
             }
-            HeaderName::ContentTransferEncoding
-            | HeaderName::ContentDescription
-            | HeaderName::MimeVersion
-            | HeaderName::Received
-            | HeaderName::ReturnPath
-            | HeaderName::Other => (), // Ignore
+            RfcHeader::ContentTransferEncoding
+            | RfcHeader::ContentDescription
+            | RfcHeader::MimeVersion
+            | RfcHeader::Received
+            | RfcHeader::ReturnPath => (),
         }
     }
 
-    message_body.parts_headers.push(mime_headers);
+    message_body
+        .mime_parts
+        .push(MimePart::new_other(mime_parts, false));
 
     for (part_id, part) in message.parts.into_iter().enumerate() {
         match part {
             MessagePart::Html(html) => {
-                message_body
-                    .parts_headers
-                    .push(mime_headers_to_jmap(html.headers_rfc, html.body.len()));
+                message_body.mime_parts.push(MimePart::new_html(
+                    mime_parts_to_jmap(html.headers_rfc, html.body.len()),
+                    html.is_encoding_problem,
+                ));
                 parts_headers_raw.push(html.headers_raw);
 
                 let field =
@@ -210,9 +212,10 @@ pub fn build_message_document<'x>(
                 );
             }
             MessagePart::Text(text) => {
-                message_body
-                    .parts_headers
-                    .push(mime_headers_to_jmap(text.headers_rfc, text.body.len()));
+                message_body.mime_parts.push(MimePart::new_text(
+                    mime_parts_to_jmap(text.headers_rfc, text.body.len()),
+                    text.is_encoding_problem,
+                ));
                 parts_headers_raw.push(text.headers_raw);
 
                 let field =
@@ -242,9 +245,10 @@ pub fn build_message_document<'x>(
                 if !message_body.has_attachments {
                     message_body.has_attachments = true;
                 }
-                message_body
-                    .parts_headers
-                    .push(mime_headers_to_jmap(binary.headers_rfc, binary.body.len()));
+                message_body.mime_parts.push(MimePart::new_other(
+                    mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                    binary.is_encoding_problem,
+                ));
                 parts_headers_raw.push(binary.headers_raw);
 
                 document.add_binary(
@@ -254,9 +258,10 @@ pub fn build_message_document<'x>(
                 );
             }
             MessagePart::InlineBinary(binary) => {
-                message_body
-                    .parts_headers
-                    .push(mime_headers_to_jmap(binary.headers_rfc, binary.body.len()));
+                message_body.mime_parts.push(MimePart::new_other(
+                    mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                    binary.is_encoding_problem,
+                ));
                 parts_headers_raw.push(binary.headers_raw);
                 document.add_binary(
                     MessageField::Attachment.into(),
@@ -268,39 +273,51 @@ pub fn build_message_document<'x>(
                 if !message_body.has_attachments {
                     message_body.has_attachments = true;
                 }
-                message_body.parts_headers.push(mime_headers_to_jmap(
-                    nested_message.headers_rfc,
-                    match nested_message.body {
-                        MessageAttachment::Parsed(mut message) => {
-                            parse_attached_message(document, &mut message, &mut language_detector);
-                            let message_size = message.raw_message.len();
-                            document.add_binary(
-                                MessageField::Attachment.into(),
-                                message.raw_message,
-                                FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
-                            );
-                            message_size
-                        }
-                        MessageAttachment::Raw(raw_message) => {
-                            if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                parse_attached_message(document, message, &mut language_detector)
+                message_body.mime_parts.push(MimePart::new_other(
+                    mime_parts_to_jmap(
+                        nested_message.headers_rfc,
+                        match nested_message.body {
+                            MessageAttachment::Parsed(mut message) => {
+                                parse_attached_message(
+                                    document,
+                                    &mut message,
+                                    &mut language_detector,
+                                );
+                                let message_size = message.raw_message.len();
+                                document.add_binary(
+                                    MessageField::Attachment.into(),
+                                    message.raw_message,
+                                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                                );
+                                message_size
                             }
-                            let message_size = raw_message.len();
-                            document.add_binary(
-                                MessageField::Attachment.into(),
-                                raw_message,
-                                FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
-                            );
-                            message_size
-                        }
-                    },
+                            MessageAttachment::Raw(raw_message) => {
+                                if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
+                                    parse_attached_message(
+                                        document,
+                                        message,
+                                        &mut language_detector,
+                                    )
+                                }
+                                let message_size = raw_message.len();
+                                document.add_binary(
+                                    MessageField::Attachment.into(),
+                                    raw_message,
+                                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                                );
+                                message_size
+                            }
+                        },
+                    ),
+                    false,
                 ));
                 parts_headers_raw.push(nested_message.headers_raw);
             }
             MessagePart::Multipart(part) => {
-                message_body
-                    .parts_headers
-                    .push(mime_headers_to_jmap(part.headers_rfc, 0));
+                message_body.mime_parts.push(MimePart::new_other(
+                    mime_parts_to_jmap(part.headers_rfc, 0),
+                    false,
+                ));
                 parts_headers_raw.push(part.headers_raw);
             }
         };
@@ -371,7 +388,7 @@ fn parse_attached_message<'x>(
     message: &mut Message,
     language_detector: &mut LanguageDetector,
 ) {
-    if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&HeaderName::Subject) {
+    if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
         document.add_text(
             MessageField::Attachment.into(),
             Text::Full(FullText::new(
@@ -410,7 +427,7 @@ fn parse_attached_message<'x>(
 
 fn parse_address<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     address: &Addr<'x>,
 ) {
     if let Some(name) = &address.name {
@@ -429,7 +446,7 @@ fn parse_address<'x>(
 
 fn parse_address_group<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     group: &Group<'x>,
 ) {
     if let Some(name) = &group.name {
@@ -443,17 +460,17 @@ fn parse_address_group<'x>(
 
 fn parse_text<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     text: &str,
 ) {
     match header_name {
-        HeaderName::Keywords
-        | HeaderName::ContentLanguage
-        | HeaderName::MimeVersion
-        | HeaderName::MessageId
-        | HeaderName::References
-        | HeaderName::ContentId
-        | HeaderName::ResentMessageId => {
+        RfcHeader::Keywords
+        | RfcHeader::ContentLanguage
+        | RfcHeader::MimeVersion
+        | RfcHeader::MessageId
+        | RfcHeader::References
+        | RfcHeader::ContentId
+        | RfcHeader::ResentMessageId => {
             if text.len() <= MAX_TOKEN_LENGTH {
                 document.add_text(
                     header_name.into(),
@@ -463,7 +480,7 @@ fn parse_text<'x>(
             }
         }
 
-        HeaderName::Subject => (),
+        RfcHeader::Subject => (),
 
         _ => {
             document.add_text(
@@ -477,7 +494,7 @@ fn parse_text<'x>(
 
 fn parse_content_type<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     content_type: &ContentType<'x>,
 ) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
@@ -517,7 +534,7 @@ fn parse_content_type<'x>(
 
 fn parse_datetime(
     document: &mut DocumentWriter<impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     date_time: &DateTime,
 ) {
     if (0..23).contains(&date_time.tz_hour)
@@ -550,7 +567,7 @@ fn parse_datetime(
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     header_value: &HeaderValue<'x>,
 ) {
     let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
@@ -614,7 +631,7 @@ fn add_addr_sort<'x>(
 
 fn parse_header<'x>(
     document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
-    header_name: HeaderName,
+    header_name: RfcHeader,
     header_value: &HeaderValue<'x>,
 ) {
     match header_value {
@@ -753,7 +770,7 @@ pub fn header_to_jmap_address<'x>(
             JMAPMailProperties::Name,
             addr.name.map_or(JSONValue::Null, JSONValue::String),
         );
-        JSONValue::Properties(jmap_addr)
+        JSONValue::Object(jmap_addr)
     }
 
     fn addrlist_to_jmap<'x>(addrlist: Vec<Addr<'x>>) -> JSONValue<'x, JMAPMailProperties> {
@@ -781,7 +798,7 @@ pub fn header_to_jmap_address<'x>(
             JMAPMailProperties::Name,
             group.name.map_or(JSONValue::Null, JSONValue::String),
         );
-        JSONValue::Properties(jmap_addr)
+        JSONValue::Object(jmap_addr)
     }
 
     fn into_group<'x>(
@@ -790,7 +807,7 @@ pub fn header_to_jmap_address<'x>(
         let mut email = HashMap::new();
         email.insert(JMAPMailProperties::Name, JSONValue::Null);
         email.insert(JMAPMailProperties::Addresses, addresses);
-        JSONValue::Array(vec![JSONValue::Properties(email)])
+        JSONValue::Array(vec![JSONValue::Object(email)])
     }
 
     match header {
@@ -835,46 +852,46 @@ pub fn header_to_jmap_address<'x>(
     }
 }
 
-fn mime_headers_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
-    let mut mime_headers = HashMap::with_capacity(headers.len());
+fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
+    let mut mime_parts = HashMap::with_capacity(headers.len());
     if size > 0 {
-        mime_headers.insert(JMAPMailProperties::Size, JSONValue::Number(size as i64));
+        mime_parts.insert(JMAPMailProperties::Size, JSONValue::Number(size as i64));
     }
     for (header, value) in headers {
-        if let HeaderName::ContentType
-        | HeaderName::ContentDisposition
-        | HeaderName::ContentId
-        | HeaderName::ContentLanguage
-        | HeaderName::ContentLocation = header
+        if let RfcHeader::ContentType
+        | RfcHeader::ContentDisposition
+        | RfcHeader::ContentId
+        | RfcHeader::ContentLanguage
+        | RfcHeader::ContentLocation = header
         {
-            mime_header_to_jmap(&mut mime_headers, header, value);
+            mime_header_to_jmap(&mut mime_parts, header, value);
         }
     }
-    mime_headers
+    mime_parts
 }
 
 fn mime_header_to_jmap<'x>(
-    mime_headers: &mut JMAPMailMimeHeaders<'x>,
-    header: HeaderName,
+    mime_parts: &mut JMAPMailMimeHeaders<'x>,
+    header: RfcHeader,
     value: HeaderValue<'x>,
 ) {
     match header {
-        HeaderName::ContentType => {
+        RfcHeader::ContentType => {
             if let HeaderValue::ContentType(content_type) = value {
                 if let Some(mut attributes) = content_type.attributes {
                     if content_type.c_type == "text" {
                         if let Some(charset) = attributes.remove("charset") {
-                            mime_headers
+                            mime_parts
                                 .insert(JMAPMailProperties::Charset, JSONValue::String(charset));
                         }
                     }
-                    if let Entry::Vacant(e) = mime_headers.entry(JMAPMailProperties::Name) {
+                    if let Entry::Vacant(e) = mime_parts.entry(JMAPMailProperties::Name) {
                         if let Some(name) = attributes.remove("name") {
                             e.insert(JSONValue::String(name));
                         }
                     }
                 }
-                mime_headers.insert(
+                mime_parts.insert(
                     JMAPMailProperties::Type,
                     if let Some(subtype) = content_type.c_subtype {
                         JSONValue::String(format!("{}/{}", content_type.c_type, subtype).into())
@@ -884,52 +901,52 @@ fn mime_header_to_jmap<'x>(
                 );
             }
         }
-        HeaderName::ContentDisposition => {
+        RfcHeader::ContentDisposition => {
             if let HeaderValue::ContentType(content_disposition) = value {
-                mime_headers.insert(
+                mime_parts.insert(
                     JMAPMailProperties::Disposition,
                     JSONValue::String(content_disposition.c_type),
                 );
                 if let Some(mut attributes) = content_disposition.attributes {
                     if let Some(name) = attributes.remove("filename") {
-                        mime_headers.insert(JMAPMailProperties::Name, JSONValue::String(name));
+                        mime_parts.insert(JMAPMailProperties::Name, JSONValue::String(name));
                     }
                 }
             }
         }
-        HeaderName::ContentId => match value {
+        RfcHeader::ContentId => match value {
             HeaderValue::Text(id) => {
-                mime_headers.insert(JMAPMailProperties::Cid, JSONValue::String(id));
+                mime_parts.insert(JMAPMailProperties::Cid, JSONValue::String(id));
             }
             HeaderValue::TextList(mut ids) => {
-                mime_headers.insert(
+                mime_parts.insert(
                     JMAPMailProperties::Cid,
                     JSONValue::String(ids.pop().unwrap()),
                 );
             }
             _ => {}
         },
-        HeaderName::ContentLanguage => match value {
+        RfcHeader::ContentLanguage => match value {
             HeaderValue::Text(id) => {
-                mime_headers.insert(
+                mime_parts.insert(
                     JMAPMailProperties::Language,
                     JSONValue::Array(vec![JSONValue::String(id)]),
                 );
             }
             HeaderValue::TextList(ids) => {
-                mime_headers.insert(
+                mime_parts.insert(
                     JMAPMailProperties::Language,
                     JSONValue::Array(ids.into_iter().map(JSONValue::String).collect()),
                 );
             }
             _ => {}
         },
-        HeaderName::ContentLocation => match value {
+        RfcHeader::ContentLocation => match value {
             HeaderValue::Text(id) => {
-                mime_headers.insert(JMAPMailProperties::Location, JSONValue::String(id));
+                mime_parts.insert(JMAPMailProperties::Location, JSONValue::String(id));
             }
             HeaderValue::TextList(mut ids) => {
-                mime_headers.insert(
+                mime_parts.insert(
                     JMAPMailProperties::Location,
                     JSONValue::String(ids.pop().unwrap()),
                 );

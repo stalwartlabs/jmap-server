@@ -187,7 +187,10 @@ impl StoreBlob for RocksDBStore {
                     } else {
                         0
                     } + range.start,
-                    range.end - range.start,
+                    std::cmp::min(
+                        range.end - range.start,
+                        blob_entries.index[entry.index] - blob_entries.index[entry.index - 1],
+                    ),
                 )
             } else if entry.index > 0 {
                 (

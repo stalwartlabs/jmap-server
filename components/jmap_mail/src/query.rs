@@ -5,7 +5,7 @@ use jmap_store::{
     JMAPError, JMAPFilter, JMAPId, JMAPLogicalOperator, JMAPQuery, JMAPQueryChanges,
     JMAPQueryChangesResponse, JMAPQueryChangesResponseItem, JMAPQueryResponse, JMAP_MAIL,
 };
-use mail_parser::HeaderName;
+use mail_parser::RfcHeader;
 use nlp::Language;
 use store::{
     AccountId, Comparator, DocumentId, DocumentSet, DocumentSetBitOps, DocumentSetComparator,
@@ -38,7 +38,7 @@ pub enum JMAPMailFilterCondition<'x> {
     Bcc(Cow<'x, str>),
     Subject(Cow<'x, str>),
     Body(Cow<'x, str>),
-    Header((HeaderName, Option<Cow<'x, str>>)),
+    Header((RfcHeader, Option<Cow<'x, str>>)),
 }
 
 #[derive(Debug, Clone)]
@@ -155,31 +155,31 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                                 }
                                 JMAPMailFilterCondition::From(from) => {
                                     state.terms.push(Filter::eq(
-                                        HeaderName::From.into(),
+                                        RfcHeader::From.into(),
                                         FieldValue::Text(from),
                                     ));
                                 }
                                 JMAPMailFilterCondition::To(to) => {
                                     state.terms.push(Filter::eq(
-                                        HeaderName::To.into(),
+                                        RfcHeader::To.into(),
                                         FieldValue::Text(to),
                                     ));
                                 }
                                 JMAPMailFilterCondition::Cc(cc) => {
                                     state.terms.push(Filter::eq(
-                                        HeaderName::Cc.into(),
+                                        RfcHeader::Cc.into(),
                                         FieldValue::Text(cc),
                                     ));
                                 }
                                 JMAPMailFilterCondition::Bcc(bcc) => {
                                     state.terms.push(Filter::eq(
-                                        HeaderName::Bcc.into(),
+                                        RfcHeader::Bcc.into(),
                                         FieldValue::Text(bcc),
                                     ));
                                 }
                                 JMAPMailFilterCondition::Subject(subject) => {
                                     state.terms.push(Filter::eq(
-                                        HeaderName::Subject.into(),
+                                        RfcHeader::Subject.into(),
                                         FieldValue::FullText(TextQuery::query(
                                             subject,
                                             Language::English,
@@ -198,23 +198,23 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                                 JMAPMailFilterCondition::Text(text) => {
                                     state.terms.push(Filter::or(vec![
                                         Filter::eq(
-                                            HeaderName::From.into(),
+                                            RfcHeader::From.into(),
                                             FieldValue::Text(text.clone()),
                                         ),
                                         Filter::eq(
-                                            HeaderName::To.into(),
+                                            RfcHeader::To.into(),
                                             FieldValue::Text(text.clone()),
                                         ),
                                         Filter::eq(
-                                            HeaderName::Cc.into(),
+                                            RfcHeader::Cc.into(),
                                             FieldValue::Text(text.clone()),
                                         ),
                                         Filter::eq(
-                                            HeaderName::Bcc.into(),
+                                            RfcHeader::Bcc.into(),
                                             FieldValue::Text(text.clone()),
                                         ),
                                         Filter::eq(
-                                            HeaderName::Subject.into(),
+                                            RfcHeader::Subject.into(),
                                             FieldValue::FullText(TextQuery::query(
                                                 text.clone(),
                                                 Language::English,
@@ -330,11 +330,11 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                         ascending: comp.is_ascending,
                     }),
                     JMAPMailComparator::From => Comparator::Field(FieldComparator {
-                        field: HeaderName::From.into(),
+                        field: RfcHeader::From.into(),
                         ascending: comp.is_ascending,
                     }),
                     JMAPMailComparator::To => Comparator::Field(FieldComparator {
-                        field: HeaderName::To.into(),
+                        field: RfcHeader::To.into(),
                         ascending: comp.is_ascending,
                     }),
                     JMAPMailComparator::Subject => Comparator::Field(FieldComparator {
@@ -342,7 +342,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                         ascending: comp.is_ascending,
                     }),
                     JMAPMailComparator::SentAt => Comparator::Field(FieldComparator {
-                        field: HeaderName::Date.into(),
+                        field: RfcHeader::Date.into(),
                         ascending: comp.is_ascending,
                     }),
                     JMAPMailComparator::HasKeyword(keyword) => {

@@ -13,7 +13,7 @@ use jmap_mail::{
 use jmap_store::{
     json::JSONValue, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQuery, JMAP_MAIL,
 };
-use mail_parser::HeaderName;
+use mail_parser::RfcHeader;
 use store::{Comparator, FieldValue, Filter, Integer, Tag};
 
 use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
@@ -269,7 +269,7 @@ fn test_query<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
         (
             JMAPFilter::and(vec![
                 JMAPFilter::condition(JMAPMailFilterCondition::Header((
-                    HeaderName::Comments,
+                    RfcHeader::Comments,
                     Some("attributed".into()),
                 ))),
                 JMAPFilter::condition(JMAPMailFilterCondition::From("john".into())),
@@ -755,10 +755,8 @@ fn get_message_id<'x>(
         .unwrap()
         .list
     {
-        if let JSONValue::Properties(mut obj) = list.pop().unwrap() {
-            if let JSONValue::String(message_id) =
-                obj.remove(&JMAPMailProperties::MessageId).unwrap()
-            {
+        if let JSONValue::Object(mut obj) = list.pop().unwrap() {
+            if let JSONValue::String(message_id) = obj.remove("MessageId").unwrap() {
                 return message_id;
             }
         }
