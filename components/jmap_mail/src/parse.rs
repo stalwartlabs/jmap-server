@@ -3,7 +3,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 
-use chrono::{FixedOffset, LocalResult, TimeZone, Utc};
+use chrono::{FixedOffset, LocalResult, SecondsFormat, TimeZone, Utc};
 use jmap_store::json::JSONValue;
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
@@ -19,9 +19,9 @@ use store::{
 };
 
 use crate::{
-    JMAPMailMimeHeaders, JMAPMailProperties, MessageBody, MessageField, MessageRawHeaders,
-    MimePart, MESSAGE_BODY, MESSAGE_BODY_STRUCTURE, MESSAGE_HEADERS, MESSAGE_HEADERS_RAW,
-    MESSAGE_PARTS, MESSAGE_RAW,
+    JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailMimeHeaders,
+    JMAPMailProperties, MessageBody, MessageField, MessageRawHeaders, MimePart, MESSAGE_BODY,
+    MESSAGE_BODY_STRUCTURE, MESSAGE_HEADERS_RAW, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
 pub fn build_message_document<'x>(
@@ -31,30 +31,45 @@ pub fn build_message_document<'x>(
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
     let mut total_parts = message.parts.len();
     let mut message_body = MessageBody {
+        properties: HashMap::with_capacity(message.headers_rfc.len() + 3),
         mime_parts: Vec::with_capacity(total_parts + 1),
         html_body: message.html_body,
         text_body: message.text_body,
         attachments: message.attachments,
-        size: message.raw_message.len(),
-        received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
-        has_attachments: false,
     };
     let mut parts_headers_raw = Vec::with_capacity(total_parts);
     let mut language_detector = LanguageDetector::new();
+    let mut has_attachments = false;
+
+    message_body.properties.insert(
+        JMAPMailProperties::Size,
+        JSONValue::Number(message.raw_message.len() as i64),
+    );
 
     document.add_integer(
         MessageField::Size.into(),
-        message_body.size as Integer,
-        FieldOptions::Sort,
-    );
-    document.add_long_int(
-        MessageField::ReceivedAt.into(),
-        message_body.received_at as LongInteger,
+        message.raw_message.len() as Integer,
         FieldOptions::Sort,
     );
 
+    {
+        let received_at = received_at.unwrap_or_else(|| Utc::now().timestamp());
+        message_body.properties.insert(
+            JMAPMailProperties::ReceivedAt,
+            if let LocalResult::Single(received_at) = Utc.timestamp_opt(received_at, 0) {
+                JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
+            } else {
+                JSONValue::Null
+            },
+        );
+        document.add_long_int(
+            MessageField::ReceivedAt.into(),
+            received_at as LongInteger,
+            FieldOptions::Sort,
+        );
+    }
+
     let mut reference_ids = Vec::new();
-    let mut jmap_headers = HashMap::with_capacity(message.headers_rfc.len());
     let mut mime_parts = HashMap::with_capacity(5);
     let mut base_subject = None;
 
@@ -97,13 +112,32 @@ pub fn build_message_document<'x>(
                     }
                     _ => (),
                 }
-
-                jmap_headers.insert(header_name, header_to_jmap_id(header_value));
+                let (value, is_all) = header_to_jmap_id(header_value);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        JMAPMailHeaderForm::MessageIds,
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
                 // Build sort index
                 add_addr_sort(document, header_name, &header_value);
-                jmap_headers.insert(header_name, header_to_jmap_address(header_value, false));
+                let (value, is_group, is_all) = header_to_jmap_address(header_value, false);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        if is_group {
+                            JMAPMailHeaderForm::GroupedAddresses
+                        } else {
+                            JMAPMailHeaderForm::Addresses
+                        },
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::ReplyTo
             | RfcHeader::Sender
@@ -112,10 +146,30 @@ pub fn build_message_document<'x>(
             | RfcHeader::ResentBcc
             | RfcHeader::ResentCc
             | RfcHeader::ResentSender => {
-                jmap_headers.insert(header_name, header_to_jmap_address(header_value, false));
+                let (value, is_group, is_all) = header_to_jmap_address(header_value, false);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        if is_group {
+                            JMAPMailHeaderForm::GroupedAddresses
+                        } else {
+                            JMAPMailHeaderForm::Addresses
+                        },
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::Date | RfcHeader::ResentDate => {
-                jmap_headers.insert(header_name, header_to_jmap_date(header_value));
+                let (value, is_all) = header_to_jmap_date(header_value);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        JMAPMailHeaderForm::Date,
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::ListArchive
             | RfcHeader::ListHelp
@@ -123,7 +177,15 @@ pub fn build_message_document<'x>(
             | RfcHeader::ListPost
             | RfcHeader::ListSubscribe
             | RfcHeader::ListUnsubscribe => {
-                jmap_headers.insert(header_name, header_to_jmap_url(header_value));
+                let (value, is_all) = header_to_jmap_url(header_value);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        JMAPMailHeaderForm::URLs,
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::Subject => {
                 if let HeaderValue::Text(subject) = &header_value {
@@ -146,10 +208,26 @@ pub fn build_message_document<'x>(
 
                     base_subject = Some(thread_name);
                 }
-                jmap_headers.insert(header_name, header_to_jmap_text(header_value));
+                let (value, is_all) = header_to_jmap_text(header_value);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        JMAPMailHeaderForm::Text,
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId => {
-                jmap_headers.insert(header_name, header_to_jmap_text(header_value));
+                let (value, is_all) = header_to_jmap_text(header_value);
+                message_body.properties.insert(
+                    JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
+                        header_name,
+                        JMAPMailHeaderForm::Text,
+                        is_all,
+                    )),
+                    value,
+                );
             }
             RfcHeader::ContentType
             | RfcHeader::ContentDisposition
@@ -169,6 +247,7 @@ pub fn build_message_document<'x>(
     message_body
         .mime_parts
         .push(MimePart::new_other(mime_parts, false));
+    let mut extra_mime_parts = Vec::new();
 
     for (part_id, part) in message.parts.into_iter().enumerate() {
         match part {
@@ -186,18 +265,22 @@ pub fn build_message_document<'x>(
                     } else if message_body.html_body.contains(&part_id) {
                         MessageField::Body
                     } else {
-                        message_body.has_attachments = true;
+                        has_attachments = true;
                         MessageField::Attachment
                     };
 
+                let text = html_to_text(html.body.as_ref());
+                let text_len = text.len();
+
                 document.add_text(
                     field.clone().into(),
-                    Text::Full(FullText::new(
-                        html_to_text(html.body.as_ref()).into(),
-                        &mut language_detector,
-                    )),
+                    Text::Full(FullText::new(text.into(), &mut language_detector)),
                     if field == MessageField::Body {
                         let blob_id = total_parts;
+                        extra_mime_parts.push(MimePart::new_text(
+                            empty_text_mime_heades(false, text_len),
+                            false,
+                        ));
                         total_parts += 1;
                         FieldOptions::StoreAsBlob(blob_id + MESSAGE_PARTS)
                     } else {
@@ -220,18 +303,24 @@ pub fn build_message_document<'x>(
 
                 let field =
                     if let Some(pos) = message_body.html_body.iter().position(|&p| p == part_id) {
+                        let html = text_to_html(text.body.as_ref());
+                        let html_len = html.len();
                         document.add_text(
                             MessageField::Body.into(),
-                            Text::Default(text_to_html(text.body.as_ref()).into()),
+                            Text::Default(html.into()),
                             FieldOptions::StoreAsBlob(total_parts + MESSAGE_PARTS),
                         );
+                        extra_mime_parts.push(MimePart::new_html(
+                            empty_text_mime_heades(true, html_len),
+                            false,
+                        ));
                         message_body.html_body[pos] = total_parts;
                         total_parts += 1;
                         MessageField::Body
                     } else if message_body.text_body.contains(&part_id) {
                         MessageField::Body
                     } else {
-                        message_body.has_attachments = true;
+                        has_attachments = true;
                         MessageField::Attachment
                     };
 
@@ -242,8 +331,8 @@ pub fn build_message_document<'x>(
                 );
             }
             MessagePart::Binary(binary) => {
-                if !message_body.has_attachments {
-                    message_body.has_attachments = true;
+                if !has_attachments {
+                    has_attachments = true;
                 }
                 message_body.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
@@ -270,8 +359,8 @@ pub fn build_message_document<'x>(
                 );
             }
             MessagePart::Message(nested_message) => {
-                if !message_body.has_attachments {
-                    message_body.has_attachments = true;
+                if !has_attachments {
+                    has_attachments = true;
                 }
                 message_body.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(
@@ -323,7 +412,16 @@ pub fn build_message_document<'x>(
         };
     }
 
-    if message_body.has_attachments {
+    if !extra_mime_parts.is_empty() {
+        message_body.mime_parts.append(&mut extra_mime_parts);
+    }
+
+    message_body.properties.insert(
+        JMAPMailProperties::HasAttachment,
+        JSONValue::Bool(has_attachments),
+    );
+
+    if has_attachments {
         document.set_tag(MessageField::Attachment.into(), Tag::Id(0));
     }
 
@@ -331,14 +429,6 @@ pub fn build_message_document<'x>(
         MessageField::Internal.into(),
         message.raw_message,
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
-    );
-
-    document.add_binary(
-        MessageField::Internal.into(),
-        bincode::serialize(&jmap_headers)
-            .map_err(|e| StoreError::SerializeError(e.to_string()))?
-            .into(),
-        FieldOptions::StoreAsBlob(MESSAGE_HEADERS),
     );
 
     document.add_binary(
@@ -674,106 +764,133 @@ fn parse_header<'x>(
     }
 }
 
-pub fn header_to_jmap_date(header: HeaderValue) -> JSONValue<JMAPMailProperties> {
+pub fn header_to_jmap_date(header: HeaderValue) -> (JSONValue, bool) {
     match header {
-        HeaderValue::DateTime(datetime) => JSONValue::String(datetime.to_iso8601().into()),
-        HeaderValue::Collection(list) => JSONValue::Array(
-            list.into_iter()
-                .filter_map(|datetime| {
-                    if let HeaderValue::DateTime(datetime) = datetime {
-                        Some(JSONValue::String(datetime.to_iso8601().into()))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
+        HeaderValue::DateTime(datetime) => (JSONValue::String(datetime.to_iso8601()), false),
+        HeaderValue::Collection(list) => (
+            JSONValue::Array(
+                list.into_iter()
+                    .filter_map(|datetime| {
+                        if let HeaderValue::DateTime(datetime) = datetime {
+                            Some(JSONValue::String(datetime.to_iso8601()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            ),
+            true,
         ),
-        _ => JSONValue::Null,
+        _ => (JSONValue::Null, false),
     }
 }
 
-pub fn header_to_jmap_id(header: HeaderValue) -> JSONValue<JMAPMailProperties> {
+pub fn header_to_jmap_id(header: HeaderValue) -> (JSONValue, bool) {
     match header {
-        HeaderValue::Text(id) => JSONValue::Array(vec![JSONValue::String(id)]),
-        HeaderValue::TextList(ids) => {
-            JSONValue::Array(ids.into_iter().map(JSONValue::String).collect())
-        }
-        HeaderValue::Collection(list) => JSONValue::Array(
-            list.into_iter()
-                .filter_map(|ids| match header_to_jmap_id(ids) {
-                    JSONValue::Null => None,
-                    value => Some(value),
-                })
-                .collect(),
+        HeaderValue::Text(id) => (
+            JSONValue::Array(vec![JSONValue::String(id.to_string())]),
+            false,
         ),
-        _ => JSONValue::Null,
+        HeaderValue::TextList(ids) => (
+            JSONValue::Array(
+                ids.into_iter()
+                    .map(|v| JSONValue::String(v.to_string()))
+                    .collect(),
+            ),
+            false,
+        ),
+        HeaderValue::Collection(list) => (
+            JSONValue::Array(
+                list.into_iter()
+                    .filter_map(|ids| match header_to_jmap_id(ids) {
+                        (JSONValue::Null, _) => None,
+                        (value, _) => Some(value),
+                    })
+                    .collect(),
+            ),
+            true,
+        ),
+        _ => (JSONValue::Null, false),
     }
 }
 
-pub fn header_to_jmap_text(header: HeaderValue) -> JSONValue<JMAPMailProperties> {
+pub fn header_to_jmap_text(header: HeaderValue) -> (JSONValue, bool) {
     match header {
-        HeaderValue::Text(text) => JSONValue::String(text),
-        HeaderValue::TextList(textlist) => JSONValue::String(textlist.join(", ").into()),
-        HeaderValue::Collection(list) => JSONValue::Array(
-            list.into_iter()
-                .filter_map(|ids| match header_to_jmap_text(ids) {
-                    JSONValue::Null => None,
-                    value => Some(value),
-                })
-                .collect(),
+        HeaderValue::Text(text) => (JSONValue::String(text.to_string()), false),
+        HeaderValue::TextList(textlist) => (JSONValue::String(textlist.join(", ")), false),
+        HeaderValue::Collection(list) => (
+            JSONValue::Array(
+                list.into_iter()
+                    .filter_map(|ids| match header_to_jmap_text(ids) {
+                        (JSONValue::Null, _) => None,
+                        (value, _) => Some(value),
+                    })
+                    .collect(),
+            ),
+            true,
         ),
-        _ => JSONValue::Null,
+        _ => (JSONValue::Null, false),
     }
 }
 
-pub fn header_to_jmap_url(header: HeaderValue) -> JSONValue<JMAPMailProperties> {
+pub fn header_to_jmap_url(header: HeaderValue) -> (JSONValue, bool) {
     match header {
         HeaderValue::Address(Addr {
             address: Some(addr),
             ..
-        }) if addr.contains(':') => JSONValue::Array(vec![JSONValue::String(addr)]),
-        HeaderValue::AddressList(textlist) => JSONValue::Array(
-            textlist
-                .into_iter()
-                .filter_map(|addr| match addr {
-                    Addr {
-                        address: Some(addr),
-                        ..
-                    } if addr.contains(':') => Some(JSONValue::String(addr)),
-                    _ => None,
-                })
-                .collect(),
+        }) if addr.contains(':') => (
+            JSONValue::Array(vec![JSONValue::String(addr.to_string())]),
+            false,
         ),
-        HeaderValue::Collection(list) => JSONValue::Array(
-            list.into_iter()
-                .filter_map(|ids| match header_to_jmap_url(ids) {
-                    JSONValue::Null => None,
-                    value => Some(value),
-                })
-                .collect(),
+        HeaderValue::AddressList(textlist) => (
+            JSONValue::Array(
+                textlist
+                    .into_iter()
+                    .filter_map(|addr| match addr {
+                        Addr {
+                            address: Some(addr),
+                            ..
+                        } if addr.contains(':') => Some(JSONValue::String(addr.to_string())),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            false,
         ),
-        _ => JSONValue::Null,
+        HeaderValue::Collection(list) => (
+            JSONValue::Array(
+                list.into_iter()
+                    .filter_map(|ids| match header_to_jmap_url(ids) {
+                        (JSONValue::Null, _) => None,
+                        (value, _) => Some(value),
+                    })
+                    .collect(),
+            ),
+            true,
+        ),
+        _ => (JSONValue::Null, false),
     }
 }
 
-pub fn header_to_jmap_address<'x>(
-    header: HeaderValue<'x>,
+pub fn header_to_jmap_address(
+    header: HeaderValue,
     convert_to_group: bool,
-) -> JSONValue<'x, JMAPMailProperties> {
-    fn addr_to_jmap<'x>(addr: Addr<'x>) -> JSONValue<'x, JMAPMailProperties> {
+) -> (JSONValue, bool, bool) {
+    fn addr_to_jmap(addr: Addr) -> JSONValue {
         let mut jmap_addr = HashMap::with_capacity(2);
         jmap_addr.insert(
-            JMAPMailProperties::Email,
-            JSONValue::String(addr.address.unwrap()),
+            "email".to_string(),
+            JSONValue::String(addr.address.unwrap().to_string()),
         );
         jmap_addr.insert(
-            JMAPMailProperties::Name,
-            addr.name.map_or(JSONValue::Null, JSONValue::String),
+            "name".to_string(),
+            addr.name
+                .map_or(JSONValue::Null, |v| JSONValue::String(v.to_string())),
         );
         JSONValue::Object(jmap_addr)
     }
 
-    fn addrlist_to_jmap<'x>(addrlist: Vec<Addr<'x>>) -> JSONValue<'x, JMAPMailProperties> {
+    fn addrlist_to_jmap(addrlist: Vec<Addr>) -> JSONValue {
         JSONValue::Array(
             addrlist
                 .into_iter()
@@ -788,25 +905,22 @@ pub fn header_to_jmap_address<'x>(
         )
     }
 
-    fn group_to_jmap<'x>(group: Group<'x>) -> JSONValue<'x, JMAPMailProperties> {
+    fn group_to_jmap(group: Group) -> JSONValue {
         let mut jmap_addr = HashMap::with_capacity(2);
+        jmap_addr.insert("addresses".to_string(), addrlist_to_jmap(group.addresses));
         jmap_addr.insert(
-            JMAPMailProperties::Addresses,
-            addrlist_to_jmap(group.addresses),
-        );
-        jmap_addr.insert(
-            JMAPMailProperties::Name,
-            group.name.map_or(JSONValue::Null, JSONValue::String),
+            "name".to_string(),
+            group
+                .name
+                .map_or(JSONValue::Null, |v| JSONValue::String(v.to_string())),
         );
         JSONValue::Object(jmap_addr)
     }
 
-    fn into_group<'x>(
-        addresses: JSONValue<'x, JMAPMailProperties<'x>>,
-    ) -> JSONValue<'x, JMAPMailProperties<'x>> {
+    fn into_group(addresses: JSONValue) -> JSONValue {
         let mut email = HashMap::new();
-        email.insert(JMAPMailProperties::Name, JSONValue::Null);
-        email.insert(JMAPMailProperties::Addresses, addresses);
+        email.insert("name".to_string(), JSONValue::Null);
+        email.insert("addresses".to_string(), addresses);
         JSONValue::Array(vec![JSONValue::Object(email)])
     }
 
@@ -818,44 +932,64 @@ pub fn header_to_jmap_address<'x>(
         ) => {
             let value = JSONValue::Array(vec![addr_to_jmap(addr)]);
             if !convert_to_group {
-                value
+                (value, false, false)
             } else {
-                into_group(value)
+                (into_group(value), true, false)
             }
         }
         HeaderValue::AddressList(addrlist) => {
             let value = addrlist_to_jmap(addrlist);
             if !convert_to_group {
-                value
+                (value, false, false)
             } else {
-                into_group(value)
+                (into_group(value), true, false)
             }
         }
-        HeaderValue::Group(group) => JSONValue::Array(vec![group_to_jmap(group)]),
-        HeaderValue::GroupList(grouplist) => {
-            JSONValue::Array(grouplist.into_iter().map(group_to_jmap).collect())
-        }
+        HeaderValue::Group(group) => (JSONValue::Array(vec![group_to_jmap(group)]), true, false),
+        HeaderValue::GroupList(grouplist) => (
+            JSONValue::Array(grouplist.into_iter().map(group_to_jmap).collect()),
+            true,
+            false,
+        ),
         HeaderValue::Collection(list) => {
             let convert_to_group = list
                 .iter()
                 .any(|item| matches!(item, HeaderValue::Group(_) | HeaderValue::GroupList(_)));
-            JSONValue::Array(
-                list.into_iter()
-                    .filter_map(|ids| match header_to_jmap_address(ids, convert_to_group) {
-                        JSONValue::Null => None,
-                        value => Some(value),
-                    })
-                    .collect(),
+            (
+                JSONValue::Array(
+                    list.into_iter()
+                        .filter_map(|ids| match header_to_jmap_address(ids, convert_to_group) {
+                            (JSONValue::Null, _, _) => None,
+                            (value, _, _) => Some(value),
+                        })
+                        .collect(),
+                ),
+                convert_to_group,
+                true,
             )
         }
-        _ => JSONValue::Null,
+        _ => (JSONValue::Null, false, false),
     }
+}
+
+fn empty_text_mime_heades<'x>(is_html: bool, size: usize) -> JMAPMailMimeHeaders<'x> {
+    let mut mime_parts = HashMap::with_capacity(2);
+    mime_parts.insert(JMAPMailBodyProperties::Size, JSONValue::Number(size as i64));
+    mime_parts.insert(
+        JMAPMailBodyProperties::Type,
+        JSONValue::String(if is_html {
+            "text/html".to_string()
+        } else {
+            "text/plain".to_string()
+        }),
+    );
+    mime_parts
 }
 
 fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
     let mut mime_parts = HashMap::with_capacity(headers.len());
     if size > 0 {
-        mime_parts.insert(JMAPMailProperties::Size, JSONValue::Number(size as i64));
+        mime_parts.insert(JMAPMailBodyProperties::Size, JSONValue::Number(size as i64));
     }
     for (header, value) in headers {
         if let RfcHeader::ContentType
@@ -881,22 +1015,24 @@ fn mime_header_to_jmap<'x>(
                 if let Some(mut attributes) = content_type.attributes {
                     if content_type.c_type == "text" {
                         if let Some(charset) = attributes.remove("charset") {
-                            mime_parts
-                                .insert(JMAPMailProperties::Charset, JSONValue::String(charset));
+                            mime_parts.insert(
+                                JMAPMailBodyProperties::Charset,
+                                JSONValue::String(charset.to_string()),
+                            );
                         }
                     }
-                    if let Entry::Vacant(e) = mime_parts.entry(JMAPMailProperties::Name) {
+                    if let Entry::Vacant(e) = mime_parts.entry(JMAPMailBodyProperties::Name) {
                         if let Some(name) = attributes.remove("name") {
-                            e.insert(JSONValue::String(name));
+                            e.insert(JSONValue::String(name.to_string()));
                         }
                     }
                 }
                 mime_parts.insert(
-                    JMAPMailProperties::Type,
+                    JMAPMailBodyProperties::Type,
                     if let Some(subtype) = content_type.c_subtype {
-                        JSONValue::String(format!("{}/{}", content_type.c_type, subtype).into())
+                        JSONValue::String(format!("{}/{}", content_type.c_type, subtype))
                     } else {
-                        JSONValue::String(content_type.c_type)
+                        JSONValue::String(content_type.c_type.to_string())
                     },
                 );
             }
@@ -904,24 +1040,30 @@ fn mime_header_to_jmap<'x>(
         RfcHeader::ContentDisposition => {
             if let HeaderValue::ContentType(content_disposition) = value {
                 mime_parts.insert(
-                    JMAPMailProperties::Disposition,
-                    JSONValue::String(content_disposition.c_type),
+                    JMAPMailBodyProperties::Disposition,
+                    JSONValue::String(content_disposition.c_type.to_string()),
                 );
                 if let Some(mut attributes) = content_disposition.attributes {
                     if let Some(name) = attributes.remove("filename") {
-                        mime_parts.insert(JMAPMailProperties::Name, JSONValue::String(name));
+                        mime_parts.insert(
+                            JMAPMailBodyProperties::Name,
+                            JSONValue::String(name.to_string()),
+                        );
                     }
                 }
             }
         }
         RfcHeader::ContentId => match value {
             HeaderValue::Text(id) => {
-                mime_parts.insert(JMAPMailProperties::Cid, JSONValue::String(id));
+                mime_parts.insert(
+                    JMAPMailBodyProperties::Cid,
+                    JSONValue::String(id.to_string()),
+                );
             }
             HeaderValue::TextList(mut ids) => {
                 mime_parts.insert(
-                    JMAPMailProperties::Cid,
-                    JSONValue::String(ids.pop().unwrap()),
+                    JMAPMailBodyProperties::Cid,
+                    JSONValue::String(ids.pop().unwrap().to_string()),
                 );
             }
             _ => {}
@@ -929,26 +1071,33 @@ fn mime_header_to_jmap<'x>(
         RfcHeader::ContentLanguage => match value {
             HeaderValue::Text(id) => {
                 mime_parts.insert(
-                    JMAPMailProperties::Language,
-                    JSONValue::Array(vec![JSONValue::String(id)]),
+                    JMAPMailBodyProperties::Language,
+                    JSONValue::Array(vec![JSONValue::String(id.to_string())]),
                 );
             }
             HeaderValue::TextList(ids) => {
                 mime_parts.insert(
-                    JMAPMailProperties::Language,
-                    JSONValue::Array(ids.into_iter().map(JSONValue::String).collect()),
+                    JMAPMailBodyProperties::Language,
+                    JSONValue::Array(
+                        ids.into_iter()
+                            .map(|v| JSONValue::String(v.to_string()))
+                            .collect(),
+                    ),
                 );
             }
             _ => {}
         },
         RfcHeader::ContentLocation => match value {
             HeaderValue::Text(id) => {
-                mime_parts.insert(JMAPMailProperties::Location, JSONValue::String(id));
+                mime_parts.insert(
+                    JMAPMailBodyProperties::Location,
+                    JSONValue::String(id.to_string()),
+                );
             }
             HeaderValue::TextList(mut ids) => {
                 mime_parts.insert(
-                    JMAPMailProperties::Location,
-                    JSONValue::String(ids.pop().unwrap()),
+                    JMAPMailBodyProperties::Location,
+                    JSONValue::String(ids.pop().unwrap().to_string()),
                 );
             }
             _ => {}

@@ -3,7 +3,6 @@ pub mod id;
 pub mod json;
 
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     hash::Hash,
 };
@@ -166,17 +165,17 @@ pub struct JMAPChangesResponse {
     pub destroyed: HashSet<ChangeLogId>,
 }
 
-pub type JMAPSetIdList<'x, T, U> = HashMap<T, HashMap<U, JSONValue<'x, Cow<'x, str>>>>;
+pub type JMAPSetIdList<T, U> = HashMap<T, HashMap<U, JSONValue>>;
 
 #[derive(Debug)]
-pub struct JMAPSet<'x, T>
+pub struct JMAPSet<T>
 where
     T: Hash + Eq + PartialEq,
 {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub create: Option<JMAPSetIdList<'x, Cow<'x, str>, Cow<'x, str>>>,
-    pub update: Option<JMAPSetIdList<'x, JMAPId, JSONPointer<'x, T>>>,
+    pub create: Option<JMAPSetIdList<String, String>>,
+    pub update: Option<JMAPSetIdList<JMAPId, JSONPointer<T>>>,
     pub destroy: Option<Vec<JMAPId>>,
 }
 
@@ -201,16 +200,13 @@ pub struct JMAPSetError {
 }
 
 #[derive(Debug, Default)]
-pub struct JMAPSetResponse<'x, T>
-where
-    T: Hash + Eq + PartialEq,
-{
+pub struct JMAPSetResponse {
     pub old_state: JMAPState,
     pub new_state: JMAPState,
-    pub created: Option<HashMap<Cow<'x, str>, JSONValue<'x, T>>>,
-    pub updated: Option<HashMap<JMAPId, JSONValue<'x, T>>>,
+    pub created: Option<HashMap<String, JSONValue>>,
+    pub updated: Option<HashMap<JMAPId, JSONValue>>,
     pub destroyed: Option<Vec<JMAPId>>,
-    pub not_created: Option<HashMap<Cow<'x, str>, JMAPSetError>>,
+    pub not_created: Option<HashMap<String, JMAPSetError>>,
     pub not_updated: Option<HashMap<JMAPId, JMAPSetError>>,
     pub not_destroyed: Option<HashMap<JMAPId, JMAPSetError>>,
 }
@@ -238,8 +234,8 @@ pub struct JMAPGet<T> {
     pub properties: Option<Vec<T>>,
 }
 
-pub struct JMAPGetResponse<'x> {
+pub struct JMAPGetResponse {
     pub state: JMAPState,
-    pub list: JSONValue<'x, Cow<'x, str>>,
+    pub list: JSONValue,
     pub not_found: Option<Vec<JMAPId>>,
 }

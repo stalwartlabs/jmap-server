@@ -21,9 +21,9 @@ use crate::{JMAPMailIdImpl, JMAPMailProperties, MessageField};
 
 fn build_message<'x, T>(
     document: &mut DocumentWriter<'x, T>,
-    fields: HashMap<Cow<'x, str>, JSONValue<'x, Cow<'x, str>>>,
+    fields: HashMap<String, JSONValue>,
     mailbox_ids: &impl DocumentSet,
-) -> Result<JSONValue<'x, JMAPMailProperties<'x>>, JMAPSetError>
+) -> Result<JSONValue, JMAPSetError>
 where
     T: UncommittedDocumentId,
 {
@@ -37,8 +37,8 @@ where
 pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
     fn mail_set(
         &self,
-        request: JMAPSet<'x, JMAPMailProperties<'x>>,
-    ) -> jmap_store::Result<JMAPSetResponse<'x, JMAPMailProperties<'x>>> {
+        request: JMAPSet<JMAPMailProperties>,
+    ) -> jmap_store::Result<JMAPSetResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -139,7 +139,7 @@ pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
                                 let mut new_keywords = Vec::with_capacity(value.len());
                                 for (keyword, value) in value {
                                     if let JSONValue::Bool(true) = value {
-                                        new_keywords.push(Tag::Text(keyword));
+                                        new_keywords.push(Tag::Text(keyword.into()));
                                     }
                                 }
                                 document.add_binary(
@@ -207,13 +207,13 @@ pub trait JMAPMailLocalStoreSet<'x>: JMAPMailLocalStoreChanges<'x> {
                                     JSONValue::Null | JSONValue::Bool(false) => {
                                         document.clear_tag(
                                             MessageField::Keyword.into(),
-                                            Tag::Text(keyword),
+                                            Tag::Text(keyword.into()),
                                         );
                                     }
                                     JSONValue::Bool(true) => {
                                         document.set_tag(
                                             MessageField::Keyword.into(),
-                                            Tag::Text(keyword),
+                                            Tag::Text(keyword.into()),
                                         );
                                     }
                                     _ => {

@@ -1,0 +1,155 @@
+[
+  {
+    "from": [
+      {
+        "name": "Al Gore",
+        "email": "vice-president@whitehouse.gov"
+      }
+    ],
+    "hasAttachment": true,
+    "threadId": "i00",
+    "subject": "[Fwd: Map of Argentina with Description]",
+    "htmlBody": [
+      {
+        "partId": 2,
+        "type": "text/html",
+        "size": 107,
+        "blobId": "b00000006"
+      }
+    ],
+    "blobId": "b00000000",
+    "id": "i00",
+    "bodyStructure": {
+      "headers": [
+        {
+          "name": "header:From",
+          "value": "Al Gore <vice-president@whitehouse.gov>"
+        },
+        {
+          "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>",
+          "name": "header:To"
+        },
+        {
+          "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\"",
+          "name": "header:Content-Type"
+        },
+        {
+          "value": "[Fwd: Map of Argentina with Description]",
+          "name": "header:Subject"
+        }
+      ],
+      "subparts": [
+        {
+          "size": 61,
+          "partId": 0,
+          "blobId": "b00000004",
+          "type": "text/plain",
+          "headers": [
+            {
+              "value": "text/plain; charset=us-ascii",
+              "name": "header:Content-Type"
+            },
+            {
+              "name": "header:Content-Transfer-Encoding",
+              "value": "7bit"
+            }
+          ],
+          "charset": "us-ascii"
+        },
+        {
+          "blobId": "b00000005",
+          "disposition": "inline",
+          "size": 1980,
+          "type": "message/rfc822",
+          "partId": 1,
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "message/rfc822"
+            },
+            {
+              "name": "header:Content-Transfer-Encoding",
+              "value": "7bit"
+            },
+            {
+              "name": "header:Content-Disposition",
+              "value": "inline"
+            }
+          ]
+        }
+      ],
+      "type": "multipart/mixed"
+    },
+    "receivedAt": "2022-01-14T18:19:31Z",
+    "to": [
+      {
+        "name": "White House Transportation Coordinator",
+        "email": "transport@whitehouse.gov"
+      }
+    ],
+    "textBody": [
+      {
+        "partId": 0,
+        "charset": "us-ascii",
+        "headers": [
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
+            "value": "text/plain; charset=us-ascii",
+            "name": "header:Content-Type"
+          }
+        ],
+        "blobId": "b00000004",
+        "size": 61,
+        "type": "text/plain"
+      }
+    ],
+    "bodyValues": {
+      "2": {
+        "value": "<html><body>Fred,<br/><br/>Fire up Air Force One!  We're going South!<br/><br/>Thanks,<br/>Al...",
+        "isEncodingProblem": false,
+        "isTruncated": true
+      },
+      "0": {
+        "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
+        "isEncodingProblem": false,
+        "isTruncated": false
+      }
+    },
+    "preview": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
+    "size": 2651,
+    "keywords": {
+      "tag": true
+    },
+    "mailboxIds": {
+      "i00": true,
+      "i02": true,
+      "i01": true
+    },
+    "attachments": [
+      {
+        "disposition": "inline",
+        "headers": [
+          {
+            "value": "7bit",
+            "name": "header:Content-Transfer-Encoding"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "message/rfc822"
+          },
+          {
+            "name": "header:Content-Disposition",
+            "value": "inline"
+          }
+        ],
+        "blobId": "b00000005",
+        "partId": 1,
+        "type": "message/rfc822",
+        "size": 1980
+      }
+    ]
+  }
+]

@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     time::Instant,
 };
@@ -438,7 +437,7 @@ fn test_query<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
                 .ids
                 .into_iter()
                 .map(|id| { get_message_id(mail_store, id) })
-                .collect::<Vec<Cow<str>>>(),
+                .collect::<Vec<String>>(),
             expected_results
         );
     }
@@ -700,7 +699,7 @@ fn test_query_options<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
                 .ids
                 .into_iter()
                 .map(|id| { get_message_id(mail_store, id) })
-                .collect::<Vec<Cow<str>>>(),
+                .collect::<Vec<String>>(),
             expected_results
         );
         assert_eq!(
@@ -710,7 +709,7 @@ fn test_query_options<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
                 .ids
                 .into_iter()
                 .map(|id| { get_message_id(mail_store, id) })
-                .collect::<Vec<Cow<str>>>(),
+                .collect::<Vec<String>>(),
             expected_results_collapsed
         );
     }
@@ -739,10 +738,7 @@ fn get_anchor<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, anchor: &'x str) 
     JMAPId::from_email(thread_id, doc_id).into()
 }
 
-fn get_message_id<'x>(
-    mail_store: &'x impl JMAPMailLocalStore<'x>,
-    jmap_id: JMAPId,
-) -> Cow<'x, str> {
+fn get_message_id<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, jmap_id: JMAPId) -> String {
     if let JSONValue::Array(mut list) = mail_store
         .mail_get(
             JMAPGet {

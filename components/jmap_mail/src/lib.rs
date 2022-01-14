@@ -23,15 +23,13 @@ use set::JMAPMailLocalStoreSet;
 use store::{AccountId, BlobIndex, DocumentId, ThreadId};
 
 pub const MESSAGE_RAW: BlobIndex = 0;
-pub const MESSAGE_HEADERS: BlobIndex = 1;
-pub const MESSAGE_HEADERS_RAW: BlobIndex = 2;
-pub const MESSAGE_BODY: BlobIndex = 3;
-pub const MESSAGE_BODY_STRUCTURE: BlobIndex = 4;
-pub const MESSAGE_PARTS: BlobIndex = 5;
+pub const MESSAGE_HEADERS_RAW: BlobIndex = 1;
+pub const MESSAGE_BODY: BlobIndex = 2;
+pub const MESSAGE_BODY_STRUCTURE: BlobIndex = 3;
+pub const MESSAGE_PARTS: BlobIndex = 4;
 
-pub type JMAPMailHeaders<'x> = HashMap<RfcHeader, JSONValue<'x, JMAPMailProperties<'x>>>;
-pub type JMAPMailMimeHeaders<'x> =
-    HashMap<JMAPMailProperties<'x>, JSONValue<'x, JMAPMailProperties<'x>>>;
+pub type JMAPMailHeaders<'x> = HashMap<JMAPMailProperties<'x>, JSONValue>;
+pub type JMAPMailMimeHeaders<'x> = HashMap<JMAPMailBodyProperties<'x>, JSONValue>;
 
 pub trait JMAPMailIdImpl {
     fn from_email(thread_id: ThreadId, doc_id: DocumentId) -> Self;
@@ -55,13 +53,11 @@ impl JMAPMailIdImpl for JMAPId {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageBody<'x> {
+    pub properties: HashMap<JMAPMailProperties<'x>, JSONValue>,
     pub mime_parts: Vec<MimePart<'x>>,
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
     pub attachments: Vec<MessagePartId>,
-    pub size: usize,
-    pub received_at: i64,
-    pub has_attachments: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -150,6 +146,16 @@ pub struct JMAPMailHeaderProperty<'x> {
     pub all: bool,
 }
 
+impl<'x> JMAPMailHeaderProperty<'x> {
+    pub fn new_rfc(header: RfcHeader, form: JMAPMailHeaderForm, all: bool) -> Self {
+        JMAPMailHeaderProperty {
+            form,
+            header: HeaderName::Rfc(header),
+            all,
+        }
+    }
+}
+
 impl<'x> Display for JMAPMailHeaderProperty<'x> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "header:")?;
@@ -212,18 +218,6 @@ pub enum JMAPMailProperties<'x> {
     Attachments,
     BodyStructure,
     Header(JMAPMailHeaderProperty<'x>),
-
-    // Sub-properties
-    Name,
-    Email,
-    Addresses,
-    Type,
-    Charset,
-    Headers,
-    Disposition,
-    Cid,
-    Language,
-    Location,
 }
 
 impl<'x> Display for JMAPMailProperties<'x> {
@@ -255,16 +249,6 @@ impl<'x> Display for JMAPMailProperties<'x> {
             JMAPMailProperties::Attachments => write!(f, "attachments"),
             JMAPMailProperties::BodyStructure => write!(f, "bodyStructure"),
             JMAPMailProperties::Header(header) => header.fmt(f),
-            JMAPMailProperties::Name => write!(f, "name"),
-            JMAPMailProperties::Email => write!(f, "email"),
-            JMAPMailProperties::Addresses => write!(f, "addresses"),
-            JMAPMailProperties::Type => write!(f, "type"),
-            JMAPMailProperties::Charset => write!(f, "charset"),
-            JMAPMailProperties::Headers => write!(f, "headers"),
-            JMAPMailProperties::Disposition => write!(f, "disposition"),
-            JMAPMailProperties::Cid => write!(f, "cid"),
-            JMAPMailProperties::Language => write!(f, "language"),
-            JMAPMailProperties::Location => write!(f, "location"),
         }
     }
 }
@@ -304,16 +288,6 @@ impl<'x> JMAPMailProperties<'x> {
             JMAPMailProperties::Attachments => JMAPMailProperties::Attachments,
             JMAPMailProperties::BodyStructure => JMAPMailProperties::BodyStructure,
             JMAPMailProperties::Header(header) => JMAPMailProperties::Header(header.into_owned()),
-            JMAPMailProperties::Name => JMAPMailProperties::Name,
-            JMAPMailProperties::Email => JMAPMailProperties::Email,
-            JMAPMailProperties::Addresses => JMAPMailProperties::Addresses,
-            JMAPMailProperties::Type => JMAPMailProperties::Type,
-            JMAPMailProperties::Charset => JMAPMailProperties::Charset,
-            JMAPMailProperties::Headers => JMAPMailProperties::Headers,
-            JMAPMailProperties::Disposition => JMAPMailProperties::Disposition,
-            JMAPMailProperties::Cid => JMAPMailProperties::Cid,
-            JMAPMailProperties::Language => JMAPMailProperties::Language,
-            JMAPMailProperties::Location => JMAPMailProperties::Location,
         }
     }
 }
@@ -324,7 +298,7 @@ impl<'x> Default for JMAPMailProperties<'x> {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JMAPMailBodyProperties<'x> {
     PartId,
     BlobId,
@@ -361,26 +335,6 @@ impl<'x> Display for JMAPMailBodyProperties<'x> {
     }
 }
 
-impl<'x, 'y> From<&JMAPMailBodyProperties<'x>> for JMAPMailProperties<'y> {
-    fn from(body_property: &JMAPMailBodyProperties<'x>) -> Self {
-        match body_property {
-            JMAPMailBodyProperties::Size => JMAPMailProperties::Size,
-            JMAPMailBodyProperties::Name => JMAPMailProperties::Name,
-            JMAPMailBodyProperties::Type => JMAPMailProperties::Type,
-            JMAPMailBodyProperties::Charset => JMAPMailProperties::Charset,
-            JMAPMailBodyProperties::Header(header) => {
-                JMAPMailProperties::Header(header.into_owned())
-            }
-            JMAPMailBodyProperties::Headers => JMAPMailProperties::Headers,
-            JMAPMailBodyProperties::Disposition => JMAPMailProperties::Disposition,
-            JMAPMailBodyProperties::Cid => JMAPMailProperties::Cid,
-            JMAPMailBodyProperties::Language => JMAPMailProperties::Language,
-            JMAPMailBodyProperties::Location => JMAPMailProperties::Location,
-            _ => JMAPMailProperties::BlobId,
-        }
-    }
-}
-
 pub trait JMAPMailStoreImport<'x> {
     fn mail_import_single(
         &'x self,
@@ -390,10 +344,8 @@ pub trait JMAPMailStoreImport<'x> {
 }
 
 pub trait JMAPMailStoreSet<'x> {
-    fn mail_set(
-        &self,
-        request: JMAPSet<'x, JMAPMailProperties<'x>>,
-    ) -> jmap_store::Result<JMAPSetResponse<'x, JMAPMailProperties<'x>>>;
+    fn mail_set(&self, request: JMAPSet<JMAPMailProperties>)
+        -> jmap_store::Result<JMAPSetResponse>;
 }
 
 pub trait JMAPMailStoreQuery<'x> {
@@ -433,7 +385,7 @@ pub trait JMAPMailStoreGet<'x> {
         &self,
         request: JMAPGet<JMAPMailProperties<'x>>,
         arguments: JMAPMailStoreGetArguments,
-    ) -> jmap_store::Result<JMAPGetResponse<'x>>;
+    ) -> jmap_store::Result<JMAPGetResponse>;
 }
 
 pub trait JMAPMailStore<'x>:
