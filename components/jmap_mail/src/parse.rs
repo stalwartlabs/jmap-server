@@ -30,6 +30,7 @@ pub fn build_message_document<'x>(
     received_at: Option<i64>,
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
     let mut total_parts = message.parts.len();
+    let mut total_blobs = 0;
     let mut message_body = MessageBody {
         properties: HashMap::with_capacity(message.headers_rfc.len() + 3),
         mime_parts: Vec::with_capacity(total_parts + 1),
@@ -37,7 +38,7 @@ pub fn build_message_document<'x>(
         text_body: message.text_body,
         attachments: message.attachments,
     };
-    let mut parts_headers_raw = Vec::with_capacity(total_parts);
+    let mut parts_headers_raw = Vec::with_capacity(total_parts + 1);
     let mut language_detector = LanguageDetector::new();
     let mut has_attachments = false;
 
@@ -246,21 +247,26 @@ pub fn build_message_document<'x>(
 
     message_body
         .mime_parts
-        .push(MimePart::new_other(mime_parts, false));
+        .push(MimePart::new_other(mime_parts, 0, false));
+    parts_headers_raw.push(message.headers_raw);
+
     let mut extra_mime_parts = Vec::new();
 
     for (part_id, part) in message.parts.into_iter().enumerate() {
         match part {
             MessagePart::Html(html) => {
-                message_body.mime_parts.push(MimePart::new_html(
-                    mime_parts_to_jmap(html.headers_rfc, html.body.len()),
-                    html.is_encoding_problem,
-                ));
-                parts_headers_raw.push(html.headers_raw);
-
+                let text = html_to_text(html.body.as_ref());
+                let text_len = text.len();
+                let html_len = html.body.len();
                 let field =
                     if let Some(pos) = message_body.text_body.iter().position(|&p| p == part_id) {
                         message_body.text_body[pos] = total_parts;
+                        extra_mime_parts.push(MimePart::new_text(
+                            empty_text_mime_headers(false, text_len),
+                            total_blobs,
+                            false,
+                        ));
+                        total_parts += 1;
                         MessageField::Body
                     } else if message_body.html_body.contains(&part_id) {
                         MessageField::Body
@@ -269,20 +275,13 @@ pub fn build_message_document<'x>(
                         MessageField::Attachment
                     };
 
-                let text = html_to_text(html.body.as_ref());
-                let text_len = text.len();
-
                 document.add_text(
                     field.clone().into(),
                     Text::Full(FullText::new(text.into(), &mut language_detector)),
                     if field == MessageField::Body {
-                        let blob_id = total_parts;
-                        extra_mime_parts.push(MimePart::new_text(
-                            empty_text_mime_heades(false, text_len),
-                            false,
-                        ));
-                        total_parts += 1;
-                        FieldOptions::StoreAsBlob(blob_id + MESSAGE_PARTS)
+                        let blob_index = total_blobs;
+                        total_blobs += 1;
+                        FieldOptions::StoreAsBlob(blob_index + MESSAGE_PARTS)
                     } else {
                         FieldOptions::None
                     },
@@ -291,16 +290,20 @@ pub fn build_message_document<'x>(
                 document.add_text(
                     field.into(),
                     Text::Default(html.body),
-                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
+
+                message_body.mime_parts.push(MimePart::new_html(
+                    mime_parts_to_jmap(html.headers_rfc, html_len),
+                    total_blobs,
+                    html.is_encoding_problem,
+                ));
+                parts_headers_raw.push(html.headers_raw);
+
+                total_blobs += 1;
             }
             MessagePart::Text(text) => {
-                message_body.mime_parts.push(MimePart::new_text(
-                    mime_parts_to_jmap(text.headers_rfc, text.body.len()),
-                    text.is_encoding_problem,
-                ));
-                parts_headers_raw.push(text.headers_raw);
-
+                let text_len = text.body.len();
                 let field =
                     if let Some(pos) = message_body.html_body.iter().position(|&p| p == part_id) {
                         let html = text_to_html(text.body.as_ref());
@@ -308,13 +311,15 @@ pub fn build_message_document<'x>(
                         document.add_text(
                             MessageField::Body.into(),
                             Text::Default(html.into()),
-                            FieldOptions::StoreAsBlob(total_parts + MESSAGE_PARTS),
+                            FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                         );
                         extra_mime_parts.push(MimePart::new_html(
-                            empty_text_mime_heades(true, html_len),
+                            empty_text_mime_headers(true, html_len),
+                            total_blobs,
                             false,
                         ));
                         message_body.html_body[pos] = total_parts;
+                        total_blobs += 1;
                         total_parts += 1;
                         MessageField::Body
                     } else if message_body.text_body.contains(&part_id) {
@@ -327,8 +332,17 @@ pub fn build_message_document<'x>(
                 document.add_text(
                     field.into(),
                     Text::Full(FullText::new(text.body, &mut language_detector)),
-                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
+
+                message_body.mime_parts.push(MimePart::new_text(
+                    mime_parts_to_jmap(text.headers_rfc, text_len),
+                    total_blobs,
+                    text.is_encoding_problem,
+                ));
+                parts_headers_raw.push(text.headers_raw);
+
+                total_blobs += 1;
             }
             MessagePart::Binary(binary) => {
                 if !has_attachments {
@@ -336,6 +350,7 @@ pub fn build_message_document<'x>(
                 }
                 message_body.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                    total_blobs,
                     binary.is_encoding_problem,
                 ));
                 parts_headers_raw.push(binary.headers_raw);
@@ -343,20 +358,23 @@ pub fn build_message_document<'x>(
                 document.add_binary(
                     MessageField::Attachment.into(),
                     binary.body,
-                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
+                total_blobs += 1;
             }
             MessagePart::InlineBinary(binary) => {
                 message_body.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                    total_blobs,
                     binary.is_encoding_problem,
                 ));
                 parts_headers_raw.push(binary.headers_raw);
                 document.add_binary(
                     MessageField::Attachment.into(),
                     binary.body,
-                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                    FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
+                total_blobs += 1;
             }
             MessagePart::Message(nested_message) => {
                 if !has_attachments {
@@ -376,7 +394,7 @@ pub fn build_message_document<'x>(
                                 document.add_binary(
                                     MessageField::Attachment.into(),
                                     message.raw_message,
-                                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                                    FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                                 );
                                 message_size
                             }
@@ -392,19 +410,22 @@ pub fn build_message_document<'x>(
                                 document.add_binary(
                                     MessageField::Attachment.into(),
                                     raw_message,
-                                    FieldOptions::StoreAsBlob(part_id + MESSAGE_PARTS),
+                                    FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                                 );
                                 message_size
                             }
                         },
                     ),
+                    total_blobs,
                     false,
                 ));
+                total_blobs += 1;
                 parts_headers_raw.push(nested_message.headers_raw);
             }
             MessagePart::Multipart(part) => {
                 message_body.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(part.headers_rfc, 0),
+                    0,
                     false,
                 ));
                 parts_headers_raw.push(part.headers_raw);
@@ -435,8 +456,7 @@ pub fn build_message_document<'x>(
         MessageField::Internal.into(),
         bincode::serialize(&MessageRawHeaders {
             size: message.offset_body,
-            headers: message.headers_raw,
-            parts_headers: parts_headers_raw,
+            headers: parts_headers_raw,
         })
         .map_err(|e| StoreError::SerializeError(e.to_string()))?
         .into(),
@@ -972,7 +992,7 @@ pub fn header_to_jmap_address(
     }
 }
 
-fn empty_text_mime_heades<'x>(is_html: bool, size: usize) -> JMAPMailMimeHeaders<'x> {
+fn empty_text_mime_headers<'x>(is_html: bool, size: usize) -> JMAPMailMimeHeaders<'x> {
     let mut mime_parts = HashMap::with_capacity(2);
     mime_parts.insert(JMAPMailBodyProperties::Size, JSONValue::Number(size as i64));
     mime_parts.insert(

@@ -1,0 +1,291 @@
+[
+  {
+    "threadId": "i02",
+    "blobId": "b00000200",
+    "subject": "RFC 8621 Section 4.1.4 test",
+    "htmlBody": [
+      {
+        "partId": 14,
+        "type": "text/html",
+        "blobId": "b00000204",
+        "size": 27
+      },
+      {
+        "blobId": "b0000020a",
+        "type": "text/html",
+        "size": 14,
+        "headers": [
+          {
+            "value": "text/html",
+            "name": "header:Content-Type"
+          }
+        ],
+        "partId": 8
+      },
+      {
+        "type": "text/html",
+        "partId": 15,
+        "size": 27,
+        "blobId": "b0000020f"
+      }
+    ],
+    "attachments": [
+      {
+        "partId": 5,
+        "headers": [
+          {
+            "name": "header:Content-Disposition",
+            "value": "inline"
+          },
+          {
+            "value": "image/jpeg",
+            "name": "header:Content-Type"
+          }
+        ],
+        "size": 1,
+        "blobId": "b00000207",
+        "type": "image/jpeg",
+        "disposition": "inline"
+      },
+      {
+        "blobId": "b0000020b",
+        "type": "image/jpeg",
+        "partId": 9,
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "image/jpeg"
+          }
+        ],
+        "size": 1
+      },
+      {
+        "partId": 10,
+        "type": "image/jpeg",
+        "blobId": "b0000020c",
+        "size": 1,
+        "headers": [
+          {
+            "name": "header:Content-Disposition",
+            "value": "attachment"
+          },
+          {
+            "value": "image/jpeg",
+            "name": "header:Content-Type"
+          }
+        ],
+        "disposition": "attachment"
+      },
+      {
+        "headers": [
+          {
+            "value": "application/x-excel",
+            "name": "header:Content-Type"
+          }
+        ],
+        "type": "application/x-excel",
+        "size": 1,
+        "partId": 11,
+        "blobId": "b0000020d"
+      },
+      {
+        "blobId": "b0000020e",
+        "headers": [
+          {
+            "value": "message/rfc822",
+            "name": "header:Content-Type"
+          }
+        ],
+        "partId": 12,
+        "size": 17,
+        "type": "message/rfc822"
+      }
+    ],
+    "hasAttachment": true,
+    "size": 870,
+    "mailboxIds": {
+      "i00": true,
+      "i02": true,
+      "i01": true
+    },
+    "id": "i200000002",
+    "bodyStructure": {
+      "type": "multipart/mixed",
+      "headers": [
+        {
+          "value": "RFC 8621 Section 4.1.4 test",
+          "name": "header:Subject"
+        },
+        {
+          "value": "multipart/mixed; boundary=\"1\"",
+          "name": "header:Content-Type"
+        }
+      ],
+      "subparts": [
+        {
+          "type": "text/plain",
+          "size": 1,
+          "headers": [
+            {
+              "name": "header:Content-Disposition",
+              "value": "inline"
+            },
+            {
+              "value": "text/plain",
+              "name": "header:Content-Type"
+            }
+          ],
+          "blobId": "b00000205",
+          "partId": 0,
+          "disposition": "inline"
+        },
+        {
+          "size": 1,
+          "partId": 13,
+          "blobId": "b00000210",
+          "type": "text/plain",
+          "headers": [
+            {
+              "name": "header:Content-Disposition",
+              "value": "inline"
+            },
+            {
+              "value": "text/plain",
+              "name": "header:Content-Type"
+            }
+          ],
+          "disposition": "inline"
+        }
+      ]
+    },
+    "textBody": [
+      {
+        "blobId": "b00000205",
+        "headers": [
+          {
+            "value": "inline",
+            "name": "header:Content-Disposition"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain"
+          }
+        ],
+        "type": "text/plain",
+        "size": 1,
+        "disposition": "inline",
+        "partId": 0
+      },
+      {
+        "disposition": "inline",
+        "headers": [
+          {
+            "value": "text/plain",
+            "name": "header:Content-Type"
+          },
+          {
+            "value": "inline",
+            "name": "header:Content-Disposition"
+          }
+        ],
+        "size": 1,
+        "blobId": "b00000206",
+        "partId": 4,
+        "type": "text/plain"
+      },
+      {
+        "headers": [
+          {
+            "value": "inline",
+            "name": "header:Content-Disposition"
+          },
+          {
+            "value": "image/jpeg",
+            "name": "header:Content-Type"
+          }
+        ],
+        "disposition": "inline",
+        "type": "image/jpeg",
+        "blobId": "b00000207",
+        "partId": 5,
+        "size": 1
+      },
+      {
+        "type": "text/plain",
+        "size": 1,
+        "disposition": "inline",
+        "partId": 6,
+        "headers": [
+          {
+            "value": "inline",
+            "name": "header:Content-Disposition"
+          },
+          {
+            "value": "text/plain",
+            "name": "header:Content-Type"
+          }
+        ],
+        "blobId": "b00000208"
+      },
+      {
+        "type": "text/plain",
+        "partId": 13,
+        "disposition": "inline",
+        "blobId": "b00000210",
+        "headers": [
+          {
+            "name": "header:Content-Disposition",
+            "value": "inline"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain"
+          }
+        ],
+        "size": 1
+      }
+    ],
+    "receivedAt": "2022-01-15T11:12:45Z",
+    "preview": "A",
+    "keywords": {
+      "tag": true
+    },
+    "bodyValues": {
+      "8": {
+        "isTruncated": false,
+        "value": "<html>E</html>",
+        "isEncodingProblem": false
+      },
+      "6": {
+        "value": "D",
+        "isEncodingProblem": false,
+        "isTruncated": false
+      },
+      "14": {
+        "isEncodingProblem": false,
+        "isTruncated": false,
+        "value": "<html><body>A</body></html>"
+      },
+      "15": {
+        "isEncodingProblem": false,
+        "value": "<html><body>K</body></html>",
+        "isTruncated": false
+      },
+      "4": {
+        "isTruncated": false,
+        "isEncodingProblem": false,
+        "value": "B"
+      },
+      "13": {
+        "isEncodingProblem": false,
+        "isTruncated": false,
+        "value": "K"
+      },
+      "0": {
+        "value": "A",
+        "isEncodingProblem": false,
+        "isTruncated": false
+      }
+    }
+  }
+]

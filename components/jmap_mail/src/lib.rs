@@ -70,30 +70,46 @@ pub enum MimePartType {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MimePart<'x> {
     pub headers: JMAPMailMimeHeaders<'x>,
+    pub blob_index: BlobIndex,
     pub is_encoding_problem: bool,
     pub mime_type: MimePartType,
 }
 
 impl<'x> MimePart<'x> {
-    pub fn new_html(headers: JMAPMailMimeHeaders<'x>, is_encoding_problem: bool) -> Self {
+    pub fn new_html(
+        headers: JMAPMailMimeHeaders<'x>,
+        blob_index: BlobIndex,
+        is_encoding_problem: bool,
+    ) -> Self {
         MimePart {
             headers,
+            blob_index,
             is_encoding_problem,
             mime_type: MimePartType::Html,
         }
     }
 
-    pub fn new_text(headers: JMAPMailMimeHeaders<'x>, is_encoding_problem: bool) -> Self {
+    pub fn new_text(
+        headers: JMAPMailMimeHeaders<'x>,
+        blob_index: BlobIndex,
+        is_encoding_problem: bool,
+    ) -> Self {
         MimePart {
             headers,
+            blob_index,
             is_encoding_problem,
             mime_type: MimePartType::Text,
         }
     }
 
-    pub fn new_other(headers: JMAPMailMimeHeaders<'x>, is_encoding_problem: bool) -> Self {
+    pub fn new_other(
+        headers: JMAPMailMimeHeaders<'x>,
+        blob_index: BlobIndex,
+        is_encoding_problem: bool,
+    ) -> Self {
         MimePart {
             headers,
+            blob_index,
             is_encoding_problem,
             mime_type: MimePartType::Other,
         }
@@ -102,8 +118,7 @@ impl<'x> MimePart<'x> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessageRawHeaders<'x> {
     pub size: usize,
-    pub headers: RawHeaders<'x>,
-    pub parts_headers: Vec<RawHeaders<'x>>,
+    pub headers: Vec<RawHeaders<'x>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

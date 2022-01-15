@@ -1,0 +1,155 @@
+[
+  {
+    "subject": "[Fwd: Map of Argentina with Description]",
+    "receivedAt": "2022-01-15T11:12:45Z",
+    "textBody": [
+      {
+        "partId": 0,
+        "type": "text/plain",
+        "size": 61,
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain; charset=us-ascii"
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "7bit"
+          }
+        ],
+        "blobId": "b00000005",
+        "charset": "us-ascii"
+      }
+    ],
+    "hasAttachment": true,
+    "keywords": {
+      "tag": true
+    },
+    "from": [
+      {
+        "email": "vice-president@whitehouse.gov",
+        "name": "Al Gore"
+      }
+    ],
+    "size": 2651,
+    "bodyValues": {
+      "0": {
+        "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
+        "isEncodingProblem": false,
+        "isTruncated": false
+      },
+      "2": {
+        "isTruncated": true,
+        "value": "<html><body>Fred,<br/><br/>Fire up Air Force One!  We're going South!<br/><br/>Thanks,<br/>Al...",
+        "isEncodingProblem": false
+      }
+    },
+    "threadId": "i00",
+    "attachments": [
+      {
+        "headers": [
+          {
+            "value": "7bit",
+            "name": "header:Content-Transfer-Encoding"
+          },
+          {
+            "value": "inline",
+            "name": "header:Content-Disposition"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "message/rfc822"
+          }
+        ],
+        "size": 1980,
+        "partId": 1,
+        "blobId": "b00000006",
+        "disposition": "inline",
+        "type": "message/rfc822"
+      }
+    ],
+    "to": [
+      {
+        "name": "White House Transportation Coordinator",
+        "email": "transport@whitehouse.gov"
+      }
+    ],
+    "blobId": "b00000000",
+    "bodyStructure": {
+      "headers": [
+        {
+          "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>",
+          "name": "header:To"
+        },
+        {
+          "name": "header:Content-Type",
+          "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
+        },
+        {
+          "name": "header:From",
+          "value": "Al Gore <vice-president@whitehouse.gov>"
+        },
+        {
+          "value": "[Fwd: Map of Argentina with Description]",
+          "name": "header:Subject"
+        }
+      ],
+      "type": "multipart/mixed",
+      "subparts": [
+        {
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "text/plain; charset=us-ascii"
+            },
+            {
+              "name": "header:Content-Transfer-Encoding",
+              "value": "7bit"
+            }
+          ],
+          "charset": "us-ascii",
+          "size": 61,
+          "blobId": "b00000005",
+          "partId": 0,
+          "type": "text/plain"
+        },
+        {
+          "type": "message/rfc822",
+          "disposition": "inline",
+          "headers": [
+            {
+              "value": "7bit",
+              "name": "header:Content-Transfer-Encoding"
+            },
+            {
+              "name": "header:Content-Disposition",
+              "value": "inline"
+            },
+            {
+              "value": "message/rfc822",
+              "name": "header:Content-Type"
+            }
+          ],
+          "partId": 1,
+          "blobId": "b00000006",
+          "size": 1980
+        }
+      ]
+    },
+    "preview": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
+    "id": "i00",
+    "htmlBody": [
+      {
+        "partId": 2,
+        "size": 107,
+        "type": "text/html",
+        "blobId": "b00000004"
+      }
+    ],
+    "mailboxIds": {
+      "i01": true,
+      "i00": true,
+      "i02": true
+    }
+  }
+]

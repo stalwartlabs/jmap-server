@@ -398,11 +398,11 @@ where
     }
 
     if set_total_docs > 0 {
-        set_buf[set_header_pos] = BIT_SET | ((set_total_docs & 0x7F) as u8);
+        set_buf[set_header_pos] = BIT_SET | (((set_total_docs - 1) & 0x7F) as u8);
     }
 
     if clear_total_docs > 0 {
-        clear_buf[clear_header_pos] = BIT_CLEAR | ((clear_total_docs & 0x7F) as u8);
+        clear_buf[clear_header_pos] = BIT_CLEAR | (((clear_total_docs - 1) & 0x7F) as u8);
     }
 
     if set_total_docs > 0 && clear_total_docs > 0 {
