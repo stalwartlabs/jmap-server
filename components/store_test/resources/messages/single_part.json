@@ -1,0 +1,137 @@
+[
+  {
+    "attachments": [],
+    "blobId": "ignored_value",
+    "bodyStructure": {
+      "blobId": "ignored_value",
+      "charset": "iso-8859-1",
+      "headers": [
+        {
+          "name": "header:X-Mailer",
+          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        },
+        {
+          "name": "header:Subject",
+          "value": "=?iso-8859-1?Q?Die_Hasen_und_die_Fr=F6sche_=28Microsoft_Outlook_00=29?="
+        },
+        {
+          "name": "header:X-MSMail-Priority",
+          "value": "Normal"
+        },
+        {
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        },
+        {
+          "name": "header:Message-ID",
+          "value": "<NDBBIAKOPKHFGPLCODIGIEKCCHAA.doug@example.com>"
+        },
+        {
+          "name": "header:Importance",
+          "value": "Normal"
+        },
+        {
+          "name": "header:Content-Transfer-Encoding",
+          "value": "quoted-printable"
+        },
+        {
+          "name": "header:Content-Type",
+          "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+        },
+        {
+          "name": "header:From",
+          "value": "\"Doug Sauder\" <doug@example.com>"
+        },
+        {
+          "name": "header:Date",
+          "value": "Wed, 17 May 2000 19:15:35 -0400"
+        },
+        {
+          "name": "header:To",
+          "value": "=?iso-8859-1?B?SvxyZ2VuIFNjaG38cmdlbg==?= <schmuergen@example.com>"
+        },
+        {
+          "name": "header:X-MimeOLE",
+          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+        },
+        {
+          "name": "header:X-Priority",
+          "value": "3 (Normal)"
+        }
+      ],
+      "partId": 0,
+      "size": 754,
+      "type": "text/plain"
+    },
+    "bodyValues": {
+      "0": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprac..."
+      },
+      "1": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "<html><body>Die Hasen und die Frösche<br/><br/>Die Hasen klagten einst über ihre mißliche Lage..."
+      }
+    },
+    "from": [
+      {
+        "email": "doug@example.com",
+        "name": "Doug Sauder"
+      }
+    ],
+    "hasAttachment": false,
+    "htmlBody": [
+      {
+        "blobId": "ignored_value",
+        "partId": 1,
+        "size": 808,
+        "type": "text/html"
+      }
+    ],
+    "id": "ignored_value",
+    "keywords": {
+      "tag": true
+    },
+    "mailboxIds": {
+      "i00": true,
+      "i01": true,
+      "i02": true
+    },
+    "messageId": [
+      "NDBBIAKOPKHFGPLCODIGIEKCCHAA.doug@example.com"
+    ],
+    "preview": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprach ein Redner, \"in steter Furcht vor Menschen und Tieren, eine Beute der Hunde, der Adler, ja fast aller Raubtiere! Unsere stete Angst ist ärger als der Tod...",
+    "receivedAt": "2022-01-18T22:52:54Z",
+    "sentAt": "2000-05-17T19:15:35-04:00",
+    "size": 1378,
+    "subject": "Die Hasen und die Frösche (Microsoft Outlook 00)",
+    "textBody": [
+      {
+        "blobId": "ignored_value",
+        "charset": "iso-8859-1",
+        "headers": [
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+          }
+        ],
+        "partId": 0,
+        "size": 754,
+        "type": "text/plain"
+      }
+    ],
+    "threadId": "i07",
+    "to": [
+      {
+        "email": "schmuergen@example.com",
+        "name": "Jürgen Schmürgen"
+      }
+    ]
+  }
+]

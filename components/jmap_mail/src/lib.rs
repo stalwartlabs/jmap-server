@@ -16,17 +16,15 @@ use jmap_store::{
     JMAPChangesResponse, JMAPGet, JMAPGetResponse, JMAPId, JMAPQuery, JMAPQueryChanges,
     JMAPQueryChangesResponse, JMAPQueryResponse, JMAPSet, JMAPSetResponse,
 };
-use mail_parser::{HeaderName, MessagePartId, RawHeaders, RfcHeader};
+use mail_parser::{HeaderName, MessagePartId, MessageStructure, RawHeaders, RfcHeader};
 use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery};
 use serde::{Deserialize, Serialize};
 use set::JMAPMailLocalStoreSet;
 use store::{AccountId, BlobIndex, DocumentId, ThreadId};
 
 pub const MESSAGE_RAW: BlobIndex = 0;
-pub const MESSAGE_HEADERS_RAW: BlobIndex = 1;
-pub const MESSAGE_BODY: BlobIndex = 2;
-pub const MESSAGE_BODY_STRUCTURE: BlobIndex = 3;
-pub const MESSAGE_PARTS: BlobIndex = 4;
+pub const MESSAGE_DATA: BlobIndex = 1;
+pub const MESSAGE_PARTS: BlobIndex = 2;
 
 pub type JMAPMailHeaders<'x> = HashMap<JMAPMailProperties<'x>, JSONValue>;
 pub type JMAPMailMimeHeaders<'x> = HashMap<JMAPMailBodyProperties<'x>, JSONValue>;
@@ -52,12 +50,19 @@ impl JMAPMailIdImpl for JMAPId {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MessageBody<'x> {
+pub struct MessageData<'x> {
     pub properties: HashMap<JMAPMailProperties<'x>, JSONValue>,
     pub mime_parts: Vec<MimePart<'x>>,
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
     pub attachments: Vec<MessagePartId>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MessageOutline<'x> {
+    pub body_offset: usize,
+    pub body_structure: MessageStructure,
+    pub headers: Vec<RawHeaders<'x>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -115,11 +120,6 @@ impl<'x> MimePart<'x> {
         }
     }
 }
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MessageRawHeaders<'x> {
-    pub size: usize,
-    pub headers: Vec<RawHeaders<'x>>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(u8)]
@@ -169,6 +169,13 @@ impl<'x> JMAPMailHeaderProperty<'x> {
             all,
         }
     }
+    pub fn new_other(header: Cow<'x, str>, form: JMAPMailHeaderForm, all: bool) -> Self {
+        JMAPMailHeaderProperty {
+            form,
+            header: HeaderName::Other(header),
+            all,
+        }
+    }
 }
 
 impl<'x> Display for JMAPMailHeaderProperty<'x> {
@@ -180,12 +187,12 @@ impl<'x> Display for JMAPMailHeaderProperty<'x> {
         }
         match self.form {
             JMAPMailHeaderForm::Raw => (),
-            JMAPMailHeaderForm::Text => write!(f, "asText")?,
-            JMAPMailHeaderForm::Addresses => write!(f, "asAddresses")?,
-            JMAPMailHeaderForm::GroupedAddresses => write!(f, "asGroupedAddresses")?,
-            JMAPMailHeaderForm::MessageIds => write!(f, "asMessageIds")?,
-            JMAPMailHeaderForm::Date => write!(f, "asDate")?,
-            JMAPMailHeaderForm::URLs => write!(f, "asURLs")?,
+            JMAPMailHeaderForm::Text => write!(f, ":asText")?,
+            JMAPMailHeaderForm::Addresses => write!(f, ":asAddresses")?,
+            JMAPMailHeaderForm::GroupedAddresses => write!(f, ":asGroupedAddresses")?,
+            JMAPMailHeaderForm::MessageIds => write!(f, ":asMessageIds")?,
+            JMAPMailHeaderForm::Date => write!(f, ":asDate")?,
+            JMAPMailHeaderForm::URLs => write!(f, ":asURLs")?,
         }
         if self.all {
             write!(f, ":all")

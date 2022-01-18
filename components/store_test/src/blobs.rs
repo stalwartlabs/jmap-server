@@ -66,7 +66,7 @@ where
     }
 
     let blobs = db.get_all_blobs().unwrap();
-    assert_eq!(blobs.len(), 4);
+    assert_eq!(blobs.len(), 40);
 
     for account in 0..100 {
         db.update_document(account, DocumentWriter::delete(0, 0), None)

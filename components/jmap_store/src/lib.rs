@@ -174,7 +174,7 @@ where
 {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub create: Option<JMAPSetIdList<String, String>>,
+    pub create: Option<JMAPSetIdList<String, T>>,
     pub update: Option<JMAPSetIdList<JMAPId, JSONPointer<T>>>,
     pub destroy: Option<Vec<JMAPId>>,
 }

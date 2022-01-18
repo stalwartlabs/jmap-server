@@ -1,0 +1,127 @@
+[
+  {
+    "attachments": [
+      {
+        "blobId": "ignored_value",
+        "disposition": "attachment",
+        "headers": [
+          {
+            "name": "header:Content-Disposition",
+            "value": "attachment;\n\tfilename=\"redball.png\""
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/png;\n\tname=\"redball.png\""
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
+          }
+        ],
+        "name": "redball.png",
+        "partId": 0,
+        "size": 1453,
+        "type": "image/png"
+      }
+    ],
+    "blobId": "ignored_value",
+    "bodyStructure": {
+      "blobId": "ignored_value",
+      "disposition": "attachment",
+      "headers": [
+        {
+          "name": "header:X-MimeOLE",
+          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+        },
+        {
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        },
+        {
+          "name": "header:X-Mailer",
+          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        },
+        {
+          "name": "header:Content-Type",
+          "value": "image/png;\n\tname=\"redball.png\""
+        },
+        {
+          "name": "header:Subject",
+          "value": "Test message from Microsoft Outlook 00"
+        },
+        {
+          "name": "header:Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "header:Importance",
+          "value": "Normal"
+        },
+        {
+          "name": "header:Message-ID",
+          "value": "<NDBBIAKOPKHFGPLCODIGKEKECHAA.doug@example.com>"
+        },
+        {
+          "name": "header:To",
+          "value": "\"Joe Blow\" <jblow@example.com>"
+        },
+        {
+          "name": "header:X-Priority",
+          "value": "3 (Normal)"
+        },
+        {
+          "name": "header:X-MSMail-Priority",
+          "value": "Normal"
+        },
+        {
+          "name": "header:Date",
+          "value": "Wed, 17 May 2000 19:35:05 -0400"
+        },
+        {
+          "name": "header:From",
+          "value": "\"Doug Sauder\" <doug@example.com>"
+        },
+        {
+          "name": "header:Content-Disposition",
+          "value": "attachment;\n\tfilename=\"redball.png\""
+        }
+      ],
+      "name": "redball.png",
+      "partId": 0,
+      "size": 1453,
+      "type": "image/png"
+    },
+    "from": [
+      {
+        "email": "doug@example.com",
+        "name": "Doug Sauder"
+      }
+    ],
+    "hasAttachment": true,
+    "htmlBody": [],
+    "id": "ignored_value",
+    "keywords": {
+      "tag": true
+    },
+    "mailboxIds": {
+      "i00": true,
+      "i01": true,
+      "i02": true
+    },
+    "messageId": [
+      "NDBBIAKOPKHFGPLCODIGKEKECHAA.doug@example.com"
+    ],
+    "receivedAt": "2022-01-18T22:52:54Z",
+    "sentAt": "2000-05-17T19:35:05-04:00",
+    "size": 2527,
+    "subject": "Test message from Microsoft Outlook 00",
+    "textBody": [],
+    "threadId": "i06",
+    "to": [
+      {
+        "email": "jblow@example.com",
+        "name": "Joe Blow"
+      }
+    ]
+  }
+]

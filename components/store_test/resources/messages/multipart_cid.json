@@ -1,0 +1,231 @@
+[
+  {
+    "attachments": [
+      {
+        "blobId": "ignored_value",
+        "cid": "823504223@17052000-0f8d",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "image/png;\n\tname=\"blueball.png\""
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "header:Content-ID",
+            "value": "<823504223@17052000-0f8d>"
+          }
+        ],
+        "name": "blueball.png",
+        "partId": 3,
+        "size": 1325,
+        "type": "image/png"
+      },
+      {
+        "blobId": "ignored_value",
+        "cid": "823504223@17052000-0f94",
+        "headers": [
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "header:Content-ID",
+            "value": "<823504223@17052000-0f94>"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/png;\n\tname=\"redball.png\""
+          }
+        ],
+        "name": "redball.png",
+        "partId": 4,
+        "size": 1453,
+        "type": "image/png"
+      }
+    ],
+    "blobId": "ignored_value",
+    "bodyStructure": {
+      "headers": [
+        {
+          "name": "header:Content-Type",
+          "value": "multipart/related;\n\tboundary=\"----=_NextPart_000_000C_01BFC038.5A5C8E60\""
+        },
+        {
+          "name": "header:X-Mailer",
+          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        },
+        {
+          "name": "header:X-Priority",
+          "value": "3 (Normal)"
+        },
+        {
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        },
+        {
+          "name": "header:To",
+          "value": "\"Joe Blow\" <jblow@example.com>"
+        },
+        {
+          "name": "header:Subject",
+          "value": "Test message from Microsoft Outlook 00"
+        },
+        {
+          "name": "header:Importance",
+          "value": "Normal"
+        },
+        {
+          "name": "header:Date",
+          "value": "Wed, 17 May 2000 19:44:45 -0400"
+        },
+        {
+          "name": "header:X-MimeOLE",
+          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+        },
+        {
+          "name": "header:Message-ID",
+          "value": "<NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com>"
+        },
+        {
+          "name": "header:X-MSMail-Priority",
+          "value": "Normal"
+        },
+        {
+          "name": "header:From",
+          "value": "\"Doug Sauder\" <doug@example.com>"
+        }
+      ],
+      "subparts": [
+        {
+          "blobId": "ignored_value",
+          "cid": "823504223@17052000-0f8d",
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "image/png;\n\tname=\"blueball.png\""
+            },
+            {
+              "name": "header:Content-Transfer-Encoding",
+              "value": "base64"
+            },
+            {
+              "name": "header:Content-ID",
+              "value": "<823504223@17052000-0f8d>"
+            }
+          ],
+          "name": "blueball.png",
+          "partId": 3,
+          "size": 1325,
+          "type": "image/png"
+        },
+        {
+          "blobId": "ignored_value",
+          "cid": "823504223@17052000-0f94",
+          "headers": [
+            {
+              "name": "header:Content-ID",
+              "value": "<823504223@17052000-0f94>"
+            },
+            {
+              "name": "header:Content-Type",
+              "value": "image/png;\n\tname=\"redball.png\""
+            },
+            {
+              "name": "header:Content-Transfer-Encoding",
+              "value": "base64"
+            }
+          ],
+          "name": "redball.png",
+          "partId": 4,
+          "size": 1453,
+          "type": "image/png"
+        }
+      ],
+      "type": "multipart/related"
+    },
+    "bodyValues": {
+      "1": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoi..."
+      },
+      "2": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\">\n<HTML><HEAD>\n..."
+      }
+    },
+    "from": [
+      {
+        "email": "doug@example.com",
+        "name": "Doug Sauder"
+      }
+    ],
+    "hasAttachment": true,
+    "htmlBody": [
+      {
+        "blobId": "ignored_value",
+        "charset": "iso-8859-1",
+        "headers": [
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/html;\n\tcharset=\"iso-8859-1\""
+          }
+        ],
+        "partId": 2,
+        "size": 1442,
+        "type": "text/html"
+      }
+    ],
+    "id": "ignored_value",
+    "keywords": {
+      "tag": true
+    },
+    "mailboxIds": {
+      "i00": true,
+      "i01": true,
+      "i02": true
+    },
+    "messageId": [
+      "NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com"
+    ],
+    "preview": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoise, who replied, laughing:  \"Though you be swift as the wind, I will beat you in a race.\"  The Hare, believing her assertion to be simply impossible, assent...",
+    "receivedAt": "2022-01-18T22:52:54Z",
+    "sentAt": "2000-05-17T19:44:45-04:00",
+    "size": 7477,
+    "subject": "Test message from Microsoft Outlook 00",
+    "textBody": [
+      {
+        "blobId": "ignored_value",
+        "charset": "iso-8859-1",
+        "headers": [
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+          }
+        ],
+        "partId": 1,
+        "size": 761,
+        "type": "text/plain"
+      }
+    ],
+    "threadId": "i05",
+    "to": [
+      {
+        "email": "jblow@example.com",
+        "name": "Joe Blow"
+      }
+    ]
+  }
+]

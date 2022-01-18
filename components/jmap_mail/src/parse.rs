@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{hash_map::Entry, HashMap},
+    vec,
 };
 
 use chrono::{FixedOffset, LocalResult, SecondsFormat, TimeZone, Utc};
@@ -15,13 +16,14 @@ use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
     batch::{DocumentWriter, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::{FieldOptions, FullText, Text},
+    leb128::Leb128,
     Integer, LongInteger, StoreError, Tag, UncommittedDocumentId,
 };
 
 use crate::{
     JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailMimeHeaders,
-    JMAPMailProperties, MessageBody, MessageField, MessageRawHeaders, MimePart, MESSAGE_BODY,
-    MESSAGE_BODY_STRUCTURE, MESSAGE_HEADERS_RAW, MESSAGE_PARTS, MESSAGE_RAW,
+    JMAPMailProperties, MessageData, MessageField, MessageOutline, MimePart, MESSAGE_DATA,
+    MESSAGE_PARTS, MESSAGE_RAW,
 };
 
 pub fn build_message_document<'x>(
@@ -31,18 +33,22 @@ pub fn build_message_document<'x>(
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
     let mut total_parts = message.parts.len();
     let mut total_blobs = 0;
-    let mut message_body = MessageBody {
+    let mut message_data = MessageData {
         properties: HashMap::with_capacity(message.headers_rfc.len() + 3),
         mime_parts: Vec::with_capacity(total_parts + 1),
         html_body: message.html_body,
         text_body: message.text_body,
         attachments: message.attachments,
     };
-    let mut parts_headers_raw = Vec::with_capacity(total_parts + 1);
+    let mut message_outline = MessageOutline {
+        body_offset: message.offset_body,
+        body_structure: message.structure,
+        headers: Vec::with_capacity(total_parts + 1),
+    };
     let mut language_detector = LanguageDetector::new();
     let mut has_attachments = false;
 
-    message_body.properties.insert(
+    message_data.properties.insert(
         JMAPMailProperties::Size,
         JSONValue::Number(message.raw_message.len() as i64),
     );
@@ -55,7 +61,7 @@ pub fn build_message_document<'x>(
 
     {
         let received_at = received_at.unwrap_or_else(|| Utc::now().timestamp());
-        message_body.properties.insert(
+        message_data.properties.insert(
             JMAPMailProperties::ReceivedAt,
             if let LocalResult::Single(received_at) = Utc.timestamp_opt(received_at, 0) {
                 JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
@@ -114,7 +120,7 @@ pub fn build_message_document<'x>(
                     _ => (),
                 }
                 let (value, is_all) = header_to_jmap_id(header_value);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         JMAPMailHeaderForm::MessageIds,
@@ -127,7 +133,7 @@ pub fn build_message_document<'x>(
                 // Build sort index
                 add_addr_sort(document, header_name, &header_value);
                 let (value, is_group, is_all) = header_to_jmap_address(header_value, false);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         if is_group {
@@ -148,7 +154,7 @@ pub fn build_message_document<'x>(
             | RfcHeader::ResentCc
             | RfcHeader::ResentSender => {
                 let (value, is_group, is_all) = header_to_jmap_address(header_value, false);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         if is_group {
@@ -163,7 +169,7 @@ pub fn build_message_document<'x>(
             }
             RfcHeader::Date | RfcHeader::ResentDate => {
                 let (value, is_all) = header_to_jmap_date(header_value);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         JMAPMailHeaderForm::Date,
@@ -179,7 +185,7 @@ pub fn build_message_document<'x>(
             | RfcHeader::ListSubscribe
             | RfcHeader::ListUnsubscribe => {
                 let (value, is_all) = header_to_jmap_url(header_value);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         JMAPMailHeaderForm::URLs,
@@ -210,7 +216,7 @@ pub fn build_message_document<'x>(
                     base_subject = Some(thread_name);
                 }
                 let (value, is_all) = header_to_jmap_text(header_value);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         JMAPMailHeaderForm::Text,
@@ -221,7 +227,7 @@ pub fn build_message_document<'x>(
             }
             RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId => {
                 let (value, is_all) = header_to_jmap_text(header_value);
-                message_body.properties.insert(
+                message_data.properties.insert(
                     JMAPMailProperties::Header(JMAPMailHeaderProperty::new_rfc(
                         header_name,
                         JMAPMailHeaderForm::Text,
@@ -245,10 +251,10 @@ pub fn build_message_document<'x>(
         }
     }
 
-    message_body
+    message_data
         .mime_parts
         .push(MimePart::new_other(mime_parts, 0, false));
-    parts_headers_raw.push(message.headers_raw);
+    message_outline.headers.push(message.headers_raw);
 
     let mut extra_mime_parts = Vec::new();
 
@@ -259,8 +265,8 @@ pub fn build_message_document<'x>(
                 let text_len = text.len();
                 let html_len = html.body.len();
                 let field =
-                    if let Some(pos) = message_body.text_body.iter().position(|&p| p == part_id) {
-                        message_body.text_body[pos] = total_parts;
+                    if let Some(pos) = message_data.text_body.iter().position(|&p| p == part_id) {
+                        message_data.text_body[pos] = total_parts;
                         extra_mime_parts.push(MimePart::new_text(
                             empty_text_mime_headers(false, text_len),
                             total_blobs,
@@ -268,7 +274,7 @@ pub fn build_message_document<'x>(
                         ));
                         total_parts += 1;
                         MessageField::Body
-                    } else if message_body.html_body.contains(&part_id) {
+                    } else if message_data.html_body.contains(&part_id) {
                         MessageField::Body
                     } else {
                         has_attachments = true;
@@ -293,19 +299,19 @@ pub fn build_message_document<'x>(
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
 
-                message_body.mime_parts.push(MimePart::new_html(
+                message_data.mime_parts.push(MimePart::new_html(
                     mime_parts_to_jmap(html.headers_rfc, html_len),
                     total_blobs,
                     html.is_encoding_problem,
                 ));
-                parts_headers_raw.push(html.headers_raw);
+                message_outline.headers.push(html.headers_raw);
 
                 total_blobs += 1;
             }
             MessagePart::Text(text) => {
                 let text_len = text.body.len();
                 let field =
-                    if let Some(pos) = message_body.html_body.iter().position(|&p| p == part_id) {
+                    if let Some(pos) = message_data.html_body.iter().position(|&p| p == part_id) {
                         let html = text_to_html(text.body.as_ref());
                         let html_len = html.len();
                         document.add_text(
@@ -318,11 +324,11 @@ pub fn build_message_document<'x>(
                             total_blobs,
                             false,
                         ));
-                        message_body.html_body[pos] = total_parts;
+                        message_data.html_body[pos] = total_parts;
                         total_blobs += 1;
                         total_parts += 1;
                         MessageField::Body
-                    } else if message_body.text_body.contains(&part_id) {
+                    } else if message_data.text_body.contains(&part_id) {
                         MessageField::Body
                     } else {
                         has_attachments = true;
@@ -335,12 +341,12 @@ pub fn build_message_document<'x>(
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
 
-                message_body.mime_parts.push(MimePart::new_text(
+                message_data.mime_parts.push(MimePart::new_text(
                     mime_parts_to_jmap(text.headers_rfc, text_len),
                     total_blobs,
                     text.is_encoding_problem,
                 ));
-                parts_headers_raw.push(text.headers_raw);
+                message_outline.headers.push(text.headers_raw);
 
                 total_blobs += 1;
             }
@@ -348,12 +354,12 @@ pub fn build_message_document<'x>(
                 if !has_attachments {
                     has_attachments = true;
                 }
-                message_body.mime_parts.push(MimePart::new_other(
+                message_data.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
                     total_blobs,
                     binary.is_encoding_problem,
                 ));
-                parts_headers_raw.push(binary.headers_raw);
+                message_outline.headers.push(binary.headers_raw);
 
                 document.add_binary(
                     MessageField::Attachment.into(),
@@ -363,12 +369,12 @@ pub fn build_message_document<'x>(
                 total_blobs += 1;
             }
             MessagePart::InlineBinary(binary) => {
-                message_body.mime_parts.push(MimePart::new_other(
+                message_data.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
                     total_blobs,
                     binary.is_encoding_problem,
                 ));
-                parts_headers_raw.push(binary.headers_raw);
+                message_outline.headers.push(binary.headers_raw);
                 document.add_binary(
                     MessageField::Attachment.into(),
                     binary.body,
@@ -380,7 +386,7 @@ pub fn build_message_document<'x>(
                 if !has_attachments {
                     has_attachments = true;
                 }
-                message_body.mime_parts.push(MimePart::new_other(
+                message_data.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(
                         nested_message.headers_rfc,
                         match nested_message.body {
@@ -420,24 +426,24 @@ pub fn build_message_document<'x>(
                     false,
                 ));
                 total_blobs += 1;
-                parts_headers_raw.push(nested_message.headers_raw);
+                message_outline.headers.push(nested_message.headers_raw);
             }
             MessagePart::Multipart(part) => {
-                message_body.mime_parts.push(MimePart::new_other(
+                message_data.mime_parts.push(MimePart::new_other(
                     mime_parts_to_jmap(part.headers_rfc, 0),
                     0,
                     false,
                 ));
-                parts_headers_raw.push(part.headers_raw);
+                message_outline.headers.push(part.headers_raw);
             }
         };
     }
 
     if !extra_mime_parts.is_empty() {
-        message_body.mime_parts.append(&mut extra_mime_parts);
+        message_data.mime_parts.append(&mut extra_mime_parts);
     }
 
-    message_body.properties.insert(
+    message_data.properties.insert(
         JMAPMailProperties::HasAttachment,
         JSONValue::Bool(has_attachments),
     );
@@ -452,31 +458,21 @@ pub fn build_message_document<'x>(
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
 
-    document.add_binary(
-        MessageField::Internal.into(),
-        bincode::serialize(&MessageRawHeaders {
-            size: message.offset_body,
-            headers: parts_headers_raw,
-        })
-        .map_err(|e| StoreError::SerializeError(e.to_string()))?
-        .into(),
-        FieldOptions::StoreAsBlob(MESSAGE_HEADERS_RAW),
+    let mut message_data =
+        bincode::serialize(&message_data).map_err(|e| StoreError::SerializeError(e.to_string()))?;
+    let mut message_outline = bincode::serialize(&message_outline)
+        .map_err(|e| StoreError::SerializeError(e.to_string()))?;
+    let mut buf = Vec::with_capacity(
+        message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
     );
+    message_data.len().to_leb128_bytes(&mut buf);
+    buf.append(&mut message_data);
+    buf.append(&mut message_outline);
 
     document.add_binary(
         MessageField::Internal.into(),
-        bincode::serialize(&message_body)
-            .map_err(|e| StoreError::SerializeError(e.to_string()))?
-            .into(),
-        FieldOptions::StoreAsBlob(MESSAGE_BODY),
-    );
-
-    document.add_binary(
-        MessageField::Internal.into(),
-        bincode::serialize(&message.structure)
-            .map_err(|e| StoreError::SerializeError(e.to_string()))?
-            .into(),
-        FieldOptions::StoreAsBlob(MESSAGE_BODY_STRUCTURE),
+        buf.into(),
+        FieldOptions::StoreAsBlob(MESSAGE_DATA),
     );
 
     if let Some(default_language) = language_detector.most_frequent_language() {

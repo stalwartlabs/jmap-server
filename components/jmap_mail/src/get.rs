@@ -20,6 +20,7 @@ use mail_parser::{
     },
     HeaderName, HeaderOffset, HeaderValue, MessageStructure, RawHeaders, RfcHeader,
 };
+use store::leb128::Leb128;
 use store::{AccountId, BlobEntry, DocumentId, Store, StoreError, Tag};
 
 use crate::{
@@ -32,8 +33,8 @@ use crate::{
     query::MailboxId,
     JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailHeaders,
     JMAPMailIdImpl, JMAPMailMimeHeaders, JMAPMailProperties, JMAPMailStoreGetArguments,
-    MessageBody, MessageField, MessageRawHeaders, MimePart, MimePartType, MESSAGE_BODY,
-    MESSAGE_BODY_STRUCTURE, MESSAGE_HEADERS_RAW, MESSAGE_PARTS, MESSAGE_RAW,
+    MessageData, MessageField, MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS,
+    MESSAGE_RAW,
 };
 
 pub const DEFAULT_RAW_FETCH_SIZE: usize = 512;
@@ -44,59 +45,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
         request: JMAPGet<JMAPMailProperties<'x>>,
         mut arguments: JMAPMailStoreGetArguments,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
-        let mut blob_indexes = [false; MESSAGE_PARTS];
-
-        let properties = if let Some(properties) = request.properties {
-            for property in &properties {
-                match property {
-                    JMAPMailProperties::BodyStructure => {
-                        blob_indexes[MESSAGE_BODY_STRUCTURE] = true;
-                        blob_indexes[MESSAGE_BODY] = true;
-                    }
-
-                    JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                        form: JMAPMailHeaderForm::Raw,
-                        ..
-                    })
-                    | JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                        header: HeaderName::Other(_),
-                        ..
-                    }) => {
-                        blob_indexes[MESSAGE_HEADERS_RAW] = true;
-                        blob_indexes[MESSAGE_RAW] = true;
-                    }
-
-                    JMAPMailProperties::MessageId
-                    | JMAPMailProperties::InReplyTo
-                    | JMAPMailProperties::References
-                    | JMAPMailProperties::Sender
-                    | JMAPMailProperties::From
-                    | JMAPMailProperties::To
-                    | JMAPMailProperties::Cc
-                    | JMAPMailProperties::Bcc
-                    | JMAPMailProperties::ReplyTo
-                    | JMAPMailProperties::Subject
-                    | JMAPMailProperties::SentAt
-                    | JMAPMailProperties::Header(_)
-                    | JMAPMailProperties::HasAttachment
-                    | JMAPMailProperties::Attachments
-                    | JMAPMailProperties::Preview
-                    | JMAPMailProperties::BodyValues
-                    | JMAPMailProperties::TextBody
-                    | JMAPMailProperties::HtmlBody
-                    | JMAPMailProperties::Size
-                    | JMAPMailProperties::ReceivedAt => {
-                        blob_indexes[MESSAGE_BODY] = true;
-                    }
-
-                    // Ignore sub-properties
-                    _ => (),
-                }
-            }
-            properties
-        } else {
-            blob_indexes[MESSAGE_BODY] = true;
-
+        let properties = request.properties.unwrap_or_else(|| {
             vec![
                 JMAPMailProperties::Id,
                 JMAPMailProperties::BlobId,
@@ -123,9 +72,9 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                 JMAPMailProperties::HtmlBody,
                 JMAPMailProperties::Attachments,
             ]
-        };
+        });
 
-        let raw_fetch_size = if arguments.body_properties.is_empty() {
+        if arguments.body_properties.is_empty() {
             arguments.body_properties = vec![
                 JMAPMailBodyProperties::PartId,
                 JMAPMailBodyProperties::BlobId,
@@ -138,18 +87,36 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                 JMAPMailBodyProperties::Language,
                 JMAPMailBodyProperties::Location,
             ];
-            DEFAULT_RAW_FETCH_SIZE
-        } else if arguments.body_properties.iter().any(|prop| {
+        }
+
+        enum FetchRaw {
+            Header,
+            All,
+            None,
+        }
+
+        let fetch_raw = if arguments.body_properties.iter().any(|prop| {
             matches!(
                 prop,
                 JMAPMailBodyProperties::Headers | JMAPMailBodyProperties::Header(_)
             )
         }) {
-            blob_indexes[MESSAGE_HEADERS_RAW] = true;
-            blob_indexes[MESSAGE_RAW] = true;
-            0
+            FetchRaw::All
+        } else if properties.iter().any(|prop| {
+            matches!(
+                prop,
+                JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                    form: JMAPMailHeaderForm::Raw,
+                    ..
+                }) | JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                    header: HeaderName::Other(_),
+                    ..
+                }) | JMAPMailProperties::BodyStructure
+            )
+        }) {
+            FetchRaw::Header
         } else {
-            DEFAULT_RAW_FETCH_SIZE
+            FetchRaw::None
         };
 
         let request_ids = if let Some(request_ids) = request.ids {
@@ -187,65 +154,59 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
 
         for jmap_id in request_ids {
             let document_id = jmap_id.get_document_id();
-            let mut message_body = None;
-            let mut message_body_structure = None;
-            let mut message_headers_raw = None;
-            let mut message_raw = None;
-
-            let entries = self.get_document_blob_entries(
+            let message_data_bytes = if let Some(blob_entry) = self.get_document_blob_entry(
                 request.account_id,
                 JMAP_MAIL,
                 document_id,
-                (MESSAGE_RAW..MESSAGE_PARTS)
-                    .into_iter()
-                    .filter_map(|index| {
-                        if blob_indexes[index] {
-                            Some(if index != MESSAGE_RAW || raw_fetch_size == 0 {
-                                BlobEntry::new(index)
-                            } else {
-                                BlobEntry::new_range(index, 0..raw_fetch_size)
-                            })
-                        } else {
-                            None
-                        }
-                    }),
-            )?;
-
-            if entries.is_empty() {
+                BlobEntry::new(MESSAGE_DATA),
+            )? {
+                blob_entry.value
+            } else {
                 not_found.push(jmap_id);
                 continue;
-            }
+            };
+            let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
+                .ok_or(StoreError::DataCorruption)?;
 
-            for entry in entries {
-                match entry.index {
-                    MESSAGE_BODY => {
-                        message_body = Some(bincode_deserialize::<MessageBody>(&entry.value)?);
-                    }
-                    MESSAGE_BODY_STRUCTURE => {
-                        message_body_structure =
-                            Some(bincode_deserialize::<MessageStructure>(&entry.value)?);
-                    }
-                    MESSAGE_HEADERS_RAW => {
-                        let raw_headers = bincode_deserialize::<MessageRawHeaders>(&entry.value)?;
-                        if raw_fetch_size > 0 && raw_headers.size > raw_fetch_size {
-                            message_raw = Some(
-                                self.get_document_blob_entry(
-                                    request.account_id,
-                                    JMAP_MAIL,
-                                    document_id,
-                                    BlobEntry::new_range(MESSAGE_RAW, 0..raw_headers.size),
-                                )?
-                                .value,
-                            );
-                        }
-                        message_headers_raw = Some(raw_headers);
-                    }
-                    MESSAGE_RAW => {
-                        message_raw = Some(entry.value);
-                    }
-                    _ => (),
+            let mut message_data = bincode_deserialize::<MessageData>(
+                &message_data_bytes[read_bytes..read_bytes + message_data_len],
+            )?;
+            let (message_raw, mut message_outline) = match &fetch_raw {
+                FetchRaw::All => (
+                    Some(
+                        self.get_document_blob_entry(
+                            request.account_id,
+                            JMAP_MAIL,
+                            document_id,
+                            BlobEntry::new(MESSAGE_RAW),
+                        )?
+                        .ok_or(StoreError::DataCorruption)?
+                        .value,
+                    ),
+                    Some(bincode_deserialize::<MessageOutline>(
+                        &message_data_bytes[read_bytes + message_data_len..],
+                    )?),
+                ),
+                FetchRaw::Header => {
+                    let message_outline: MessageOutline = bincode_deserialize::<MessageOutline>(
+                        &message_data_bytes[read_bytes + message_data_len..],
+                    )?;
+                    (
+                        Some(
+                            self.get_document_blob_entry(
+                                request.account_id,
+                                JMAP_MAIL,
+                                document_id,
+                                BlobEntry::new_range(MESSAGE_RAW, 0..message_outline.body_offset),
+                            )?
+                            .ok_or(StoreError::DataCorruption)?
+                            .value,
+                        ),
+                        Some(message_outline),
+                    )
                 }
-            }
+                FetchRaw::None => (None, None),
+            };
 
             let mut result: HashMap<String, JSONValue> = HashMap::new();
 
@@ -257,7 +218,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             header,
                             all,
                         }) => add_raw_header(
-                            message_headers_raw.as_mut().unwrap(),
+                            &mut message_outline.as_mut().unwrap(),
                             message_raw.as_ref().unwrap(),
                             header.clone(),
                             JMAPMailHeaderForm::Raw,
@@ -268,74 +229,74 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             header: header @ HeaderName::Other(_),
                             all,
                         }) => add_raw_header(
-                            message_headers_raw.as_mut().unwrap(),
+                            &mut message_outline.as_mut().unwrap(),
                             message_raw.as_ref().unwrap(),
                             header.clone(),
                             form.clone(),
                             *all,
                         ),
                         JMAPMailProperties::MessageId => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::MessageId,
                             JMAPMailHeaderForm::MessageIds,
                             false,
                         )?,
                         JMAPMailProperties::InReplyTo => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::InReplyTo,
                             JMAPMailHeaderForm::MessageIds,
                             false,
                         )?,
                         JMAPMailProperties::References => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::References,
                             JMAPMailHeaderForm::MessageIds,
                             false,
                         )?,
                         JMAPMailProperties::Sender => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::Sender,
                             JMAPMailHeaderForm::Addresses,
                             false,
                         )?,
                         JMAPMailProperties::From => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::From,
                             JMAPMailHeaderForm::Addresses,
                             false,
                         )?,
                         JMAPMailProperties::To => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::To,
                             JMAPMailHeaderForm::Addresses,
                             false,
                         )?,
                         JMAPMailProperties::Cc => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::Cc,
                             JMAPMailHeaderForm::Addresses,
                             false,
                         )?,
                         JMAPMailProperties::Bcc => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::Bcc,
                             JMAPMailHeaderForm::Addresses,
                             false,
                         )?,
                         JMAPMailProperties::ReplyTo => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::ReplyTo,
                             JMAPMailHeaderForm::Addresses,
                             false,
                         )?,
                         JMAPMailProperties::Subject => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::Subject,
                             JMAPMailHeaderForm::Text,
                             false,
                         )?,
                         JMAPMailProperties::SentAt => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             RfcHeader::Date,
                             JMAPMailHeaderForm::Date,
                             false,
@@ -345,7 +306,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             header: HeaderName::Rfc(header),
                             all,
                         }) => add_rfc_header(
-                            &mut message_body.as_mut().unwrap().properties,
+                            &mut message_data.properties,
                             *header,
                             form.clone(),
                             *all,
@@ -413,45 +374,41 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                         }
                         JMAPMailProperties::Size
                         | JMAPMailProperties::ReceivedAt
-                        | JMAPMailProperties::HasAttachment => message_body
-                            .as_mut()
-                            .unwrap()
-                            .properties
-                            .remove(property)
-                            .unwrap_or_default(),
+                        | JMAPMailProperties::HasAttachment => {
+                            message_data.properties.remove(property).unwrap_or_default()
+                        }
                         JMAPMailProperties::TextBody => add_body_parts(
                             request.account_id,
                             document_id,
-                            &message_body.as_ref().unwrap().text_body,
-                            &message_body.as_ref().unwrap().mime_parts,
+                            &message_data.text_body,
+                            &message_data.mime_parts,
                             &arguments.body_properties,
                             message_raw.as_ref(),
-                            message_headers_raw.as_ref(),
+                            message_outline.as_ref(),
                         ),
 
                         JMAPMailProperties::HtmlBody => add_body_parts(
                             request.account_id,
                             document_id,
-                            &message_body.as_ref().unwrap().html_body,
-                            &message_body.as_ref().unwrap().mime_parts,
+                            &message_data.html_body,
+                            &message_data.mime_parts,
                             &arguments.body_properties,
                             message_raw.as_ref(),
-                            message_headers_raw.as_ref(),
+                            message_outline.as_ref(),
                         ),
 
                         JMAPMailProperties::Attachments => add_body_parts(
                             request.account_id,
                             document_id,
-                            &message_body.as_ref().unwrap().attachments,
-                            &message_body.as_ref().unwrap().mime_parts,
+                            &message_data.attachments,
+                            &message_data.mime_parts,
                             &arguments.body_properties,
                             message_raw.as_ref(),
-                            message_headers_raw.as_ref(),
+                            message_outline.as_ref(),
                         ),
 
                         JMAPMailProperties::Preview => {
-                            let message_body = message_body.as_ref().unwrap();
-                            if !message_body.text_body.is_empty() {
+                            if !message_data.text_body.is_empty() {
                                 JSONValue::String(
                                     preview_text(
                                         String::from_utf8(
@@ -461,17 +418,18 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                                                 document_id,
                                                 BlobEntry::new_range(
                                                     MESSAGE_PARTS
-                                                        + message_body
+                                                        + message_data
                                                             .text_body
                                                             .get(0)
                                                             .and_then(|p| {
-                                                                message_body.mime_parts.get(p + 1)
+                                                                message_data.mime_parts.get(p + 1)
                                                             })
                                                             .ok_or(StoreError::DataCorruption)?
                                                             .blob_index,
                                                     0..260,
                                                 ),
                                             )?
+                                            .ok_or(StoreError::DataCorruption)?
                                             .value,
                                         )
                                         .map_or_else(
@@ -485,7 +443,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                                     )
                                     .to_string(),
                                 )
-                            } else if !message_body.html_body.is_empty() {
+                            } else if !message_data.html_body.is_empty() {
                                 JSONValue::String(
                                     preview_html(
                                         String::from_utf8(
@@ -495,16 +453,17 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                                                 document_id,
                                                 BlobEntry::new(
                                                     MESSAGE_PARTS
-                                                        + message_body
+                                                        + message_data
                                                             .html_body
                                                             .get(0)
                                                             .and_then(|p| {
-                                                                message_body.mime_parts.get(p + 1)
+                                                                message_data.mime_parts.get(p + 1)
                                                             })
                                                             .ok_or(StoreError::DataCorruption)?
                                                             .blob_index,
                                                 ),
                                             )?
+                                            .ok_or(StoreError::DataCorruption)?
                                             .value,
                                         )
                                         .map_or_else(
@@ -523,11 +482,10 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             }
                         }
                         JMAPMailProperties::BodyValues => {
-                            let message_body = message_body.as_ref().unwrap();
                             let mut fetch_parts = BTreeMap::new();
                             if arguments.fetch_all_body_values || arguments.fetch_text_body_values {
-                                message_body.text_body.iter().for_each(|part| {
-                                    if let Some(mime_part) = message_body.mime_parts.get(*part + 1)
+                                message_data.text_body.iter().for_each(|part| {
+                                    if let Some(mime_part) = message_data.mime_parts.get(*part + 1)
                                     {
                                         if let MimePartType::Html | MimePartType::Text =
                                             mime_part.mime_type
@@ -542,8 +500,8 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                                 });
                             }
                             if arguments.fetch_all_body_values || arguments.fetch_html_body_values {
-                                message_body.html_body.iter().for_each(|part| {
-                                    if let Some(mime_part) = message_body.mime_parts.get(*part + 1)
+                                message_data.html_body.iter().for_each(|part| {
+                                    if let Some(mime_part) = message_data.mime_parts.get(*part + 1)
                                     {
                                         if let MimePartType::Html | MimePartType::Text =
                                             mime_part.mime_type
@@ -638,11 +596,10 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             if let Some(body_structure) = add_body_structure(
                                 request.account_id,
                                 document_id,
-                                message_body_structure.as_ref().unwrap(),
-                                &message_body.as_ref().unwrap().mime_parts,
+                                message_outline.as_ref().unwrap(),
+                                &message_data.mime_parts,
                                 &arguments.body_properties,
                                 message_raw.as_ref(),
-                                message_headers_raw.as_ref(),
                             ) {
                                 body_structure
                             } else {
@@ -679,16 +636,15 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
 fn add_body_structure<'x, 'y>(
     account: AccountId,
     document: DocumentId,
-    message_body_structure: &MessageStructure,
+    message_outline: &MessageOutline,
     mime_parts: &[MimePart<'x>],
     properties: &[JMAPMailBodyProperties<'y>],
     message_raw: Option<&Vec<u8>>,
-    message_raw_headers: Option<&MessageRawHeaders>,
 ) -> Option<JSONValue> {
     let mut parts_stack = Vec::with_capacity(5);
     let mut stack = Vec::new();
 
-    let part_list = match message_body_structure {
+    let part_list = match &message_outline.body_structure {
         MessageStructure::Part(part_id) => {
             return Some(JSONValue::Object(add_body_part(
                 account,
@@ -697,11 +653,7 @@ fn add_body_structure<'x, 'y>(
                 mime_parts.get(part_id + 1)?,
                 properties,
                 message_raw,
-                if let Some(message_raw_headers) = message_raw_headers {
-                    message_raw_headers.headers.get(0)
-                } else {
-                    None
-                },
+                message_outline.headers.get(0),
             )))
         }
         MessageStructure::List(part_list) => {
@@ -712,11 +664,7 @@ fn add_body_structure<'x, 'y>(
                 mime_parts.get(0)?,
                 properties,
                 message_raw,
-                if let Some(message_raw_headers) = message_raw_headers {
-                    message_raw_headers.headers.get(0)
-                } else {
-                    None
-                },
+                message_outline.headers.get(0),
             ));
             part_list
         }
@@ -728,11 +676,7 @@ fn add_body_structure<'x, 'y>(
                 mime_parts.get(0)?,
                 properties,
                 message_raw,
-                if let Some(message_raw_headers) = message_raw_headers {
-                    message_raw_headers.headers.get(0)
-                } else {
-                    None
-                },
+                message_outline.headers.get(0),
             ));
             parts_stack.push(add_body_part(
                 account,
@@ -741,11 +685,7 @@ fn add_body_structure<'x, 'y>(
                 mime_parts.get(part_id + 1)?,
                 properties,
                 message_raw,
-                if let Some(message_raw_headers) = message_raw_headers {
-                    message_raw_headers.headers.get(part_id + 1)
-                } else {
-                    None
-                },
+                message_outline.headers.get(part_id + 1),
             ));
             stack.push(([].iter(), vec![]));
             part_list
@@ -765,11 +705,7 @@ fn add_body_structure<'x, 'y>(
                     mime_parts.get(part_id + 1)?,
                     properties,
                     message_raw,
-                    if let Some(message_raw_headers) = message_raw_headers {
-                        message_raw_headers.headers.get(part_id + 1)
-                    } else {
-                        None
-                    },
+                    message_outline.headers.get(part_id + 1),
                 ))),
                 MessageStructure::MultiPart((part_id, next_part_list)) => {
                     parts_stack.push(add_body_part(
@@ -779,11 +715,7 @@ fn add_body_structure<'x, 'y>(
                         mime_parts.get(part_id + 1)?,
                         properties,
                         message_raw,
-                        if let Some(message_raw_headers) = message_raw_headers {
-                            message_raw_headers.headers.get(part_id + 1)
-                        } else {
-                            None
-                        },
+                        message_outline.headers.get(part_id + 1),
                     ));
                     stack.push((part_list_iter, subparts));
                     part_list_iter = next_part_list.iter();
@@ -815,7 +747,7 @@ fn add_body_parts<'x, 'y>(
     mime_parts: &[MimePart<'x>],
     properties: &[JMAPMailBodyProperties<'y>],
     message_raw: Option<&Vec<u8>>,
-    message_raw_headers: Option<&MessageRawHeaders>,
+    message_outline: Option<&MessageOutline>,
 ) -> JSONValue {
     JSONValue::Array(
         parts
@@ -828,8 +760,8 @@ fn add_body_parts<'x, 'y>(
                     mime_parts.get(part_id + 1)?,
                     properties,
                     message_raw,
-                    if let Some(message_raw_headers) = message_raw_headers {
-                        message_raw_headers.headers.get(part_id + 1)
+                    if let Some(message_outline) = message_outline {
+                        message_outline.headers.get(part_id + 1)
                     } else {
                         None
                     },
@@ -1049,13 +981,13 @@ fn add_rfc_header(
 }
 
 fn add_raw_header<'y>(
-    message_headers_raw: &mut MessageRawHeaders<'y>,
+    message_outline: &mut MessageOutline<'y>,
     message_raw: &[u8],
     header_name: HeaderName<'y>,
     form: JMAPMailHeaderForm,
     all: bool,
 ) -> JSONValue {
-    if let Some(offsets) = message_headers_raw
+    if let Some(offsets) = message_outline
         .headers
         .get_mut(0)
         .and_then(|l| l.remove(&header_name))

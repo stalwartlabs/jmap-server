@@ -381,17 +381,18 @@ impl BlobEntry<Option<Range<usize>>> {
 }
 
 pub trait StoreBlob {
+    fn store_blob(&self, bytes: &[u8]) -> Result<Vec<u8>>;
+
     fn get_document_blob_entry(
         &self,
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
         entry: BlobEntry<Option<Range<usize>>>,
-    ) -> Result<BlobEntry<Vec<u8>>> {
+    ) -> Result<Option<BlobEntry<Vec<u8>>>> {
         Ok(self
             .get_document_blob_entries(account, collection, document, vec![entry].into_iter())?
-            .pop()
-            .unwrap())
+            .pop())
     }
 
     fn get_document_blob_entries(

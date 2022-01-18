@@ -12,7 +12,7 @@ use store::{
 
 use crate::{
     bitmaps::{clear_bits, into_bitmap, set_bits, RocksDBDocumentSet},
-    blob::serialize_blob_key_from_value,
+    blob::serialize_blob_keys_from_value,
     RocksDBStore,
 };
 
@@ -187,15 +187,13 @@ impl StoreTombstone for RocksDBStore {
                                 && key.ends_with(BLOB_KEY)
                                 && serialize_blob_key(account, collection, doc_id)[..] == key[..]
                             {
-                                batch.merge_cf(
-                                    &cf,
-                                    serialize_blob_key_from_value(&value).ok_or_else(|| {
-                                        StoreError::InternalError(
-                                            "Failed to deserialize blob name".to_string(),
-                                        )
-                                    })?,
-                                    (-1i64).to_le_bytes(),
-                                );
+                                serialize_blob_keys_from_value(&value)
+                                    .ok_or(StoreError::DataCorruption)?
+                                    .into_iter()
+                                    .for_each(|key| {
+                                        batch.merge_cf(&cf, &key, (-1i64).to_le_bytes());
+                                    });
+
                                 batch_size += 1;
                             }
 

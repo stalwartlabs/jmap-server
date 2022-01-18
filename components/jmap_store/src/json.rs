@@ -31,6 +31,20 @@ impl JSONValue {
     pub fn is_null(&self) -> bool {
         matches!(self, JSONValue::Null)
     }
+
+    pub fn unwrap_array(self) -> Vec<JSONValue> {
+        match self {
+            JSONValue::Array(array) => array,
+            _ => panic!("Expected array"),
+        }
+    }
+
+    pub fn unwrap_object(self) -> HashMap<String, JSONValue> {
+        match self {
+            JSONValue::Object(object) => object,
+            _ => panic!("Expected object"),
+        }
+    }
 }
 
 impl<T> JSONPointer<T> {

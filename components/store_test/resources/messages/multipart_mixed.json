@@ -1,0 +1,222 @@
+[
+  {
+    "attachments": [
+      {
+        "blobId": "ignored_value",
+        "headers": [
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "audio/basic"
+          }
+        ],
+        "partId": 3,
+        "size": 85,
+        "type": "audio/basic"
+      },
+      {
+        "blobId": "ignored_value",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "image/jpeg"
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
+          }
+        ],
+        "partId": 4,
+        "size": 44,
+        "type": "image/jpeg"
+      },
+      {
+        "blobId": "ignored_value",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "text/enriched"
+          }
+        ],
+        "partId": 5,
+        "size": 140,
+        "type": "text/enriched"
+      },
+      {
+        "blobId": "ignored_value",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "message/rfc822"
+          }
+        ],
+        "partId": 6,
+        "size": 243,
+        "type": "message/rfc822"
+      }
+    ],
+    "blobId": "ignored_value",
+    "bodyStructure": {
+      "headers": [
+        {
+          "name": "header:Subject",
+          "value": "A multipart example"
+        },
+        {
+          "name": "header:Date",
+          "value": "Fri, 07 Oct 1994 16:15:05 -0700 (PDT)"
+        },
+        {
+          "name": "header:Content-Type",
+          "value": "multipart/mixed;\n            boundary=unique-boundary-1"
+        },
+        {
+          "name": "header:From",
+          "value": "Nathaniel Borenstein <nsb@nsb.fv.com>"
+        },
+        {
+          "name": "header:To",
+          "value": "Ned Freed <ned@innosoft.com>"
+        },
+        {
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        }
+      ],
+      "subparts": [
+        {
+          "blobId": "ignored_value",
+          "partId": 0,
+          "size": 262,
+          "type": "text/plain"
+        },
+        {
+          "blobId": "ignored_value",
+          "charset": "US-ASCII",
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "text/plain; charset=US-ASCII"
+            }
+          ],
+          "partId": 1,
+          "size": 111,
+          "type": "text/plain"
+        },
+        {
+          "blobId": "ignored_value",
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "text/enriched"
+            }
+          ],
+          "partId": 5,
+          "size": 140,
+          "type": "text/enriched"
+        },
+        {
+          "blobId": "ignored_value",
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "message/rfc822"
+            }
+          ],
+          "partId": 6,
+          "size": 243,
+          "type": "message/rfc822"
+        }
+      ],
+      "type": "multipart/mixed"
+    },
+    "bodyValues": {
+      "0": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "... Some text appears here ...\n\n[Note that the blank between the boundary and the start\nof the te..."
+      },
+      "1": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "This could have been part of the previous part, but\nillustrates explicit versus implicit typing o..."
+      },
+      "7": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "<html><body>... Some text appears here ...<br/><br/>[Note that the blank between the boundary and..."
+      },
+      "8": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "<html><body>This could have been part of the previous part, but<br/>illustrates explicit versus i..."
+      }
+    },
+    "from": [
+      {
+        "email": "nsb@nsb.fv.com",
+        "name": "Nathaniel Borenstein"
+      }
+    ],
+    "hasAttachment": true,
+    "htmlBody": [
+      {
+        "blobId": "ignored_value",
+        "partId": 7,
+        "size": 316,
+        "type": "text/html"
+      },
+      {
+        "blobId": "ignored_value",
+        "partId": 8,
+        "size": 149,
+        "type": "text/html"
+      }
+    ],
+    "id": "ignored_value",
+    "keywords": {
+      "tag": true
+    },
+    "mailboxIds": {
+      "i00": true,
+      "i01": true,
+      "i02": true
+    },
+    "preview": "... Some text appears here ...\n\n[Note that the blank between the boundary and the start\nof the text in this part means no header fields were\ngiven and this is text in the US-ASCII character set.\nIt could have been done with explicit typing as in the\nnex...",
+    "receivedAt": "2022-01-18T22:52:55Z",
+    "sentAt": "1994-10-07T16:15:05-07:00",
+    "size": 1853,
+    "subject": "A multipart example",
+    "textBody": [
+      {
+        "blobId": "ignored_value",
+        "partId": 0,
+        "size": 262,
+        "type": "text/plain"
+      },
+      {
+        "blobId": "ignored_value",
+        "charset": "US-ASCII",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain; charset=US-ASCII"
+          }
+        ],
+        "partId": 1,
+        "size": 111,
+        "type": "text/plain"
+      }
+    ],
+    "threadId": "i09",
+    "to": [
+      {
+        "email": "ned@innosoft.com",
+        "name": "Ned Freed"
+      }
+    ]
+  }
+]

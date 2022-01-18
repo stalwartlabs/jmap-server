@@ -1,110 +1,36 @@
 [
   {
-    "from": [
-      {
-        "email": "sender@example.com",
-        "name": null
-      }
-    ],
-    "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
-    "receivedAt": "2022-01-15T11:12:45Z",
-    "htmlBody": [
-      {
-        "charset": "utf-8",
-        "type": "text/html",
-        "blobId": "b00000106",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "header:Content-Transfer-Encoding",
-            "value": "quoted-printable"
-          },
-          {
-            "value": "inline",
-            "name": "header:Content-Disposition"
-          },
-          {
-            "name": "header:Content-Type",
-            "value": "text/html; charset=\"utf-8\""
-          }
-        ],
-        "size": 93,
-        "partId": 1
-      }
-    ],
-    "references": [
-      "789@local.machine.example",
-      "abcd@example.net"
-    ],
+    "attachments": [],
+    "blobId": "ignored_value",
     "bodyStructure": {
       "headers": [
+        {
+          "name": "header:Subject",
+          "value": "Multipart Email Example"
+        },
+        {
+          "name": "header:Content-Type",
+          "value": "multipart/alternative; boundary=\"boundary-string\""
+        },
         {
           "name": "header:From",
           "value": "sender@example.com"
         },
         {
-          "value": "multipart/alternative; boundary=\"boundary-string\"",
-          "name": "header:Content-Type"
-        },
-        {
-          "value": "<5678.21-Nov-1997@example.com>",
-          "name": "header:Message-ID"
-        },
-        {
-          "name": "header:List-Subscribe",
-          "value": "(Use this command to join the list)\n       <mailto:list-manager@host.com?body=subscribe%20list>"
-        },
-        {
           "name": "header:To",
-          "value": "\"  James Smythe\" <james@example.com>, Friends:\n      jane@example.com, =?UTF-8?Q?John_Sm=C3=AEth?=\n      <john@example.com>;"
-        },
-        {
-          "value": "<mailto:moderator@host.com> (Postings are Moderated)",
-          "name": "header:List-Post"
-        },
-        {
-          "value": "Greg Vaudreuil <gvaudre@NRI.Reston.VA.US>, Ned Freed\n        <ned@innosoft.com>, Keith Moore <moore@cs.utk.edu>",
-          "name": "header:Bcc"
-        },
-        {
-          "value": "Tue, 1 Jul 2003 10:52:37 +0200",
-          "name": "header:Date"
-        },
-        {
-          "value": "(Use this command to get off the list)\n         <mailto:list-manager@host.com?body=unsubscribe%20list>",
-          "name": "header:List-Unsubscribe"
-        },
-        {
-          "name": "header:References",
-          "value": "<1234@local.machine.example>\n            <3456@example.net>"
-        },
-        {
-          "value": "<789@local.machine.example>\n            <abcd@example.net>",
-          "name": "header:References"
-        },
-        {
-          "value": "Multipart Email Example",
-          "name": "header:Subject"
-        },
-        {
-          "value": "multipart, alternative, example",
-          "name": "header:Keywords"
-        },
-        {
-          "value": "<http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>",
-          "name": "header:List-Owner"
+          "value": "recipient@example.com"
         }
       ],
-      "type": "multipart/alternative",
       "subparts": [
         {
-          "type": "text/plain",
-          "disposition": "inline",
+          "blobId": "ignored_value",
           "charset": "utf-8",
-          "size": 87,
-          "partId": 0,
-          "blobId": "b00000104",
+          "disposition": "inline",
           "headers": [
+            {
+              "name": "header:Content-Transfer-Encoding",
+              "value": "quoted-printable"
+            },
             {
               "name": "header:Content-Type",
               "value": "text/plain; charset=\"utf-8\""
@@ -112,120 +38,41 @@
             {
               "name": "header:Content-Disposition",
               "value": "inline"
-            },
-            {
-              "value": "smtp",
-              "name": "header:X-Protocol"
-            },
-            {
-              "value": "quoted-printable",
-              "name": "header:Content-Transfer-Encoding"
             }
-          ]
+          ],
+          "partId": 0,
+          "size": 87,
+          "type": "text/plain"
         },
         {
+          "blobId": "ignored_value",
           "charset": "utf-8",
           "disposition": "inline",
-          "blobId": "b00000106",
-          "partId": 1,
-          "type": "text/html",
-          "size": 93,
           "headers": [
             {
               "name": "header:Content-Type",
               "value": "text/html; charset=\"utf-8\""
             },
             {
-              "value": "quoted-printable",
-              "name": "header:Content-Transfer-Encoding"
+              "name": "header:Content-Disposition",
+              "value": "inline"
             },
             {
-              "value": "inline",
-              "name": "header:Content-Disposition"
+              "name": "header:Content-Transfer-Encoding",
+              "value": "quoted-printable"
             }
-          ]
+          ],
+          "partId": 1,
+          "size": 93,
+          "type": "text/html"
         }
-      ]
+      ],
+      "type": "multipart/alternative"
     },
-    "messageId": [
-      "5678.21-Nov-1997@example.com"
-    ],
-    "id": "i100000001",
-    "attachments": [],
-    "to": [
-      {
-        "name": "  James Smythe",
-        "email": "james@example.com"
-      },
-      {
-        "email": "jane@example.com",
-        "name": null
-      },
-      {
-        "email": "john@example.com",
-        "name": "John Smîth"
-      }
-    ],
-    "sentAt": "2003-07-01T10:52:37+02:00",
-    "textBody": [
-      {
-        "partId": 0,
-        "charset": "utf-8",
-        "size": 87,
-        "blobId": "b00000104",
-        "disposition": "inline",
-        "type": "text/plain",
-        "headers": [
-          {
-            "value": "text/plain; charset=\"utf-8\"",
-            "name": "header:Content-Type"
-          },
-          {
-            "name": "header:Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "value": "smtp",
-            "name": "header:X-Protocol"
-          },
-          {
-            "name": "header:Content-Transfer-Encoding",
-            "value": "quoted-printable"
-          }
-        ]
-      }
-    ],
-    "size": 1536,
-    "keywords": {
-      "tag": true
-    },
-    "subject": "Multipart Email Example",
-    "hasAttachment": false,
-    "bcc": [
-      {
-        "name": "Greg Vaudreuil",
-        "email": "gvaudre@NRI.Reston.VA.US"
-      },
-      {
-        "email": "ned@innosoft.com",
-        "name": "Ned Freed"
-      },
-      {
-        "name": "Keith Moore",
-        "email": "moore@cs.utk.edu"
-      }
-    ],
-    "blobId": "b00000100",
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
-    "threadId": "i01",
     "bodyValues": {
       "0": {
-        "isTruncated": false,
         "isEncodingProblem": false,
+        "isTruncated": false,
         "value": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n"
       },
       "1": {
@@ -233,6 +80,81 @@
         "isTruncated": false,
         "value": "<h1>This is the HTML Section!</h1>\n<p>This is what displays in most modern email clients</p>\n"
       }
-    }
+    },
+    "from": [
+      {
+        "email": "sender@example.com",
+        "name": null
+      }
+    ],
+    "hasAttachment": false,
+    "htmlBody": [
+      {
+        "blobId": "ignored_value",
+        "charset": "utf-8",
+        "disposition": "inline",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "text/html; charset=\"utf-8\""
+          },
+          {
+            "name": "header:Content-Disposition",
+            "value": "inline"
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          }
+        ],
+        "partId": 1,
+        "size": 93,
+        "type": "text/html"
+      }
+    ],
+    "id": "ignored_value",
+    "keywords": {
+      "tag": true
+    },
+    "mailboxIds": {
+      "i00": true,
+      "i01": true,
+      "i02": true
+    },
+    "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
+    "receivedAt": "2022-01-18T22:52:54Z",
+    "size": 616,
+    "subject": "Multipart Email Example",
+    "textBody": [
+      {
+        "blobId": "ignored_value",
+        "charset": "utf-8",
+        "disposition": "inline",
+        "headers": [
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain; charset=\"utf-8\""
+          },
+          {
+            "name": "header:Content-Disposition",
+            "value": "inline"
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          }
+        ],
+        "partId": 0,
+        "size": 87,
+        "type": "text/plain"
+      }
+    ],
+    "threadId": "i03",
+    "to": [
+      {
+        "email": "recipient@example.com",
+        "name": null
+      }
+    ]
   }
 ]

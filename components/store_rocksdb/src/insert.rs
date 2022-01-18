@@ -1,13 +1,10 @@
 use std::{
     collections::HashMap,
-    fs::File,
-    io::Write,
     sync::{Arc, MutexGuard},
 };
 
 use nlp::Language;
 use rocksdb::BoundColumnFamily;
-use sha2::{Digest, Sha256};
 use store::{
     batch::{DocumentWriter, LogAction, WriteAction},
     field::{FieldOptions, Text, TokenIterator, UpdateField},
@@ -19,15 +16,12 @@ use store::{
         BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, CollectionId, DocumentId, Store, StoreChangeLog, StoreError, StoreUpdate,
+    AccountId, CollectionId, DocumentId, StoreBlob, StoreChangeLog, StoreError, StoreUpdate,
 };
 
 use crate::{
-    bitmaps::set_clear_bits,
-    blob::{serialize_blob_key_from_value, BlobFile},
-    changelog::ChangeLogWriter,
-    document_id::AssignedDocumentId,
-    RocksDBStore,
+    bitmaps::set_clear_bits, blob::serialize_blob_keys_from_value, changelog::ChangeLogWriter,
+    document_id::AssignedDocumentId, RocksDBStore,
 };
 
 impl StoreUpdate for RocksDBStore {
@@ -43,7 +37,6 @@ impl StoreUpdate for RocksDBStore {
         let cf_indexes = self.get_handle("indexes")?;
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut write_batch = rocksdb::WriteBatch::default();
-        let mut uncommited_files = Vec::new();
 
         let mut change_log_list = HashMap::new();
         let mut bitmap_list = HashMap::new();
@@ -83,7 +76,7 @@ impl StoreUpdate for RocksDBStore {
                         .or_insert_with(HashMap::new)
                         .insert(document_id, true);
 
-                    if let file @ (Some(_), Some(_) | None) = self._update_document(
+                    self._update_document(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
@@ -93,30 +86,20 @@ impl StoreUpdate for RocksDBStore {
                         document_id,
                         batch.default_language,
                         batch.fields,
-                    )? {
-                        uncommited_files.push(file)
-                    }
+                    )?;
                 }
                 WriteAction::Update(document_id) => {
-                    if self
-                        ._update_document(
-                            &mut write_batch,
-                            &cf_values,
-                            &cf_indexes,
-                            &mut bitmap_list,
-                            account,
-                            batch.collection,
-                            document_id,
-                            batch.default_language,
-                            batch.fields,
-                        )?
-                        .1
-                        .is_some()
-                    {
-                        return Err(StoreError::InternalError(
-                            "Updating external blobs is not supported.".into(),
-                        ));
-                    }
+                    self._update_document(
+                        &mut write_batch,
+                        &cf_values,
+                        &cf_indexes,
+                        &mut bitmap_list,
+                        account,
+                        batch.collection,
+                        document_id,
+                        batch.default_language,
+                        batch.fields,
+                    )?;
                 }
                 WriteAction::Delete(document_id) => {
                     // Remove any external blobs
@@ -129,12 +112,12 @@ impl StoreUpdate for RocksDBStore {
                         .map_err(|e| StoreError::InternalError(e.into_string()))?
                     {
                         // Decrement blob count
-                        write_batch.merge_cf(
-                            &cf_values,
-                            &serialize_blob_key_from_value(&blob)
-                                .ok_or(StoreError::DataCorruption)?,
-                            (-1i64).to_le_bytes(),
-                        );
+                        serialize_blob_keys_from_value(&blob)
+                            .ok_or(StoreError::DataCorruption)?
+                            .into_iter()
+                            .for_each(|key| {
+                                write_batch.merge_cf(&cf_values, &key, (-1i64).to_le_bytes());
+                            });
                     }
 
                     // Add document id to tombstoned ids
@@ -226,13 +209,6 @@ impl StoreUpdate for RocksDBStore {
         self.db
             .write(write_batch)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
-
-        // Commit external blobs
-        for (_, file) in uncommited_files {
-            if let Some(file) = file {
-                file.commit();
-            }
-        }
 
         Ok(())
     }
@@ -366,7 +342,7 @@ impl RocksDBStore {
         document_id: DocumentId,
         default_language: Language,
         fields: Vec<UpdateField>,
-    ) -> crate::Result<(Option<MutexGuard<usize>>, Option<BlobFile>)> {
+    ) -> crate::Result<()> {
         // Full text term positions
         let mut term_index = TermIndexBuilder::new();
         let mut blob_fields = Vec::new();
@@ -599,12 +575,12 @@ impl RocksDBStore {
         }
 
         // Store external blobs
-        Ok(if !blob_fields.is_empty() {
-            let mut hasher = Sha256::new();
-            let mut blob_size = 0;
+        if !blob_fields.is_empty() {
             let mut blob_index_last = None;
-            let num_blobs = blob_fields.len();
-            let mut blob_entries = Vec::with_capacity(num_blobs);
+            let mut blob_entries = Vec::with_capacity(
+                std::mem::size_of::<usize>()
+                    + (blob_fields.len() * (32 + std::mem::size_of::<u32>())),
+            );
 
             blob_fields.sort_unstable_by_key(|(blob_index, _)| *blob_index);
 
@@ -621,85 +597,20 @@ impl RocksDBStore {
                     ));
                 }
                 blob_index_last = Some(blob_index);
-                blob_size += blob.len();
-                blob_entries.push(blob_size);
-                hasher.update(blob);
+                let blob_key = self.store_blob(blob)?;
+
+                // Increment blob count
+                batch.merge_cf(cf_values, &blob_key, (1i64).to_le_bytes());
+
+                blob_entries.extend_from_slice(&blob_key[BLOB_KEY.len()..]);
             }
-
-            // Create blob key
-            let result = hasher.finalize();
-            let mut blob_key = Vec::with_capacity(
-                result.len()
-                    + std::mem::size_of::<usize>()
-                    + BLOB_KEY.len()
-                    + (std::mem::size_of::<usize>() * num_blobs),
-            );
-            blob_key.extend_from_slice(BLOB_KEY);
-            blob_key.extend_from_slice(&result);
-            num_blobs.to_leb128_bytes(&mut blob_key);
-
-            // Lock blob key
-            let blob_lock = self
-                .blob_lock
-                .lock_hash(&blob_key)
-                .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))?;
-
-            // Check whether the blob is already stored
-            let uncommitted_blob = if self
-                .db
-                .get_cf(cf_values, &blob_key)
-                .map_err(|e| StoreError::InternalError(e.into_string()))?
-                .is_none()
-            {
-                let blob = BlobFile::new(
-                    self.blob_path.clone(),
-                    &blob_key[BLOB_KEY.len()..],
-                    &self.get_config().db_options.hash_levels,
-                    true,
-                )
-                .map_err(|err| {
-                    StoreError::InternalError(format!("Failed to create blob file: {:?}", err))
-                })?
-                .needs_commit();
-                let mut blob_file = File::create(blob.get_path()).map_err(|err| {
-                    StoreError::InternalError(format!(
-                        "Failed to create blob file {:?}: {:?}",
-                        blob.get_path().display(),
-                        err
-                    ))
-                })?;
-                for (_, bytes) in blob_fields {
-                    blob_file.write_all(bytes).map_err(|err| {
-                        StoreError::InternalError(format!(
-                            "Failed to write blob file {:?}: {:?}",
-                            blob.get_path().display(),
-                            err
-                        ))
-                    })?;
-                }
-                (Some(blob_lock), Some(blob))
-            } else {
-                (Some(blob_lock), None)
-            };
-
-            // Increment blob count
-            batch.merge_cf(cf_values, &blob_key, (1i64).to_le_bytes());
-
-            // Store blob index
-            blob_key.drain(0..BLOB_KEY.len());
-            blob_entries
-                .into_iter()
-                .for_each(|pos| pos.to_leb128_bytes(&mut blob_key));
 
             batch.put_cf(
                 cf_values,
                 &serialize_blob_key(account, collection, document_id),
-                &blob_key,
+                &blob_entries,
             );
-
-            uncommitted_blob
-        } else {
-            (None, None)
-        })
+        }
+        Ok(())
     }
 }

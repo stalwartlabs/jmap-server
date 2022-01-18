@@ -1,23 +1,5 @@
 From: sender@example.com
-To: "  James Smythe" <james@example.com>, Friends:
-      jane@example.com, =?UTF-8?Q?John_Sm=C3=AEth?=
-      <john@example.com>;
-Bcc: Greg Vaudreuil <gvaudre@NRI.Reston.VA.US>, Ned Freed
-        <ned@innosoft.com>, Keith Moore <moore@cs.utk.edu>
-Date: Tue, 1 Jul 2003 10:52:37 +0200
-Message-ID: <5678.21-Nov-1997@example.com>
-References: <1234@local.machine.example>
-            <3456@example.net>
-References: <789@local.machine.example>
-            <abcd@example.net>
-Keywords: multipart, alternative, example
-List-Post: <mailto:moderator@host.com> (Postings are Moderated)
-List-Subscribe: (Use this command to join the list)
-       <mailto:list-manager@host.com?body=subscribe%20list>
-List-Owner: <http://www.host.com/list.cgi?cmd=sub&lst=list>,
-       <mailto:list-manager@host.com?body=subscribe%20list>
-List-Unsubscribe: (Use this command to get off the list)
-         <mailto:list-manager@host.com?body=unsubscribe%20list>
+To: recipient@example.com
 Subject: Multipart Email Example
 Content-Type: multipart/alternative; boundary="boundary-string"
 
@@ -25,7 +7,6 @@ Content-Type: multipart/alternative; boundary="boundary-string"
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 Content-Disposition: inline
-X-Protocol: smtp
 
 Plain text email goes here!
 This is the fallback if email client does not support HTML
