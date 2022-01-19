@@ -21,12 +21,12 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "image/jpeg"
-          },
-          {
             "name": "header:Content-Transfer-Encoding",
             "value": "base64"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/jpeg"
           }
         ],
         "partId": 4,
@@ -62,28 +62,28 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Subject",
-          "value": "A multipart example"
+          "name": "header:Content-Type",
+          "value": "multipart/mixed;\n            boundary=unique-boundary-1"
         },
         {
           "name": "header:Date",
           "value": "Fri, 07 Oct 1994 16:15:05 -0700 (PDT)"
         },
         {
-          "name": "header:Content-Type",
-          "value": "multipart/mixed;\n            boundary=unique-boundary-1"
-        },
-        {
           "name": "header:From",
           "value": "Nathaniel Borenstein <nsb@nsb.fv.com>"
         },
         {
-          "name": "header:To",
-          "value": "Ned Freed <ned@innosoft.com>"
-        },
-        {
           "name": "header:MIME-Version",
           "value": "1.0"
+        },
+        {
+          "name": "header:Subject",
+          "value": "A multipart example"
+        },
+        {
+          "name": "header:To",
+          "value": "Ned Freed <ned@innosoft.com>"
         }
       ],
       "subparts": [
@@ -180,13 +180,8 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "preview": "... Some text appears here ...\n\n[Note that the blank between the boundary and the start\nof the text in this part means no header fields were\ngiven and this is text in the US-ASCII character set.\nIt could have been done with explicit typing as in the\nnex...",
-    "receivedAt": "2022-01-18T22:52:55Z",
+    "receivedAt": "2028-09-19T18:13:20Z",
     "sentAt": "1994-10-07T16:15:05-07:00",
     "size": 1853,
     "subject": "A multipart example",
@@ -211,7 +206,7 @@
         "type": "text/plain"
       }
     ],
-    "threadId": "i09",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "ned@innosoft.com",

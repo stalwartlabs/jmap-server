@@ -30,13 +30,30 @@ impl<'x> From<JSONValue> for UntaggedJSONValue {
             JSONValue::Bool(value) => UntaggedJSONValue::Bool(value),
             JSONValue::String(string) => UntaggedJSONValue::String(string),
             JSONValue::Number(value) => UntaggedJSONValue::Number(value),
-            JSONValue::Array(list) => {
+            JSONValue::Array(mut list) => {
+                match list.first() {
+                    Some(JSONValue::Object(map))
+                        if map.get("name").is_some() && map.get("value").is_some() =>
+                    {
+                        list.sort_unstable_by_key(|value| match value {
+                            JSONValue::Object(map) => match map.get("name") {
+                                Some(JSONValue::String(str)) => str.clone(),
+                                Some(JSONValue::Null) => "".to_string(),
+                                _ => {
+                                    unreachable!()
+                                }
+                            },
+                            _ => unreachable!(),
+                        });
+                    }
+                    _ => (),
+                }
                 UntaggedJSONValue::Array(list.into_iter().map(|value| value.into()).collect())
             }
             JSONValue::Object(map) => UntaggedJSONValue::Object(
                 map.into_iter()
                     .map(|(key, value)| {
-                        if key == "blobId" || key == "id" {
+                        if key == "blobId" || key == "id" || key == "threadId" {
                             (key, UntaggedJSONValue::String("ignored_value".into()))
                         } else {
                             (key, value.into())
@@ -61,17 +78,22 @@ where
         if file_name.extension().map_or(true, |e| e != "eml") {
             continue;
         }
+        let blob = fs::read(&file_name).unwrap();
         let jmap_id = mail_store
             .mail_import_single(
                 0,
                 JMAPMailImportItem {
-                    blob: fs::read(&file_name).unwrap().into(),
-                    mailbox_ids: vec![0, 1, 2],
+                    received_at: Some((blob.len() * 1000000) as i64),
+                    blob: blob.into(),
+                    mailbox_ids: vec![],
                     keywords: vec![Tag::Text("tag".into())],
-                    received_at: None,
                 },
             )
             .unwrap();
+
+        if file_name.file_name().unwrap() != "rfc8621.eml" {
+            continue;
+        }
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {
             mail_store
@@ -247,6 +269,34 @@ where
                 }));
                 properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
                     form: JMAPMailHeaderForm::Date,
+                    header: header.clone(),
+                    all: false,
+                }));
+            }
+
+            for header in [
+                HeaderName::Rfc(RfcHeader::MessageId),
+                HeaderName::Rfc(RfcHeader::References),
+                HeaderName::Other("X-Id-Single".into()),
+                HeaderName::Other("X-Id".into()),
+            ] {
+                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                    form: JMAPMailHeaderForm::Raw,
+                    header: header.clone(),
+                    all: true,
+                }));
+                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                    form: JMAPMailHeaderForm::Raw,
+                    header: header.clone(),
+                    all: false,
+                }));
+                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                    form: JMAPMailHeaderForm::MessageIds,
+                    header: header.clone(),
+                    all: true,
+                }));
+                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                    form: JMAPMailHeaderForm::MessageIds,
                     header: header.clone(),
                     all: false,
                 }));

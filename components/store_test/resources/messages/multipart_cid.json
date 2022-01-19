@@ -6,16 +6,16 @@
         "cid": "823504223@17052000-0f8d",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "image/png;\n\tname=\"blueball.png\""
+            "name": "header:Content-ID",
+            "value": "<823504223@17052000-0f8d>"
           },
           {
             "name": "header:Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-ID",
-            "value": "<823504223@17052000-0f8d>"
+            "name": "header:Content-Type",
+            "value": "image/png;\n\tname=\"blueball.png\""
           }
         ],
         "name": "blueball.png",
@@ -28,12 +28,12 @@
         "cid": "823504223@17052000-0f94",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
             "name": "header:Content-ID",
             "value": "<823504223@17052000-0f94>"
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
           },
           {
             "name": "header:Content-Type",
@@ -54,48 +54,48 @@
           "value": "multipart/related;\n\tboundary=\"----=_NextPart_000_000C_01BFC038.5A5C8E60\""
         },
         {
-          "name": "header:X-Mailer",
-          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+          "name": "header:Date",
+          "value": "Wed, 17 May 2000 19:44:45 -0400"
         },
         {
-          "name": "header:X-Priority",
-          "value": "3 (Normal)"
-        },
-        {
-          "name": "header:MIME-Version",
-          "value": "1.0"
-        },
-        {
-          "name": "header:To",
-          "value": "\"Joe Blow\" <jblow@example.com>"
-        },
-        {
-          "name": "header:Subject",
-          "value": "Test message from Microsoft Outlook 00"
+          "name": "header:From",
+          "value": "\"Doug Sauder\" <doug@example.com>"
         },
         {
           "name": "header:Importance",
           "value": "Normal"
         },
         {
-          "name": "header:Date",
-          "value": "Wed, 17 May 2000 19:44:45 -0400"
-        },
-        {
-          "name": "header:X-MimeOLE",
-          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+          "name": "header:MIME-Version",
+          "value": "1.0"
         },
         {
           "name": "header:Message-ID",
           "value": "<NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com>"
         },
         {
+          "name": "header:Subject",
+          "value": "Test message from Microsoft Outlook 00"
+        },
+        {
+          "name": "header:To",
+          "value": "\"Joe Blow\" <jblow@example.com>"
+        },
+        {
           "name": "header:X-MSMail-Priority",
           "value": "Normal"
         },
         {
-          "name": "header:From",
-          "value": "\"Doug Sauder\" <doug@example.com>"
+          "name": "header:X-Mailer",
+          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        },
+        {
+          "name": "header:X-MimeOLE",
+          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+        },
+        {
+          "name": "header:X-Priority",
+          "value": "3 (Normal)"
         }
       ],
       "subparts": [
@@ -104,16 +104,16 @@
           "cid": "823504223@17052000-0f8d",
           "headers": [
             {
-              "name": "header:Content-Type",
-              "value": "image/png;\n\tname=\"blueball.png\""
+              "name": "header:Content-ID",
+              "value": "<823504223@17052000-0f8d>"
             },
             {
               "name": "header:Content-Transfer-Encoding",
               "value": "base64"
             },
             {
-              "name": "header:Content-ID",
-              "value": "<823504223@17052000-0f8d>"
+              "name": "header:Content-Type",
+              "value": "image/png;\n\tname=\"blueball.png\""
             }
           ],
           "name": "blueball.png",
@@ -130,12 +130,12 @@
               "value": "<823504223@17052000-0f94>"
             },
             {
-              "name": "header:Content-Type",
-              "value": "image/png;\n\tname=\"redball.png\""
-            },
-            {
               "name": "header:Content-Transfer-Encoding",
               "value": "base64"
+            },
+            {
+              "name": "header:Content-Type",
+              "value": "image/png;\n\tname=\"redball.png\""
             }
           ],
           "name": "redball.png",
@@ -188,16 +188,11 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "messageId": [
       "NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com"
     ],
     "preview": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoise, who replied, laughing:  \"Though you be swift as the wind, I will beat you in a race.\"  The Hare, believing her assertion to be simply impossible, assent...",
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "2206-12-09T08:26:40Z",
     "sentAt": "2000-05-17T19:44:45-04:00",
     "size": 7477,
     "subject": "Test message from Microsoft Outlook 00",
@@ -220,7 +215,7 @@
         "type": "text/plain"
       }
     ],
-    "threadId": "i05",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "jblow@example.com",

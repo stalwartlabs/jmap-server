@@ -6,16 +6,16 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "message/rfc822"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
           },
           {
             "name": "header:Content-Transfer-Encoding",
             "value": "7bit"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "message/rfc822"
           }
         ],
         "partId": 1,
@@ -27,12 +27,12 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:From",
-          "value": "Al Gore <vice-president@whitehouse.gov>"
-        },
-        {
           "name": "header:Content-Type",
           "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
+        },
+        {
+          "name": "header:From",
+          "value": "Al Gore <vice-president@whitehouse.gov>"
         },
         {
           "name": "header:Subject",
@@ -66,16 +66,16 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Type",
-              "value": "message/rfc822"
-            },
-            {
               "name": "header:Content-Disposition",
               "value": "inline"
             },
             {
               "name": "header:Content-Transfer-Encoding",
               "value": "7bit"
+            },
+            {
+              "name": "header:Content-Type",
+              "value": "message/rfc822"
             }
           ],
           "partId": 1,
@@ -116,13 +116,8 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "preview": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "2054-01-02T20:53:20Z",
     "size": 2651,
     "subject": "[Fwd: Map of Argentina with Description]",
     "textBody": [
@@ -131,12 +126,12 @@
         "charset": "us-ascii",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/plain; charset=us-ascii"
-          },
-          {
             "name": "header:Content-Transfer-Encoding",
             "value": "7bit"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain; charset=us-ascii"
           }
         ],
         "partId": 0,
@@ -144,7 +139,7 @@
         "type": "text/plain"
       }
     ],
-    "threadId": "i00",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "transport@whitehouse.gov",

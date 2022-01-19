@@ -35,12 +35,12 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "image/jpeg"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "attachment"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/jpeg"
           }
         ],
         "partId": 10,
@@ -101,6 +101,166 @@
           "partId": 0,
           "size": 1,
           "type": "text/plain"
+        },
+        {
+          "headers": [
+            {
+              "name": "header:Content-Type",
+              "value": "multipart/mixed; boundary=\"2\""
+            }
+          ],
+          "subparts": [
+            {
+              "headers": [
+                {
+                  "name": "header:Content-Type",
+                  "value": "multipart/alternative; boundary=\"3\""
+                }
+              ],
+              "subparts": [
+                {
+                  "headers": [
+                    {
+                      "name": "header:Content-Type",
+                      "value": "multipart/mixed; boundary=\"4\""
+                    }
+                  ],
+                  "subparts": [
+                    {
+                      "blobId": "ignored_value",
+                      "disposition": "inline",
+                      "headers": [
+                        {
+                          "name": "header:Content-Disposition",
+                          "value": "inline"
+                        },
+                        {
+                          "name": "header:Content-Type",
+                          "value": "text/plain"
+                        }
+                      ],
+                      "partId": 4,
+                      "size": 1,
+                      "type": "text/plain"
+                    },
+                    {
+                      "blobId": "ignored_value",
+                      "disposition": "inline",
+                      "headers": [
+                        {
+                          "name": "header:Content-Disposition",
+                          "value": "inline"
+                        },
+                        {
+                          "name": "header:Content-Type",
+                          "value": "image/jpeg"
+                        }
+                      ],
+                      "partId": 5,
+                      "size": 1,
+                      "type": "image/jpeg"
+                    },
+                    {
+                      "blobId": "ignored_value",
+                      "disposition": "inline",
+                      "headers": [
+                        {
+                          "name": "header:Content-Disposition",
+                          "value": "inline"
+                        },
+                        {
+                          "name": "header:Content-Type",
+                          "value": "text/plain"
+                        }
+                      ],
+                      "partId": 6,
+                      "size": 1,
+                      "type": "text/plain"
+                    }
+                  ],
+                  "type": "multipart/mixed"
+                },
+                {
+                  "headers": [
+                    {
+                      "name": "header:Content-Type",
+                      "value": "multipart/related; boundary=\"5\""
+                    }
+                  ],
+                  "subparts": [
+                    {
+                      "blobId": "ignored_value",
+                      "headers": [
+                        {
+                          "name": "header:Content-Type",
+                          "value": "text/html"
+                        }
+                      ],
+                      "partId": 8,
+                      "size": 14,
+                      "type": "text/html"
+                    },
+                    {
+                      "blobId": "ignored_value",
+                      "headers": [
+                        {
+                          "name": "header:Content-Type",
+                          "value": "image/jpeg"
+                        }
+                      ],
+                      "partId": 9,
+                      "size": 1,
+                      "type": "image/jpeg"
+                    }
+                  ],
+                  "type": "multipart/related"
+                }
+              ],
+              "type": "multipart/alternative"
+            },
+            {
+              "blobId": "ignored_value",
+              "disposition": "attachment",
+              "headers": [
+                {
+                  "name": "header:Content-Disposition",
+                  "value": "attachment"
+                },
+                {
+                  "name": "header:Content-Type",
+                  "value": "image/jpeg"
+                }
+              ],
+              "partId": 10,
+              "size": 1,
+              "type": "image/jpeg"
+            },
+            {
+              "blobId": "ignored_value",
+              "headers": [
+                {
+                  "name": "header:Content-Type",
+                  "value": "application/x-excel"
+                }
+              ],
+              "partId": 11,
+              "size": 1,
+              "type": "application/x-excel"
+            },
+            {
+              "blobId": "ignored_value",
+              "headers": [
+                {
+                  "name": "header:Content-Type",
+                  "value": "message/rfc822"
+                }
+              ],
+              "partId": 12,
+              "size": 17,
+              "type": "message/rfc822"
+            }
+          ],
+          "type": "multipart/mixed"
         },
         {
           "blobId": "ignored_value",
@@ -190,13 +350,8 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "preview": "A",
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "1997-07-27T10:40:00Z",
     "size": 870,
     "subject": "RFC 8621 Section 4.1.4 test",
     "textBody": [
@@ -205,12 +360,12 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/plain"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain"
           }
         ],
         "partId": 0,
@@ -222,12 +377,12 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/plain"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain"
           }
         ],
         "partId": 4,
@@ -239,12 +394,12 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "image/jpeg"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/jpeg"
           }
         ],
         "partId": 5,
@@ -256,12 +411,12 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/plain"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain"
           }
         ],
         "partId": 6,
@@ -273,12 +428,12 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/plain"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain"
           }
         ],
         "partId": 13,
@@ -286,6 +441,6 @@
         "type": "text/plain"
       }
     ],
-    "threadId": "i04"
+    "threadId": "ignored_value"
   }
 ]

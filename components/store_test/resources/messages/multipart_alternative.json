@@ -5,16 +5,16 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Subject",
-          "value": "Multipart Email Example"
-        },
-        {
           "name": "header:Content-Type",
           "value": "multipart/alternative; boundary=\"boundary-string\""
         },
         {
           "name": "header:From",
           "value": "sender@example.com"
+        },
+        {
+          "name": "header:Subject",
+          "value": "Multipart Email Example"
         },
         {
           "name": "header:To",
@@ -28,16 +28,16 @@
           "disposition": "inline",
           "headers": [
             {
+              "name": "header:Content-Disposition",
+              "value": "inline"
+            },
+            {
               "name": "header:Content-Transfer-Encoding",
               "value": "quoted-printable"
             },
             {
               "name": "header:Content-Type",
               "value": "text/plain; charset=\"utf-8\""
-            },
-            {
-              "name": "header:Content-Disposition",
-              "value": "inline"
             }
           ],
           "partId": 0,
@@ -50,16 +50,16 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Type",
-              "value": "text/html; charset=\"utf-8\""
-            },
-            {
               "name": "header:Content-Disposition",
               "value": "inline"
             },
             {
               "name": "header:Content-Transfer-Encoding",
               "value": "quoted-printable"
+            },
+            {
+              "name": "header:Content-Type",
+              "value": "text/html; charset=\"utf-8\""
             }
           ],
           "partId": 1,
@@ -95,16 +95,16 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/html; charset=\"utf-8\""
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
           },
           {
             "name": "header:Content-Transfer-Encoding",
             "value": "quoted-printable"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/html; charset=\"utf-8\""
           }
         ],
         "partId": 1,
@@ -116,13 +116,8 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "1989-07-09T15:06:40Z",
     "size": 616,
     "subject": "Multipart Email Example",
     "textBody": [
@@ -132,16 +127,16 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "text/plain; charset=\"utf-8\""
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "inline"
           },
           {
             "name": "header:Content-Transfer-Encoding",
             "value": "quoted-printable"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "text/plain; charset=\"utf-8\""
           }
         ],
         "partId": 0,
@@ -149,7 +144,7 @@
         "type": "text/plain"
       }
     ],
-    "threadId": "i03",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "recipient@example.com",

@@ -32,9 +32,8 @@ use crate::{
     },
     query::MailboxId,
     JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailHeaders,
-    JMAPMailIdImpl, JMAPMailMimeHeaders, JMAPMailProperties, JMAPMailStoreGetArguments,
-    MessageData, MessageField, MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS,
-    MESSAGE_RAW,
+    JMAPMailIdImpl, JMAPMailProperties, JMAPMailStoreGetArguments, MessageData, MessageField,
+    MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
 pub const DEFAULT_RAW_FETCH_SIZE: usize = 512;
@@ -644,6 +643,8 @@ fn add_body_structure<'x, 'y>(
     let mut parts_stack = Vec::with_capacity(5);
     let mut stack = Vec::new();
 
+    println!("{:?}", message_outline.body_structure);
+
     let part_list = match &message_outline.body_structure {
         MessageStructure::Part(part_id) => {
             return Some(JSONValue::Object(add_body_part(
@@ -725,9 +726,11 @@ fn add_body_structure<'x, 'y>(
             }
         }
 
-        if let Some((prev_part_list_iter, prev_subparts)) = stack.pop() {
+        if let Some((prev_part_list_iter, mut prev_subparts)) = stack.pop() {
             let mut prev_part = parts_stack.pop().unwrap();
+            println!("prev_part {:?}", subparts);
             prev_part.insert("subparts".into(), JSONValue::Array(subparts));
+            prev_subparts.push(JSONValue::Object(prev_part));
             part_list_iter = prev_part_list_iter;
             subparts = prev_subparts;
         } else {

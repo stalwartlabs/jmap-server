@@ -7,20 +7,20 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
-            "name": "header:Content-Type",
-            "value": "image/png; name=\"2aa3ed95.png\""
+            "name": "header:Content-Disposition",
+            "value": "inline; filename=\"2aa3ed95.png\""
           },
           {
             "name": "header:Content-ID",
             "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
           },
           {
-            "name": "header:Content-Disposition",
-            "value": "inline; filename=\"2aa3ed95.png\""
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/png; name=\"2aa3ed95.png\""
           }
         ],
         "name": "2aa3ed95.png",
@@ -34,20 +34,20 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-ID",
-            "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
+            "name": "header:Content-Disposition",
+            "value": "inline; filename=\"2aa3edd1.png\""
           },
           {
-            "name": "header:Content-Type",
-            "value": "image/png; name=\"2aa3edd1.png\""
+            "name": "header:Content-ID",
+            "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
           },
           {
             "name": "header:Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Disposition",
-            "value": "inline; filename=\"2aa3edd1.png\""
+            "name": "header:Content-Type",
+            "value": "image/png; name=\"2aa3edd1.png\""
           }
         ],
         "name": "2aa3edd1.png",
@@ -82,12 +82,12 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "attachment; filename=\"greenball.png\""
+          },
+          {
+            "name": "header:Content-Transfer-Encoding",
+            "value": "base64"
           },
           {
             "name": "header:Content-Type",
@@ -108,40 +108,40 @@
           "value": "multipart/mixed;\n\tboundary=\"=====================_715392540==_\""
         },
         {
-          "name": "header:Subject",
-          "value": "=?iso-8859-1?Q?Die_Hasen_und_die_Frosche?="
-        },
-        {
-          "name": "header:MIME-Version",
-          "value": "1.0"
-        },
-        {
           "name": "header:Date",
           "value": "Fri, 19 May 2000 00:36:58 -0400"
-        },
-        {
-          "name": "header:X-Sender",
-          "value": "dwsauder@pop.example.com (Unverified)"
-        },
-        {
-          "name": "header:Message-ID",
-          "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com>"
         },
         {
           "name": "header:From",
           "value": "Doug Sauder <dwsauder@example.com>"
         },
         {
-          "name": "header:X-Mailer",
-          "value": "QUALCOMM Windows Eudora Pro Version 4.2.0.58"
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        },
+        {
+          "name": "header:Message-ID",
+          "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com>"
+        },
+        {
+          "name": "header:Subject",
+          "value": "=?iso-8859-1?Q?Die_Hasen_und_die_Frosche?="
         },
         {
           "name": "header:To",
           "value": "Heinz =?iso-8859-1?Q?Muller?= <mueller@example.com>"
         },
         {
+          "name": "header:X-Mailer",
+          "value": "QUALCOMM Windows Eudora Pro Version 4.2.0.58"
+        },
+        {
           "name": "header:X-Priority",
           "value": "2 (High)"
+        },
+        {
+          "name": "header:X-Sender",
+          "value": "dwsauder@pop.example.com (Unverified)"
         }
       ],
       "subparts": [
@@ -150,16 +150,16 @@
           "disposition": "attachment",
           "headers": [
             {
-              "name": "header:Content-Type",
-              "value": "image/png; name=\"blueball.png\""
+              "name": "header:Content-Disposition",
+              "value": "attachment; filename=\"blueball.png\""
             },
             {
               "name": "header:Content-Transfer-Encoding",
               "value": "base64"
             },
             {
-              "name": "header:Content-Disposition",
-              "value": "attachment; filename=\"blueball.png\""
+              "name": "header:Content-Type",
+              "value": "image/png; name=\"blueball.png\""
             }
           ],
           "name": "blueball.png",
@@ -176,12 +176,12 @@
               "value": "attachment; filename=\"greenball.png\""
             },
             {
-              "name": "header:Content-Type",
-              "value": "image/png; name=\"greenball.png\""
-            },
-            {
               "name": "header:Content-Transfer-Encoding",
               "value": "base64"
+            },
+            {
+              "name": "header:Content-Type",
+              "value": "image/png; name=\"greenball.png\""
             }
           ],
           "name": "greenball.png",
@@ -234,16 +234,11 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "messageId": [
       "4.2.0.58.20000519003556.00a918e0@pop.example.com"
     ],
     "preview": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprach ein Redner, \"in steter Furcht vor Menschen und Tieren, eine Beute der Hunde, der Adler, ja fast aller Raubtiere! Unsere stete Angst ist ärger als der Tod...",
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "2328-03-18T08:00:00Z",
     "sentAt": "2000-05-19T00:36:58-04:00",
     "size": 11304,
     "subject": "Die Hasen und die Frosche",
@@ -266,7 +261,7 @@
         "type": "text/plain"
       }
     ],
-    "threadId": "i02",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "mueller@example.com",

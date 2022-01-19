@@ -6,16 +6,16 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Type",
-            "value": "image/png;\n\tname=\"blueball.png\""
-          },
-          {
             "name": "header:Content-Disposition",
             "value": "attachment;\n\tfilename=\"blueball.png\""
           },
           {
             "name": "header:Content-Transfer-Encoding",
             "value": "base64"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/png;\n\tname=\"blueball.png\""
           }
         ],
         "name": "blueball.png",
@@ -50,52 +50,52 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:X-MSMail-Priority",
-          "value": "Normal"
-        },
-        {
-          "name": "header:From",
-          "value": "\"Doug Sauder\" <doug@example.com>"
-        },
-        {
-          "name": "header:To",
-          "value": "\"Joe Blow\" <jblow@example.com>"
-        },
-        {
-          "name": "header:X-Priority",
-          "value": "3 (Normal)"
-        },
-        {
-          "name": "header:Importance",
-          "value": "Normal"
-        },
-        {
           "name": "header:Content-Type",
           "value": "multipart/mixed;\n\tboundary=\"----=_NextPart_000_0004_01BFC037.28F2FA90\""
-        },
-        {
-          "name": "header:MIME-Version",
-          "value": "1.0"
         },
         {
           "name": "header:Date",
           "value": "Wed, 17 May 2000 19:36:13 -0400"
         },
         {
-          "name": "header:X-Mailer",
-          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+          "name": "header:From",
+          "value": "\"Doug Sauder\" <doug@example.com>"
+        },
+        {
+          "name": "header:Importance",
+          "value": "Normal"
+        },
+        {
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        },
+        {
+          "name": "header:Message-ID",
+          "value": "<NDBBIAKOPKHFGPLCODIGOEKECHAA.doug@example.com>"
         },
         {
           "name": "header:Subject",
           "value": "Test message from Microsoft Outlook 00"
         },
         {
+          "name": "header:To",
+          "value": "\"Joe Blow\" <jblow@example.com>"
+        },
+        {
+          "name": "header:X-MSMail-Priority",
+          "value": "Normal"
+        },
+        {
+          "name": "header:X-Mailer",
+          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        },
+        {
           "name": "header:X-MimeOLE",
           "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
         },
         {
-          "name": "header:Message-ID",
-          "value": "<NDBBIAKOPKHFGPLCODIGOEKECHAA.doug@example.com>"
+          "name": "header:X-Priority",
+          "value": "3 (Normal)"
         }
       ],
       "subparts": [
@@ -104,16 +104,16 @@
           "disposition": "attachment",
           "headers": [
             {
+              "name": "header:Content-Disposition",
+              "value": "attachment;\n\tfilename=\"blueball.png\""
+            },
+            {
               "name": "header:Content-Transfer-Encoding",
               "value": "base64"
             },
             {
               "name": "header:Content-Type",
               "value": "image/png;\n\tname=\"blueball.png\""
-            },
-            {
-              "name": "header:Content-Disposition",
-              "value": "attachment;\n\tfilename=\"blueball.png\""
             }
           ],
           "name": "blueball.png",
@@ -126,16 +126,16 @@
           "disposition": "attachment",
           "headers": [
             {
+              "name": "header:Content-Disposition",
+              "value": "attachment;\n\tfilename=\"redball.png\""
+            },
+            {
               "name": "header:Content-Transfer-Encoding",
               "value": "base64"
             },
             {
               "name": "header:Content-Type",
               "value": "image/png;\n\tname=\"redball.png\""
-            },
-            {
-              "name": "header:Content-Disposition",
-              "value": "attachment;\n\tfilename=\"redball.png\""
             }
           ],
           "name": "redball.png",
@@ -158,20 +158,15 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "messageId": [
       "NDBBIAKOPKHFGPLCODIGOEKECHAA.doug@example.com"
     ],
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "2119-10-06T01:46:40Z",
     "sentAt": "2000-05-17T19:36:13-04:00",
     "size": 4726,
     "subject": "Test message from Microsoft Outlook 00",
     "textBody": [],
-    "threadId": "i01",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "jblow@example.com",

@@ -10,12 +10,12 @@
             "value": "attachment;\n\tfilename=\"redball.png\""
           },
           {
-            "name": "header:Content-Type",
-            "value": "image/png;\n\tname=\"redball.png\""
-          },
-          {
             "name": "header:Content-Transfer-Encoding",
             "value": "base64"
+          },
+          {
+            "name": "header:Content-Type",
+            "value": "image/png;\n\tname=\"redball.png\""
           }
         ],
         "name": "redball.png",
@@ -30,48 +30,16 @@
       "disposition": "attachment",
       "headers": [
         {
-          "name": "header:X-MimeOLE",
-          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
-        },
-        {
-          "name": "header:MIME-Version",
-          "value": "1.0"
-        },
-        {
-          "name": "header:X-Mailer",
-          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
-        },
-        {
-          "name": "header:Content-Type",
-          "value": "image/png;\n\tname=\"redball.png\""
-        },
-        {
-          "name": "header:Subject",
-          "value": "Test message from Microsoft Outlook 00"
+          "name": "header:Content-Disposition",
+          "value": "attachment;\n\tfilename=\"redball.png\""
         },
         {
           "name": "header:Content-Transfer-Encoding",
           "value": "base64"
         },
         {
-          "name": "header:Importance",
-          "value": "Normal"
-        },
-        {
-          "name": "header:Message-ID",
-          "value": "<NDBBIAKOPKHFGPLCODIGKEKECHAA.doug@example.com>"
-        },
-        {
-          "name": "header:To",
-          "value": "\"Joe Blow\" <jblow@example.com>"
-        },
-        {
-          "name": "header:X-Priority",
-          "value": "3 (Normal)"
-        },
-        {
-          "name": "header:X-MSMail-Priority",
-          "value": "Normal"
+          "name": "header:Content-Type",
+          "value": "image/png;\n\tname=\"redball.png\""
         },
         {
           "name": "header:Date",
@@ -82,8 +50,40 @@
           "value": "\"Doug Sauder\" <doug@example.com>"
         },
         {
-          "name": "header:Content-Disposition",
-          "value": "attachment;\n\tfilename=\"redball.png\""
+          "name": "header:Importance",
+          "value": "Normal"
+        },
+        {
+          "name": "header:MIME-Version",
+          "value": "1.0"
+        },
+        {
+          "name": "header:Message-ID",
+          "value": "<NDBBIAKOPKHFGPLCODIGKEKECHAA.doug@example.com>"
+        },
+        {
+          "name": "header:Subject",
+          "value": "Test message from Microsoft Outlook 00"
+        },
+        {
+          "name": "header:To",
+          "value": "\"Joe Blow\" <jblow@example.com>"
+        },
+        {
+          "name": "header:X-MSMail-Priority",
+          "value": "Normal"
+        },
+        {
+          "name": "header:X-Mailer",
+          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        },
+        {
+          "name": "header:X-MimeOLE",
+          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+        },
+        {
+          "name": "header:X-Priority",
+          "value": "3 (Normal)"
         }
       ],
       "name": "redball.png",
@@ -103,20 +103,15 @@
     "keywords": {
       "tag": true
     },
-    "mailboxIds": {
-      "i00": true,
-      "i01": true,
-      "i02": true
-    },
     "messageId": [
       "NDBBIAKOPKHFGPLCODIGKEKECHAA.doug@example.com"
     ],
-    "receivedAt": "2022-01-18T22:52:54Z",
+    "receivedAt": "2050-01-28T16:26:40Z",
     "sentAt": "2000-05-17T19:35:05-04:00",
     "size": 2527,
     "subject": "Test message from Microsoft Outlook 00",
     "textBody": [],
-    "threadId": "i06",
+    "threadId": "ignored_value",
     "to": [
       {
         "email": "jblow@example.com",

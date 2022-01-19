@@ -8,7 +8,6 @@ use rocksdb::BoundColumnFamily;
 use store::{
     batch::{DocumentWriter, LogAction, WriteAction},
     field::{FieldOptions, Text, TokenIterator, UpdateField},
-    leb128::Leb128,
     serialize::{
         serialize_acd_key_leb128, serialize_blob_key, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_changelog_key, serialize_index_key,

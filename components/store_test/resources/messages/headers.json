@@ -470,6 +470,37 @@
         "mailto:list-manager@host.com?body=unsubscribe%20list"
       ]
     ],
+    "header:Message-ID": "<5678.21-Nov-1997@example.com>",
+    "header:Message-ID:all": [
+      "<5678.21-Nov-1997@example.com>"
+    ],
+    "header:Message-ID:asMessageIds": [
+      "5678.21-Nov-1997@example.com"
+    ],
+    "header:Message-ID:asMessageIds:all": [
+      [
+        "5678.21-Nov-1997@example.com"
+      ]
+    ],
+    "header:References": "<789@local.machine.example>\n            <abcd@example.net>",
+    "header:References:all": [
+      "<1234@local.machine.example>\n            <3456@example.net>",
+      "<789@local.machine.example>\n            <abcd@example.net>"
+    ],
+    "header:References:asMessageIds": [
+      "789@local.machine.example",
+      "abcd@example.net"
+    ],
+    "header:References:asMessageIds:all": [
+      [
+        "1234@local.machine.example",
+        "3456@example.net"
+      ],
+      [
+        "789@local.machine.example",
+        "abcd@example.net"
+      ]
+    ],
     "header:Resent-Date": "Tue, 4 Jul 2005 13:52:37 +0400",
     "header:Resent-Date:all": [
       "Tue, 2 Jul 2005 11:52:37 +0200",
@@ -834,6 +865,7 @@
         }
       ]
     ],
+    "header:X-AddressesGroup": "\"List 1\": addr1@test.com, addr2@test.com; \"List 2\": \n            addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com",
     "header:X-AddressesGroup-Single": "A Group(Some people)\n            :Chris Jones <c@(Chris's host.)public.example>,\n            joe@example.org,     John <jdoe@one.test> (my dear\n            friend); (the end of the group)",
     "header:X-AddressesGroup-Single:all": [
       "A Group(Some people)\n            :Chris Jones <c@(Chris's host.)public.example>,\n            joe@example.org,     John <jdoe@one.test> (my dear\n            friend); (the end of the group)"
@@ -916,6 +948,181 @@
         }
       ]
     ],
+    "header:X-AddressesGroup:all": [
+      "A Group:Ed Jones <c@a.test>,joe@where.test,John <jdoe@one.test>;",
+      "\"List 1\": addr1@test.com, addr2@test.com; \"List 2\": \n            addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com"
+    ],
+    "header:X-AddressesGroup:asAddresses": [
+      {
+        "email": "addr1@test.com",
+        "name": null
+      },
+      {
+        "email": "addr2@test.com",
+        "name": null
+      },
+      {
+        "email": "addr3@test.com",
+        "name": null
+      },
+      {
+        "email": "addr4@test.com",
+        "name": null
+      },
+      {
+        "email": "addr5@test.com",
+        "name": null
+      },
+      {
+        "email": "addr6@test.com",
+        "name": null
+      }
+    ],
+    "header:X-AddressesGroup:asAddresses:all": [
+      [
+        {
+          "email": "c@a.test",
+          "name": "Ed Jones"
+        },
+        {
+          "email": "joe@where.test",
+          "name": null
+        },
+        {
+          "email": "jdoe@one.test",
+          "name": "John"
+        }
+      ],
+      [
+        {
+          "email": "addr1@test.com",
+          "name": null
+        },
+        {
+          "email": "addr2@test.com",
+          "name": null
+        },
+        {
+          "email": "addr3@test.com",
+          "name": null
+        },
+        {
+          "email": "addr4@test.com",
+          "name": null
+        },
+        {
+          "email": "addr5@test.com",
+          "name": null
+        },
+        {
+          "email": "addr6@test.com",
+          "name": null
+        }
+      ]
+    ],
+    "header:X-AddressesGroup:asGroupedAddresses": [
+      {
+        "addresses": [
+          {
+            "email": "addr1@test.com",
+            "name": null
+          },
+          {
+            "email": "addr2@test.com",
+            "name": null
+          }
+        ],
+        "name": "List 1"
+      },
+      {
+        "addresses": [
+          {
+            "email": "addr3@test.com",
+            "name": null
+          },
+          {
+            "email": "addr4@test.com",
+            "name": null
+          }
+        ],
+        "name": "List 2"
+      },
+      {
+        "addresses": [
+          {
+            "email": "addr5@test.com",
+            "name": null
+          },
+          {
+            "email": "addr6@test.com",
+            "name": null
+          }
+        ],
+        "name": null
+      }
+    ],
+    "header:X-AddressesGroup:asGroupedAddresses:all": [
+      [
+        {
+          "addresses": [
+            {
+              "email": "c@a.test",
+              "name": "Ed Jones"
+            },
+            {
+              "email": "joe@where.test",
+              "name": null
+            },
+            {
+              "email": "jdoe@one.test",
+              "name": "John"
+            }
+          ],
+          "name": "A Group"
+        }
+      ],
+      [
+        {
+          "addresses": [
+            {
+              "email": "addr1@test.com",
+              "name": null
+            },
+            {
+              "email": "addr2@test.com",
+              "name": null
+            }
+          ],
+          "name": "List 1"
+        },
+        {
+          "addresses": [
+            {
+              "email": "addr3@test.com",
+              "name": null
+            },
+            {
+              "email": "addr4@test.com",
+              "name": null
+            }
+          ],
+          "name": "List 2"
+        },
+        {
+          "addresses": [
+            {
+              "email": "addr5@test.com",
+              "name": null
+            },
+            {
+              "email": "addr6@test.com",
+              "name": null
+            }
+          ],
+          "name": null
+        }
+      ]
+    ],
     "header:X-Date": "Sun, 21 Nov 2021 15:23:02 -0900",
     "header:X-Date-Single": "Tue, 5 Jul 2006 13:52:37 -0500",
     "header:X-Date-Single:all": [
@@ -933,6 +1140,38 @@
     "header:X-Date:asDate:all": [
       "2021-11-20T14:22:01-08:00",
       "2021-11-21T15:23:02-09:00"
+    ],
+    "header:X-Id": "<myid4@example.com> <myid5@example.com>",
+    "header:X-Id-Single": "<myid@example.com> <myid2@example.com>",
+    "header:X-Id-Single:all": [
+      "<myid@example.com> <myid2@example.com>"
+    ],
+    "header:X-Id-Single:asMessageIds": [
+      "myid@example.com",
+      "myid2@example.com"
+    ],
+    "header:X-Id-Single:asMessageIds:all": [
+      [
+        "myid@example.com",
+        "myid2@example.com"
+      ]
+    ],
+    "header:X-Id:all": [
+      "<myid3@example.com>",
+      "<myid4@example.com> <myid5@example.com>"
+    ],
+    "header:X-Id:asMessageIds": [
+      "myid4@example.com",
+      "myid5@example.com"
+    ],
+    "header:X-Id:asMessageIds:all": [
+      [
+        "myid3@example.com"
+      ],
+      [
+        "myid4@example.com",
+        "myid5@example.com"
+      ]
     ],
     "header:X-List": "<http://www.mylist2.com/list2>,\n       <mailto:list2@mylist2.com>",
     "header:X-List-Single": "<mailto:x-moderator@host.com> (X-Postings are Moderated)",

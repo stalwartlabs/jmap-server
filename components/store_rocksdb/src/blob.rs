@@ -318,7 +318,7 @@ impl StoreBlob for RocksDBStore {
                 ))
             })?;
 
-            // Increment blob count
+            // Create blob key
             self.db
                 .put_cf(&cf_values, &blob_key, &(0i64).to_le_bytes())
                 .map_err(|e| StoreError::InternalError(e.to_string()))?;
