@@ -6,15 +6,15 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "7bit"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "message/rfc822"
           }
         ],
@@ -27,19 +27,19 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Content-Type",
+          "name": "Content-Type",
           "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
         },
         {
-          "name": "header:From",
+          "name": "From",
           "value": "Al Gore <vice-president@whitehouse.gov>"
         },
         {
-          "name": "header:Subject",
+          "name": "Subject",
           "value": "[Fwd: Map of Argentina with Description]"
         },
         {
-          "name": "header:To",
+          "name": "To",
           "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>"
         }
       ],
@@ -49,11 +49,11 @@
           "charset": "us-ascii",
           "headers": [
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "7bit"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/plain; charset=us-ascii"
             }
           ],
@@ -66,15 +66,15 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "inline"
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "7bit"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "message/rfc822"
             }
           ],
@@ -126,11 +126,11 @@
         "charset": "us-ascii",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "7bit"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain; charset=us-ascii"
           }
         ],

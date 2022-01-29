@@ -6,15 +6,15 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "attachment;\n\tfilename=\"blueball.png\""
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/png;\n\tname=\"blueball.png\""
           }
         ],
@@ -28,15 +28,15 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "attachment;\n\tfilename=\"redball.png\""
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/png;\n\tname=\"redball.png\""
           }
         ],
@@ -50,51 +50,51 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Content-Type",
+          "name": "Content-Type",
           "value": "multipart/mixed;\n\tboundary=\"----=_NextPart_000_0004_01BFC037.28F2FA90\""
         },
         {
-          "name": "header:Date",
+          "name": "Date",
           "value": "Wed, 17 May 2000 19:36:13 -0400"
         },
         {
-          "name": "header:From",
+          "name": "From",
           "value": "\"Doug Sauder\" <doug@example.com>"
         },
         {
-          "name": "header:Importance",
+          "name": "Importance",
           "value": "Normal"
         },
         {
-          "name": "header:MIME-Version",
+          "name": "MIME-Version",
           "value": "1.0"
         },
         {
-          "name": "header:Message-ID",
+          "name": "Message-ID",
           "value": "<NDBBIAKOPKHFGPLCODIGOEKECHAA.doug@example.com>"
         },
         {
-          "name": "header:Subject",
+          "name": "Subject",
           "value": "Test message from Microsoft Outlook 00"
         },
         {
-          "name": "header:To",
+          "name": "To",
           "value": "\"Joe Blow\" <jblow@example.com>"
         },
         {
-          "name": "header:X-MSMail-Priority",
+          "name": "X-MSMail-Priority",
           "value": "Normal"
         },
         {
-          "name": "header:X-Mailer",
+          "name": "X-Mailer",
           "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
         },
         {
-          "name": "header:X-MimeOLE",
+          "name": "X-MimeOLE",
           "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
         },
         {
-          "name": "header:X-Priority",
+          "name": "X-Priority",
           "value": "3 (Normal)"
         }
       ],
@@ -104,15 +104,15 @@
           "disposition": "attachment",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "attachment;\n\tfilename=\"blueball.png\""
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "base64"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "image/png;\n\tname=\"blueball.png\""
             }
           ],
@@ -126,15 +126,15 @@
           "disposition": "attachment",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "attachment;\n\tfilename=\"redball.png\""
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "base64"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "image/png;\n\tname=\"redball.png\""
             }
           ],

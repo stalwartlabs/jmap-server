@@ -23,6 +23,7 @@ pub const BM_FREED_IDS: u8 = 8;
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
 pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
 pub const BLOB_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
+pub const TEMP_BLOB_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
 
 pub fn serialize_stored_key(
     account: AccountId,
@@ -66,6 +67,19 @@ pub fn serialize_blob_key(
     bytes.push(collection);
     document.to_leb128_bytes(&mut bytes);
     bytes.extend_from_slice(BLOB_KEY);
+    bytes
+}
+
+pub fn serialize_temporary_blob_key(
+    account: AccountId,
+    blob_id: DocumentId,
+    timestamp: u64,
+) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(KEY_BASE_LEN + TEMP_BLOB_KEY.len());
+    bytes.extend_from_slice(TEMP_BLOB_KEY);
+    timestamp.to_leb128_bytes(&mut bytes);
+    blob_id.to_leb128_bytes(&mut bytes);
+    account.to_leb128_bytes(&mut bytes);
     bytes
 }
 

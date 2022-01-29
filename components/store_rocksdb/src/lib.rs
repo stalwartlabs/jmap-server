@@ -23,7 +23,7 @@ use jmap_mail::{
     import::JMAPMailLocalStoreImport, query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet,
     JMAPMailLocalStore,
 };
-use jmap_store::changes::JMAPLocalChanges;
+use jmap_store::{blob::JMAPLocalBlobStore, changes::JMAPLocalChanges};
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded,
     Options,
@@ -36,6 +36,7 @@ use term::TermLock;
 pub struct RocksDBStoreConfig {
     pub path: String,
     pub hash_levels: Vec<usize>,
+    pub temp_blob_ttl: u64,
 }
 
 impl RocksDBStoreConfig {
@@ -43,6 +44,7 @@ impl RocksDBStoreConfig {
         StoreConfig::new(RocksDBStoreConfig {
             path: path.to_string(),
             hash_levels: vec![1],
+            temp_blob_ttl: 3600,
         })
     }
 }
@@ -227,6 +229,7 @@ impl<'x> JMAPMailLocalStoreQuery<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreGet<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreImport<'x> for RocksDBStore {}
 impl<'x> JMAPLocalChanges<'x> for RocksDBStore {}
+impl<'x> JMAPLocalBlobStore<'x> for RocksDBStore {}
 
 #[cfg(test)]
 mod tests {
@@ -364,12 +367,30 @@ mod tests {
     #[test]
     fn test_jmap_mail_get() {
         let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_get_test");
+        temp_dir.push("strdb_mail_get_test");
         if temp_dir.exists() {
             std::fs::remove_dir_all(&temp_dir).unwrap();
         }
 
         store_test::jmap_mail_get::test_jmap_mail_get(
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_mail_set() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_mail_set_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mail_set::test_jmap_mail_set(
             RocksDBStore::open(RocksDBStoreConfig::default_config(
                 temp_dir.to_str().unwrap(),
             ))

@@ -2,12 +2,7 @@
   {
     "attachments": [
       {
-        "headers": [
-          {
-            "name": "header:X-Custom-Header-2",
-            "value": "345"
-          }
-        ],
+        "header:X-Custom-Header-2": "345",
         "size": 724,
         "type": "message/rfc822"
       }
@@ -1225,12 +1220,7 @@
     "htmlBody": [
       {
         "charset": "us-ascii",
-        "headers": [
-          {
-            "name": "header:X-Custom-Header",
-            "value": "123"
-          }
-        ],
+        "header:X-Custom-Header": "123",
         "size": 175,
         "type": "text/html"
       }

@@ -5,11 +5,11 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "audio/basic"
           }
         ],
@@ -21,11 +21,11 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
@@ -37,7 +37,7 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/enriched"
           }
         ],
@@ -49,7 +49,7 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "message/rfc822"
           }
         ],
@@ -62,27 +62,27 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Content-Type",
+          "name": "Content-Type",
           "value": "multipart/mixed;\n            boundary=unique-boundary-1"
         },
         {
-          "name": "header:Date",
+          "name": "Date",
           "value": "Fri, 07 Oct 1994 16:15:05 -0700 (PDT)"
         },
         {
-          "name": "header:From",
+          "name": "From",
           "value": "Nathaniel Borenstein <nsb@nsb.fv.com>"
         },
         {
-          "name": "header:MIME-Version",
+          "name": "MIME-Version",
           "value": "1.0"
         },
         {
-          "name": "header:Subject",
+          "name": "Subject",
           "value": "A multipart example"
         },
         {
-          "name": "header:To",
+          "name": "To",
           "value": "Ned Freed <ned@innosoft.com>"
         }
       ],
@@ -98,7 +98,7 @@
           "charset": "US-ASCII",
           "headers": [
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/plain; charset=US-ASCII"
             }
           ],
@@ -107,10 +107,53 @@
           "type": "text/plain"
         },
         {
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "multipart/parallel; boundary=unique-boundary-2"
+            }
+          ],
+          "subparts": [
+            {
+              "blobId": "ignored_value",
+              "headers": [
+                {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "audio/basic"
+                }
+              ],
+              "partId": 3,
+              "size": 85,
+              "type": "audio/basic"
+            },
+            {
+              "blobId": "ignored_value",
+              "headers": [
+                {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "image/jpeg"
+                }
+              ],
+              "partId": 4,
+              "size": 44,
+              "type": "image/jpeg"
+            }
+          ],
+          "type": "multipart/parallel"
+        },
+        {
           "blobId": "ignored_value",
           "headers": [
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/enriched"
             }
           ],
@@ -122,7 +165,7 @@
           "blobId": "ignored_value",
           "headers": [
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "message/rfc822"
             }
           ],
@@ -197,7 +240,7 @@
         "charset": "US-ASCII",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain; charset=US-ASCII"
           }
         ],

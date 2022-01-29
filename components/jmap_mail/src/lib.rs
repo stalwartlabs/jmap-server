@@ -11,12 +11,16 @@ use changes::JMAPMailLocalStoreChanges;
 use get::JMAPMailLocalStoreGet;
 use import::{JMAPMailImportItem, JMAPMailLocalStoreImport};
 use jmap_store::{
+    blob::JMAPLocalBlobStore,
     changes::{JMAPLocalChanges, JMAPState},
     json::JSONValue,
     JMAPChangesResponse, JMAPGet, JMAPGetResponse, JMAPId, JMAPQuery, JMAPQueryChanges,
     JMAPQueryChangesResponse, JMAPQueryResponse, JMAPSet, JMAPSetResponse,
 };
-use mail_parser::{HeaderName, MessagePartId, MessageStructure, RawHeaders, RfcHeader};
+use mail_parser::{
+    parsers::header::{parse_header_name, HeaderParserResult},
+    HeaderName, MessagePartId, MessageStructure, RawHeaders, RfcHeader,
+};
 use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery};
 use serde::{Deserialize, Serialize};
 use set::JMAPMailLocalStoreSet;
@@ -154,6 +158,20 @@ pub enum JMAPMailHeaderForm {
     URLs,
 }
 
+impl JMAPMailHeaderForm {
+    pub fn parse(value: &str) -> Option<JMAPMailHeaderForm> {
+        match value {
+            "asText" => Some(JMAPMailHeaderForm::Text),
+            "asAddresses" => Some(JMAPMailHeaderForm::Addresses),
+            "asGroupedAddresses" => Some(JMAPMailHeaderForm::GroupedAddresses),
+            "asMessageIds" => Some(JMAPMailHeaderForm::MessageIds),
+            "asDate" => Some(JMAPMailHeaderForm::Date),
+            "asURLs" => Some(JMAPMailHeaderForm::URLs),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct JMAPMailHeaderProperty<'x> {
     pub form: JMAPMailHeaderForm,
@@ -175,6 +193,36 @@ impl<'x> JMAPMailHeaderProperty<'x> {
             header: HeaderName::Other(header),
             all,
         }
+    }
+
+    pub fn parse<'y>(value: &'x str) -> Option<JMAPMailHeaderProperty<'y>> {
+        let mut all = false;
+        let mut form = JMAPMailHeaderForm::Raw;
+        let mut header = None;
+        for (pos, part) in value.split(':').enumerate() {
+            match pos {
+                0 if part == "header" => (),
+                1 => match parse_header_name(part.as_bytes()) {
+                    (_, HeaderParserResult::Rfc(rfc_header)) => {
+                        header = Some(HeaderName::Rfc(rfc_header));
+                    }
+                    (_, HeaderParserResult::Other(other_header)) => {
+                        header = Some(HeaderName::Other(other_header.as_ref().to_owned().into()));
+                    }
+                    _ => return None,
+                },
+                2 | 3 if part == "all" => all = true,
+                2 => {
+                    form = JMAPMailHeaderForm::parse(part)?;
+                }
+                _ => return None,
+            }
+        }
+        Some(JMAPMailHeaderProperty {
+            form,
+            header: header?,
+            all,
+        })
     }
 }
 
@@ -312,6 +360,40 @@ impl<'x> JMAPMailProperties<'x> {
             JMAPMailProperties::Header(header) => JMAPMailProperties::Header(header.into_owned()),
         }
     }
+
+    pub fn parse<'y>(value: &'x str) -> Option<JMAPMailProperties<'y>> {
+        match value {
+            "id" => Some(JMAPMailProperties::Id),
+            "blobId" => Some(JMAPMailProperties::BlobId),
+            "threadId" => Some(JMAPMailProperties::ThreadId),
+            "mailboxIds" => Some(JMAPMailProperties::MailboxIds),
+            "keywords" => Some(JMAPMailProperties::Keywords),
+            "size" => Some(JMAPMailProperties::Size),
+            "receivedAt" => Some(JMAPMailProperties::ReceivedAt),
+            "messageId" => Some(JMAPMailProperties::MessageId),
+            "inReplyTo" => Some(JMAPMailProperties::InReplyTo),
+            "references" => Some(JMAPMailProperties::References),
+            "sender" => Some(JMAPMailProperties::Sender),
+            "from" => Some(JMAPMailProperties::From),
+            "to" => Some(JMAPMailProperties::To),
+            "cc" => Some(JMAPMailProperties::Cc),
+            "bcc" => Some(JMAPMailProperties::Bcc),
+            "replyTo" => Some(JMAPMailProperties::ReplyTo),
+            "subject" => Some(JMAPMailProperties::Subject),
+            "sentAt" => Some(JMAPMailProperties::SentAt),
+            "hasAttachment" => Some(JMAPMailProperties::HasAttachment),
+            "preview" => Some(JMAPMailProperties::Preview),
+            "bodyValues" => Some(JMAPMailProperties::BodyValues),
+            "textBody" => Some(JMAPMailProperties::TextBody),
+            "htmlBody" => Some(JMAPMailProperties::HtmlBody),
+            "attachments" => Some(JMAPMailProperties::Attachments),
+            "bodyStructure" => Some(JMAPMailProperties::BodyStructure),
+            _ if value.starts_with("header:") => Some(JMAPMailProperties::Header(
+                JMAPMailHeaderProperty::parse(value)?,
+            )),
+            _ => None,
+        }
+    }
 }
 
 impl<'x> Default for JMAPMailProperties<'x> {
@@ -420,7 +502,8 @@ pub trait JMAPMailStore<'x>:
 }
 
 pub trait JMAPMailLocalStore<'x>:
-    JMAPMailLocalStoreGet<'x>
+    JMAPLocalBlobStore<'x>
+    + JMAPMailLocalStoreGet<'x>
     + JMAPMailLocalStoreQuery<'x>
     + JMAPMailLocalStoreImport<'x>
     + JMAPMailLocalStoreSet<'x>

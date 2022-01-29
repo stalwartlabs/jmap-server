@@ -1,3 +1,4 @@
+pub mod blob;
 pub mod changes;
 pub mod id;
 pub mod json;
@@ -14,6 +15,7 @@ use store::{AccountId, ChangeLogId, StoreError};
 pub const JMAP_MAIL: u8 = 0;
 pub const JMAP_MAILBOX: u8 = 1;
 pub const JMAP_THREAD: u8 = 2;
+pub const JMAP_BLOB: u8 = 3;
 
 pub type JMAPId = u64;
 
@@ -184,12 +186,13 @@ pub enum JMAPSetErrorType {
     Forbidden,
     OverQuota,
     TooLarge,
-    RateLimit,
+    RateLimit, // TODO implement rate limits
     NotFound,
     InvalidPatch,
     WillDestroy,
     InvalidProperties,
     Singleton,
+    BlobNotFound,
 }
 
 #[derive(Debug)]
@@ -219,10 +222,10 @@ impl JMAPSetError {
             properties: None,
         }
     }
-    pub fn new_full(error_type: JMAPSetErrorType, description: String) -> Self {
+    pub fn new_full(error_type: JMAPSetErrorType, description: impl Into<String>) -> Self {
         Self {
             error_type,
-            description: description.into(),
+            description: Some(description.into()),
             properties: None,
         }
     }

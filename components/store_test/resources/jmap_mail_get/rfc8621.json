@@ -6,11 +6,11 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
@@ -22,7 +22,7 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
@@ -35,11 +35,11 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "attachment"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
@@ -51,7 +51,7 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "application/x-excel"
           }
         ],
@@ -63,7 +63,7 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "message/rfc822"
           }
         ],
@@ -76,11 +76,11 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Content-Type",
+          "name": "Content-Type",
           "value": "multipart/mixed; boundary=\"1\""
         },
         {
-          "name": "header:Subject",
+          "name": "Subject",
           "value": "RFC 8621 Section 4.1.4 test"
         }
       ],
@@ -90,11 +90,11 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "inline"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/plain"
             }
           ],
@@ -105,7 +105,7 @@
         {
           "headers": [
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "multipart/mixed; boundary=\"2\""
             }
           ],
@@ -113,7 +113,7 @@
             {
               "headers": [
                 {
-                  "name": "header:Content-Type",
+                  "name": "Content-Type",
                   "value": "multipart/alternative; boundary=\"3\""
                 }
               ],
@@ -121,7 +121,7 @@
                 {
                   "headers": [
                     {
-                      "name": "header:Content-Type",
+                      "name": "Content-Type",
                       "value": "multipart/mixed; boundary=\"4\""
                     }
                   ],
@@ -131,11 +131,11 @@
                       "disposition": "inline",
                       "headers": [
                         {
-                          "name": "header:Content-Disposition",
+                          "name": "Content-Disposition",
                           "value": "inline"
                         },
                         {
-                          "name": "header:Content-Type",
+                          "name": "Content-Type",
                           "value": "text/plain"
                         }
                       ],
@@ -148,11 +148,11 @@
                       "disposition": "inline",
                       "headers": [
                         {
-                          "name": "header:Content-Disposition",
+                          "name": "Content-Disposition",
                           "value": "inline"
                         },
                         {
-                          "name": "header:Content-Type",
+                          "name": "Content-Type",
                           "value": "image/jpeg"
                         }
                       ],
@@ -165,11 +165,11 @@
                       "disposition": "inline",
                       "headers": [
                         {
-                          "name": "header:Content-Disposition",
+                          "name": "Content-Disposition",
                           "value": "inline"
                         },
                         {
-                          "name": "header:Content-Type",
+                          "name": "Content-Type",
                           "value": "text/plain"
                         }
                       ],
@@ -183,7 +183,7 @@
                 {
                   "headers": [
                     {
-                      "name": "header:Content-Type",
+                      "name": "Content-Type",
                       "value": "multipart/related; boundary=\"5\""
                     }
                   ],
@@ -192,7 +192,7 @@
                       "blobId": "ignored_value",
                       "headers": [
                         {
-                          "name": "header:Content-Type",
+                          "name": "Content-Type",
                           "value": "text/html"
                         }
                       ],
@@ -204,7 +204,7 @@
                       "blobId": "ignored_value",
                       "headers": [
                         {
-                          "name": "header:Content-Type",
+                          "name": "Content-Type",
                           "value": "image/jpeg"
                         }
                       ],
@@ -223,11 +223,11 @@
               "disposition": "attachment",
               "headers": [
                 {
-                  "name": "header:Content-Disposition",
+                  "name": "Content-Disposition",
                   "value": "attachment"
                 },
                 {
-                  "name": "header:Content-Type",
+                  "name": "Content-Type",
                   "value": "image/jpeg"
                 }
               ],
@@ -239,7 +239,7 @@
               "blobId": "ignored_value",
               "headers": [
                 {
-                  "name": "header:Content-Type",
+                  "name": "Content-Type",
                   "value": "application/x-excel"
                 }
               ],
@@ -251,7 +251,7 @@
               "blobId": "ignored_value",
               "headers": [
                 {
-                  "name": "header:Content-Type",
+                  "name": "Content-Type",
                   "value": "message/rfc822"
                 }
               ],
@@ -267,11 +267,11 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "inline"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/plain"
             }
           ],
@@ -331,7 +331,7 @@
         "blobId": "ignored_value",
         "headers": [
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/html"
           }
         ],
@@ -360,11 +360,11 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain"
           }
         ],
@@ -377,11 +377,11 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain"
           }
         ],
@@ -394,11 +394,11 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
@@ -411,11 +411,11 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain"
           }
         ],
@@ -428,11 +428,11 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain"
           }
         ],

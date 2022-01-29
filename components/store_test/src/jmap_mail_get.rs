@@ -71,7 +71,7 @@ where
 {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
-    test_dir.push("messages");
+    test_dir.push("jmap_mail_get");
 
     for file_name in fs::read_dir(&test_dir).unwrap() {
         let mut file_name = file_name.as_ref().unwrap().path();
@@ -90,10 +90,6 @@ where
                 },
             )
             .unwrap();
-
-        if file_name.file_name().unwrap() != "rfc8621.eml" {
-            continue;
-        }
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {
             mail_store
@@ -382,9 +378,15 @@ where
             JSONValue::Array(vec![JSONValue::Object(result)])
         };
 
-        //let output = serde_yaml::to_string(&UntaggedJSONValue::from(result.list)).unwrap();
-        let output = serde_json::to_string_pretty(&UntaggedJSONValue::from(result)).unwrap();
+        let result = UntaggedJSONValue::from(result);
+
         file_name.set_extension("json");
-        fs::write(file_name, &output).unwrap();
+
+        //fs::write(file_name, &serde_json::to_string_pretty(&result).unwrap()).unwrap();
+
+        let expected_result =
+            serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&file_name).unwrap()).unwrap();
+
+        assert_eq!(result, expected_result);
     }
 }

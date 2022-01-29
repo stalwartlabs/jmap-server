@@ -1,13 +1,18 @@
+use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 use std::path::PathBuf;
+use std::thread;
+use std::time::SystemTime;
 
 use rocksdb::{Direction, IteratorMode};
 use sha2::{Digest, Sha256};
-use store::serialize::serialize_blob_key;
-use store::serialize::BLOB_KEY;
+use store::leb128::Leb128;
+use store::serialize::{serialize_blob_key, serialize_temporary_blob_key};
+use store::serialize::{BLOB_KEY, TEMP_BLOB_KEY};
 use store::{AccountId, BlobEntry, CollectionId, DocumentId, Store, StoreBlob, StoreError};
 
 use crate::RocksDBStore;
@@ -134,7 +139,7 @@ pub fn deserialize_blob_entry(
 }
 
 impl StoreBlob for RocksDBStore {
-    fn get_document_blob_entries(
+    fn get_blobs(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -220,8 +225,47 @@ impl StoreBlob for RocksDBStore {
         Ok(result)
     }
 
-    fn purge_deleted_blobs(&self) -> store::Result<()> {
+    fn purge_blobs(&self) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
+        let mut batch = rocksdb::WriteBatch::default();
+        let current_time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| StoreError::InternalError("Failed to get current timestamp".into()))?
+            .as_secs();
+
+        for (key, value) in self.db.iterator_cf(
+            &cf_values,
+            IteratorMode::From(TEMP_BLOB_KEY, Direction::Forward),
+        ) {
+            if key.starts_with(TEMP_BLOB_KEY) {
+                let (timestamp, _) = u64::from_leb128_bytes(&value[TEMP_BLOB_KEY.len()..])
+                    .ok_or_else(|| {
+                        StoreError::InternalError(format!(
+                            "Failed to deserialize timestamp from key {:?}",
+                            key
+                        ))
+                    })?;
+                if (current_time >= timestamp
+                    && current_time - timestamp > self.config.db_options.temp_blob_ttl)
+                    || (current_time < timestamp
+                        && timestamp - current_time > self.config.db_options.temp_blob_ttl)
+                {
+                    batch.delete_cf(&cf_values, key);
+                    let mut blob_key = Vec::with_capacity(value.len() + BLOB_KEY.len());
+                    blob_key.extend_from_slice(BLOB_KEY);
+                    blob_key.extend_from_slice(&value);
+                    batch.merge_cf(&cf_values, &blob_key, &(-1i64).to_le_bytes());
+                }
+            } else {
+                break;
+            }
+        }
+
+        if !batch.is_empty() {
+            self.db
+                .write(batch)
+                .map_err(|e| StoreError::InternalError(e.to_string()))?;
+        }
 
         for (key, value) in self
             .db
@@ -260,6 +304,83 @@ impl StoreBlob for RocksDBStore {
         }
 
         Ok(())
+    }
+
+    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<(u64, u32)> {
+        let mut batch = rocksdb::WriteBatch::default();
+        let blob_key = self.store_blob(bytes)?;
+        let cf_values = self.get_handle("values")?;
+
+        // Obtain second from Unix epoch
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Generate unique id for the temporary blob
+        let mut s = DefaultHasher::new();
+        thread::current().id().hash(&mut s);
+        SystemTime::now().hash(&mut s);
+        let blob_id = s.finish() as u32;
+
+        // Increment blob count
+        batch.merge_cf(&cf_values, &blob_key, (1i64).to_le_bytes());
+
+        batch.put_cf(
+            &cf_values,
+            &serialize_temporary_blob_key(account, blob_id, timestamp),
+            &blob_key[BLOB_KEY.len()..],
+        );
+
+        self.db
+            .write(batch)
+            .map_err(|e| StoreError::InternalError(e.to_string()))?;
+
+        Ok((timestamp, blob_id))
+    }
+
+    fn get_temporary_blob(
+        &self,
+        account: AccountId,
+        blob_id: DocumentId,
+        timestamp: u64,
+    ) -> store::Result<Option<Vec<u8>>> {
+        if let Some(blob_key) = self
+            .db
+            .get_cf(
+                &self.get_handle("values")?,
+                &serialize_temporary_blob_key(account, blob_id, timestamp),
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))?
+        {
+            let (blob_entry, blob_len) = deserialize_blob_entry(
+                self.blob_path.clone(),
+                &self.config.db_options.hash_levels,
+                &blob_key,
+                0,
+            )?;
+
+            let mut blob = File::open(&blob_entry.get_path()).map_err(|err| {
+                StoreError::InternalError(format!(
+                    "Failed to open blob file {}: {:}",
+                    blob_entry.get_path().display(),
+                    err
+                ))
+            })?;
+
+            let mut buf = Vec::with_capacity(blob_len);
+            blob.read_to_end(&mut buf).map_err(|err| {
+                StoreError::InternalError(format!(
+                    "Failed to read blob file {}: {:}",
+                    blob_entry.get_path().display(),
+                    err
+                ))
+            })?;
+
+            Ok(Some(buf))
+        } else {
+            Ok(None)
+        }
     }
 
     fn store_blob(&self, bytes: &[u8]) -> store::Result<Vec<u8>> {

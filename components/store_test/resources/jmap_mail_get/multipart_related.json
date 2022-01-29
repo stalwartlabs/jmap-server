@@ -7,19 +7,19 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline; filename=\"2aa3ed95.png\""
           },
           {
-            "name": "header:Content-ID",
+            "name": "Content-ID",
             "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/png; name=\"2aa3ed95.png\""
           }
         ],
@@ -34,19 +34,19 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline; filename=\"2aa3edd1.png\""
           },
           {
-            "name": "header:Content-ID",
+            "name": "Content-ID",
             "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/png; name=\"2aa3edd1.png\""
           }
         ],
@@ -60,15 +60,15 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "attachment; filename=\"blueball.png\""
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/png; name=\"blueball.png\""
           }
         ],
@@ -82,15 +82,15 @@
         "disposition": "attachment",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "attachment; filename=\"greenball.png\""
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "base64"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "image/png; name=\"greenball.png\""
           }
         ],
@@ -104,61 +104,171 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Content-Type",
+          "name": "Content-Type",
           "value": "multipart/mixed;\n\tboundary=\"=====================_715392540==_\""
         },
         {
-          "name": "header:Date",
+          "name": "Date",
           "value": "Fri, 19 May 2000 00:36:58 -0400"
         },
         {
-          "name": "header:From",
+          "name": "From",
           "value": "Doug Sauder <dwsauder@example.com>"
         },
         {
-          "name": "header:MIME-Version",
+          "name": "MIME-Version",
           "value": "1.0"
         },
         {
-          "name": "header:Message-ID",
+          "name": "Message-ID",
           "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com>"
         },
         {
-          "name": "header:Subject",
+          "name": "Subject",
           "value": "=?iso-8859-1?Q?Die_Hasen_und_die_Frosche?="
         },
         {
-          "name": "header:To",
+          "name": "To",
           "value": "Heinz =?iso-8859-1?Q?Muller?= <mueller@example.com>"
         },
         {
-          "name": "header:X-Mailer",
+          "name": "X-Mailer",
           "value": "QUALCOMM Windows Eudora Pro Version 4.2.0.58"
         },
         {
-          "name": "header:X-Priority",
+          "name": "X-Priority",
           "value": "2 (High)"
         },
         {
-          "name": "header:X-Sender",
+          "name": "X-Sender",
           "value": "dwsauder@pop.example.com (Unverified)"
         }
       ],
       "subparts": [
         {
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "multipart/related;\n\ttype=\"multipart/alternative\";\n\tboundary=\"=====================_715392540==_.REL\""
+            }
+          ],
+          "subparts": [
+            {
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "value": "multipart/alternative;\n\tboundary=\"=====================_715392550==_.ALT\""
+                }
+              ],
+              "subparts": [
+                {
+                  "blobId": "ignored_value",
+                  "charset": "iso-8859-1",
+                  "headers": [
+                    {
+                      "name": "Content-Transfer-Encoding",
+                      "value": "quoted-printable"
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "text/plain; charset=\"iso-8859-1\""
+                    }
+                  ],
+                  "partId": 2,
+                  "size": 779,
+                  "type": "text/plain"
+                },
+                {
+                  "blobId": "ignored_value",
+                  "charset": "iso-8859-1",
+                  "headers": [
+                    {
+                      "name": "Content-Transfer-Encoding",
+                      "value": "quoted-printable"
+                    },
+                    {
+                      "name": "Content-Type",
+                      "value": "text/html; charset=\"iso-8859-1\""
+                    }
+                  ],
+                  "partId": 3,
+                  "size": 1154,
+                  "type": "text/html"
+                }
+              ],
+              "type": "multipart/alternative"
+            },
+            {
+              "blobId": "ignored_value",
+              "cid": "4.2.0.58.20000519003556.00a918e0@pop.example.com.2",
+              "disposition": "inline",
+              "headers": [
+                {
+                  "name": "Content-Disposition",
+                  "value": "inline; filename=\"2aa3ed95.png\""
+                },
+                {
+                  "name": "Content-ID",
+                  "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
+                },
+                {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "image/png; name=\"2aa3ed95.png\""
+                }
+              ],
+              "name": "2aa3ed95.png",
+              "partId": 4,
+              "size": 1325,
+              "type": "image/png"
+            },
+            {
+              "blobId": "ignored_value",
+              "cid": "4.2.0.58.20000519003556.00a918e0@pop.example.com.3",
+              "disposition": "inline",
+              "headers": [
+                {
+                  "name": "Content-Disposition",
+                  "value": "inline; filename=\"2aa3edd1.png\""
+                },
+                {
+                  "name": "Content-ID",
+                  "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
+                },
+                {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "image/png; name=\"2aa3edd1.png\""
+                }
+              ],
+              "name": "2aa3edd1.png",
+              "partId": 5,
+              "size": 1453,
+              "type": "image/png"
+            }
+          ],
+          "type": "multipart/related"
+        },
+        {
           "blobId": "ignored_value",
           "disposition": "attachment",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "attachment; filename=\"blueball.png\""
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "base64"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "image/png; name=\"blueball.png\""
             }
           ],
@@ -172,15 +282,15 @@
           "disposition": "attachment",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "attachment; filename=\"greenball.png\""
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "base64"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "image/png; name=\"greenball.png\""
             }
           ],
@@ -217,11 +327,11 @@
         "charset": "iso-8859-1",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "quoted-printable"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/html; charset=\"iso-8859-1\""
           }
         ],
@@ -248,11 +358,11 @@
         "charset": "iso-8859-1",
         "headers": [
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "quoted-printable"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain; charset=\"iso-8859-1\""
           }
         ],

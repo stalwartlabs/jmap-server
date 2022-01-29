@@ -381,9 +381,18 @@ impl BlobEntry<Option<Range<usize>>> {
 }
 
 pub trait StoreBlob {
+    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> Result<(u64, u32)>;
+
+    fn get_temporary_blob(
+        &self,
+        account: AccountId,
+        blob_id: DocumentId,
+        timestamp: u64,
+    ) -> Result<Option<Vec<u8>>>;
+
     fn store_blob(&self, bytes: &[u8]) -> Result<Vec<u8>>;
 
-    fn get_document_blob_entry(
+    fn get_blob(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -391,11 +400,11 @@ pub trait StoreBlob {
         entry: BlobEntry<Option<Range<usize>>>,
     ) -> Result<Option<BlobEntry<Vec<u8>>>> {
         Ok(self
-            .get_document_blob_entries(account, collection, document, vec![entry].into_iter())?
+            .get_blobs(account, collection, document, vec![entry].into_iter())?
             .pop())
     }
 
-    fn get_document_blob_entries(
+    fn get_blobs(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -403,7 +412,7 @@ pub trait StoreBlob {
         entries: impl Iterator<Item = BlobEntry<Option<Range<usize>>>>,
     ) -> Result<Vec<BlobEntry<Vec<u8>>>>;
 
-    fn purge_deleted_blobs(&self) -> Result<()>;
+    fn purge_blobs(&self) -> Result<()>;
 }
 
 pub trait StoreBlobTest {

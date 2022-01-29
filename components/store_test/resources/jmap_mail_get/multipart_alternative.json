@@ -5,19 +5,19 @@
     "bodyStructure": {
       "headers": [
         {
-          "name": "header:Content-Type",
+          "name": "Content-Type",
           "value": "multipart/alternative; boundary=\"boundary-string\""
         },
         {
-          "name": "header:From",
+          "name": "From",
           "value": "sender@example.com"
         },
         {
-          "name": "header:Subject",
+          "name": "Subject",
           "value": "Multipart Email Example"
         },
         {
-          "name": "header:To",
+          "name": "To",
           "value": "recipient@example.com"
         }
       ],
@@ -28,15 +28,15 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "inline"
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "quoted-printable"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/plain; charset=\"utf-8\""
             }
           ],
@@ -50,15 +50,15 @@
           "disposition": "inline",
           "headers": [
             {
-              "name": "header:Content-Disposition",
+              "name": "Content-Disposition",
               "value": "inline"
             },
             {
-              "name": "header:Content-Transfer-Encoding",
+              "name": "Content-Transfer-Encoding",
               "value": "quoted-printable"
             },
             {
-              "name": "header:Content-Type",
+              "name": "Content-Type",
               "value": "text/html; charset=\"utf-8\""
             }
           ],
@@ -95,15 +95,15 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "quoted-printable"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/html; charset=\"utf-8\""
           }
         ],
@@ -127,15 +127,15 @@
         "disposition": "inline",
         "headers": [
           {
-            "name": "header:Content-Disposition",
+            "name": "Content-Disposition",
             "value": "inline"
           },
           {
-            "name": "header:Content-Transfer-Encoding",
+            "name": "Content-Transfer-Encoding",
             "value": "quoted-printable"
           },
           {
-            "name": "header:Content-Type",
+            "name": "Content-Type",
             "value": "text/plain; charset=\"utf-8\""
           }
         ],

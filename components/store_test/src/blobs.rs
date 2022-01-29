@@ -40,14 +40,14 @@ where
         });
 
     for account in 0..100 {
-        db.get_document_blob_entries(account, 0, 0, (0..10).into_iter().map(BlobEntry::new))
+        db.get_blobs(account, 0, 0, (0..10).into_iter().map(BlobEntry::new))
             .unwrap()
             .into_iter()
             .for_each(|entry| {
                 assert_eq!(entry.value, blobs[(account & 3) as usize][entry.index]);
             });
 
-        db.get_document_blob_entries(
+        db.get_blobs(
             account,
             0,
             0,
@@ -77,7 +77,7 @@ where
         assert_eq!(0, ref_count);
     }
 
-    db.purge_deleted_blobs().unwrap();
+    db.purge_blobs().unwrap();
 
     assert_eq!(db.get_all_blobs().unwrap().len(), 0);
 

@@ -1,5 +1,3 @@
-use store_rocksdb::RocksDBStore;
-
 fn main() {
     let mut temp_dir = std::env::temp_dir();
     temp_dir.push("strdb_query_test");
