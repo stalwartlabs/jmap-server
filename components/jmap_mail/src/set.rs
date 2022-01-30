@@ -121,7 +121,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
             let mut updated = HashMap::with_capacity(update.len());
             let mut not_updated = HashMap::with_capacity(update.len());
 
-            for (jmap_id, properties) in update {
+            'main: for (jmap_id, properties) in update {
                 let document_id = jmap_id.get_document_id();
                 if !document_ids.contains(document_id) {
                     not_updated.insert(jmap_id, JMAPSetError::new(JMAPSetErrorType::NotFound));
@@ -134,82 +134,68 @@ pub trait JMAPMailLocalStoreSet<'x>:
                     }
                 }
                 let mut document = DocumentWriter::update(JMAP_MAIL, document_id);
-                let mut invalid_properties = Vec::new();
+
+                let mut keyword_op_list = HashMap::new();
+                let mut keyword_op_clear_all = false;
+                let mut mailbox_op_list = HashMap::new();
+                let mut mailbox_op_clear_all = false;
 
                 for (field, value) in properties {
                     match field {
                         JSONPointer::Property(JMAPMailProperties::Keywords) => {
                             if let JSONValue::Object(value) = value {
-                                if let Some(current_keywords) = self.get_document_value::<Vec<u8>>(
-                                    request.account_id,
-                                    JMAP_MAIL,
-                                    document_id,
-                                    MessageField::Keyword.into(),
-                                )? {
-                                    for tag in bincode_deserialize::<Vec<Tag>>(&current_keywords)? {
-                                        document.clear_tag(MessageField::Keyword.into(), tag);
-                                    }
-                                }
-                                let mut new_keywords = Vec::with_capacity(value.len());
+                                // Add keywords to the list
                                 for (keyword, value) in value {
                                     if let JSONValue::Bool(true) = value {
-                                        new_keywords.push(Tag::Text(keyword.into()));
+                                        keyword_op_list.insert(Tag::Text(keyword.into()), true);
                                     }
                                 }
-                                document.add_binary(
-                                    MessageField::Keyword.into(),
-                                    bincode_serialize(&new_keywords)?.into(),
-                                    FieldOptions::Store,
-                                );
+                                keyword_op_clear_all = true;
                             } else {
-                                invalid_properties.push("keywords".to_string());
+                                not_updated.insert(
+                                    jmap_id,
+                                    JMAPSetError::invalid_property(
+                                        "keywords",
+                                        "Expected an object.",
+                                    ),
+                                );
+                                continue 'main;
                             }
                         }
                         JSONPointer::Property(JMAPMailProperties::MailboxIds) => {
+                            // Unwrap JSON object
                             if let JSONValue::Object(value) = value {
-                                if let Some(current_mailboxes) = self
-                                    .get_document_value::<Vec<u8>>(
-                                        request.account_id,
-                                        JMAP_MAIL,
-                                        document_id,
-                                        MessageField::Mailbox.into(),
-                                    )?
-                                {
-                                    for mailbox_id in
-                                        bincode_deserialize::<Vec<MailboxId>>(&current_mailboxes)?
-                                    {
-                                        document.clear_tag(
-                                            MessageField::Mailbox.into(),
-                                            Tag::Id(mailbox_id),
-                                        );
-                                    }
-                                }
-
+                                // Add mailbox ids to the list
                                 for (mailbox_id, value) in value {
-                                    if let (Some(mailbox_id), JSONValue::Bool(true)) =
-                                        (JMAPId::from_jmap_string(mailbox_id.as_ref()), value)
-                                    {
-                                        let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
-                                            mailbox_ids
-                                        } else {
-                                            mailbox_ids = self
-                                                .get_document_ids(request.account_id, JMAP_MAILBOX)?
-                                                .into();
-                                            mailbox_ids.as_ref().unwrap()
-                                        };
-                                        let mailbox_id = mailbox_id.get_document_id();
-                                        if mailbox_ids.contains(mailbox_id) {
-                                            document.set_tag(
-                                                MessageField::Mailbox.into(),
-                                                Tag::Id(mailbox_id),
-                                            );
-                                            continue;
+                                    match (JMAPId::from_jmap_string(mailbox_id.as_ref()), value) {
+                                        (Some(mailbox_id), JSONValue::Bool(true)) => {
+                                            mailbox_op_list
+                                                .insert(mailbox_id.get_document_id(), true);
                                         }
+                                        (None, _) => {
+                                            not_updated.insert(
+                                                jmap_id,
+                                                JMAPSetError::invalid_property(
+                                                    format!("mailboxIds/{}", mailbox_id),
+                                                    "Failed to parse mailbox id.",
+                                                ),
+                                            );
+                                            continue 'main;
+                                        }
+                                        _ => (),
                                     }
-                                    invalid_properties.push(format!("mailboxIds/{}", mailbox_id));
                                 }
+                                mailbox_op_clear_all = true;
                             } else {
-                                invalid_properties.push("mailboxIds".to_string());
+                                // mailboxIds is not a JSON object
+                                not_updated.insert(
+                                    jmap_id,
+                                    JMAPSetError::invalid_property(
+                                        "mailboxIds",
+                                        "Expected an object.",
+                                    ),
+                                );
+                                continue 'main;
                             }
                         }
                         JSONPointer::Path(mut path) if path.len() == 2 => {
@@ -219,19 +205,20 @@ pub trait JMAPMailLocalStoreSet<'x>:
                                     JSONPointer::Property(JMAPMailProperties::Keywords),
                                 ) => match value {
                                     JSONValue::Null | JSONValue::Bool(false) => {
-                                        document.clear_tag(
-                                            MessageField::Keyword.into(),
-                                            Tag::Text(keyword.into()),
-                                        );
+                                        keyword_op_list.insert(Tag::Text(keyword.into()), false);
                                     }
                                     JSONValue::Bool(true) => {
-                                        document.set_tag(
-                                            MessageField::Keyword.into(),
-                                            Tag::Text(keyword.into()),
-                                        );
+                                        keyword_op_list.insert(Tag::Text(keyword.into()), true);
                                     }
                                     _ => {
-                                        invalid_properties.push(format!("keywords/{}", keyword));
+                                        not_updated.insert(
+                                            jmap_id,
+                                            JMAPSetError::invalid_property(
+                                                format!("keywords/{}", keyword),
+                                                "Expected a boolean or null value.",
+                                            ),
+                                        );
+                                        continue 'main;
                                     }
                                 },
                                 (
@@ -241,57 +228,209 @@ pub trait JMAPMailLocalStoreSet<'x>:
                                     if let Some(mailbox_id) =
                                         JMAPId::from_jmap_string(mailbox_id.as_ref())
                                     {
-                                        let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
-                                            mailbox_ids
-                                        } else {
-                                            mailbox_ids = self
-                                                .get_document_ids(request.account_id, JMAP_MAILBOX)?
-                                                .into();
-                                            mailbox_ids.as_ref().unwrap()
-                                        };
-                                        if mailbox_ids.contains(mailbox_id.get_document_id()) {
-                                            match value {
-                                                JSONValue::Null | JSONValue::Bool(false) => {
-                                                    document.clear_tag(
-                                                        MessageField::Mailbox.into(),
-                                                        Tag::Id(mailbox_id.get_document_id()),
-                                                    );
-                                                    continue;
-                                                }
-                                                JSONValue::Bool(true) => {
-                                                    document.set_tag(
-                                                        MessageField::Mailbox.into(),
-                                                        Tag::Id(mailbox_id.get_document_id()),
-                                                    );
-                                                    continue;
-                                                }
-                                                _ => (),
+                                        match value {
+                                            JSONValue::Null | JSONValue::Bool(false) => {
+                                                mailbox_op_list
+                                                    .insert(mailbox_id.get_document_id(), false);
+                                                continue;
                                             }
+                                            JSONValue::Bool(true) => {
+                                                mailbox_op_list
+                                                    .insert(mailbox_id.get_document_id(), true);
+                                                continue;
+                                            }
+                                            _ => (),
                                         }
                                     }
-                                    invalid_properties.push(format!("mailboxIds/{}", mailbox_id));
+                                    not_updated.insert(
+                                        jmap_id,
+                                        JMAPSetError::invalid_property(
+                                            format!("mailboxIds/{}", mailbox_id),
+                                            "Expected boolean or new value.",
+                                        ),
+                                    );
+                                    continue 'main;
                                 }
                                 (part2, part1) => {
-                                    invalid_properties.push(format!("{}/{}", part1, part2));
+                                    not_updated.insert(
+                                        jmap_id,
+                                        JMAPSetError::invalid_property(
+                                            format!("{}/{}", part1, part2),
+                                            "Unsupported property.",
+                                        ),
+                                    );
+                                    continue 'main;
                                 }
                             }
                         }
                         _ => {
-                            invalid_properties.push(field.to_string());
+                            not_updated.insert(
+                                jmap_id,
+                                JMAPSetError::invalid_property(
+                                    field.to_string(),
+                                    "Unsupported property.",
+                                ),
+                            );
+                            continue 'main;
                         }
                     }
                 }
 
-                if !invalid_properties.is_empty() {
-                    not_updated.insert(
-                        jmap_id,
-                        JMAPSetError {
-                            error_type: JMAPSetErrorType::InvalidProperties,
-                            description: None,
-                            properties: invalid_properties.into(),
-                        },
+                if !mailbox_op_list.is_empty() || mailbox_op_clear_all {
+                    // Obtain mailboxes
+                    let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
+                        mailbox_ids
+                    } else {
+                        mailbox_ids = self
+                            .get_document_ids(request.account_id, JMAP_MAILBOX)?
+                            .into();
+                        mailbox_ids.as_ref().unwrap()
+                    };
+
+                    // Deserialize mailbox list
+                    let current_mailboxes = if let Some(current_mailboxes) = self
+                        .get_document_value::<Vec<u8>>(
+                            request.account_id,
+                            JMAP_MAIL,
+                            document_id,
+                            MessageField::Mailbox.into(),
+                        )? {
+                        bincode_deserialize::<Vec<MailboxId>>(&current_mailboxes)?
+                    } else {
+                        vec![]
+                    };
+
+                    let mut new_mailboxes = Vec::with_capacity(std::cmp::max(
+                        mailbox_op_list.len(),
+                        current_mailboxes.len(),
+                    ));
+
+                    for mailbox_id in &current_mailboxes {
+                        if mailbox_op_clear_all {
+                            // Untag mailbox unless it is in the list of mailboxes to tag
+                            if !mailbox_op_list.get(mailbox_id).unwrap_or(&false) {
+                                document
+                                    .clear_tag(MessageField::Mailbox.into(), Tag::Id(*mailbox_id));
+                            }
+                        } else if !mailbox_op_list.get(mailbox_id).unwrap_or(&true) {
+                            // Untag mailbox if is marked for untagging
+                            document.clear_tag(MessageField::Mailbox.into(), Tag::Id(*mailbox_id));
+                        } else {
+                            // Keep mailbox in the list
+                            new_mailboxes.push(*mailbox_id);
+                        }
+                    }
+
+                    for (mailbox_id, do_create) in mailbox_op_list {
+                        if do_create {
+                            // Make sure the mailbox exists
+                            if mailbox_ids.contains(mailbox_id) {
+                                // Tag mailbox if it is not already tagged
+                                if !current_mailboxes.contains(&mailbox_id) {
+                                    document
+                                        .set_tag(MessageField::Mailbox.into(), Tag::Id(mailbox_id));
+                                }
+                                new_mailboxes.push(mailbox_id);
+                            } else {
+                                not_updated.insert(
+                                    jmap_id,
+                                    JMAPSetError::invalid_property(
+                                        format!("mailboxIds/{}", mailbox_id),
+                                        "Mailbox does not exist.",
+                                    ),
+                                );
+                                continue 'main;
+                            }
+                        }
+                    }
+
+                    // Messages have to be in at least one mailbox
+                    if new_mailboxes.is_empty() {
+                        not_updated.insert(
+                            jmap_id,
+                            JMAPSetError::invalid_property(
+                                "mailboxIds",
+                                "Message must belong to at least one mailbox.",
+                            ),
+                        );
+                        continue 'main;
+                    }
+
+                    // Serialize new mailbox list
+                    document.add_binary(
+                        MessageField::Mailbox.into(),
+                        bincode_serialize(&new_mailboxes)?.into(),
+                        FieldOptions::Store,
                     );
-                } else if !document.is_empty() {
+                }
+
+                if !keyword_op_list.is_empty() || keyword_op_clear_all {
+                    // Deserialize current keywords
+                    let current_keywords = if let Some(current_keywords) = self
+                        .get_document_value::<Vec<u8>>(
+                            request.account_id,
+                            JMAP_MAIL,
+                            document_id,
+                            MessageField::Keyword.into(),
+                        )? {
+                        bincode_deserialize::<Vec<Tag>>(&current_keywords)?
+                    } else {
+                        vec![]
+                    };
+
+                    let mut new_keywords = Vec::with_capacity(std::cmp::max(
+                        keyword_op_list.len(),
+                        current_keywords.len(),
+                    ));
+
+                    for keyword in &current_keywords {
+                        if keyword_op_clear_all {
+                            // Untag keyword unless it is in the list of keywords to tag
+                            if !keyword_op_list.get(keyword).unwrap_or(&false) {
+                                document.clear_tag(MessageField::Keyword.into(), keyword.clone());
+                            }
+                        } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
+                            // Untag keyword if is marked for untagging
+                            document.clear_tag(MessageField::Keyword.into(), keyword.clone());
+                        } else {
+                            // Keep keyword in the list
+                            new_keywords.push(keyword.clone());
+                        }
+                    }
+
+                    for (keyword, do_create) in keyword_op_list {
+                        if do_create {
+                            // Tag keyword if it is not already tagged
+                            if !current_keywords.contains(&keyword) {
+                                document.set_tag(MessageField::Keyword.into(), keyword.clone());
+                            }
+                            new_keywords.push(keyword);
+                        }
+                    }
+
+                    // Clear keyword tags
+                    for keyword in &current_keywords {
+                        if !new_keywords.contains(keyword) {
+                            document.clear_tag(MessageField::Keyword.into(), keyword.clone());
+                        }
+                    }
+
+                    // Set keyword tags
+                    for keyword in &new_keywords {
+                        if !new_keywords.contains(keyword) {
+                            document.set_tag(MessageField::Keyword.into(), keyword.clone());
+                        }
+                    }
+
+                    // Serialize new keywords list
+                    document.add_binary(
+                        MessageField::Keyword.into(),
+                        bincode_serialize(&new_keywords)?.into(),
+                        FieldOptions::Store,
+                    );
+                }
+
+                if !document.is_empty() {
                     document.log_update(jmap_id);
                     changes.push(document);
                     updated.insert(jmap_id, JSONValue::Null);
@@ -735,6 +874,7 @@ fn import_body_part<'x, 'y>(
                 );
             };
         }
+
         match (
             part.get("disposition").and_then(|v| v.to_string()),
             part.get("name").and_then(|v| v.to_string()),

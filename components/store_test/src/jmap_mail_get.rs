@@ -36,9 +36,13 @@ impl<'x> From<JSONValue> for UntaggedJSONValue {
                         if map.get("name").is_some() && map.get("value").is_some() =>
                     {
                         list.sort_unstable_by_key(|value| match value {
-                            JSONValue::Object(map) => match map.get("name") {
-                                Some(JSONValue::String(str)) => str.clone(),
-                                Some(JSONValue::Null) => "".to_string(),
+                            JSONValue::Object(map) => match (map.get("name"), map.get("value")) {
+                                (Some(JSONValue::String(name)), Some(JSONValue::String(value))) => {
+                                    (name.clone(), value.clone())
+                                }
+                                (Some(JSONValue::String(name)), Some(JSONValue::Null)) => {
+                                    (name.clone(), "".to_string())
+                                }
                                 _ => {
                                     unreachable!()
                                 }

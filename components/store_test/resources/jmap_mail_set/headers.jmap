@@ -40,11 +40,11 @@
         },
         {
           "name": "List-Subscribe",
-          "value": "<mailto:list-manager@host.com?body=subscribe%20list>"
+          "value": "<ftp://ftp.host.com/list.txt>\r\n\t<mailto:list@host.com?subject=subscribe>"
         },
         {
           "name": "List-Subscribe",
-          "value": "<ftp://ftp.host.com/list.txt>\r\n\t<mailto:list@host.com?subject=subscribe>"
+          "value": "<mailto:list-manager@host.com?body=subscribe%20list>"
         },
         {
           "name": "Message-ID",
@@ -60,15 +60,15 @@
         },
         {
           "name": "Resent-Date",
+          "value": "Mon, 04 Jul 2005 09:52:37 +0000"
+        },
+        {
+          "name": "Resent-Date",
           "value": "Sat, 02 Jul 2005 09:52:37 +0000"
         },
         {
           "name": "Resent-Date",
           "value": "Sun, 03 Jul 2005 09:52:37 +0000"
-        },
-        {
-          "name": "Resent-Date",
-          "value": "Mon, 04 Jul 2005 09:52:37 +0000"
         },
         {
           "name": "Sender",
@@ -84,11 +84,11 @@
         },
         {
           "name": "X-AddressesGroup",
-          "value": "\"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>"
+          "value": "\"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>"
         },
         {
           "name": "X-AddressesGroup",
-          "value": "\"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>"
+          "value": "\"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>"
         },
         {
           "name": "X-References",
@@ -100,11 +100,11 @@
         },
         {
           "name": "X-Text",
-          "value": "this is some text"
+          "value": "a b"
         },
         {
           "name": "X-Text",
-          "value": "a b"
+          "value": "this is some text"
         }
       ],
       "subparts": [
@@ -254,7 +254,6 @@
       }
     ],
     "sentAt": "2018-07-10T01:03:11+00:00",
-    "size": 2433,
     "subject": "Headers test",
     "textBody": [
       {

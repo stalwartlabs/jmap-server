@@ -229,6 +229,14 @@ impl JMAPSetError {
             properties: None,
         }
     }
+
+    pub fn invalid_property(property: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            error_type: JMAPSetErrorType::InvalidProperties,
+            description: Some(description.into()),
+            properties: Some(vec![property.into()]),
+        }
+    }
 }
 
 pub struct JMAPGet<T> {

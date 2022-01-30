@@ -106,7 +106,7 @@ pub enum FieldValue<'x> {
     Tag(Tag<'x>),
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
 pub enum Tag<'x> {
     Static(TagId),
     Id(Integer),

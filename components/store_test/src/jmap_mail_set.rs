@@ -99,10 +99,6 @@ pub fn test_jmap_mail_set<T>(mail_store: T)
 where
     T: for<'x> JMAPMailLocalStore<'x>,
 {
-    let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    test_dir.push("resources");
-    test_dir.push("jmap_mail_set");
-
     // TODO use mailbox create API
     mail_store
         .update_document(
@@ -116,6 +112,27 @@ where
             None,
         )
         .unwrap();
+    mail_store
+        .update_document(
+            0,
+            DocumentWriter::insert(
+                JMAP_MAILBOX,
+                mail_store
+                    .assign_document_id(0, JMAP_MAILBOX, None)
+                    .unwrap(),
+            ),
+            None,
+        )
+        .unwrap();
+
+    test_jmap_mail_create(&mail_store);
+    test_jmap_mail_update(&mail_store);
+}
+
+fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
+    let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    test_dir.push("resources");
+    test_dir.push("jmap_mail_set");
 
     for file_name in fs::read_dir(&test_dir).unwrap() {
         let mut file_name = file_name.as_ref().unwrap().path();
@@ -139,7 +156,7 @@ where
                         .unwrap_object()
                         .into_iter()
                         .map(|(k, mut v)| {
-                            store_blobs(&mail_store, &mut v);
+                            store_blobs(mail_store, &mut v);
                             (JMAPMailProperties::parse(&k).unwrap(), v)
                         })
                         .collect::<HashMap<JMAPMailProperties, JSONValue>>(),
@@ -191,7 +208,6 @@ where
                             JMAPMailProperties::ThreadId,
                             JMAPMailProperties::MailboxIds,
                             JMAPMailProperties::Keywords,
-                            JMAPMailProperties::Size,
                             JMAPMailProperties::ReceivedAt,
                             JMAPMailProperties::MessageId,
                             JMAPMailProperties::InReplyTo,
@@ -240,30 +256,32 @@ where
 
         file_name.set_extension("jmap");
 
-        /*assert_diff(
+        assert_diff(
             &replace_boundaries(serde_json::to_string_pretty(&parsed_message).unwrap()),
             &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
             file_name.to_str().unwrap(),
-        );*/
+        );
 
-        fs::write(
+        /*fs::write(
             file_name.clone(),
             replace_boundaries(serde_json::to_string_pretty(&parsed_message).unwrap()),
         )
-        .unwrap();
+        .unwrap();*/
 
         file_name.set_extension("eml");
 
-        /*assert_diff(
+        assert_diff(
             &replace_boundaries(String::from_utf8(raw_message).unwrap()),
             &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
             file_name.to_str().unwrap(),
-        );*/
+        );
 
-        fs::write(
+        /*fs::write(
             file_name,
             replace_boundaries(String::from_utf8(raw_message).unwrap()),
         )
-        .unwrap();
+        .unwrap();*/
     }
 }
+
+fn test_jmap_mail_update<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {}
