@@ -1,0 +1,83 @@
+[
+  {
+    "attachments": [],
+    "blobId": "ignored_value",
+    "bodyStructure": {
+      "blobId": "ignored_value",
+      "charset": "utf-8",
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Date",
+          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        },
+        {
+          "name": "Message-ID",
+          "value": "<my-message-id>"
+        }
+      ],
+      "partId": 0,
+      "size": 2,
+      "type": "text/plain"
+    },
+    "bodyValues": {
+      "0": {
+        "isEncodingProblem": false,
+        "isTruncated": false,
+        "value": "\r\n"
+      },
+      "1": {
+        "isEncodingProblem": false,
+        "isTruncated": false,
+        "value": "<html><body><br/></body></html>"
+      }
+    },
+    "hasAttachment": false,
+    "htmlBody": [
+      {
+        "blobId": "ignored_value",
+        "partId": 1,
+        "size": 31,
+        "type": "text/html"
+      }
+    ],
+    "id": "ignored_value",
+    "mailboxIds": {
+      "i00": true
+    },
+    "messageId": [
+      "my-message-id"
+    ],
+    "preview": "\r\n",
+    "receivedAt": "2018-07-10T01:03:11Z",
+    "sentAt": "2018-07-10T01:03:11+00:00",
+    "size": 148,
+    "textBody": [
+      {
+        "blobId": "ignored_value",
+        "charset": "utf-8",
+        "headers": [
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=\"utf-8\""
+          }
+        ],
+        "partId": 0,
+        "size": 2,
+        "type": "text/plain"
+      }
+    ],
+    "threadId": "ignored_value"
+  }
+]

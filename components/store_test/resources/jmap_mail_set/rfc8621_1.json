@@ -1,6 +1,6 @@
 {
     "mailboxIds": {
-        "2ea1ca41b38e": true
+        "i0": true
     },
     "keywords": {
         "$seen": true,
@@ -15,6 +15,9 @@
     "subject": "World domination",
     "receivedAt": "2018-07-10T01:03:11Z",
     "sentAt": "2018-07-10T11:03:11+10:00",
+    "messageId": [
+        "my-message-id"
+    ],
     "bodyStructure": {
         "type": "text/plain",
         "partId": "bd48",

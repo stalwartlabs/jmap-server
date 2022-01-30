@@ -43,7 +43,7 @@
           "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "blobId": "ignored_value",
           "charset": "us-ascii",

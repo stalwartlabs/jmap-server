@@ -1,6 +1,6 @@
 {
     "mailboxIds": {
-        "2ea1ca41b38e": true
+        "i0": true
     },
     "keywords": {
         "$seen": true,
@@ -17,6 +17,9 @@
             "name": "John",
             "email": "john@example.com"
         }
+    ],
+    "messageId": [
+        "my-message-id"
     ],
     "subject": "World domination",
     "receivedAt": "2018-07-10T01:05:08Z",

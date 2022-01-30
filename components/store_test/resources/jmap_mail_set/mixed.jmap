@@ -1,0 +1,324 @@
+[
+  {
+    "attachments": [
+      {
+        "blobId": "ignored_value",
+        "cid": "cid:1234-5678-9012-3456",
+        "headers": [
+          {
+            "name": "Content-ID",
+            "value": "<cid:1234-5678-9012-3456>"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "Content-Type",
+            "value": "image/png"
+          }
+        ],
+        "partId": 3,
+        "size": 37,
+        "type": "image/png"
+      },
+      {
+        "blobId": "ignored_value",
+        "disposition": "attachment",
+        "headers": [
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "Content-Type",
+            "value": "x-document/pdf"
+          }
+        ],
+        "name": "Book about ☕ tables.pdf",
+        "partId": 4,
+        "size": 127,
+        "type": "x-document/pdf"
+      }
+    ],
+    "blobId": "ignored_value",
+    "bodyStructure": {
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "multipart/mixed; \r\n\tboundary=\"boundary_0\""
+        },
+        {
+          "name": "Date",
+          "value": "Sat, 20 Nov 2021 22:22:01 +0000"
+        },
+        {
+          "name": "From",
+          "value": "\"Art Vandelay (Vandelay Industries)\" <art@vandelay.com>"
+        },
+        {
+          "name": "Message-ID",
+          "value": "<my-message-id>"
+        },
+        {
+          "name": "Subject",
+          "value": "=?utf-8?Q?Why_not_both_importing_AND_exporting=3F_=E2=98=BA?="
+        },
+        {
+          "name": "To",
+          "value": "\"Colleagues\": \"James Smythe\" <james@vandelay.com>; \r\n\t\"Friends\": <jane@example.com>, \r\n\t\"=?utf-8?Q?John_Sm=C3=AEth?=\" <john@example.com>"
+        }
+      ],
+      "subparts": [
+        {
+          "headers": [
+            {
+              "name": "Content-Type",
+              "value": "multipart/alternative; \r\n\tboundary=\"boundary_1\""
+            }
+          ],
+          "subparts": [
+            {
+              "blobId": "ignored_value",
+              "headers": [
+                {
+                  "name": "Content-Language",
+                  "value": "en"
+                },
+                {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "quoted-printable"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "text/plain"
+                }
+              ],
+              "language": [
+                "en"
+              ],
+              "partId": 1,
+              "size": 129,
+              "type": "text/plain"
+            },
+            {
+              "blobId": "ignored_value",
+              "headers": [
+                {
+                  "name": "Content-Language",
+                  "value": "en_US"
+                },
+                {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "7bit"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "text/html"
+                }
+              ],
+              "language": [
+                "en_US"
+              ],
+              "partId": 2,
+              "size": 175,
+              "type": "text/html"
+            }
+          ],
+          "type": "multipart/alternative"
+        },
+        {
+          "blobId": "ignored_value",
+          "cid": "cid:1234-5678-9012-3456",
+          "headers": [
+            {
+              "name": "Content-ID",
+              "value": "<cid:1234-5678-9012-3456>"
+            },
+            {
+              "name": "Content-Transfer-Encoding",
+              "value": "base64"
+            },
+            {
+              "name": "Content-Type",
+              "value": "image/png"
+            }
+          ],
+          "partId": 3,
+          "size": 37,
+          "type": "image/png"
+        },
+        {
+          "blobId": "ignored_value",
+          "disposition": "attachment",
+          "headers": [
+            {
+              "name": "Content-Disposition",
+              "value": "attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
+            },
+            {
+              "name": "Content-Transfer-Encoding",
+              "value": "base64"
+            },
+            {
+              "name": "Content-Type",
+              "value": "x-document/pdf"
+            }
+          ],
+          "name": "Book about ☕ tables.pdf",
+          "partId": 4,
+          "size": 127,
+          "type": "x-document/pdf"
+        }
+      ],
+      "type": "multipart/mixed"
+    },
+    "bodyValues": {
+      "1": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "I was thinking about quitting the “exporting” to focus just on the “importing”,\nbut then ..."
+      },
+      "2": {
+        "isEncodingProblem": false,
+        "isTruncated": true,
+        "value": "<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus just on the &ldquo;im..."
+      }
+    },
+    "from": [
+      {
+        "email": "art@vandelay.com",
+        "name": "Art Vandelay (Vandelay Industries)"
+      }
+    ],
+    "hasAttachment": true,
+    "htmlBody": [
+      {
+        "blobId": "ignored_value",
+        "headers": [
+          {
+            "name": "Content-Language",
+            "value": "en_US"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/html"
+          }
+        ],
+        "language": [
+          "en_US"
+        ],
+        "partId": 2,
+        "size": 175,
+        "type": "text/html"
+      },
+      {
+        "blobId": "ignored_value",
+        "cid": "cid:1234-5678-9012-3456",
+        "headers": [
+          {
+            "name": "Content-ID",
+            "value": "<cid:1234-5678-9012-3456>"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "Content-Type",
+            "value": "image/png"
+          }
+        ],
+        "partId": 3,
+        "size": 37,
+        "type": "image/png"
+      }
+    ],
+    "id": "ignored_value",
+    "keywords": {
+      "$draft": true,
+      "$seen": true,
+      "my-tag": true
+    },
+    "mailboxIds": {
+      "i00": true
+    },
+    "messageId": [
+      "my-message-id"
+    ],
+    "preview": "I was thinking about quitting the “exporting” to focus just on the “importing”,\nbut then I thought, why not do both? ☺\n",
+    "receivedAt": "2021-11-20T22:22:01Z",
+    "sentAt": "2021-11-20T22:22:01+00:00",
+    "size": 1953,
+    "subject": "Why not both importing AND exporting? ☺",
+    "textBody": [
+      {
+        "blobId": "ignored_value",
+        "headers": [
+          {
+            "name": "Content-Language",
+            "value": "en"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/plain"
+          }
+        ],
+        "language": [
+          "en"
+        ],
+        "partId": 1,
+        "size": 129,
+        "type": "text/plain"
+      },
+      {
+        "blobId": "ignored_value",
+        "cid": "cid:1234-5678-9012-3456",
+        "headers": [
+          {
+            "name": "Content-ID",
+            "value": "<cid:1234-5678-9012-3456>"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "Content-Type",
+            "value": "image/png"
+          }
+        ],
+        "partId": 3,
+        "size": 37,
+        "type": "image/png"
+      }
+    ],
+    "threadId": "ignored_value",
+    "to": [
+      {
+        "email": "james@vandelay.com",
+        "name": "James Smythe"
+      },
+      {
+        "email": "jane@example.com",
+        "name": null
+      },
+      {
+        "email": "john@example.com",
+        "name": "John Smîth"
+      }
+    ]
+  }
+]

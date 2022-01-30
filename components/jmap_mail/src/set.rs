@@ -100,7 +100,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
                             (mail_id.get_thread_id() as JMAPId).to_jmap_string().into(),
                         );
                         values.insert("size".to_string(), mail_size.into());
-                        created.insert(create_id, values);
+                        created.insert(create_id, JSONValue::Object(values));
                     }
                     Err(err) => {
                         not_created.insert(create_id, err);
@@ -109,7 +109,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
             }
 
             if !created.is_empty() {
-                //response.created = created.into();
+                response.created = created.into();
             }
 
             if !not_created.is_empty() {
@@ -544,6 +544,19 @@ fn build_message<'x, 'y>(
         ));
     }
 
+    if builder.headers.is_empty()
+        && builder.body.is_none()
+        && builder.html_body.is_none()
+        && builder.text_body.is_none()
+        && builder.attachments.is_none()
+    {
+        return Err(JMAPSetError::new_full(
+            JMAPSetErrorType::InvalidProperties,
+            "Message has to have at least one header or body part.",
+        ));
+    }
+
+    // TODO: write parsed message directly to store, avoid parsing it again.
     let mut blob = Vec::with_capacity(1024);
     builder.write_to(&mut blob).map_err(|_| {
         JMAPSetError::new_full(JMAPSetErrorType::InvalidProperties, "Internal error")
@@ -681,7 +694,7 @@ fn import_body_part<'x, 'y>(
                     .map_err(|_| {
                         JMAPSetError::new_full(
                             JMAPSetErrorType::BlobNotFound,
-                            "Failed to download blob",
+                            "Failed to fetch blob.",
                         )
                     })?
                     .ok_or_else(|| {
@@ -765,7 +778,7 @@ fn import_body_part<'x, 'y>(
         if let Some(cid) = part.get("cid").and_then(|v| v.to_string()) {
             mime_part
                 .headers
-                .insert("Content-ID".into(), Text::new(cid).into());
+                .insert("Content-ID".into(), MessageId::new(cid).into());
         }
 
         if let Some(location) = part.get("location").and_then(|v| v.to_string()) {
@@ -782,7 +795,7 @@ fn import_body_part<'x, 'y>(
     for (property, value) in part {
         if property.starts_with("header:") {
             match property.split(':').nth(1) {
-                Some(header_name) if !property.is_empty() => {
+                Some(header_name) if !header_name.is_empty() => {
                     mime_part.headers.insert(
                         header_name.into(),
                         Raw::new(value.to_string().ok_or_else(|| {
@@ -856,7 +869,7 @@ fn import_body_parts<'x, 'y>(
     let parts = parts.to_array().ok_or_else(|| {
         JMAPSetError::new_full(
             JMAPSetErrorType::InvalidProperties,
-            "Expected an array.".to_string(),
+            "Expected an array containing body part.".to_string(),
         )
     })?;
 
@@ -1011,7 +1024,7 @@ fn import_json_grouped_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAP
         })?;
         result.push(Address::new_group(
             addr.get("name").and_then(|n| n.to_string()),
-            import_json_addresses(addr.get("email").ok_or_else(|| {
+            import_json_addresses(addr.get("addresses").ok_or_else(|| {
                 JMAPSetError::new_full(
                     JMAPSetErrorType::InvalidProperties,
                     "Missing 'addresses' field in EmailAddressGroup object.".to_string(),

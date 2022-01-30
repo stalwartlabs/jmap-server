@@ -98,7 +98,7 @@
           "value": "3 (Normal)"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "headers": [
             {
@@ -106,7 +106,7 @@
               "value": "multipart/alternative;\n\tboundary=\"----=_NextPart_001_000D_01BFC038.5A5C8E60\""
             }
           ],
-          "subparts": [
+          "subParts": [
             {
               "blobId": "ignored_value",
               "charset": "iso-8859-1",

@@ -10,24 +10,32 @@
             "value": "inline"
           },
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
             "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
         "partId": 5,
-        "size": 1,
+        "size": 6,
         "type": "image/jpeg"
       },
       {
         "blobId": "ignored_value",
         "headers": [
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
             "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
         "partId": 9,
-        "size": 1,
+        "size": 6,
         "type": "image/jpeg"
       },
       {
@@ -39,37 +47,49 @@
             "value": "attachment"
           },
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
             "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
         "partId": 10,
-        "size": 1,
+        "size": 6,
         "type": "image/jpeg"
       },
       {
         "blobId": "ignored_value",
         "headers": [
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
             "name": "Content-Type",
             "value": "application/x-excel"
           }
         ],
         "partId": 11,
-        "size": 1,
+        "size": 6,
         "type": "application/x-excel"
       },
       {
         "blobId": "ignored_value",
         "headers": [
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
             "name": "Content-Type",
-            "value": "message/rfc822"
+            "value": "x-message/rfc822"
           }
         ],
         "partId": 12,
-        "size": 17,
-        "type": "message/rfc822"
+        "size": 6,
+        "type": "x-message/rfc822"
       }
     ],
     "blobId": "ignored_value",
@@ -77,14 +97,26 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "multipart/mixed; boundary=\"1\""
+          "value": "multipart/mixed; \r\n\tboundary=\"boundary_0\""
+        },
+        {
+          "name": "Date",
+          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        },
+        {
+          "name": "From",
+          "value": "\"Joe Bloggs\" <joe@example.com>"
+        },
+        {
+          "name": "Message-ID",
+          "value": "<my-message-id>"
         },
         {
           "name": "Subject",
           "value": "RFC 8621 Section 4.1.4 test"
         }
       ],
-      "subParts": [
+      "subparts": [
         {
           "blobId": "ignored_value",
           "disposition": "inline",
@@ -94,38 +126,42 @@
               "value": "inline"
             },
             {
+              "name": "Content-Transfer-Encoding",
+              "value": "7bit"
+            },
+            {
               "name": "Content-Type",
               "value": "text/plain"
             }
           ],
           "partId": 0,
-          "size": 1,
+          "size": 6,
           "type": "text/plain"
         },
         {
           "headers": [
             {
               "name": "Content-Type",
-              "value": "multipart/mixed; boundary=\"2\""
+              "value": "multipart/mixed; \r\n\tboundary=\"boundary_1\""
             }
           ],
-          "subParts": [
+          "subparts": [
             {
               "headers": [
                 {
                   "name": "Content-Type",
-                  "value": "multipart/alternative; boundary=\"3\""
+                  "value": "multipart/alternative; \r\n\tboundary=\"boundary_2\""
                 }
               ],
-              "subParts": [
+              "subparts": [
                 {
                   "headers": [
                     {
                       "name": "Content-Type",
-                      "value": "multipart/mixed; boundary=\"4\""
+                      "value": "multipart/mixed; \r\n\tboundary=\"boundary_3\""
                     }
                   ],
-                  "subParts": [
+                  "subparts": [
                     {
                       "blobId": "ignored_value",
                       "disposition": "inline",
@@ -135,12 +171,16 @@
                           "value": "inline"
                         },
                         {
+                          "name": "Content-Transfer-Encoding",
+                          "value": "7bit"
+                        },
+                        {
                           "name": "Content-Type",
                           "value": "text/plain"
                         }
                       ],
                       "partId": 4,
-                      "size": 1,
+                      "size": 6,
                       "type": "text/plain"
                     },
                     {
@@ -152,12 +192,16 @@
                           "value": "inline"
                         },
                         {
+                          "name": "Content-Transfer-Encoding",
+                          "value": "base64"
+                        },
+                        {
                           "name": "Content-Type",
                           "value": "image/jpeg"
                         }
                       ],
                       "partId": 5,
-                      "size": 1,
+                      "size": 6,
                       "type": "image/jpeg"
                     },
                     {
@@ -169,12 +213,16 @@
                           "value": "inline"
                         },
                         {
+                          "name": "Content-Transfer-Encoding",
+                          "value": "7bit"
+                        },
+                        {
                           "name": "Content-Type",
                           "value": "text/plain"
                         }
                       ],
                       "partId": 6,
-                      "size": 1,
+                      "size": 6,
                       "type": "text/plain"
                     }
                   ],
@@ -184,32 +232,40 @@
                   "headers": [
                     {
                       "name": "Content-Type",
-                      "value": "multipart/related; boundary=\"5\""
+                      "value": "multipart/related; \r\n\tboundary=\"boundary_4\""
                     }
                   ],
-                  "subParts": [
+                  "subparts": [
                     {
                       "blobId": "ignored_value",
                       "headers": [
+                        {
+                          "name": "Content-Transfer-Encoding",
+                          "value": "7bit"
+                        },
                         {
                           "name": "Content-Type",
                           "value": "text/html"
                         }
                       ],
                       "partId": 8,
-                      "size": 14,
+                      "size": 6,
                       "type": "text/html"
                     },
                     {
                       "blobId": "ignored_value",
                       "headers": [
                         {
+                          "name": "Content-Transfer-Encoding",
+                          "value": "base64"
+                        },
+                        {
                           "name": "Content-Type",
                           "value": "image/jpeg"
                         }
                       ],
                       "partId": 9,
-                      "size": 1,
+                      "size": 6,
                       "type": "image/jpeg"
                     }
                   ],
@@ -227,37 +283,49 @@
                   "value": "attachment"
                 },
                 {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
                   "name": "Content-Type",
                   "value": "image/jpeg"
                 }
               ],
               "partId": 10,
-              "size": 1,
+              "size": 6,
               "type": "image/jpeg"
             },
             {
               "blobId": "ignored_value",
               "headers": [
                 {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
                   "name": "Content-Type",
                   "value": "application/x-excel"
                 }
               ],
               "partId": 11,
-              "size": 1,
+              "size": 6,
               "type": "application/x-excel"
             },
             {
               "blobId": "ignored_value",
               "headers": [
                 {
+                  "name": "Content-Transfer-Encoding",
+                  "value": "base64"
+                },
+                {
                   "name": "Content-Type",
-                  "value": "message/rfc822"
+                  "value": "x-message/rfc822"
                 }
               ],
               "partId": 12,
-              "size": 17,
-              "type": "message/rfc822"
+              "size": 6,
+              "type": "x-message/rfc822"
             }
           ],
           "type": "multipart/mixed"
@@ -271,12 +339,16 @@
               "value": "inline"
             },
             {
+              "name": "Content-Transfer-Encoding",
+              "value": "7bit"
+            },
+            {
               "name": "Content-Type",
               "value": "text/plain"
             }
           ],
           "partId": 13,
-          "size": 1,
+          "size": 6,
           "type": "text/plain"
         }
       ],
@@ -286,73 +358,91 @@
       "0": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "A"
+        "value": "Part A"
       },
       "13": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "K"
+        "value": "Part K"
       },
       "14": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "<html><body>A</body></html>"
+        "value": "<html><body>Part A</body></html>"
       },
       "15": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "<html><body>K</body></html>"
+        "value": "<html><body>Part K</body></html>"
       },
       "4": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "B"
+        "value": "Part B"
       },
       "6": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "D"
+        "value": "Part D"
       },
       "8": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "<html>E</html>"
+        "value": "Part E"
       }
     },
+    "from": [
+      {
+        "email": "joe@example.com",
+        "name": "Joe Bloggs"
+      }
+    ],
     "hasAttachment": true,
     "htmlBody": [
       {
         "blobId": "ignored_value",
         "partId": 14,
-        "size": 27,
+        "size": 32,
         "type": "text/html"
       },
       {
         "blobId": "ignored_value",
         "headers": [
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
             "name": "Content-Type",
             "value": "text/html"
           }
         ],
         "partId": 8,
-        "size": 14,
+        "size": 6,
         "type": "text/html"
       },
       {
         "blobId": "ignored_value",
         "partId": 15,
-        "size": 27,
+        "size": 32,
         "type": "text/html"
       }
     ],
     "id": "ignored_value",
     "keywords": {
-      "tag": true
+      "$draft": true,
+      "$seen": true
     },
-    "preview": "A",
-    "receivedAt": "1997-07-27T10:40:00Z",
-    "size": 870,
+    "mailboxIds": {
+      "i00": true
+    },
+    "messageId": [
+      "my-message-id"
+    ],
+    "preview": "Part A",
+    "receivedAt": "2018-07-10T01:03:11Z",
+    "sentAt": "2018-07-10T01:03:11+00:00",
+    "size": 2613,
     "subject": "RFC 8621 Section 4.1.4 test",
     "textBody": [
       {
@@ -364,12 +454,16 @@
             "value": "inline"
           },
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
             "name": "Content-Type",
             "value": "text/plain"
           }
         ],
         "partId": 0,
-        "size": 1,
+        "size": 6,
         "type": "text/plain"
       },
       {
@@ -379,6 +473,10 @@
           {
             "name": "Content-Disposition",
             "value": "inline"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
           },
           {
             "name": "Content-Type",
@@ -386,7 +484,7 @@
           }
         ],
         "partId": 4,
-        "size": 1,
+        "size": 6,
         "type": "text/plain"
       },
       {
@@ -398,12 +496,16 @@
             "value": "inline"
           },
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
             "name": "Content-Type",
             "value": "image/jpeg"
           }
         ],
         "partId": 5,
-        "size": 1,
+        "size": 6,
         "type": "image/jpeg"
       },
       {
@@ -415,12 +517,16 @@
             "value": "inline"
           },
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
             "name": "Content-Type",
             "value": "text/plain"
           }
         ],
         "partId": 6,
-        "size": 1,
+        "size": 6,
         "type": "text/plain"
       },
       {
@@ -432,12 +538,16 @@
             "value": "inline"
           },
           {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
             "name": "Content-Type",
             "value": "text/plain"
           }
         ],
         "partId": 13,
-        "size": 1,
+        "size": 6,
         "type": "text/plain"
       }
     ],

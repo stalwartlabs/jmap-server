@@ -6,65 +6,77 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "multipart/alternative; boundary=\"boundary-string\""
+          "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
+        },
+        {
+          "name": "Date",
+          "value": "Tue, 10 Jul 2018 01:05:08 +0000"
         },
         {
           "name": "From",
-          "value": "sender@example.com"
+          "value": "\"Joe Bloggs\" <joe@example.com>"
+        },
+        {
+          "name": "Message-ID",
+          "value": "<my-message-id>"
         },
         {
           "name": "Subject",
-          "value": "Multipart Email Example"
+          "value": "World domination"
         },
         {
           "name": "To",
-          "value": "recipient@example.com"
+          "value": "\"John\" <john@example.com>"
         }
       ],
-      "subParts": [
+      "subparts": [
         {
           "blobId": "ignored_value",
           "charset": "utf-8",
-          "disposition": "inline",
           "headers": [
             {
-              "name": "Content-Disposition",
-              "value": "inline"
+              "name": "Content-Language",
+              "value": "en"
             },
             {
               "name": "Content-Transfer-Encoding",
-              "value": "quoted-printable"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain; charset=\"utf-8\""
-            }
-          ],
-          "partId": 0,
-          "size": 87,
-          "type": "text/plain"
-        },
-        {
-          "blobId": "ignored_value",
-          "charset": "utf-8",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "quoted-printable"
+              "value": "7bit"
             },
             {
               "name": "Content-Type",
               "value": "text/html; charset=\"utf-8\""
             }
           ],
-          "partId": 1,
-          "size": 93,
+          "language": [
+            "en"
+          ],
+          "partId": 0,
+          "size": 218,
           "type": "text/html"
+        },
+        {
+          "blobId": "ignored_value",
+          "charset": "utf-8",
+          "headers": [
+            {
+              "name": "Content-Language",
+              "value": "en"
+            },
+            {
+              "name": "Content-Transfer-Encoding",
+              "value": "7bit"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain; charset=\"utf-8\""
+            }
+          ],
+          "language": [
+            "en"
+          ],
+          "partId": 1,
+          "size": 81,
+          "type": "text/plain"
         }
       ],
       "type": "multipart/alternative"
@@ -72,19 +84,19 @@
     "bodyValues": {
       "0": {
         "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n"
+        "isTruncated": true,
+        "value": "<!DOCTYPE html><html><head><title></title><style type=\"text/css\">div{font-size:16px}</style>..."
       },
       "1": {
         "isEncodingProblem": false,
         "isTruncated": false,
-        "value": "<h1>This is the HTML Section!</h1>\n<p>This is what displays in most modern email clients</p>\n"
+        "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
       }
     },
     "from": [
       {
-        "email": "sender@example.com",
-        "name": null
+        "email": "joe@example.com",
+        "name": "Joe Bloggs"
       }
     ],
     "hasAttachment": false,
@@ -92,63 +104,75 @@
       {
         "blobId": "ignored_value",
         "charset": "utf-8",
-        "disposition": "inline",
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Language",
+            "value": "en"
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
+            "value": "7bit"
           },
           {
             "name": "Content-Type",
             "value": "text/html; charset=\"utf-8\""
           }
         ],
-        "partId": 1,
-        "size": 93,
+        "language": [
+          "en"
+        ],
+        "partId": 0,
+        "size": 218,
         "type": "text/html"
       }
     ],
     "id": "ignored_value",
     "keywords": {
-      "tag": true
+      "$draft": true,
+      "$seen": true
     },
-    "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
-    "receivedAt": "1989-07-09T15:06:40Z",
-    "size": 616,
-    "subject": "Multipart Email Example",
+    "mailboxIds": {
+      "i00": true
+    },
+    "messageId": [
+      "my-message-id"
+    ],
+    "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
+    "receivedAt": "2018-07-10T01:05:08Z",
+    "sentAt": "2018-07-10T01:05:08+00:00",
+    "size": 937,
+    "subject": "World domination",
     "textBody": [
       {
         "blobId": "ignored_value",
         "charset": "utf-8",
-        "disposition": "inline",
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Language",
+            "value": "en"
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
+            "value": "7bit"
           },
           {
             "name": "Content-Type",
             "value": "text/plain; charset=\"utf-8\""
           }
         ],
-        "partId": 0,
-        "size": 87,
+        "language": [
+          "en"
+        ],
+        "partId": 1,
+        "size": 81,
         "type": "text/plain"
       }
     ],
     "threadId": "ignored_value",
     "to": [
       {
-        "email": "recipient@example.com",
-        "name": null
+        "email": "john@example.com",
+        "name": "John"
       }
     ]
   }

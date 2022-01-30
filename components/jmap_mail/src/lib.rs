@@ -434,7 +434,7 @@ impl<'x> Display for JMAPMailBodyProperties<'x> {
             JMAPMailBodyProperties::Cid => write!(f, "cid"),
             JMAPMailBodyProperties::Language => write!(f, "language"),
             JMAPMailBodyProperties::Location => write!(f, "location"),
-            JMAPMailBodyProperties::Subparts => write!(f, "subparts"),
+            JMAPMailBodyProperties::Subparts => write!(f, "subParts"),
         }
     }
 }

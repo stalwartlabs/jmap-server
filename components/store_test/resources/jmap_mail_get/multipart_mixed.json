@@ -86,7 +86,7 @@
           "value": "Ned Freed <ned@innosoft.com>"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "blobId": "ignored_value",
           "partId": 0,
@@ -113,7 +113,7 @@
               "value": "multipart/parallel; boundary=unique-boundary-2"
             }
           ],
-          "subparts": [
+          "subParts": [
             {
               "blobId": "ignored_value",
               "headers": [

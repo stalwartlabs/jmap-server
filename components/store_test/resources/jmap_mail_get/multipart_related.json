@@ -144,7 +144,7 @@
           "value": "dwsauder@pop.example.com (Unverified)"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "headers": [
             {
@@ -152,7 +152,7 @@
               "value": "multipart/related;\n\ttype=\"multipart/alternative\";\n\tboundary=\"=====================_715392540==_.REL\""
             }
           ],
-          "subparts": [
+          "subParts": [
             {
               "headers": [
                 {
@@ -160,7 +160,7 @@
                   "value": "multipart/alternative;\n\tboundary=\"=====================_715392550==_.ALT\""
                 }
               ],
-              "subparts": [
+              "subParts": [
                 {
                   "blobId": "ignored_value",
                   "charset": "iso-8859-1",

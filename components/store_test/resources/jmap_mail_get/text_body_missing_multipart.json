@@ -98,7 +98,7 @@
           "value": "3 (Normal)"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "blobId": "ignored_value",
           "disposition": "attachment",
