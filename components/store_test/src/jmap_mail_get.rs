@@ -374,9 +374,11 @@ where
                         .unwrap()
                         .list
                         .unwrap_array()
+                        .unwrap()
                         .pop()
                         .unwrap()
-                        .unwrap_object(),
+                        .unwrap_object()
+                        .unwrap(),
                 );
             }
             JSONValue::Array(vec![JSONValue::Object(result)])

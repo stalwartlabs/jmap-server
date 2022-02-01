@@ -3,13 +3,10 @@ pub mod changes;
 pub mod id;
 pub mod json;
 
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-};
+use std::collections::{HashMap, HashSet};
 
 use changes::JMAPState;
-use json::{JSONPointer, JSONValue};
+use json::JSONValue;
 use store::{AccountId, ChangeLogId, StoreError};
 
 pub const JMAP_MAIL: u8 = 0;
@@ -167,18 +164,13 @@ pub struct JMAPChangesResponse {
     pub destroyed: HashSet<ChangeLogId>,
 }
 
-pub type JMAPSetIdList<T, U> = HashMap<T, HashMap<U, JSONValue>>;
-
 #[derive(Debug)]
-pub struct JMAPSet<T>
-where
-    T: Hash + Eq + PartialEq,
-{
+pub struct JMAPSet {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub create: Option<JMAPSetIdList<String, T>>,
-    pub update: Option<JMAPSetIdList<JMAPId, JSONPointer<T>>>,
-    pub destroy: Option<Vec<JMAPId>>,
+    pub create: JSONValue,
+    pub update: JSONValue,
+    pub destroy: JSONValue,
 }
 
 #[derive(Debug)]
@@ -195,47 +187,64 @@ pub enum JMAPSetErrorType {
     BlobNotFound,
 }
 
-#[derive(Debug)]
-pub struct JMAPSetError {
-    pub error_type: JMAPSetErrorType,
-    pub description: Option<String>,
-    pub properties: Option<Vec<String>>,
+impl JMAPSetErrorType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JMAPSetErrorType::Forbidden => "forbidden",
+            JMAPSetErrorType::OverQuota => "overQuota",
+            JMAPSetErrorType::TooLarge => "tooLarge",
+            JMAPSetErrorType::RateLimit => "rateLimit",
+            JMAPSetErrorType::NotFound => "notFound",
+            JMAPSetErrorType::InvalidPatch => "invalidPatch",
+            JMAPSetErrorType::WillDestroy => "willDestroy",
+            JMAPSetErrorType::InvalidProperties => "invalidProperties",
+            JMAPSetErrorType::Singleton => "singleton",
+            JMAPSetErrorType::BlobNotFound => "blobNotFound",
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct JMAPSetResponse {
     pub old_state: JMAPState,
     pub new_state: JMAPState,
-    pub created: Option<HashMap<String, JSONValue>>,
-    pub updated: Option<HashMap<JMAPId, JSONValue>>,
-    pub destroyed: Option<Vec<JMAPId>>,
-    pub not_created: Option<HashMap<String, JMAPSetError>>,
-    pub not_updated: Option<HashMap<JMAPId, JMAPSetError>>,
-    pub not_destroyed: Option<HashMap<JMAPId, JMAPSetError>>,
+    pub created: JSONValue,
+    pub updated: JSONValue,
+    pub destroyed: JSONValue,
+    pub not_created: JSONValue,
+    pub not_updated: JSONValue,
+    pub not_destroyed: JSONValue,
 }
 
-impl JMAPSetError {
-    pub fn new(error_type: JMAPSetErrorType) -> Self {
-        Self {
-            error_type,
-            description: None,
-            properties: None,
-        }
-    }
-    pub fn new_full(error_type: JMAPSetErrorType, description: impl Into<String>) -> Self {
-        Self {
-            error_type,
-            description: Some(description.into()),
-            properties: None,
-        }
+impl JSONValue {
+    pub fn new_error(error_type: JMAPSetErrorType, description: impl Into<String>) -> Self {
+        let mut o = HashMap::with_capacity(2);
+        o.insert(
+            "error_type".to_string(),
+            error_type.as_str().to_string().into(),
+        );
+        o.insert("description".to_string(), description.into().into());
+        o.into()
     }
 
-    pub fn invalid_property(property: impl Into<String>, description: impl Into<String>) -> Self {
-        Self {
-            error_type: JMAPSetErrorType::InvalidProperties,
-            description: Some(description.into()),
-            properties: Some(vec![property.into()]),
-        }
+    pub fn new_invalid_property(
+        property: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        let mut o = HashMap::with_capacity(2);
+        o.insert(
+            "error_type".to_string(),
+            JMAPSetErrorType::InvalidProperties
+                .as_str()
+                .to_string()
+                .into(),
+        );
+        o.insert("description".to_string(), description.into().into());
+        o.insert(
+            "properties".to_string(),
+            vec![property.into().into()].into(),
+        );
+        o.into()
     }
 }
 
@@ -245,6 +254,7 @@ pub struct JMAPGet<T> {
     pub properties: Option<Vec<T>>,
 }
 
+#[derive(Debug)]
 pub struct JMAPGetResponse {
     pub state: JMAPState,
     pub list: JSONValue,

@@ -20,7 +20,7 @@ use mail_parser::{
     },
     HeaderName, HeaderOffset, HeaderValue, MessageStructure, RawHeaders, RfcHeader,
 };
-use store::leb128::Leb128;
+use store::{leb128::Leb128, DocumentSet};
 use store::{AccountId, BlobEntry, DocumentId, Store, StoreError, Tag};
 
 use crate::{
@@ -148,22 +148,27 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
             }
         };
 
+        let document_ids = self.get_document_ids(request.account_id, JMAP_MAIL)?;
         let mut not_found = Vec::new();
         let mut results = Vec::with_capacity(request_ids.len());
 
         for jmap_id in request_ids {
             let document_id = jmap_id.get_document_id();
-            let message_data_bytes = if let Some(blob_entry) = self.get_blob(
-                request.account_id,
-                JMAP_MAIL,
-                document_id,
-                BlobEntry::new(MESSAGE_DATA),
-            )? {
-                blob_entry.value
-            } else {
+            if !document_ids.contains(document_id) {
                 not_found.push(jmap_id);
                 continue;
-            };
+            }
+
+            let message_data_bytes = self
+                .get_blob(
+                    request.account_id,
+                    JMAP_MAIL,
+                    document_id,
+                    BlobEntry::new(MESSAGE_DATA),
+                )?
+                .ok_or(StoreError::DataCorruption)?
+                .value;
+
             let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
                 .ok_or(StoreError::DataCorruption)?;
 

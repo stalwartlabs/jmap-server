@@ -5,8 +5,8 @@ use jmap_store::blob::JMAPLocalBlobStore;
 use jmap_store::id::{BlobId, JMAPIdSerialize};
 use jmap_store::json::JSONValue;
 use jmap_store::{
-    json::JSONPointer, JMAPError, JMAPId, JMAPSet, JMAPSetError, JMAPSetErrorType, JMAPSetResponse,
-    JMAP_MAIL, JMAP_MAILBOX,
+    json::JSONPointer, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAIL,
+    JMAP_MAILBOX,
 };
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
@@ -38,10 +38,7 @@ use crate::{
 pub trait JMAPMailLocalStoreSet<'x>:
     JMAPMailLocalStoreChanges<'x> + JMAPMailLocalStoreImport<'x> + JMAPLocalBlobStore<'x>
 {
-    fn mail_set(
-        &'x self,
-        request: JMAPSet<JMAPMailProperties>,
-    ) -> jmap_store::Result<JMAPSetResponse> {
+    fn mail_set(&'x self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -49,9 +46,9 @@ pub trait JMAPMailLocalStoreSet<'x>:
             }
         }
 
-        let total_changes = request.create.as_ref().map_or(0, |c| c.len())
-            + request.update.as_ref().map_or(0, |c| c.len())
-            + request.destroy.as_ref().map_or(0, |c| c.len());
+        let total_changes = request.create.to_object().map_or(0, |c| c.len())
+            + request.update.to_object().map_or(0, |c| c.len())
+            + request.destroy.to_array().map_or(0, |c| c.len());
         if total_changes > self.get_config().jmap_mail_options.set_max_changes {
             return Err(JMAPError::RequestTooLarge);
         }
@@ -64,7 +61,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
         let document_ids = self.get_document_ids(request.account_id, JMAP_MAIL)?;
         let mut mailbox_ids = None;
 
-        if let Some(create) = request.create {
+        if let JSONValue::Object(create) = request.create {
             let mut created = HashMap::with_capacity(create.len());
             let mut not_created = HashMap::with_capacity(create.len());
 
@@ -117,19 +114,45 @@ pub trait JMAPMailLocalStoreSet<'x>:
             }
         }
 
-        if let Some(update) = request.update {
+        if let JSONValue::Object(update) = request.update {
             let mut updated = HashMap::with_capacity(update.len());
             let mut not_updated = HashMap::with_capacity(update.len());
 
-            'main: for (jmap_id, properties) in update {
+            'main: for (jmap_id_str, properties) in update {
+                let (jmap_id, properties) = if let (Some(jmap_id), Some(properties)) = (
+                    JMAPId::from_jmap_string(&jmap_id_str),
+                    properties.unwrap_object(),
+                ) {
+                    (jmap_id, properties)
+                } else {
+                    not_updated.insert(
+                        jmap_id_str,
+                        JSONValue::new_error(
+                            JMAPSetErrorType::InvalidProperties,
+                            "Failed to parse request.",
+                        ),
+                    );
+                    continue 'main;
+                };
                 let document_id = jmap_id.get_document_id();
                 if !document_ids.contains(document_id) {
-                    not_updated.insert(jmap_id, JMAPSetError::new(JMAPSetErrorType::NotFound));
+                    not_updated.insert(
+                        jmap_id_str,
+                        JSONValue::new_error(JMAPSetErrorType::NotFound, "ID not found."),
+                    );
                     continue;
-                } else if let Some(destroy_ids) = &request.destroy {
-                    if destroy_ids.contains(&jmap_id) {
-                        not_updated
-                            .insert(jmap_id, JMAPSetError::new(JMAPSetErrorType::WillDestroy));
+                } else if let JSONValue::Array(destroy_ids) = &request.destroy {
+                    if destroy_ids
+                        .iter()
+                        .any(|x| x.to_string().map(|v| v == jmap_id_str).unwrap_or(false))
+                    {
+                        not_updated.insert(
+                            jmap_id_str,
+                            JSONValue::new_error(
+                                JMAPSetErrorType::WillDestroy,
+                                "ID will be destroyed.",
+                            ),
+                        );
                         continue;
                     }
                 }
@@ -141,121 +164,76 @@ pub trait JMAPMailLocalStoreSet<'x>:
                 let mut mailbox_op_clear_all = false;
 
                 for (field, value) in properties {
-                    match field {
-                        JSONPointer::Property(JMAPMailProperties::Keywords) => {
-                            if let JSONValue::Object(value) = value {
-                                // Add keywords to the list
-                                for (keyword, value) in value {
-                                    if let JSONValue::Bool(true) = value {
-                                        keyword_op_list.insert(Tag::Text(keyword.into()), true);
-                                    }
-                                }
-                                keyword_op_clear_all = true;
-                            } else {
-                                not_updated.insert(
-                                    jmap_id,
-                                    JMAPSetError::invalid_property(
-                                        "keywords",
-                                        "Expected an object.",
-                                    ),
-                                );
-                                continue 'main;
-                            }
-                        }
-                        JSONPointer::Property(JMAPMailProperties::MailboxIds) => {
-                            // Unwrap JSON object
-                            if let JSONValue::Object(value) = value {
-                                // Add mailbox ids to the list
-                                for (mailbox_id, value) in value {
-                                    match (JMAPId::from_jmap_string(mailbox_id.as_ref()), value) {
-                                        (Some(mailbox_id), JSONValue::Bool(true)) => {
-                                            mailbox_op_list
-                                                .insert(mailbox_id.get_document_id(), true);
+                    match JSONPointer::parse(&field).unwrap_or(JSONPointer::Root) {
+                        JSONPointer::String(field) => {
+                            match JMAPMailProperties::parse(&field)
+                                .unwrap_or(JMAPMailProperties::Id)
+                            {
+                                JMAPMailProperties::Keywords => {
+                                    if let JSONValue::Object(value) = value {
+                                        // Add keywords to the list
+                                        for (keyword, value) in value {
+                                            if let JSONValue::Bool(true) = value {
+                                                keyword_op_list
+                                                    .insert(Tag::Text(keyword.into()), true);
+                                            }
                                         }
-                                        (None, _) => {
-                                            not_updated.insert(
-                                                jmap_id,
-                                                JMAPSetError::invalid_property(
-                                                    format!("mailboxIds/{}", mailbox_id),
-                                                    "Failed to parse mailbox id.",
-                                                ),
-                                            );
-                                            continue 'main;
-                                        }
-                                        _ => (),
-                                    }
-                                }
-                                mailbox_op_clear_all = true;
-                            } else {
-                                // mailboxIds is not a JSON object
-                                not_updated.insert(
-                                    jmap_id,
-                                    JMAPSetError::invalid_property(
-                                        "mailboxIds",
-                                        "Expected an object.",
-                                    ),
-                                );
-                                continue 'main;
-                            }
-                        }
-                        JSONPointer::Path(mut path) if path.len() == 2 => {
-                            match (path.pop().unwrap(), path.pop().unwrap()) {
-                                (
-                                    JSONPointer::String(keyword),
-                                    JSONPointer::Property(JMAPMailProperties::Keywords),
-                                ) => match value {
-                                    JSONValue::Null | JSONValue::Bool(false) => {
-                                        keyword_op_list.insert(Tag::Text(keyword.into()), false);
-                                    }
-                                    JSONValue::Bool(true) => {
-                                        keyword_op_list.insert(Tag::Text(keyword.into()), true);
-                                    }
-                                    _ => {
+                                        keyword_op_clear_all = true;
+                                    } else {
                                         not_updated.insert(
-                                            jmap_id,
-                                            JMAPSetError::invalid_property(
-                                                format!("keywords/{}", keyword),
-                                                "Expected a boolean or null value.",
+                                            jmap_id_str,
+                                            JSONValue::new_invalid_property(
+                                                "keywords",
+                                                "Expected an object.",
                                             ),
                                         );
                                         continue 'main;
                                     }
-                                },
-                                (
-                                    JSONPointer::String(mailbox_id),
-                                    JSONPointer::Property(JMAPMailProperties::MailboxIds),
-                                ) => {
-                                    if let Some(mailbox_id) =
-                                        JMAPId::from_jmap_string(mailbox_id.as_ref())
-                                    {
-                                        match value {
-                                            JSONValue::Null | JSONValue::Bool(false) => {
-                                                mailbox_op_list
-                                                    .insert(mailbox_id.get_document_id(), false);
-                                                continue;
-                                            }
-                                            JSONValue::Bool(true) => {
-                                                mailbox_op_list
-                                                    .insert(mailbox_id.get_document_id(), true);
-                                                continue;
-                                            }
-                                            _ => (),
-                                        }
-                                    }
-                                    not_updated.insert(
-                                        jmap_id,
-                                        JMAPSetError::invalid_property(
-                                            format!("mailboxIds/{}", mailbox_id),
-                                            "Expected boolean or new value.",
-                                        ),
-                                    );
-                                    continue 'main;
                                 }
-                                (part2, part1) => {
+                                JMAPMailProperties::MailboxIds => {
+                                    // Unwrap JSON object
+                                    if let JSONValue::Object(value) = value {
+                                        // Add mailbox ids to the list
+                                        for (mailbox_id, value) in value {
+                                            match (
+                                                JMAPId::from_jmap_string(mailbox_id.as_ref()),
+                                                value,
+                                            ) {
+                                                (Some(mailbox_id), JSONValue::Bool(true)) => {
+                                                    mailbox_op_list
+                                                        .insert(mailbox_id.get_document_id(), true);
+                                                }
+                                                (None, _) => {
+                                                    not_updated.insert(
+                                                        jmap_id_str,
+                                                        JSONValue::new_invalid_property(
+                                                            format!("mailboxIds/{}", mailbox_id),
+                                                            "Failed to parse mailbox id.",
+                                                        ),
+                                                    );
+                                                    continue 'main;
+                                                }
+                                                _ => (),
+                                            }
+                                        }
+                                        mailbox_op_clear_all = true;
+                                    } else {
+                                        // mailboxIds is not a JSON object
+                                        not_updated.insert(
+                                            jmap_id_str,
+                                            JSONValue::new_invalid_property(
+                                                "mailboxIds",
+                                                "Expected an object.",
+                                            ),
+                                        );
+                                        continue 'main;
+                                    }
+                                }
+                                _ => {
                                     not_updated.insert(
-                                        jmap_id,
-                                        JMAPSetError::invalid_property(
-                                            format!("{}/{}", part1, part2),
+                                        jmap_id_str,
+                                        JSONValue::new_invalid_property(
+                                            field,
                                             "Unsupported property.",
                                         ),
                                     );
@@ -263,10 +241,77 @@ pub trait JMAPMailLocalStoreSet<'x>:
                                 }
                             }
                         }
+
+                        JSONPointer::Path(mut path) if path.len() == 2 => {
+                            if let (JSONPointer::String(property), JSONPointer::String(field)) =
+                                (path.pop().unwrap(), path.pop().unwrap())
+                            {
+                                let is_mailbox = match JMAPMailProperties::parse(&field)
+                                    .unwrap_or(JMAPMailProperties::Id)
+                                {
+                                    JMAPMailProperties::MailboxIds => true,
+                                    JMAPMailProperties::Keywords => false,
+                                    _ => {
+                                        not_updated.insert(
+                                            jmap_id_str,
+                                            JSONValue::new_invalid_property(
+                                                format!("{}/{}", field, property),
+                                                "Unsupported property.",
+                                            ),
+                                        );
+                                        continue 'main;
+                                    }
+                                };
+                                match value {
+                                    JSONValue::Null | JSONValue::Bool(false) => {
+                                        if is_mailbox {
+                                            if let Some(mailbox_id) =
+                                                JMAPId::from_jmap_string(property.as_ref())
+                                            {
+                                                mailbox_op_list
+                                                    .insert(mailbox_id.get_document_id(), false);
+                                            }
+                                        } else {
+                                            keyword_op_list
+                                                .insert(Tag::Text(property.into()), false);
+                                        }
+                                    }
+                                    JSONValue::Bool(true) => {
+                                        if is_mailbox {
+                                            if let Some(mailbox_id) =
+                                                JMAPId::from_jmap_string(property.as_ref())
+                                            {
+                                                mailbox_op_list
+                                                    .insert(mailbox_id.get_document_id(), true);
+                                            }
+                                        } else {
+                                            keyword_op_list
+                                                .insert(Tag::Text(property.into()), true);
+                                        }
+                                    }
+                                    _ => {
+                                        not_updated.insert(
+                                            jmap_id_str,
+                                            JSONValue::new_invalid_property(
+                                                format!("{}/{}", field, property),
+                                                "Expected a boolean or null value.",
+                                            ),
+                                        );
+                                        continue 'main;
+                                    }
+                                }
+                            } else {
+                                not_updated.insert(
+                                    jmap_id_str,
+                                    JSONValue::new_invalid_property(field, "Unsupported property."),
+                                );
+                                continue 'main;
+                            }
+                        }
                         _ => {
                             not_updated.insert(
-                                jmap_id,
-                                JMAPSetError::invalid_property(
+                                jmap_id_str,
+                                JSONValue::new_invalid_property(
                                     field.to_string(),
                                     "Unsupported property.",
                                 ),
@@ -333,8 +378,8 @@ pub trait JMAPMailLocalStoreSet<'x>:
                                 new_mailboxes.push(mailbox_id);
                             } else {
                                 not_updated.insert(
-                                    jmap_id,
-                                    JMAPSetError::invalid_property(
+                                    jmap_id_str,
+                                    JSONValue::new_invalid_property(
                                         format!("mailboxIds/{}", mailbox_id),
                                         "Mailbox does not exist.",
                                     ),
@@ -347,8 +392,8 @@ pub trait JMAPMailLocalStoreSet<'x>:
                     // Messages have to be in at least one mailbox
                     if new_mailboxes.is_empty() {
                         not_updated.insert(
-                            jmap_id,
-                            JMAPSetError::invalid_property(
+                            jmap_id_str,
+                            JSONValue::new_invalid_property(
                                 "mailboxIds",
                                 "Message must belong to at least one mailbox.",
                             ),
@@ -408,20 +453,6 @@ pub trait JMAPMailLocalStoreSet<'x>:
                         }
                     }
 
-                    // Clear keyword tags
-                    for keyword in &current_keywords {
-                        if !new_keywords.contains(keyword) {
-                            document.clear_tag(MessageField::Keyword.into(), keyword.clone());
-                        }
-                    }
-
-                    // Set keyword tags
-                    for keyword in &new_keywords {
-                        if !new_keywords.contains(keyword) {
-                            document.set_tag(MessageField::Keyword.into(), keyword.clone());
-                        }
-                    }
-
                     // Serialize new keywords list
                     document.add_binary(
                         MessageField::Keyword.into(),
@@ -433,47 +464,46 @@ pub trait JMAPMailLocalStoreSet<'x>:
                 if !document.is_empty() {
                     document.log_update(jmap_id);
                     changes.push(document);
-                    updated.insert(jmap_id, JSONValue::Null);
+                    updated.insert(jmap_id_str, JSONValue::Null);
                 } else {
                     not_updated.insert(
-                        jmap_id,
-                        JMAPSetError {
-                            error_type: JMAPSetErrorType::InvalidPatch,
-                            description: "No changes found in request.".to_string().into(),
-                            properties: None,
-                        },
+                        jmap_id_str,
+                        JSONValue::new_error(
+                            JMAPSetErrorType::InvalidPatch,
+                            "No changes found in request.",
+                        ),
                     );
                 }
             }
 
             if !updated.is_empty() {
-                response.updated = Some(updated);
+                response.updated = updated.into();
             }
             if !not_updated.is_empty() {
-                response.not_updated = Some(not_updated);
+                response.not_updated = not_updated.into();
             }
         }
 
-        if let Some(destroy_ids) = request.destroy {
+        if let JSONValue::Array(destroy_ids) = request.destroy {
             let mut destroyed = Vec::with_capacity(destroy_ids.len());
             let mut not_destroyed = HashMap::with_capacity(destroy_ids.len());
 
             for destroy_id in destroy_ids {
-                let document_id = destroy_id.get_document_id();
-                if document_ids.contains(document_id) {
-                    changes.push(
-                        DocumentWriter::delete(JMAP_MAIL, document_id)
-                            .log(LogAction::Delete(destroy_id)),
-                    );
-                    destroyed.push(destroy_id);
-                } else {
+                if let Some(jmap_id) = destroy_id.to_jmap_id() {
+                    let document_id = jmap_id.get_document_id();
+                    if document_ids.contains(document_id) {
+                        changes.push(
+                            DocumentWriter::delete(JMAP_MAIL, document_id)
+                                .log(LogAction::Delete(jmap_id)),
+                        );
+                        destroyed.push(destroy_id);
+                        continue;
+                    }
+                }
+                if let JSONValue::String(destroy_id) = destroy_id {
                     not_destroyed.insert(
                         destroy_id,
-                        JMAPSetError {
-                            error_type: JMAPSetErrorType::NotFound,
-                            description: None,
-                            properties: None,
-                        },
+                        JSONValue::new_error(JMAPSetErrorType::NotFound, "ID not found."),
                     );
                 }
             }
@@ -502,16 +532,19 @@ pub trait JMAPMailLocalStoreSet<'x>:
 fn build_message<'x, 'y>(
     store: &impl JMAPLocalBlobStore<'y>,
     account: AccountId,
-    fields: HashMap<JMAPMailProperties, JSONValue>,
+    fields: JSONValue,
     existing_mailboxes: &impl DocumentSet<Item = DocumentId>,
-) -> Result<JMAPMailImportItem<'x>, JMAPSetError> {
-    let body_values = fields.get(&JMAPMailProperties::BodyValues).and_then(|v| {
-        if let JSONValue::Object(v) = v {
-            Some(v)
-        } else {
-            None
-        }
-    });
+) -> Result<JMAPMailImportItem<'x>, JSONValue> {
+    let fields = if let JSONValue::Object(fields) = fields {
+        fields
+    } else {
+        return Err(JSONValue::new_error(
+            JMAPSetErrorType::InvalidProperties,
+            "Failed to parse request.",
+        ));
+    };
+
+    let body_values = fields.get("bodyValues").and_then(|v| v.to_object());
 
     let mut builder = MessageBuilder::new();
     let mut mailbox_ids: Vec<MailboxId> = Vec::new();
@@ -519,17 +552,22 @@ fn build_message<'x, 'y>(
     let mut received_at: Option<i64> = None;
 
     for (property, value) in &fields {
-        match property {
+        match JMAPMailProperties::parse(property).ok_or_else(|| {
+            JSONValue::new_error(
+                JMAPSetErrorType::InvalidProperties,
+                format!("Failed to parse {}", property),
+            )
+        })? {
             JMAPMailProperties::MailboxIds => {
                 for (mailbox, value) in value.to_object().ok_or_else(|| {
-                    JMAPSetError::new_full(
+                    JSONValue::new_error(
                         JMAPSetErrorType::InvalidProperties,
                         "Expected object containing mailboxIds",
                     )
                 })? {
                     let mailbox_id = JMAPId::from_jmap_string(mailbox)
                         .ok_or_else(|| {
-                            JMAPSetError::new_full(
+                            JSONValue::new_error(
                                 JMAPSetErrorType::InvalidProperties,
                                 format!("Failed to parse mailboxId: {}", mailbox),
                             )
@@ -537,13 +575,13 @@ fn build_message<'x, 'y>(
                         .get_document_id();
 
                     if value.to_bool().ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             "Expected boolean value in mailboxIds",
                         )
                     })? {
                         if !existing_mailboxes.contains(mailbox_id) {
-                            return Err(JMAPSetError::new_full(
+                            return Err(JSONValue::new_error(
                                 JMAPSetErrorType::InvalidProperties,
                                 format!("mailboxId {} does not exist.", mailbox),
                             ));
@@ -554,13 +592,13 @@ fn build_message<'x, 'y>(
             }
             JMAPMailProperties::Keywords => {
                 for (keyword, value) in value.to_object().ok_or_else(|| {
-                    JMAPSetError::new_full(
+                    JSONValue::new_error(
                         JMAPSetErrorType::InvalidProperties,
                         "Expected object containing keywords",
                     )
                 })? {
                     if value.to_bool().ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             "Expected boolean value in keywords",
                         )
@@ -619,7 +657,7 @@ fn build_message<'x, 'y>(
                 )?
                 .pop()
                 .ok_or_else(|| {
-                    JMAPSetError::new_full(
+                    JSONValue::new_error(
                         JMAPSetErrorType::InvalidProperties,
                         "No text body part found".to_string(),
                     )
@@ -637,7 +675,7 @@ fn build_message<'x, 'y>(
                 )?
                 .pop()
                 .ok_or_else(|| {
-                    JMAPSetError::new_full(
+                    JSONValue::new_error(
                         JMAPSetErrorType::InvalidProperties,
                         "No html body part found".to_string(),
                     )
@@ -652,16 +690,16 @@ fn build_message<'x, 'y>(
                 builder.body = import_body_structure(store, account, value, body_values)?.into();
             }
             JMAPMailProperties::Header(JMAPMailHeaderProperty { form, header, all }) => {
-                if !*all {
+                if !all {
                     import_header(&mut builder, header, form, value)?;
                 } else {
                     for value in value.to_array().ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             "Expected an array.".to_string(),
                         )
                     })? {
-                        import_header(&mut builder, header, form, value)?;
+                        import_header(&mut builder, header.clone(), form.clone(), value)?;
                     }
                 }
             }
@@ -677,7 +715,7 @@ fn build_message<'x, 'y>(
     }
 
     if mailbox_ids.is_empty() {
-        return Err(JMAPSetError::new_full(
+        return Err(JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Message has to belong to at least one mailbox.",
         ));
@@ -689,7 +727,7 @@ fn build_message<'x, 'y>(
         && builder.text_body.is_none()
         && builder.attachments.is_none()
     {
-        return Err(JMAPSetError::new_full(
+        return Err(JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Message has to have at least one header or body part.",
         ));
@@ -697,9 +735,9 @@ fn build_message<'x, 'y>(
 
     // TODO: write parsed message directly to store, avoid parsing it again.
     let mut blob = Vec::with_capacity(1024);
-    builder.write_to(&mut blob).map_err(|_| {
-        JMAPSetError::new_full(JMAPSetErrorType::InvalidProperties, "Internal error")
-    })?;
+    builder
+        .write_to(&mut blob)
+        .map_err(|_| JSONValue::new_error(JMAPSetErrorType::InvalidProperties, "Internal error"))?;
 
     Ok(JMAPMailImportItem {
         blob: blob.into(),
@@ -714,7 +752,7 @@ fn import_body_structure<'x, 'y>(
     account: AccountId,
     part: &'x JSONValue,
     body_values: Option<&'x HashMap<String, JSONValue>>,
-) -> Result<MimePart<'x>, JMAPSetError> {
+) -> Result<MimePart<'x>, JSONValue> {
     let (mut mime_part, sub_parts) =
         import_body_part(store, account, part, body_values, None, false)?;
 
@@ -754,9 +792,9 @@ fn import_body_part<'x, 'y>(
     body_values: Option<&'x HashMap<String, JSONValue>>,
     implicit_type: Option<&'x str>,
     strict_implicit_type: bool,
-) -> Result<(MimePart<'x>, Option<&'x Vec<JSONValue>>), JMAPSetError> {
+) -> Result<(MimePart<'x>, Option<&'x Vec<JSONValue>>), JSONValue> {
     let part = part.to_object().ok_or_else(|| {
-        JMAPSetError::new_full(
+        JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Expected an object in body part list.".to_string(),
         )
@@ -768,7 +806,7 @@ fn import_body_part<'x, 'y>(
         .unwrap_or_else(|| implicit_type.unwrap_or("text/plain"));
 
     if strict_implicit_type && implicit_type.unwrap() != content_type {
-        return Err(JMAPSetError::new_full(
+        return Err(JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             format!(
                 "Expected exactly body part of type \"{}\"",
@@ -785,35 +823,35 @@ fn import_body_part<'x, 'y>(
         } else if let Some(part_id) = part.get("partId").and_then(|v| v.to_string()) {
             BodyPart::Text( body_values
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             "Missing \"bodyValues\" object containing partId.".to_string(),
                         )
                     })?
                     .get(part_id)
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             format!("Missing body value for partId \"{}\"", part_id),
                         )
                     })?
                     .to_object()
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             format!("Expected a bodyValues object defining partId \"{}\"", part_id),
                         )
                     })?
                     .get("value")
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             format!("Missing \"value\" field in bodyValues object defining partId \"{}\"", part_id),
                         )
                     })?
                     .to_string()
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             format!("Expected a string \"value\" field in bodyValues object defining partId \"{}\"", part_id),
                         )
@@ -824,20 +862,20 @@ fn import_body_part<'x, 'y>(
                     .download_blob(
                         account,
                         BlobId::from_jmap_string(blob_id).ok_or_else(|| {
-                            JMAPSetError::new_full(
+                            JSONValue::new_error(
                                 JMAPSetErrorType::BlobNotFound,
                                 "Failed to parse blobId",
                             )
                         })?,
                     )
                     .map_err(|_| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::BlobNotFound,
                             "Failed to fetch blob.",
                         )
                     })?
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::BlobNotFound,
                             "blobId does not exist on this server.",
                         )
@@ -845,7 +883,7 @@ fn import_body_part<'x, 'y>(
                     .into(),
             )
         } else {
-            return Err(JMAPSetError::new_full(
+            return Err(JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,
                 "Expected a \"partId\" or \"blobId\" field in body part.".to_string(),
             ));
@@ -865,7 +903,7 @@ fn import_body_part<'x, 'y>(
                     charset
                         .to_string()
                         .ok_or_else(|| {
-                            JMAPSetError::new_full(
+                            JSONValue::new_error(
                                 JMAPSetErrorType::InvalidProperties,
                                 "Expected a string value for \"charset\" field.".to_string(),
                             )
@@ -939,7 +977,7 @@ fn import_body_part<'x, 'y>(
                     mime_part.headers.insert(
                         header_name.into(),
                         Raw::new(value.to_string().ok_or_else(|| {
-                            JMAPSetError::new_full(
+                            JSONValue::new_error(
                                 JMAPSetErrorType::InvalidProperties,
                                 format!("Expected a string value for \"{}\" field.", property),
                             )
@@ -955,7 +993,7 @@ fn import_body_part<'x, 'y>(
     if let Some(headers) = part.get("headers").and_then(|v| v.to_array()) {
         for header in headers {
             let header = header.to_object().ok_or_else(|| {
-                JMAPSetError::new_full(
+                JSONValue::new_error(
                     JMAPSetErrorType::InvalidProperties,
                     "Expected an object for \"headers\" field.".to_string(),
                 )
@@ -965,7 +1003,7 @@ fn import_body_part<'x, 'y>(
                     .get("name")
                     .and_then(|v| v.to_string())
                     .ok_or_else(|| {
-                        JMAPSetError::new_full(
+                        JSONValue::new_error(
                             JMAPSetErrorType::InvalidProperties,
                             "Expected a string value for \"name\" field in \"headers\" field."
                                 .to_string(),
@@ -977,7 +1015,7 @@ fn import_body_part<'x, 'y>(
                         .get("value")
                         .and_then(|v| v.to_string())
                         .ok_or_else(|| {
-                            JMAPSetError::new_full(
+                            JSONValue::new_error(
                                 JMAPSetErrorType::InvalidProperties,
                                 "Expected a string value for \"value\" field in \"headers\" field."
                                     .to_string(),
@@ -1005,9 +1043,9 @@ fn import_body_parts<'x, 'y>(
     body_values: Option<&'x HashMap<String, JSONValue>>,
     implicit_type: Option<&'x str>,
     strict_implicit_type: bool,
-) -> Result<Vec<MimePart<'x>>, JMAPSetError> {
+) -> Result<Vec<MimePart<'x>>, JSONValue> {
     let parts = parts.to_array().ok_or_else(|| {
-        JMAPSetError::new_full(
+        JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Expected an array containing body part.".to_string(),
         )
@@ -1031,60 +1069,60 @@ fn import_body_parts<'x, 'y>(
     Ok(result)
 }
 
-fn import_header<'x>(
-    builder: &mut MessageBuilder<'x>,
-    header: &'x HeaderName<'x>,
-    form: &JMAPMailHeaderForm,
-    value: &'x JSONValue,
-) -> Result<(), JMAPSetError> {
+fn import_header<'x, 'y>(
+    builder: &mut MessageBuilder<'y>,
+    header: HeaderName<'x>,
+    form: JMAPMailHeaderForm,
+    value: &'y JSONValue,
+) -> Result<(), JSONValue> {
     match form {
         JMAPMailHeaderForm::Raw => {
-            builder.header(header.as_str(), Raw::new(import_json_string(value)?))
+            builder.header(header.unwrap(), Raw::new(import_json_string(value)?))
         }
         JMAPMailHeaderForm::Text => {
-            builder.header(header.as_str(), Text::new(import_json_string(value)?))
+            builder.header(header.unwrap(), Text::new(import_json_string(value)?))
         }
         JMAPMailHeaderForm::Addresses => builder.header(
-            header.as_str(),
+            header.unwrap(),
             Address::List(import_json_addresses(value)?),
         ),
         JMAPMailHeaderForm::GroupedAddresses => builder.header(
-            header.as_str(),
+            header.unwrap(),
             Address::List(import_json_grouped_addresses(value)?),
         ),
         JMAPMailHeaderForm::MessageIds => builder.header(
-            header.as_str(),
+            header.unwrap(),
             MessageId::from(import_json_string_list(value)?),
         ),
         JMAPMailHeaderForm::Date => {
-            builder.header(header.as_str(), Date::new(import_json_date(value)?))
+            builder.header(header.unwrap(), Date::new(import_json_date(value)?))
         }
         JMAPMailHeaderForm::URLs => {
-            builder.header(header.as_str(), URL::from(import_json_string_list(value)?))
+            builder.header(header.unwrap(), URL::from(import_json_string_list(value)?))
         }
     }
     Ok(())
 }
 
-fn import_json_string(value: &JSONValue) -> Result<&str, JMAPSetError> {
+fn import_json_string(value: &JSONValue) -> Result<&str, JSONValue> {
     value.to_string().ok_or_else(|| {
-        JMAPSetError::new_full(
+        JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Expected a String property.".to_string(),
         )
     })
 }
 
-fn import_json_date(value: &JSONValue) -> Result<i64, JMAPSetError> {
+fn import_json_date(value: &JSONValue) -> Result<i64, JSONValue> {
     Ok(
         DateTime::parse_from_rfc3339(value.to_string().ok_or_else(|| {
-            JMAPSetError::new_full(
+            JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,
                 "Expected a Date property.".to_string(),
             )
         })?)
         .map_err(|_| {
-            JMAPSetError::new_full(
+            JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,
                 "Expected a valid Date property.".to_string(),
             )
@@ -1093,9 +1131,9 @@ fn import_json_date(value: &JSONValue) -> Result<i64, JMAPSetError> {
     )
 }
 
-fn import_json_string_list(value: &JSONValue) -> Result<Vec<&str>, JMAPSetError> {
+fn import_json_string_list(value: &JSONValue) -> Result<Vec<&str>, JSONValue> {
     let value = value.to_array().ok_or_else(|| {
-        JMAPSetError::new_full(
+        JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Expected an array with String.".to_string(),
         )
@@ -1104,7 +1142,7 @@ fn import_json_string_list(value: &JSONValue) -> Result<Vec<&str>, JMAPSetError>
     let mut list = Vec::with_capacity(value.len());
     for v in value {
         list.push(v.to_string().ok_or_else(|| {
-            JMAPSetError::new_full(
+            JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,
                 "Expected an array with String.".to_string(),
             )
@@ -1114,9 +1152,9 @@ fn import_json_string_list(value: &JSONValue) -> Result<Vec<&str>, JMAPSetError>
     Ok(list)
 }
 
-fn import_json_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAPSetError> {
+fn import_json_addresses(value: &JSONValue) -> Result<Vec<Address>, JSONValue> {
     let value = value.to_array().ok_or_else(|| {
-        JMAPSetError::new_full(
+        JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Expected an array with EmailAddress objects.".to_string(),
         )
@@ -1125,7 +1163,7 @@ fn import_json_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAPSetError
     let mut result = Vec::with_capacity(value.len());
     for addr in value {
         let addr = addr.to_object().ok_or_else(|| {
-            JMAPSetError::new_full(
+            JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,
                 "Expected an array containing EmailAddress objects.".to_string(),
             )
@@ -1135,7 +1173,7 @@ fn import_json_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAPSetError
             addr.get("email")
                 .and_then(|n| n.to_string())
                 .ok_or_else(|| {
-                    JMAPSetError::new_full(
+                    JSONValue::new_error(
                         JMAPSetErrorType::InvalidProperties,
                         "Missing 'email' field in EmailAddress object.".to_string(),
                     )
@@ -1146,9 +1184,9 @@ fn import_json_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAPSetError
     Ok(result)
 }
 
-fn import_json_grouped_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAPSetError> {
+fn import_json_grouped_addresses(value: &JSONValue) -> Result<Vec<Address>, JSONValue> {
     let value = value.to_array().ok_or_else(|| {
-        JMAPSetError::new_full(
+        JSONValue::new_error(
             JMAPSetErrorType::InvalidProperties,
             "Expected an array with EmailAddressGroup objects.".to_string(),
         )
@@ -1157,7 +1195,7 @@ fn import_json_grouped_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAP
     let mut result = Vec::with_capacity(value.len());
     for addr in value {
         let addr = addr.to_object().ok_or_else(|| {
-            JMAPSetError::new_full(
+            JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,
                 "Expected an array containing EmailAddressGroup objects.".to_string(),
             )
@@ -1165,7 +1203,7 @@ fn import_json_grouped_addresses(value: &JSONValue) -> Result<Vec<Address>, JMAP
         result.push(Address::new_group(
             addr.get("name").and_then(|n| n.to_string()),
             import_json_addresses(addr.get("addresses").ok_or_else(|| {
-                JMAPSetError::new_full(
+                JSONValue::new_error(
                     JMAPSetErrorType::InvalidProperties,
                     "Missing 'addresses' field in EmailAddressGroup object.".to_string(),
                 )

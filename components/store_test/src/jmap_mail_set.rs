@@ -125,14 +125,14 @@ where
         )
         .unwrap();
 
-    test_jmap_mail_create(&mail_store);
-    test_jmap_mail_update(&mail_store);
+    test_jmap_mail_update(&mail_store, test_jmap_mail_create(&mail_store));
 }
 
-fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
+fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) -> Vec<String> {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
     test_dir.push("jmap_mail_set");
+    let mut message_ids = Vec::new();
 
     for file_name in fs::read_dir(&test_dir).unwrap() {
         let mut file_name = file_name.as_ref().unwrap().path();
@@ -144,7 +144,7 @@ fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
             .mail_set(JMAPSet {
                 account_id: 0,
                 if_in_state: None,
-                create: Some(HashMap::from_iter(
+                create: HashMap::from_iter(
                     vec![(
                         "1".to_string(),
                         JSONValue::from(
@@ -154,33 +154,32 @@ fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
                             .unwrap(),
                         )
                         .unwrap_object()
+                        .unwrap()
                         .into_iter()
                         .map(|(k, mut v)| {
                             store_blobs(mail_store, &mut v);
-                            (JMAPMailProperties::parse(&k).unwrap(), v)
+                            (k, v)
                         })
-                        .collect::<HashMap<JMAPMailProperties, JSONValue>>(),
+                        .collect::<HashMap<String, JSONValue>>()
+                        .into(),
                     )]
                     .into_iter(),
-                )),
-                update: None,
-                destroy: None,
+                )
+                .into(),
+                update: JSONValue::Null,
+                destroy: JSONValue::Null,
             })
             .unwrap();
 
-        assert!(
-            result.not_created.is_none(),
-            "{:?}",
-            result.not_created.unwrap()
-        );
+        assert!(result.not_created.is_null(), "{:?}", result.not_created);
 
-        let values = result
+        let mut values = result
             .created
-            .as_ref()
+            .unwrap_object()
             .unwrap()
-            .get("1")
+            .remove("1")
             .unwrap()
-            .to_object()
+            .unwrap_object()
             .unwrap();
 
         let raw_message = mail_store
@@ -192,16 +191,16 @@ fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
             .unwrap()
             .unwrap();
 
+        let jmap_id_str = values.remove("id").unwrap().unwrap_string().unwrap();
+        let jmap_id = JMAPId::from_jmap_string(&jmap_id_str).unwrap();
+        message_ids.push(jmap_id_str);
+
         let parsed_message = UntaggedJSONValue::from(
             mail_store
                 .mail_get(
                     JMAPGet {
                         account_id: 0,
-                        ids: vec![JMAPId::from_jmap_string(
-                            values.get("id").unwrap().to_string().unwrap(),
-                        )
-                        .unwrap()]
-                        .into(),
+                        ids: vec![jmap_id].into(),
                         properties: vec![
                             JMAPMailProperties::Id,
                             JMAPMailProperties::BlobId,
@@ -282,6 +281,242 @@ fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
         )
         .unwrap();*/
     }
+    assert!(!message_ids.is_empty());
+    message_ids
 }
 
-fn test_jmap_mail_update<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {}
+fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
+    entries
+        .into_iter()
+        .map(|(jmap_id, bytes)| {
+            (
+                jmap_id,
+                JSONValue::from(serde_json::from_slice::<UntaggedJSONValue>(bytes).unwrap()),
+            )
+        })
+        .collect::<HashMap<String, JSONValue>>()
+        .into()
+}
+
+fn get_mailboxes_and_keywords<'x>(
+    mail_store: &'x impl JMAPMailLocalStore<'x>,
+    message_id: &str,
+) -> (Vec<String>, Vec<String>) {
+    let mut result = mail_store
+        .mail_get(
+            JMAPGet {
+                account_id: 0,
+                ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
+                properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords]
+                    .into(),
+            },
+            JMAPMailStoreGetArguments {
+                body_properties: vec![],
+                fetch_text_body_values: false,
+                fetch_html_body_values: false,
+                fetch_all_body_values: false,
+                max_body_value_bytes: 100,
+            },
+        )
+        .unwrap()
+        .list
+        .unwrap_array()
+        .unwrap()
+        .pop()
+        .unwrap()
+        .unwrap_object()
+        .unwrap();
+
+    let mut mailboxes = Vec::new();
+    let mut keywords = Vec::new();
+
+    if let Some(m) = result.remove("mailboxIds").unwrap().unwrap_object() {
+        for (k, v) in m {
+            mailboxes.push(k.to_string());
+            assert!(v.to_bool().unwrap());
+        }
+    }
+
+    if let Some(m) = result.remove("keywords").unwrap().unwrap_object() {
+        for (k, v) in m {
+            keywords.push(k.to_string());
+            assert!(v.to_bool().unwrap());
+        }
+    }
+
+    mailboxes.sort_unstable();
+    keywords.sort_unstable();
+
+    (mailboxes, keywords)
+}
+
+fn test_jmap_mail_update<'x>(
+    mail_store: &'x impl JMAPMailLocalStore<'x>,
+    mut message_ids: Vec<String>,
+) {
+    let message_id_1 = message_ids.pop().unwrap();
+    let message_id_2 = message_ids.pop().unwrap();
+    let message_id_3 = message_ids.pop().unwrap();
+
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id: 0,
+                if_in_state: None,
+                update: json_to_jmap_update(vec![(
+                    message_id_1.clone(),
+                    br#"{
+                "keywords": {"test1": true, "test2": true},
+                "mailboxIds": {"i0": true, "i1": true}
+            }"#,
+                )]),
+                create: JSONValue::Null,
+                destroy: JSONValue::Null,
+            })
+            .unwrap()
+            .not_updated,
+        JSONValue::Null
+    );
+
+    assert_eq!(
+        get_mailboxes_and_keywords(mail_store, &message_id_1),
+        (
+            vec!["i00".to_string(), "i01".to_string()],
+            vec!["test1".to_string(), "test2".to_string()]
+        )
+    );
+
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id: 0,
+                if_in_state: None,
+                update: json_to_jmap_update(vec![(
+                    message_id_1.clone(),
+                    br#"{
+                "keywords/test1": true,
+                "keywords/test3": true,
+                "keywords/test2": false,
+                "mailboxIds/i0": null
+            }"#,
+                )]),
+                create: JSONValue::Null,
+                destroy: JSONValue::Null,
+            })
+            .unwrap()
+            .not_updated,
+        JSONValue::Null
+    );
+
+    assert_eq!(
+        get_mailboxes_and_keywords(mail_store, &message_id_1),
+        (
+            vec!["i01".to_string()],
+            vec!["test1".to_string(), "test3".to_string()]
+        )
+    );
+
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id: 0,
+                if_in_state: None,
+                update: json_to_jmap_update(vec![(
+                    message_id_1.clone(),
+                    br#"{
+                "mailboxIds/i1": null
+                }"#,
+                )]),
+                create: JSONValue::Null,
+                destroy: JSONValue::Null,
+            })
+            .unwrap()
+            .not_updated
+            .unwrap_object()
+            .unwrap()
+            .into_values()
+            .next()
+            .unwrap()
+            .unwrap_object()
+            .unwrap()
+            .remove("description")
+            .unwrap()
+            .unwrap_string()
+            .unwrap(),
+        "Message must belong to at least one mailbox."
+    );
+
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id: 0,
+                if_in_state: None,
+                update: json_to_jmap_update(vec![(
+                    message_id_1.clone(),
+                    br#"{
+                "mailboxIds/i1": null
+                }"#,
+                )]),
+                create: JSONValue::Null,
+                destroy: vec![message_id_1.into()].into(),
+            })
+            .unwrap()
+            .not_updated
+            .unwrap_object()
+            .unwrap()
+            .into_values()
+            .next()
+            .unwrap()
+            .unwrap_object()
+            .unwrap()
+            .remove("error_type")
+            .unwrap()
+            .unwrap_string()
+            .unwrap(),
+        "willDestroy"
+    );
+
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id: 0,
+                if_in_state: None,
+                update: JSONValue::Null,
+                create: JSONValue::Null,
+                destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()].into(),
+            })
+            .unwrap()
+            .not_destroyed,
+        JSONValue::Null
+    );
+
+    assert_eq!(
+        vec![
+            JMAPId::from_jmap_string(&message_id_2).unwrap(),
+            JMAPId::from_jmap_string(&message_id_3).unwrap()
+        ],
+        mail_store
+            .mail_get(
+                JMAPGet {
+                    account_id: 0,
+                    ids: vec![
+                        JMAPId::from_jmap_string(&message_id_2).unwrap(),
+                        JMAPId::from_jmap_string(&message_id_3).unwrap()
+                    ]
+                    .into(),
+                    properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords]
+                        .into(),
+                },
+                JMAPMailStoreGetArguments {
+                    body_properties: vec![],
+                    fetch_text_body_values: false,
+                    fetch_html_body_values: false,
+                    fetch_all_body_values: false,
+                    max_body_value_bytes: 100,
+                },
+            )
+            .unwrap()
+            .not_found
+            .unwrap()
+    )
+}

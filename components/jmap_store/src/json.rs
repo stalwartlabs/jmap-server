@@ -1,14 +1,95 @@
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
-pub enum JSONPointer<T> {
+use crate::id::JMAPIdSerialize;
+use crate::JMAPId;
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum JSONPointer {
+    Root,
     Wildcard,
-    Property(T),
     String(String),
     Number(u64),
-    Path(Vec<JSONPointer<T>>),
+    Path(Vec<JSONPointer>),
+}
+
+impl JSONPointer {
+    pub fn parse(value: &str) -> Option<JSONPointer> {
+        let mut path = Vec::new();
+        let mut is_number = false;
+        let mut is_wildcard = false;
+        let mut is_escaped = false;
+        let mut is_string = false;
+        let mut last_pos = 0;
+
+        for (mut pos, ch) in value.char_indices() {
+            let mut add_token = false;
+            match ch {
+                '0'..='9' => {
+                    is_number = true;
+                }
+                '~' => {
+                    is_escaped = true;
+                }
+                '*' => {
+                    is_wildcard = true;
+                }
+                '/' => {
+                    if pos > 0 {
+                        add_token = true;
+                    } else {
+                        last_pos = pos + 1;
+                    }
+                }
+                _ => {
+                    is_string = true;
+                }
+            }
+            if !add_token && pos + ch.len_utf8() == value.len() {
+                add_token = true;
+                pos = value.len();
+            }
+            if add_token {
+                if is_number && !is_escaped && !is_string && !is_wildcard {
+                    path.push(JSONPointer::Number(
+                        value.get(last_pos..pos)?.parse().unwrap_or(0),
+                    ));
+                } else if is_wildcard && (pos - last_pos) == 1 {
+                    path.push(JSONPointer::Wildcard);
+                } else if is_escaped {
+                    path.push(JSONPointer::String(
+                        value
+                            .get(last_pos..pos)?
+                            .replace("~1", "/")
+                            .replace("~0", "~"),
+                    ));
+                } else {
+                    path.push(JSONPointer::String(value.get(last_pos..pos)?.to_string()));
+                }
+
+                is_number = false;
+                is_wildcard = false;
+                is_escaped = false;
+                is_string = false;
+
+                last_pos = pos + 1;
+            }
+        }
+
+        match path.len() {
+            1 => path.pop(),
+            0 => JSONPointer::Root.into(),
+            _ => JSONPointer::Path(path).into(),
+        }
+    }
+
+    pub fn to_string(&self) -> Option<&str> {
+        match self {
+            JSONPointer::String(s) => s.as_str().into(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -24,6 +105,18 @@ pub enum JSONValue {
 impl Default for JSONValue {
     fn default() -> Self {
         JSONValue::Null
+    }
+}
+
+impl From<HashMap<String, JSONValue>> for JSONValue {
+    fn from(o: HashMap<String, JSONValue>) -> Self {
+        JSONValue::Object(o)
+    }
+}
+
+impl From<Vec<JSONValue>> for JSONValue {
+    fn from(a: Vec<JSONValue>) -> Self {
+        JSONValue::Array(a)
     }
 }
 
@@ -91,29 +184,104 @@ impl JSONValue {
         }
     }
 
-    pub fn unwrap_array(self) -> Vec<JSONValue> {
+    pub fn to_jmap_id(&self) -> Option<JMAPId> {
         match self {
-            JSONValue::Array(array) => array,
-            _ => panic!("Expected array"),
+            JSONValue::String(string) => JMAPId::from_jmap_string(string),
+            _ => None,
         }
     }
 
-    pub fn unwrap_object(self) -> HashMap<String, JSONValue> {
+    pub fn to_pointer(&self) -> Option<JSONPointer> {
         match self {
-            JSONValue::Object(object) => object,
-            _ => panic!("Expected object"),
+            JSONValue::String(string) => Some(JSONPointer::parse(string.as_str())?),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_array(self) -> Option<Vec<JSONValue>> {
+        match self {
+            JSONValue::Array(array) => array.into(),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_object(self) -> Option<HashMap<String, JSONValue>> {
+        match self {
+            JSONValue::Object(object) => object.into(),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_string(self) -> Option<String> {
+        match self {
+            JSONValue::String(string) => Some(string),
+            _ => None,
         }
     }
 }
 
-impl<T> JSONPointer<T> {
-    pub fn as_string(&self) -> String {
-        "".to_string()
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::JSONPointer;
 
-impl<T> Display for JSONPointer<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_string())
+    #[test]
+    fn json_pointer() {
+        for (input, output) in vec![
+            ("hello", JSONPointer::String("hello".to_string())),
+            ("9a", JSONPointer::String("9a".to_string())),
+            ("a9", JSONPointer::String("a9".to_string())),
+            ("*a", JSONPointer::String("*a".to_string())),
+            (
+                "/hello/world",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::String("world".to_string()),
+                ]),
+            ),
+            ("*", JSONPointer::Wildcard),
+            (
+                "/hello/*",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::Wildcard,
+                ]),
+            ),
+            ("1234", JSONPointer::Number(1234)),
+            (
+                "/hello/1234",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::Number(1234),
+                ]),
+            ),
+            ("~0~1", JSONPointer::String("~/".to_string())),
+            (
+                "/hello/~0~1",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::String("~/".to_string()),
+                ]),
+            ),
+            (
+                "/hello/world/*/99",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::String("world".to_string()),
+                    JSONPointer::Wildcard,
+                    JSONPointer::Number(99),
+                ]),
+            ),
+            ("/", JSONPointer::String("".to_string())),
+            (
+                "///",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("".to_string()),
+                    JSONPointer::String("".to_string()),
+                ]),
+            ),
+            ("", JSONPointer::Root),
+        ] {
+            assert_eq!(JSONPointer::parse(input), Some(output), "{}", input);
+        }
     }
 }

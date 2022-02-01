@@ -448,8 +448,7 @@ pub trait JMAPMailStoreImport<'x> {
 }
 
 pub trait JMAPMailStoreSet<'x> {
-    fn mail_set(&self, request: JMAPSet<JMAPMailProperties>)
-        -> jmap_store::Result<JMAPSetResponse>;
+    fn mail_set(&self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse>;
 }
 
 pub trait JMAPMailStoreQuery<'x> {
