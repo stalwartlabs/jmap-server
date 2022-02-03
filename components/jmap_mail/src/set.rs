@@ -26,13 +26,11 @@ use store::{
 use store::{AccountId, DocumentId, Tag};
 
 use crate::changes::JMAPMailLocalStoreChanges;
-use crate::import::{
-    bincode_deserialize, bincode_serialize, JMAPMailImportItem, JMAPMailLocalStoreImport,
-};
+use crate::import::{bincode_deserialize, bincode_serialize, JMAPMailLocalStoreImport};
+use crate::parse::get_message_blob;
 use crate::query::MailboxId;
 use crate::{
     JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailIdImpl, JMAPMailProperties, MessageField,
-    MESSAGE_RAW,
 };
 
 pub trait JMAPMailLocalStoreSet<'x>:
@@ -77,27 +75,16 @@ pub trait JMAPMailLocalStoreSet<'x>:
 
                 match build_message(self, request.account_id, message_fields, mailbox_ids) {
                     Ok(import_item) => {
-                        let mail_size = import_item.blob.len();
-                        let mail_id = self.mail_import_single(request.account_id, import_item)?;
-                        let mut values: HashMap<String, JSONValue> = HashMap::with_capacity(4);
-                        values.insert("id".to_string(), mail_id.to_jmap_string().into());
-                        values.insert(
-                            "blobId".to_string(),
-                            BlobId::new(
+                        created.insert(
+                            create_id,
+                            self.mail_import_blob(
                                 request.account_id,
-                                JMAP_MAIL,
-                                mail_id.get_document_id(),
-                                MESSAGE_RAW,
-                            )
-                            .to_jmap_string()
-                            .into(),
+                                &import_item.blob,
+                                import_item.mailbox_ids,
+                                import_item.keywords,
+                                import_item.received_at,
+                            )?,
                         );
-                        values.insert(
-                            "threadId".to_string(),
-                            (mail_id.get_thread_id() as JMAPId).to_jmap_string().into(),
-                        );
-                        values.insert("size".to_string(), mail_size.into());
-                        created.insert(create_id, JSONValue::Object(values));
                     }
                     Err(err) => {
                         not_created.insert(create_id, err);
@@ -528,13 +515,20 @@ pub trait JMAPMailLocalStoreSet<'x>:
     }
 }
 
+struct MessageItem<'x> {
+    pub blob: Vec<u8>,
+    pub mailbox_ids: Vec<MailboxId>,
+    pub keywords: Vec<Tag<'x>>,
+    pub received_at: Option<i64>,
+}
+
 #[allow(clippy::blocks_in_if_conditions)]
 fn build_message<'x, 'y>(
     store: &impl JMAPLocalBlobStore<'y>,
     account: AccountId,
     fields: JSONValue,
     existing_mailboxes: &impl DocumentSet<Item = DocumentId>,
-) -> Result<JMAPMailImportItem<'x>, JSONValue> {
+) -> Result<MessageItem<'x>, JSONValue> {
     let fields = if let JSONValue::Object(fields) = fields {
         fields
     } else {
@@ -739,8 +733,8 @@ fn build_message<'x, 'y>(
         .write_to(&mut blob)
         .map_err(|_| JSONValue::new_error(JMAPSetErrorType::InvalidProperties, "Internal error"))?;
 
-    Ok(JMAPMailImportItem {
-        blob: blob.into(),
+    Ok(MessageItem {
+        blob,
         mailbox_ids,
         keywords,
         received_at,
@@ -861,12 +855,13 @@ fn import_body_part<'x, 'y>(
                 store
                     .download_blob(
                         account,
-                        BlobId::from_jmap_string(blob_id).ok_or_else(|| {
+                        &BlobId::from_jmap_string(blob_id).ok_or_else(|| {
                             JSONValue::new_error(
                                 JMAPSetErrorType::BlobNotFound,
                                 "Failed to parse blobId",
                             )
                         })?,
+                        get_message_blob,
                     )
                     .map_err(|_| {
                         JSONValue::new_error(

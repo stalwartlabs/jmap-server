@@ -306,7 +306,7 @@ impl StoreBlob for RocksDBStore {
         Ok(())
     }
 
-    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<(u64, u32)> {
+    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<(u64, u64)> {
         let mut batch = rocksdb::WriteBatch::default();
         let blob_key = self.store_blob(bytes)?;
         let cf_values = self.get_handle("values")?;
@@ -321,14 +321,14 @@ impl StoreBlob for RocksDBStore {
         let mut s = DefaultHasher::new();
         thread::current().id().hash(&mut s);
         SystemTime::now().hash(&mut s);
-        let blob_id = s.finish() as u32;
+        let hash = s.finish();
 
         // Increment blob count
         batch.merge_cf(&cf_values, &blob_key, (1i64).to_le_bytes());
 
         batch.put_cf(
             &cf_values,
-            &serialize_temporary_blob_key(account, blob_id, timestamp),
+            &serialize_temporary_blob_key(account, hash, timestamp),
             &blob_key[BLOB_KEY.len()..],
         );
 
@@ -336,20 +336,20 @@ impl StoreBlob for RocksDBStore {
             .write(batch)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
 
-        Ok((timestamp, blob_id))
+        Ok((timestamp, hash))
     }
 
     fn get_temporary_blob(
         &self,
         account: AccountId,
-        blob_id: DocumentId,
+        hash: u64,
         timestamp: u64,
     ) -> store::Result<Option<Vec<u8>>> {
         if let Some(blob_key) = self
             .db
             .get_cf(
                 &self.get_handle("values")?,
-                &serialize_temporary_blob_key(account, blob_id, timestamp),
+                &serialize_temporary_blob_key(account, hash, timestamp),
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))?
         {

@@ -15,6 +15,8 @@ use serialize::StoreDeserialize;
 pub struct JMAPMailConfig {
     pub get_max_results: usize,
     pub set_max_changes: usize,
+    pub import_max_items: usize,
+    pub parse_max_items: usize,
 }
 
 impl JMAPMailConfig {
@@ -22,6 +24,8 @@ impl JMAPMailConfig {
         JMAPMailConfig {
             get_max_results: 100,
             set_max_changes: 100,
+            import_max_items: 2,
+            parse_max_items: 5,
         }
     }
 }
@@ -381,12 +385,12 @@ impl BlobEntry<Option<Range<usize>>> {
 }
 
 pub trait StoreBlob {
-    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> Result<(u64, u32)>;
+    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> Result<(u64, u64)>;
 
     fn get_temporary_blob(
         &self,
         account: AccountId,
-        blob_id: DocumentId,
+        hash: u64,
         timestamp: u64,
     ) -> Result<Option<Vec<u8>>>;
 

@@ -20,8 +20,8 @@ use bitmaps::{bitmap_compact, bitmap_merge};
 use dashmap::DashMap;
 use jmap_mail::{
     changes::JMAPMailLocalStoreChanges, get::JMAPMailLocalStoreGet,
-    import::JMAPMailLocalStoreImport, query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet,
-    JMAPMailLocalStore,
+    import::JMAPMailLocalStoreImport, parse::JMAPMailLocalStoreParse,
+    query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet, JMAPMailLocalStore,
 };
 use jmap_store::{blob::JMAPLocalBlobStore, changes::JMAPLocalChanges};
 use rocksdb::{
@@ -228,6 +228,7 @@ impl<'x> JMAPMailLocalStoreChanges<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreQuery<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreGet<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreImport<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreParse<'x> for RocksDBStore {}
 impl<'x> JMAPLocalChanges<'x> for RocksDBStore {}
 impl<'x> JMAPLocalBlobStore<'x> for RocksDBStore {}
 
@@ -391,6 +392,24 @@ mod tests {
         }
 
         store_test::jmap_mail_set::test_jmap_mail_set(
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_mail_parse() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_mail_parse_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mail_parse::test_jmap_mail_parse(
             RocksDBStore::open(RocksDBStoreConfig::default_config(
                 temp_dir.to_str().unwrap(),
             ))

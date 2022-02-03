@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap_mail::{
-    JMAPMailBodyProperties, JMAPMailLocalStore, JMAPMailProperties, JMAPMailStoreGetArguments,
+    parse::get_message_blob, JMAPMailBodyProperties, JMAPMailLocalStore, JMAPMailProperties,
+    JMAPMailStoreGetArguments,
 };
 use jmap_store::{
     id::{BlobId, JMAPIdSerialize},
@@ -185,8 +186,9 @@ fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) -> Vec
         let raw_message = mail_store
             .download_blob(
                 0,
-                BlobId::from_jmap_string(values.get("blobId").unwrap().to_string().unwrap())
+                &BlobId::from_jmap_string(values.get("blobId").unwrap().to_string().unwrap())
                     .unwrap(),
+                get_message_blob,
             )
             .unwrap()
             .unwrap();

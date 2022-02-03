@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap_mail::{
-    import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition},
     JMAPMailIdImpl, JMAPMailLocalStore, MessageField,
 };
@@ -61,25 +60,28 @@ where
         match &change {
             LogAction::Insert(id) => {
                 let jmap_id = mail_store
-                    .mail_import_single(
+                    .mail_import_blob(
                         0,
-                        JMAPMailImportItem {
-                            blob: format!(
-                                "From: test_{}\nSubject: test_{}\n\ntest",
-                                if change_num % 2 == 0 { 1 } else { 2 },
-                                *id
-                            )
-                            .as_bytes()
-                            .into(),
-                            mailbox_ids: vec![if change_num % 2 == 0 { 1 } else { 2 }],
-                            keywords: vec![Tag::Text(if change_num % 2 == 0 {
-                                "1".into()
-                            } else {
-                                "2".into()
-                            })],
-                            received_at: Some(*id as i64),
-                        },
+                        format!(
+                            "From: test_{}\nSubject: test_{}\n\ntest",
+                            if change_num % 2 == 0 { 1 } else { 2 },
+                            *id
+                        )
+                        .as_bytes(),
+                        vec![if change_num % 2 == 0 { 1 } else { 2 }],
+                        vec![Tag::Text(if change_num % 2 == 0 {
+                            "1".into()
+                        } else {
+                            "2".into()
+                        })],
+                        Some(*id as i64),
                     )
+                    .unwrap()
+                    .unwrap_object()
+                    .unwrap()
+                    .get("id")
+                    .unwrap()
+                    .to_jmap_id()
                     .unwrap();
 
                 id_map.insert(*id, jmap_id);

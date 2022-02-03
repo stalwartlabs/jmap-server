@@ -9,7 +9,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use changes::JMAPMailLocalStoreChanges;
 use get::JMAPMailLocalStoreGet;
-use import::{JMAPMailImportItem, JMAPMailLocalStoreImport};
+use import::JMAPMailLocalStoreImport;
 use jmap_store::{
     blob::JMAPLocalBlobStore,
     changes::{JMAPLocalChanges, JMAPState},
@@ -21,10 +21,11 @@ use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderName, MessagePartId, MessageStructure, RawHeaders, RfcHeader,
 };
-use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery};
+use parse::JMAPMailLocalStoreParse;
+use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery, MailboxId};
 use serde::{Deserialize, Serialize};
 use set::JMAPMailLocalStoreSet;
-use store::{AccountId, BlobIndex, DocumentId, ThreadId};
+use store::{AccountId, BlobIndex, DocumentId, Tag, ThreadId};
 
 pub const MESSAGE_RAW: BlobIndex = 0;
 pub const MESSAGE_DATA: BlobIndex = 1;
@@ -394,6 +395,27 @@ impl<'x> JMAPMailProperties<'x> {
             _ => None,
         }
     }
+
+    pub fn as_rfc_header(&self) -> RfcHeader {
+        match self {
+            JMAPMailProperties::MessageId => RfcHeader::MessageId,
+            JMAPMailProperties::InReplyTo => RfcHeader::InReplyTo,
+            JMAPMailProperties::References => RfcHeader::References,
+            JMAPMailProperties::Sender => RfcHeader::Sender,
+            JMAPMailProperties::From => RfcHeader::From,
+            JMAPMailProperties::To => RfcHeader::To,
+            JMAPMailProperties::Cc => RfcHeader::Cc,
+            JMAPMailProperties::Bcc => RfcHeader::Bcc,
+            JMAPMailProperties::ReplyTo => RfcHeader::ReplyTo,
+            JMAPMailProperties::Subject => RfcHeader::Subject,
+            JMAPMailProperties::SentAt => RfcHeader::Date,
+            JMAPMailProperties::Header(JMAPMailHeaderProperty {
+                header: HeaderName::Rfc(rfc),
+                ..
+            }) => *rfc,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl<'x> Default for JMAPMailProperties<'x> {
@@ -440,11 +462,14 @@ impl<'x> Display for JMAPMailBodyProperties<'x> {
 }
 
 pub trait JMAPMailStoreImport<'x> {
-    fn mail_import_single(
+    fn mail_import_blob(
         &'x self,
         account: AccountId,
-        message: JMAPMailImportItem<'x>,
-    ) -> jmap_store::Result<JMAPId>;
+        blob: &[u8],
+        mailbox_ids: Vec<MailboxId>,
+        keywords: Vec<Tag<'x>>,
+        received_at: Option<i64>,
+    ) -> jmap_store::Result<JSONValue>;
 }
 
 pub trait JMAPMailStoreSet<'x> {
@@ -507,5 +532,6 @@ pub trait JMAPMailLocalStore<'x>:
     + JMAPMailLocalStoreImport<'x>
     + JMAPMailLocalStoreSet<'x>
     + JMAPMailLocalStoreChanges<'x>
+    + JMAPMailLocalStoreParse<'x>
 {
 }

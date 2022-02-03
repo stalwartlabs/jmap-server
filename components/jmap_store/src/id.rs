@@ -60,25 +60,71 @@ pub fn hex_reader(id: &str, start_pos: usize) -> impl Iterator<Item = u8> + '_ {
         .map(move |i| u8::from_str_radix(id.get(i..i + 2).unwrap_or(""), 16).unwrap_or(u8::MAX))
 }
 
-pub struct BlobId {
+#[derive(Clone, Debug)]
+pub struct OwnedBlob {
     pub account: AccountId,
     pub collection: CollectionId,
     pub document: DocumentId,
     pub blob_index: BlobIndex,
 }
 
+#[derive(Clone, Debug)]
+pub struct TemporaryBlob {
+    pub account: AccountId,
+    pub timestamp: u64,
+    pub hash: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct InnerBlob<T> {
+    pub blob_id: T,
+    pub blob_index: BlobIndex,
+}
+
+#[derive(Clone, Debug)]
+pub enum BlobId {
+    Owned(OwnedBlob),
+    Temporary(TemporaryBlob),
+    InnerOwned(InnerBlob<OwnedBlob>),
+    InnerTemporary(InnerBlob<TemporaryBlob>),
+}
+
 impl BlobId {
-    pub fn new(
+    pub fn new_owned(
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
         blob_index: BlobIndex,
     ) -> Self {
-        BlobId {
+        BlobId::Owned(OwnedBlob {
             account,
             collection,
             document,
             blob_index,
+        })
+    }
+
+    pub fn new_temporary(account: AccountId, timestamp: u64, hash: u64) -> Self {
+        BlobId::Temporary(TemporaryBlob {
+            account,
+            timestamp,
+            hash,
+        })
+    }
+
+    pub fn new_inner(blob_id: BlobId, blob_index: usize) -> Option<Self> {
+        match blob_id {
+            BlobId::Owned(blob_id) => BlobId::InnerOwned(InnerBlob {
+                blob_id,
+                blob_index,
+            })
+            .into(),
+            BlobId::Temporary(blob_id) => BlobId::InnerTemporary(InnerBlob {
+                blob_id,
+                blob_index,
+            })
+            .into(),
+            BlobId::InnerOwned(_) | BlobId::InnerTemporary(_) => None,
         }
     }
 }
@@ -88,27 +134,111 @@ impl JMAPIdSerialize for BlobId {
     where
         Self: Sized,
     {
-        if id.as_bytes().get(0)? == &b'b' {
-            let mut it = hex_reader(id, 1);
+        match id.as_bytes().get(0)? {
+            b'o' => {
+                let mut it = hex_reader(id, 1);
 
-            Some(BlobId {
-                account: AccountId::from_leb128_it(&mut it)?,
-                collection: CollectionId::from_leb128_it(&mut it)?,
-                document: DocumentId::from_leb128_it(&mut it)?,
-                blob_index: BlobIndex::from_leb128_it(&mut it)?,
-            })
-        } else {
-            None
+                Some(BlobId::Owned(OwnedBlob {
+                    account: AccountId::from_leb128_it(&mut it)?,
+                    collection: CollectionId::from_leb128_it(&mut it)?,
+                    document: DocumentId::from_leb128_it(&mut it)?,
+                    blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                }))
+            }
+            b't' => {
+                let mut it = hex_reader(id, 1);
+
+                Some(BlobId::Temporary(TemporaryBlob {
+                    account: AccountId::from_leb128_it(&mut it)?,
+                    timestamp: u64::from_leb128_it(&mut it)?,
+                    hash: u64::from_leb128_it(&mut it)?,
+                }))
+            }
+            b'q' => {
+                let mut it = hex_reader(id, 1);
+
+                Some(BlobId::InnerTemporary(InnerBlob {
+                    blob_id: TemporaryBlob {
+                        account: AccountId::from_leb128_it(&mut it)?,
+                        timestamp: u64::from_leb128_it(&mut it)?,
+                        hash: u64::from_leb128_it(&mut it)?,
+                    },
+                    blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                }))
+            }
+            b'p' => {
+                let mut it = hex_reader(id, 1);
+
+                Some(BlobId::InnerOwned(InnerBlob {
+                    blob_id: OwnedBlob {
+                        account: AccountId::from_leb128_it(&mut it)?,
+                        collection: CollectionId::from_leb128_it(&mut it)?,
+                        document: DocumentId::from_leb128_it(&mut it)?,
+                        blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                    },
+                    blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                }))
+            }
+            _ => None,
         }
     }
 
     fn to_jmap_string(&self) -> String {
         let mut writer = HexWriter::with_capacity(10);
-        writer.result.push('b');
-        self.account.to_leb128_writer(&mut writer).unwrap();
-        self.collection.to_leb128_writer(&mut writer).unwrap();
-        self.document.to_leb128_writer(&mut writer).unwrap();
-        self.blob_index.to_leb128_writer(&mut writer).unwrap();
+        match self {
+            BlobId::Owned(blob_id) => {
+                writer.result.push('o');
+                blob_id.account.to_leb128_writer(&mut writer).unwrap();
+                blob_id.collection.to_leb128_writer(&mut writer).unwrap();
+                blob_id.document.to_leb128_writer(&mut writer).unwrap();
+                blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
+            }
+            BlobId::Temporary(blob_id) => {
+                writer.result.push('t');
+                blob_id.account.to_leb128_writer(&mut writer).unwrap();
+                blob_id.timestamp.to_leb128_writer(&mut writer).unwrap();
+                blob_id.hash.to_leb128_writer(&mut writer).unwrap();
+            }
+            BlobId::InnerOwned(blob_id) => {
+                writer.result.push('p');
+                blob_id
+                    .blob_id
+                    .account
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                blob_id
+                    .blob_id
+                    .collection
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                blob_id
+                    .blob_id
+                    .document
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                blob_id
+                    .blob_id
+                    .blob_index
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
+            }
+            BlobId::InnerTemporary(blob_id) => {
+                writer.result.push('q');
+                blob_id
+                    .blob_id
+                    .account
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                blob_id
+                    .blob_id
+                    .timestamp
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                blob_id.blob_id.hash.to_leb128_writer(&mut writer).unwrap();
+                blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
+            }
+        }
         writer.result
     }
 }

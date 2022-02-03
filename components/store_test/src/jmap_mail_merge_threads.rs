@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use jmap_mail::{import::JMAPMailImportItem, JMAPMailLocalStore, MessageField};
+use jmap_mail::{JMAPMailLocalStore, MessageField};
 use jmap_store::JMAP_MAIL;
 use store::{Comparator, DocumentSet, Filter, Tag, ThreadId};
 
@@ -70,37 +70,25 @@ where
 
         for message in &messages {
             mail_store
-                .mail_import_single(
-                    base_test_num,
-                    JMAPMailImportItem::new(message.as_bytes().into()),
-                )
+                .mail_import_blob(base_test_num, message.as_bytes(), vec![], vec![], None)
                 .unwrap();
         }
 
         for message in messages.iter().rev() {
             mail_store
-                .mail_import_single(
-                    base_test_num + 1,
-                    JMAPMailImportItem::new(message.as_bytes().into()),
-                )
+                .mail_import_blob(base_test_num + 1, message.as_bytes(), vec![], vec![], None)
                 .unwrap();
         }
 
         for chunk in messages.chunks(5) {
             for message in chunk {
                 mail_store
-                    .mail_import_single(
-                        base_test_num + 2,
-                        JMAPMailImportItem::new(message.as_bytes().into()),
-                    )
+                    .mail_import_blob(base_test_num + 2, message.as_bytes(), vec![], vec![], None)
                     .unwrap();
             }
             for message in chunk.iter().rev() {
                 mail_store
-                    .mail_import_single(
-                        base_test_num + 3,
-                        JMAPMailImportItem::new(message.as_bytes().into()),
-                    )
+                    .mail_import_blob(base_test_num + 3, message.as_bytes(), vec![], vec![], None)
                     .unwrap();
             }
         }
@@ -108,18 +96,12 @@ where
         for chunk in messages.chunks(5).rev() {
             for message in chunk {
                 mail_store
-                    .mail_import_single(
-                        base_test_num + 4,
-                        JMAPMailImportItem::new(message.as_bytes().into()),
-                    )
+                    .mail_import_blob(base_test_num + 4, message.as_bytes(), vec![], vec![], None)
                     .unwrap();
             }
             for message in chunk.iter().rev() {
                 mail_store
-                    .mail_import_single(
-                        base_test_num + 5,
-                        JMAPMailImportItem::new(message.as_bytes().into()),
-                    )
+                    .mail_import_blob(base_test_num + 5, message.as_bytes(), vec![], vec![], None)
                     .unwrap();
             }
         }

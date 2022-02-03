@@ -4,7 +4,6 @@ use std::{
 };
 
 use jmap_mail::{
-    import::JMAPMailImportItem,
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
     JMAPMailIdImpl, JMAPMailLocalStore, JMAPMailProperties, JMAPMailStoreGetArguments,
     MessageField,
@@ -102,46 +101,43 @@ where
             total_messages += 1;
 
             mail_store
-                .mail_import_single(
+                .mail_import_blob(
                     0,
-                    JMAPMailImportItem {
-                        blob: format!(
-                            concat!(
-                                "From: {}\nCc: {}\nMessage-ID: <{}>\n",
-                                "References: <{}>\nComments: {}\nSubject: [{}]",
-                                " Year {}\n\n{}\n{}\n"
-                            ),
-                            values_str["artist"],
-                            values_str["medium"],
-                            values_str["accession_number"],
-                            values_int["year"],
-                            values_str["artistRole"],
-                            values_str["title"],
-                            values_int["year"],
-                            values_str["creditLine"],
-                            values_str["inscription"]
-                        )
-                        .into_bytes()
-                        .into(),
-                        mailbox_ids: vec![
-                            values_int["year"] as MailboxId,
-                            (values_int["acquisitionYear"] + 1000) as MailboxId,
-                        ],
-                        keywords: vec![
-                            Tag::Text(values_str["medium"].clone().into()),
-                            Tag::Text(values_str["artistRole"].clone().into()),
-                            Tag::Text(values_str["accession_number"][0..1].into()),
-                            Tag::Text(
-                                format!(
-                                    "N{}",
-                                    &values_str["accession_number"]
-                                        [values_str["accession_number"].len() - 1..]
-                                )
-                                .into(),
-                            ),
-                        ],
-                        received_at: Some(values_int["year"] as i64),
-                    },
+                    &format!(
+                        concat!(
+                            "From: {}\nCc: {}\nMessage-ID: <{}>\n",
+                            "References: <{}>\nComments: {}\nSubject: [{}]",
+                            " Year {}\n\n{}\n{}\n"
+                        ),
+                        values_str["artist"],
+                        values_str["medium"],
+                        values_str["accession_number"],
+                        values_int["year"],
+                        values_str["artistRole"],
+                        values_str["title"],
+                        values_int["year"],
+                        values_str["creditLine"],
+                        values_str["inscription"]
+                    )
+                    .into_bytes(),
+                    vec![
+                        values_int["year"] as MailboxId,
+                        (values_int["acquisitionYear"] + 1000) as MailboxId,
+                    ],
+                    vec![
+                        Tag::Text(values_str["medium"].clone().into()),
+                        Tag::Text(values_str["artistRole"].clone().into()),
+                        Tag::Text(values_str["accession_number"][0..1].into()),
+                        Tag::Text(
+                            format!(
+                                "N{}",
+                                &values_str["accession_number"]
+                                    [values_str["accession_number"].len() - 1..]
+                            )
+                            .into(),
+                        ),
+                    ],
+                    Some(values_int["year"] as i64),
                 )
                 .unwrap();
 

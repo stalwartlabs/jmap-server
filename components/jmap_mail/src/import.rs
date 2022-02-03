@@ -1,7 +1,13 @@
-use std::{borrow::Cow, collections::HashSet};
+use std::collections::{HashMap, HashSet};
 
-use crate::JMAPMailIdImpl;
-use jmap_store::{JMAPId, JMAP_MAIL, JMAP_THREAD};
+use crate::{parse::get_message_blob, JMAPMailIdImpl, MESSAGE_RAW};
+use jmap_store::{
+    blob::JMAPLocalBlobStore,
+    changes::{JMAPLocalChanges, JMAPState},
+    id::{BlobId, JMAPIdSerialize},
+    json::JSONValue,
+    JMAPError, JMAPId, JMAP_MAIL, JMAP_MAILBOX, JMAP_THREAD,
+};
 use mail_parser::Message;
 use serde::{Deserialize, Serialize};
 use store::{
@@ -29,51 +35,126 @@ where
 
 pub struct JMAPMailImport<'x> {
     pub account_id: AccountId,
-    pub if_in_state: Option<Cow<'x, str>>,
+    pub if_in_state: Option<JMAPState>,
     pub emails: Vec<JMAPMailImportItem<'x>>,
 }
-
-impl<'x> JMAPMailImport<'x> {
-    pub fn new(account_id: AccountId, blob: Cow<'x, [u8]>) -> Self {
-        Self {
-            account_id,
-            if_in_state: None,
-            emails: vec![JMAPMailImportItem::new(blob)],
-        }
-    }
-}
-
 pub struct JMAPMailImportItem<'x> {
-    pub blob: Cow<'x, [u8]>,
+    pub id: String,
+    pub blob_id: BlobId,
     pub mailbox_ids: Vec<MailboxId>,
     pub keywords: Vec<Tag<'x>>,
     pub received_at: Option<i64>,
 }
 
-impl<'x> JMAPMailImportItem<'x> {
-    pub fn new(blob: Cow<'x, [u8]>) -> Self {
-        Self {
-            blob,
-            mailbox_ids: vec![],
-            keywords: vec![],
-            received_at: None,
-        }
-    }
-}
-
 pub struct JMAPMailImportResponse {
-    pub account_id: AccountId,
-    pub old_state: Option<String>,
-    pub new_state: String,
-    pub results: Vec<store::Result<JMAPId>>,
+    pub old_state: Option<JMAPState>,
+    pub new_state: JMAPState,
+    pub created: JSONValue,
+    pub not_created: JSONValue,
 }
 
-pub trait JMAPMailLocalStoreImport<'x>: Store<'x> {
-    fn mail_import_single(
+pub trait JMAPMailLocalStoreImport<'x>:
+    Store<'x> + JMAPLocalChanges<'x> + JMAPLocalBlobStore<'x>
+{
+    fn mail_import(
+        &'x self,
+        request: JMAPMailImport<'x>,
+    ) -> jmap_store::Result<JMAPMailImportResponse> {
+        let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
+        if let Some(if_in_state) = request.if_in_state {
+            if old_state != if_in_state {
+                return Err(JMAPError::StateMismatch);
+            }
+        }
+
+        if request.emails.len() > self.get_config().jmap_mail_options.import_max_items {
+            return Err(JMAPError::RequestTooLarge);
+        }
+
+        let mailbox_ids = self.get_document_ids(request.account_id, JMAP_MAILBOX)?;
+
+        let mut created = HashMap::with_capacity(request.emails.len());
+        let mut not_created = HashMap::with_capacity(request.emails.len());
+
+        'main: for item in request.emails {
+            if item.mailbox_ids.is_empty() {
+                not_created.insert(
+                    item.id,
+                    JSONValue::new_invalid_property(
+                        "mailboxIds",
+                        "Message must belong to at least one mailbox.",
+                    ),
+                );
+                continue 'main;
+            }
+            for &mailbox_id in &item.mailbox_ids {
+                if !mailbox_ids.contains(mailbox_id) {
+                    not_created.insert(
+                        item.id,
+                        JSONValue::new_invalid_property(
+                            "mailboxIds",
+                            format!(
+                                "Mailbox {} does not exist.",
+                                (mailbox_id as JMAPId).to_jmap_string()
+                            ),
+                        ),
+                    );
+                    continue 'main;
+                }
+            }
+
+            if let Some(blob) =
+                self.download_blob(request.account_id, &item.blob_id, get_message_blob)?
+            {
+                created.insert(
+                    item.id,
+                    self.mail_import_blob(
+                        request.account_id,
+                        &blob,
+                        item.mailbox_ids,
+                        item.keywords,
+                        item.received_at,
+                    )?,
+                );
+            } else {
+                not_created.insert(
+                    item.id,
+                    JSONValue::new_invalid_property(
+                        "blobId",
+                        format!("BlobId {} not found.", item.blob_id.to_jmap_string()),
+                    ),
+                );
+            }
+        }
+
+        Ok(JMAPMailImportResponse {
+            new_state: if !created.is_empty() {
+                self.get_state(request.account_id, JMAP_MAIL)?
+            } else {
+                old_state.clone()
+            },
+            old_state: old_state.into(),
+            created: if !created.is_empty() {
+                created.into()
+            } else {
+                JSONValue::Null
+            },
+            not_created: if !not_created.is_empty() {
+                not_created.into()
+            } else {
+                JSONValue::Null
+            },
+        })
+    }
+
+    fn mail_import_blob(
         &'x self,
         account: AccountId,
-        message: JMAPMailImportItem<'x>,
-    ) -> jmap_store::Result<JMAPId> {
+        blob: &[u8],
+        mailbox_ids: Vec<MailboxId>,
+        keywords: Vec<Tag<'x>>,
+        received_at: Option<i64>,
+    ) -> jmap_store::Result<JSONValue> {
         // Build message document
         let (mut batch, document_id) = {
             let assigned_id = self.assign_document_id(account, JMAP_MAIL, None)?;
@@ -82,32 +163,32 @@ pub trait JMAPMailLocalStoreImport<'x>: Store<'x> {
         };
         let (reference_ids, thread_name) = build_message_document(
             &mut batch,
-            Message::parse(message.blob.as_ref()).ok_or(StoreError::ParseError)?,
-            message.received_at,
+            Message::parse(blob).ok_or(StoreError::ParseError)?,
+            received_at,
         )?;
         let mut batches = Vec::new();
 
         // Add mailbox tags
-        if !message.mailbox_ids.is_empty() {
+        if !mailbox_ids.is_empty() {
             //TODO validate mailbox ids
             batch.add_binary(
                 MessageField::Mailbox.into(),
-                bincode_serialize(&message.mailbox_ids)?.into(),
+                bincode_serialize(&mailbox_ids)?.into(),
                 FieldOptions::Store,
             );
-            for mailbox_id in message.mailbox_ids {
+            for mailbox_id in mailbox_ids {
                 batch.set_tag(MessageField::Mailbox.into(), Tag::Id(mailbox_id));
             }
         }
 
         // Add keyword tags
-        if !message.keywords.is_empty() {
+        if !keywords.is_empty() {
             batch.add_binary(
                 MessageField::Keyword.into(),
-                bincode_serialize(&message.keywords)?.into(),
+                bincode_serialize(&keywords)?.into(),
                 FieldOptions::Store,
             );
-            for keyword in message.keywords {
+            for keyword in keywords {
                 batch.set_tag(MessageField::Keyword.into(), keyword);
             }
         }
@@ -205,7 +286,22 @@ pub trait JMAPMailLocalStoreImport<'x>: Store<'x> {
         // Write batches to store
         self.update_documents(account, batches, None)?;
 
-        Ok(jmap_mail_id)
+        // Generate JSON object
+        let mut values: HashMap<String, JSONValue> = HashMap::with_capacity(4);
+        values.insert("id".to_string(), jmap_mail_id.to_jmap_string().into());
+        values.insert(
+            "blobId".to_string(),
+            BlobId::new_owned(account, JMAP_MAIL, document_id, MESSAGE_RAW)
+                .to_jmap_string()
+                .into(),
+        );
+        values.insert(
+            "threadId".to_string(),
+            (thread_id as JMAPId).to_jmap_string().into(),
+        );
+        values.insert("size".to_string(), blob.len().into());
+
+        Ok(JSONValue::Object(values))
     }
 
     fn mail_merge_threads(

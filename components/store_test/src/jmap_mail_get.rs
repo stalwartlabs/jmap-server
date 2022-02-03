@@ -1,6 +1,6 @@
 use jmap_mail::{
-    import::JMAPMailImportItem, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
-    JMAPMailLocalStore, JMAPMailProperties, JMAPMailStoreGetArguments,
+    JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailLocalStore,
+    JMAPMailProperties, JMAPMailStoreGetArguments,
 };
 use jmap_store::{json::JSONValue, JMAPGet};
 use mail_parser::{HeaderName, RfcHeader};
@@ -84,15 +84,19 @@ where
         }
         let blob = fs::read(&file_name).unwrap();
         let jmap_id = mail_store
-            .mail_import_single(
+            .mail_import_blob(
                 0,
-                JMAPMailImportItem {
-                    received_at: Some((blob.len() * 1000000) as i64),
-                    blob: blob.into(),
-                    mailbox_ids: vec![],
-                    keywords: vec![Tag::Text("tag".into())],
-                },
+                &blob,
+                vec![],
+                vec![Tag::Text("tag".into())],
+                Some((blob.len() * 1000000) as i64),
             )
+            .unwrap()
+            .unwrap_object()
+            .unwrap()
+            .get("id")
+            .unwrap()
+            .to_jmap_id()
             .unwrap();
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {

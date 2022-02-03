@@ -70,15 +70,11 @@ pub fn serialize_blob_key(
     bytes
 }
 
-pub fn serialize_temporary_blob_key(
-    account: AccountId,
-    blob_id: DocumentId,
-    timestamp: u64,
-) -> Vec<u8> {
+pub fn serialize_temporary_blob_key(account: AccountId, hash: u64, timestamp: u64) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + TEMP_BLOB_KEY.len());
     bytes.extend_from_slice(TEMP_BLOB_KEY);
     timestamp.to_leb128_bytes(&mut bytes);
-    blob_id.to_leb128_bytes(&mut bytes);
+    hash.to_leb128_bytes(&mut bytes);
     account.to_leb128_bytes(&mut bytes);
     bytes
 }

@@ -1,0 +1,227 @@
+{
+  "attachments": [
+    {
+      "blobId": "ignored_value",
+      "disposition": "inline",
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/gif; name=\"map_of_Argentina.gif\""
+        }
+      ],
+      "name": "map_of_Argentina.gif",
+      "partId": 1,
+      "size": 288,
+      "type": "image/gif"
+    }
+  ],
+  "bcc": null,
+  "blobId": "ignored_value",
+  "bodyStructure": {
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "multipart/mixed;\n              boundary=\"DC8------------DC8638F443D87A7F0726DEF7\""
+      },
+      {
+        "name": "Date",
+        "value": "Mon, 13 Aug 1998 17:42:41 +1000"
+      },
+      {
+        "name": "From",
+        "value": "Bill Clinton <president@whitehouse.gov>"
+      },
+      {
+        "name": "MIME-Version",
+        "value": "1.0"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<199804130742.RAA20366@mai1host.whitehouse.gov>"
+      },
+      {
+        "name": "Received",
+        "value": "from mailhost.whitehouse.gov ([192.168.51.200])\n        by heartbeat.whitehouse.gov (8.8.8/8.8.8) with ESMTP id SAA22453\n        for <vice-president@heartbeat.whitehouse.gov>;\n        Mon, 13 Aug 1998 l8:14:23 +1000"
+      },
+      {
+        "name": "Received",
+        "value": "from the_big_box.whitehouse.gov ([192.168.51.50])\n        by mailhost.whitehouse.gov (8.8.8/8.8.7) with ESMTP id RAA20366\n        for vice-president@whitehouse.gov; Mon, 13 Aug 1998 17:42:41 +1000"
+      },
+      {
+        "name": "Return-Path",
+        "value": "<president@whitehouse.gov>"
+      },
+      {
+        "name": "Subject",
+        "value": "Map of Argentina with Description"
+      },
+      {
+        "name": "To",
+        "value": "A1 (The Enforcer) Gore <vice-president@whitehouse.gov>"
+      }
+    ],
+    "subparts": [
+      {
+        "blobId": "ignored_value",
+        "charset": "us-ascii",
+        "headers": [
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=us-ascii"
+          }
+        ],
+        "partId": 0,
+        "size": 355,
+        "type": "text/plain"
+      },
+      {
+        "blobId": "ignored_value",
+        "disposition": "inline",
+        "headers": [
+          {
+            "name": "Content-Disposition",
+            "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "base64"
+          },
+          {
+            "name": "Content-Type",
+            "value": "image/gif; name=\"map_of_Argentina.gif\""
+          }
+        ],
+        "name": "map_of_Argentina.gif",
+        "partId": 1,
+        "size": 288,
+        "type": "image/gif"
+      }
+    ],
+    "type": "multipart/mixed"
+  },
+  "bodyValues": {
+    "0": {
+      "isEncodingProblem": false,
+      "isTruncated": true,
+      "value": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au..."
+    },
+    "2": {
+      "isEncodingProblem": false,
+      "isTruncated": true,
+      "value": "<html><body>Hi A1,<br/><br/>I finally figured out this MIME thing.  Pretty cool.  I'll send you..."
+    }
+  },
+  "cc": null,
+  "from": [
+    {
+      "email": "president@whitehouse.gov",
+      "name": "Bill Clinton"
+    }
+  ],
+  "hasAttachment": false,
+  "htmlBody": [
+    {
+      "blobId": "ignored_value",
+      "partId": 2,
+      "size": 429,
+      "type": "text/html"
+    },
+    {
+      "blobId": "ignored_value",
+      "disposition": "inline",
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/gif; name=\"map_of_Argentina.gif\""
+        }
+      ],
+      "name": "map_of_Argentina.gif",
+      "partId": 1,
+      "size": 288,
+      "type": "image/gif"
+    }
+  ],
+  "id": "ignored_value",
+  "inReplyTo": null,
+  "keywords": null,
+  "mailboxIds": null,
+  "messageId": [
+    "199804130742.RAA20366@mai1host.whitehouse.gov"
+  ],
+  "preview": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au files next week!\n\nAnyway, the attached image is really too small to get a good look at\nArgentina.  Try this for a much better map:\n\n     http://www.1one1yp...",
+  "receivedAt": null,
+  "references": null,
+  "replyTo": null,
+  "sender": null,
+  "sentAt": "1998-08-13T17:42:41+10:00",
+  "size": 1980,
+  "subject": "Map of Argentina with Description",
+  "textBody": [
+    {
+      "blobId": "ignored_value",
+      "charset": "us-ascii",
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain; charset=us-ascii"
+        }
+      ],
+      "partId": 0,
+      "size": 355,
+      "type": "text/plain"
+    },
+    {
+      "blobId": "ignored_value",
+      "disposition": "inline",
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/gif; name=\"map_of_Argentina.gif\""
+        }
+      ],
+      "name": "map_of_Argentina.gif",
+      "partId": 1,
+      "size": 288,
+      "type": "image/gif"
+    }
+  ],
+  "threadId": "ignored_value",
+  "to": [
+    {
+      "email": "vice-president@whitehouse.gov",
+      "name": "A1 Gore (The Enforcer)"
+    }
+  ]
+}
