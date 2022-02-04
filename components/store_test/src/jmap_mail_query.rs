@@ -4,9 +4,9 @@ use std::{
 };
 
 use jmap_mail::{
+    get::JMAPMailStoreGetArguments,
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
-    JMAPMailIdImpl, JMAPMailLocalStore, JMAPMailProperties, JMAPMailStoreGetArguments,
-    MessageField,
+    JMAPMailIdImpl, JMAPMailLocalStore, JMAPMailProperties, MessageField,
 };
 use jmap_store::{
     json::JSONValue, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQuery, JMAP_MAIL,

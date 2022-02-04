@@ -15,6 +15,7 @@ use serialize::StoreDeserialize;
 pub struct JMAPMailConfig {
     pub get_max_results: usize,
     pub set_max_changes: usize,
+    pub thread_max_results: usize,
     pub import_max_items: usize,
     pub parse_max_items: usize,
 }
@@ -24,6 +25,7 @@ impl JMAPMailConfig {
         JMAPMailConfig {
             get_max_results: 100,
             set_max_changes: 100,
+            thread_max_results: 100,
             import_max_items: 2,
             parse_max_items: 5,
         }

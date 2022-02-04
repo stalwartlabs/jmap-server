@@ -4,11 +4,12 @@ pub mod import;
 pub mod parse;
 pub mod query;
 pub mod set;
+pub mod thread;
 
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use changes::JMAPMailLocalStoreChanges;
-use get::JMAPMailLocalStoreGet;
+use get::{JMAPMailLocalStoreGet, JMAPMailStoreGetArguments};
 use import::JMAPMailLocalStoreImport;
 use jmap_store::{
     blob::JMAPLocalBlobStore,
@@ -26,6 +27,7 @@ use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery
 use serde::{Deserialize, Serialize};
 use set::JMAPMailLocalStoreSet;
 use store::{AccountId, BlobIndex, DocumentId, Tag, ThreadId};
+use thread::JMAPMailLocalStoreThread;
 
 pub const MESSAGE_RAW: BlobIndex = 0;
 pub const MESSAGE_DATA: BlobIndex = 1;
@@ -499,15 +501,6 @@ pub trait JMAPMailStoreChanges<'x>: JMAPLocalChanges<'x> {
     ) -> jmap_store::Result<JMAPQueryChangesResponse>;
 }
 
-#[derive(Debug, Default)]
-pub struct JMAPMailStoreGetArguments<'x> {
-    pub body_properties: Vec<JMAPMailBodyProperties<'x>>,
-    pub fetch_text_body_values: bool,
-    pub fetch_html_body_values: bool,
-    pub fetch_all_body_values: bool,
-    pub max_body_value_bytes: usize,
-}
-
 pub trait JMAPMailStoreGet<'x> {
     fn mail_get(
         &self,
@@ -533,5 +526,6 @@ pub trait JMAPMailLocalStore<'x>:
     + JMAPMailLocalStoreSet<'x>
     + JMAPMailLocalStoreChanges<'x>
     + JMAPMailLocalStoreParse<'x>
+    + JMAPMailLocalStoreThread<'x>
 {
 }

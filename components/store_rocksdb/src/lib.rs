@@ -21,7 +21,8 @@ use dashmap::DashMap;
 use jmap_mail::{
     changes::JMAPMailLocalStoreChanges, get::JMAPMailLocalStoreGet,
     import::JMAPMailLocalStoreImport, parse::JMAPMailLocalStoreParse,
-    query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet, JMAPMailLocalStore,
+    query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet, thread::JMAPMailLocalStoreThread,
+    JMAPMailLocalStore,
 };
 use jmap_store::{blob::JMAPLocalBlobStore, changes::JMAPLocalChanges};
 use rocksdb::{
@@ -229,6 +230,7 @@ impl<'x> JMAPMailLocalStoreQuery<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreGet<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreImport<'x> for RocksDBStore {}
 impl<'x> JMAPMailLocalStoreParse<'x> for RocksDBStore {}
+impl<'x> JMAPMailLocalStoreThread<'x> for RocksDBStore {}
 impl<'x> JMAPLocalChanges<'x> for RocksDBStore {}
 impl<'x> JMAPLocalBlobStore<'x> for RocksDBStore {}
 
@@ -410,6 +412,24 @@ mod tests {
         }
 
         store_test::jmap_mail_parse::test_jmap_mail_parse(
+            RocksDBStore::open(RocksDBStoreConfig::default_config(
+                temp_dir.to_str().unwrap(),
+            ))
+            .unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_jmap_mail_thread() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_mail_thread_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mail_thread::test_jmap_mail_thread(
             RocksDBStore::open(RocksDBStoreConfig::default_config(
                 temp_dir.to_str().unwrap(),
             ))

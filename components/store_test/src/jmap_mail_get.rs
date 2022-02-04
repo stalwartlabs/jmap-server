@@ -1,6 +1,6 @@
 use jmap_mail::{
-    JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailLocalStore,
-    JMAPMailProperties, JMAPMailStoreGetArguments,
+    get::JMAPMailStoreGetArguments, JMAPMailBodyProperties, JMAPMailHeaderForm,
+    JMAPMailHeaderProperty, JMAPMailLocalStore, JMAPMailProperties,
 };
 use jmap_store::{json::JSONValue, JMAPGet};
 use mail_parser::{HeaderName, RfcHeader};
@@ -388,15 +388,13 @@ where
             JSONValue::Array(vec![JSONValue::Object(result)])
         };
 
-        let result = UntaggedJSONValue::from(result);
-
         file_name.set_extension("json");
 
-        //fs::write(file_name, &serde_json::to_string_pretty(&result).unwrap()).unwrap();
+        //fs::write(file_name, &serde_json::to_string_pretty(&UntaggedJSONValue::from(result)).unwrap()).unwrap();
 
-        let expected_result =
-            serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&file_name).unwrap()).unwrap();
-
-        assert_eq!(result, expected_result);
+        assert_eq!(
+            UntaggedJSONValue::from(result),
+            serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&file_name).unwrap()).unwrap()
+        );
     }
 }

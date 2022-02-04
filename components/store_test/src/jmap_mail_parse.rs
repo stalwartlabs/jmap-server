@@ -1,9 +1,10 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap_mail::{
+    get::JMAPMailStoreGetArguments,
     parse::{get_message_blob, JMAPMailParse},
     JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailLocalStore,
-    JMAPMailProperties, JMAPMailStoreGetArguments,
+    JMAPMailProperties,
 };
 use jmap_store::{
     id::{BlobId, JMAPIdSerialize},
@@ -22,6 +23,7 @@ where
     test_dir.push("resources");
     test_dir.push("jmap_mail_parse");
 
+    // Test parsing an email attachment
     for test_name in ["attachment.eml", "attachment_b64.eml"] {
         let mut test_file = test_dir.clone();
         test_file.push(test_name);
@@ -153,28 +155,43 @@ where
                 .unwrap()
             {
                 let part = part.to_object().unwrap();
-                let part_id = part.get("partId").unwrap().to_number().unwrap();
-                let part_blob_id =
-                    BlobId::from_jmap_string(part.get("blobId").unwrap().to_string().unwrap())
-                        .unwrap();
+
                 let inner_blob = mail_store
-                    .download_blob(0, &part_blob_id, get_message_blob)
+                    .download_blob(
+                        0,
+                        &BlobId::from_jmap_string(part.get("blobId").unwrap().to_string().unwrap())
+                            .unwrap(),
+                        get_message_blob,
+                    )
                     .unwrap()
                     .unwrap();
-                test_file.set_extension(format!("part{}", part_id));
-                fs::write(&test_file, inner_blob).unwrap();
+
+                test_file.set_extension(format!(
+                    "part{}",
+                    part.get("partId").unwrap().to_number().unwrap()
+                ));
+
+                //fs::write(&test_file, inner_blob).unwrap();
+
+                assert_eq!(inner_blob, fs::read(&test_file).unwrap());
             }
         }
 
         test_file.set_extension("json");
 
-        fs::write(
+        /*fs::write(
             test_file,
             &serde_json::to_string_pretty(&UntaggedJSONValue::from(result)).unwrap(),
         )
-        .unwrap();
+        .unwrap();*/
+
+        assert_eq!(
+            UntaggedJSONValue::from(result),
+            serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
+        );
     }
 
+    // Test header parsing on a temporary blob
     let mut test_file = test_dir;
     test_file.push("headers.eml");
     let blob_id = mail_store
@@ -404,12 +421,16 @@ where
         );
     }
 
-    let result = JSONValue::Object(result);
     test_file.set_extension("json");
 
-    fs::write(
+    /*fs::write(
         test_file,
-        &serde_json::to_string_pretty(&UntaggedJSONValue::from(result)).unwrap(),
+        &serde_json::to_string_pretty(&UntaggedJSONValue::from(JSONValue::Object(result))).unwrap(),
     )
-    .unwrap();
+    .unwrap();*/
+
+    assert_eq!(
+        UntaggedJSONValue::from(JSONValue::Object(result)),
+        serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
+    );
 }

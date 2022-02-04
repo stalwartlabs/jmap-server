@@ -32,11 +32,18 @@ use crate::{
     },
     query::MailboxId,
     JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailHeaders,
-    JMAPMailIdImpl, JMAPMailProperties, JMAPMailStoreGetArguments, MessageData, MessageField,
-    MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
+    JMAPMailIdImpl, JMAPMailProperties, MessageData, MessageField, MessageOutline, MimePart,
+    MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
-pub const DEFAULT_RAW_FETCH_SIZE: usize = 512;
+#[derive(Debug, Default)]
+pub struct JMAPMailStoreGetArguments<'x> {
+    pub body_properties: Vec<JMAPMailBodyProperties<'x>>,
+    pub fetch_text_body_values: bool,
+    pub fetch_html_body_values: bool,
+    pub fetch_all_body_values: bool,
+    pub max_body_value_bytes: usize,
+}
 
 trait BlobIdClone {
     fn clone_with_index(&self, blob_index: usize) -> Self;

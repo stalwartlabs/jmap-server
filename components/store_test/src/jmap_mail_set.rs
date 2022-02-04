@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap_mail::{
-    parse::get_message_blob, JMAPMailBodyProperties, JMAPMailLocalStore, JMAPMailProperties,
-    JMAPMailStoreGetArguments,
+    get::JMAPMailStoreGetArguments, parse::get_message_blob, JMAPMailBodyProperties,
+    JMAPMailLocalStore, JMAPMailProperties,
 };
 use jmap_store::{
     id::{BlobId, JMAPIdSerialize},
