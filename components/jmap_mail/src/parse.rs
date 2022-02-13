@@ -645,8 +645,8 @@ pub fn build_message_document<'x>(
         JSONValue::Number(message.raw_message.len() as i64),
     );
 
-    document.add_integer(
-        MessageField::Size.into(),
+    document.integer(
+        MessageField::Size,
         message.raw_message.len() as Integer,
         FieldOptions::Sort,
     );
@@ -661,8 +661,8 @@ pub fn build_message_document<'x>(
                 JSONValue::Null
             },
         );
-        document.add_long_int(
-            MessageField::ReceivedAt.into(),
+        document.long_int(
+            MessageField::ReceivedAt,
             received_at as LongInteger,
             FieldOptions::Sort,
         );
@@ -801,8 +801,8 @@ pub fn build_message_document<'x>(
                         ),
                     };
 
-                    document.add_text(
-                        RfcHeader::Subject.into(),
+                    document.text(
+                        RfcHeader::Subject,
                         Text::Full(FullText::new_lang(subject.to_string().into(), language)),
                         FieldOptions::None,
                     );
@@ -875,8 +875,8 @@ pub fn build_message_document<'x>(
                         MessageField::Attachment
                     };
 
-                document.add_text(
-                    field.clone().into(),
+                document.text(
+                    field.clone(),
                     Text::Full(FullText::new(text.into(), &mut language_detector)),
                     if field == MessageField::Body {
                         let blob_index = total_blobs;
@@ -887,8 +887,8 @@ pub fn build_message_document<'x>(
                     },
                 );
 
-                document.add_text(
-                    field.into(),
+                document.text(
+                    field,
                     Text::Default(html.body),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
@@ -908,8 +908,8 @@ pub fn build_message_document<'x>(
                     if let Some(pos) = message_data.html_body.iter().position(|&p| p == part_id) {
                         let html = text_to_html(text.body.as_ref());
                         let html_len = html.len();
-                        document.add_text(
-                            MessageField::Body.into(),
+                        document.text(
+                            MessageField::Body,
                             Text::Default(html.into()),
                             FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                         );
@@ -929,8 +929,8 @@ pub fn build_message_document<'x>(
                         MessageField::Attachment
                     };
 
-                document.add_text(
-                    field.into(),
+                document.text(
+                    field,
                     Text::Full(FullText::new(text.body, &mut language_detector)),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
@@ -955,8 +955,8 @@ pub fn build_message_document<'x>(
                 ));
                 message_outline.headers.push(binary.headers_raw);
 
-                document.add_binary(
-                    MessageField::Attachment.into(),
+                document.binary(
+                    MessageField::Attachment,
                     binary.body,
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
@@ -969,8 +969,8 @@ pub fn build_message_document<'x>(
                     binary.is_encoding_problem,
                 ));
                 message_outline.headers.push(binary.headers_raw);
-                document.add_binary(
-                    MessageField::Attachment.into(),
+                document.binary(
+                    MessageField::Attachment,
                     binary.body,
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
@@ -991,8 +991,8 @@ pub fn build_message_document<'x>(
                                     &mut language_detector,
                                 );
                                 let message_size = message.raw_message.len();
-                                document.add_binary(
-                                    MessageField::Attachment.into(),
+                                document.binary(
+                                    MessageField::Attachment,
                                     message.raw_message,
                                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                                 );
@@ -1007,8 +1007,8 @@ pub fn build_message_document<'x>(
                                     )
                                 }
                                 let message_size = raw_message.len();
-                                document.add_binary(
-                                    MessageField::Attachment.into(),
+                                document.binary(
+                                    MessageField::Attachment,
                                     raw_message,
                                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                                 );
@@ -1043,11 +1043,11 @@ pub fn build_message_document<'x>(
     );
 
     if has_attachments {
-        document.set_tag(MessageField::Attachment.into(), Tag::Id(0));
+        document.tag(MessageField::Attachment, Tag::Id(0), FieldOptions::None);
     }
 
-    document.add_binary(
-        MessageField::Internal.into(),
+    document.binary(
+        MessageField::Internal,
         message.raw_message,
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
@@ -1063,8 +1063,8 @@ pub fn build_message_document<'x>(
     buf.append(&mut message_data);
     buf.append(&mut message_outline);
 
-    document.add_binary(
-        MessageField::Internal.into(),
+    document.binary(
+        MessageField::Internal,
         buf.into(),
         FieldOptions::StoreAsBlob(MESSAGE_DATA),
     );
@@ -1089,8 +1089,8 @@ fn parse_attached_message<'x>(
     language_detector: &mut LanguageDetector,
 ) {
     if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
-        document.add_text(
-            MessageField::Attachment.into(),
+        document.text(
+            MessageField::Attachment,
             Text::Full(FullText::new(
                 subject.into_owned().into(),
                 language_detector,
@@ -1101,8 +1101,8 @@ fn parse_attached_message<'x>(
     for part in message.parts.drain(..) {
         match part {
             MessagePart::Text(text) => {
-                document.add_text(
-                    MessageField::Attachment.into(),
+                document.text(
+                    MessageField::Attachment,
                     Text::Full(FullText::new(
                         text.body.into_owned().into(),
                         language_detector,
@@ -1111,8 +1111,8 @@ fn parse_attached_message<'x>(
                 );
             }
             MessagePart::Html(html) => {
-                document.add_text(
-                    MessageField::Attachment.into(),
+                document.text(
+                    MessageField::Attachment,
                     Text::Full(FullText::new(
                         html_to_text(&html.body).into(),
                         language_detector,
@@ -1135,8 +1135,8 @@ fn parse_address<'x>(
     };
     if let Some(ref addr) = address.address {
         if addr.len() <= MAX_TOKEN_LENGTH {
-            document.add_text(
-                header_name.into(),
+            document.text(
+                header_name,
                 Text::Keyword(addr.to_lowercase().into()),
                 FieldOptions::None,
             );
@@ -1172,8 +1172,8 @@ fn parse_text<'x>(
         | RfcHeader::ContentId
         | RfcHeader::ResentMessageId => {
             if text.len() <= MAX_TOKEN_LENGTH {
-                document.add_text(
-                    header_name.into(),
+                document.text(
+                    header_name,
                     Text::Keyword(text.to_lowercase().into()),
                     FieldOptions::None,
                 );
@@ -1183,8 +1183,8 @@ fn parse_text<'x>(
         RfcHeader::Subject => (),
 
         _ => {
-            document.add_text(
-                header_name.into(),
+            document.text(
+                header_name,
                 Text::Tokenized(text.to_string().into()),
                 FieldOptions::None,
             );
@@ -1198,16 +1198,16 @@ fn parse_content_type<'x>(
     content_type: &ContentType<'x>,
 ) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
-        document.add_text(
-            header_name.into(),
+        document.text(
+            header_name,
             Text::Keyword(content_type.c_type.clone()),
             FieldOptions::None,
         );
     }
     if let Some(subtype) = &content_type.c_subtype {
         if subtype.len() <= MAX_TOKEN_LENGTH {
-            document.add_text(
-                header_name.into(),
+            document.text(
+                header_name,
                 Text::Keyword(subtype.clone()),
                 FieldOptions::None,
             );
@@ -1216,14 +1216,14 @@ fn parse_content_type<'x>(
     if let Some(attributes) = &content_type.attributes {
         for (key, value) in attributes {
             if key == "name" || key == "filename" {
-                document.add_text(
-                    header_name.into(),
+                document.text(
+                    header_name,
                     Text::Tokenized(value.clone()),
                     FieldOptions::None,
                 );
             } else if value.len() <= MAX_TOKEN_LENGTH {
-                document.add_text(
-                    header_name.into(),
+                document.text(
+                    header_name,
                     Text::Keyword(value.to_lowercase().into()),
                     FieldOptions::None,
                 );
@@ -1255,11 +1255,7 @@ fn parse_datetime(
             .ymd_opt(date_time.year as i32, date_time.month, date_time.day)
             .and_hms_opt(date_time.hour, date_time.minute, date_time.second)
         {
-            document.add_long_int(
-                header_name.into(),
-                datetime.timestamp() as u64,
-                FieldOptions::Sort,
-            );
+            document.long_int(header_name, datetime.timestamp() as u64, FieldOptions::Sort);
         }
     }
 }
@@ -1321,8 +1317,8 @@ fn add_addr_sort<'x>(
                 }
             }
         }
-        document.add_text(
-            header_name.into(),
+        document.text(
+            header_name,
             Text::Tokenized(text.into()),
             FieldOptions::Sort,
         );

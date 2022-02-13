@@ -115,45 +115,53 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         self.default_language = language;
     }
 
-    pub fn add_text(&mut self, field: FieldId, value: Text<'x>, options: FieldOptions) {
+    pub fn text(&mut self, field: impl Into<FieldId>, value: Text<'x>, options: FieldOptions) {
         self.fields
-            .push(UpdateField::Text(Field::new(field, value, options)));
+            .push(UpdateField::Text(Field::new(field.into(), value, options)));
     }
 
-    pub fn add_binary(&mut self, field: FieldId, value: Cow<'x, [u8]>, options: FieldOptions) {
-        self.fields
-            .push(UpdateField::Binary(Field::new(field, value, options)));
-    }
-
-    pub fn add_integer(&mut self, field: FieldId, value: Integer, options: FieldOptions) {
-        self.fields
-            .push(UpdateField::Integer(Field::new(field, value, options)));
-    }
-
-    pub fn add_long_int(&mut self, field: FieldId, value: LongInteger, options: FieldOptions) {
-        self.fields
-            .push(UpdateField::LongInteger(Field::new(field, value, options)));
-    }
-
-    pub fn set_tag(&mut self, field: FieldId, value: Tag<'x>) {
-        self.fields.push(UpdateField::TagSet(Field::new(
-            field,
+    pub fn binary(
+        &mut self,
+        field: impl Into<FieldId>,
+        value: Cow<'x, [u8]>,
+        options: FieldOptions,
+    ) {
+        self.fields.push(UpdateField::Binary(Field::new(
+            field.into(),
             value,
-            FieldOptions::None,
+            options,
         )));
     }
 
-    pub fn clear_tag(&mut self, field: FieldId, value: Tag<'x>) {
-        self.fields.push(UpdateField::TagRemove(Field::new(
-            field,
+    pub fn integer(&mut self, field: impl Into<FieldId>, value: Integer, options: FieldOptions) {
+        self.fields.push(UpdateField::Integer(Field::new(
+            field.into(),
             value,
-            FieldOptions::None,
+            options,
         )));
     }
 
-    pub fn add_float(&mut self, field: FieldId, value: Float, options: FieldOptions) {
+    pub fn long_int(
+        &mut self,
+        field: impl Into<FieldId>,
+        value: LongInteger,
+        options: FieldOptions,
+    ) {
+        self.fields.push(UpdateField::LongInteger(Field::new(
+            field.into(),
+            value,
+            options,
+        )));
+    }
+
+    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag<'x>, options: FieldOptions) {
         self.fields
-            .push(UpdateField::Float(Field::new(field, value, options)));
+            .push(UpdateField::Tag(Field::new(field.into(), value, options)));
+    }
+
+    pub fn float(&mut self, field: impl Into<FieldId>, value: Float, options: FieldOptions) {
+        self.fields
+            .push(UpdateField::Float(Field::new(field.into(), value, options)));
     }
 
     pub fn is_empty(&self) -> bool {

@@ -185,6 +185,8 @@ pub enum JMAPSetErrorType {
     InvalidProperties,
     Singleton,
     BlobNotFound,
+    MailboxHasChild, //TODO abstract
+    MailboxHasEmail,
 }
 
 impl JMAPSetErrorType {
@@ -200,6 +202,8 @@ impl JMAPSetErrorType {
             JMAPSetErrorType::InvalidProperties => "invalidProperties",
             JMAPSetErrorType::Singleton => "singleton",
             JMAPSetErrorType::BlobNotFound => "blobNotFound",
+            JMAPSetErrorType::MailboxHasChild => "mailboxHasChild",
+            JMAPSetErrorType::MailboxHasEmail => "mailboxHasEmail",
         }
     }
 }

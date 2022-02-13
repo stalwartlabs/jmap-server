@@ -218,6 +218,20 @@ impl JSONValue {
             _ => None,
         }
     }
+
+    pub fn unwrap_number(self) -> Option<i64> {
+        match self {
+            JSONValue::Number(num) => Some(num),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_bool(self) -> Option<bool> {
+        match self {
+            JSONValue::Bool(bool) => Some(bool),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

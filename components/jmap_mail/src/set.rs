@@ -341,12 +341,19 @@ pub trait JMAPMailLocalStoreSet<'x>:
                         if mailbox_op_clear_all {
                             // Untag mailbox unless it is in the list of mailboxes to tag
                             if !mailbox_op_list.get(mailbox_id).unwrap_or(&false) {
-                                document
-                                    .clear_tag(MessageField::Mailbox.into(), Tag::Id(*mailbox_id));
+                                document.tag(
+                                    MessageField::Mailbox,
+                                    Tag::Id(*mailbox_id),
+                                    FieldOptions::Clear,
+                                );
                             }
                         } else if !mailbox_op_list.get(mailbox_id).unwrap_or(&true) {
                             // Untag mailbox if is marked for untagging
-                            document.clear_tag(MessageField::Mailbox.into(), Tag::Id(*mailbox_id));
+                            document.tag(
+                                MessageField::Mailbox,
+                                Tag::Id(*mailbox_id),
+                                FieldOptions::Clear,
+                            );
                         } else {
                             // Keep mailbox in the list
                             new_mailboxes.push(*mailbox_id);
@@ -359,8 +366,11 @@ pub trait JMAPMailLocalStoreSet<'x>:
                             if mailbox_ids.contains(mailbox_id) {
                                 // Tag mailbox if it is not already tagged
                                 if !current_mailboxes.contains(&mailbox_id) {
-                                    document
-                                        .set_tag(MessageField::Mailbox.into(), Tag::Id(mailbox_id));
+                                    document.tag(
+                                        MessageField::Mailbox,
+                                        Tag::Id(mailbox_id),
+                                        FieldOptions::None,
+                                    );
                                 }
                                 new_mailboxes.push(mailbox_id);
                             } else {
@@ -389,8 +399,8 @@ pub trait JMAPMailLocalStoreSet<'x>:
                     }
 
                     // Serialize new mailbox list
-                    document.add_binary(
-                        MessageField::Mailbox.into(),
+                    document.binary(
+                        MessageField::Mailbox,
                         bincode_serialize(&new_mailboxes)?.into(),
                         FieldOptions::Store,
                     );
@@ -419,11 +429,19 @@ pub trait JMAPMailLocalStoreSet<'x>:
                         if keyword_op_clear_all {
                             // Untag keyword unless it is in the list of keywords to tag
                             if !keyword_op_list.get(keyword).unwrap_or(&false) {
-                                document.clear_tag(MessageField::Keyword.into(), keyword.clone());
+                                document.tag(
+                                    MessageField::Keyword,
+                                    keyword.clone(),
+                                    FieldOptions::Clear,
+                                );
                             }
                         } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
                             // Untag keyword if is marked for untagging
-                            document.clear_tag(MessageField::Keyword.into(), keyword.clone());
+                            document.tag(
+                                MessageField::Keyword,
+                                keyword.clone(),
+                                FieldOptions::Clear,
+                            );
                         } else {
                             // Keep keyword in the list
                             new_keywords.push(keyword.clone());
@@ -434,15 +452,19 @@ pub trait JMAPMailLocalStoreSet<'x>:
                         if do_create {
                             // Tag keyword if it is not already tagged
                             if !current_keywords.contains(&keyword) {
-                                document.set_tag(MessageField::Keyword.into(), keyword.clone());
+                                document.tag(
+                                    MessageField::Keyword,
+                                    keyword.clone(),
+                                    FieldOptions::None,
+                                );
                             }
                             new_keywords.push(keyword);
                         }
                     }
 
                     // Serialize new keywords list
-                    document.add_binary(
-                        MessageField::Keyword.into(),
+                    document.binary(
+                        MessageField::Keyword,
                         bincode_serialize(&new_keywords)?.into(),
                         FieldOptions::Store,
                     );

@@ -18,8 +18,7 @@ pub enum UpdateField<'x> {
     Binary(Field<Cow<'x, [u8]>>),
     Integer(Field<Integer>),
     LongInteger(Field<LongInteger>),
-    TagSet(Field<Tag<'x>>),
-    TagRemove(Field<Tag<'x>>),
+    Tag(Field<Tag<'x>>),
     Float(Field<Float>),
 }
 
@@ -30,8 +29,7 @@ impl<'x> UpdateField<'x> {
             UpdateField::Binary(b) => b.value.len(),
             UpdateField::Integer(i) => i.size_of(),
             UpdateField::LongInteger(li) => li.size_of(),
-            UpdateField::TagSet(t) => t.value.len(),
-            UpdateField::TagRemove(t) => t.value.len(),
+            UpdateField::Tag(t) => t.value.len(),
             UpdateField::Float(f) => f.size_of(),
         }
     }
@@ -46,8 +44,7 @@ impl<'x> UpdateField<'x> {
             UpdateField::Binary(b) => &b.field,
             UpdateField::Integer(i) => &i.field,
             UpdateField::LongInteger(li) => &li.field,
-            UpdateField::TagSet(t) => &t.field,
-            UpdateField::TagRemove(t) => &t.field,
+            UpdateField::Tag(t) => &t.field,
             UpdateField::Float(f) => &f.field,
         }
     }
@@ -79,6 +76,7 @@ pub enum FieldOptions {
     Sort,
     StoreAndSort,
     StoreAsBlob(BlobIndex),
+    Clear,
 }
 
 impl<T> Field<T> {
@@ -117,6 +115,10 @@ impl<T> Field<T> {
             self.options,
             FieldOptions::Store | FieldOptions::StoreAndSort
         )
+    }
+
+    pub fn is_clear(&self) -> bool {
+        matches!(self.options, FieldOptions::Clear)
     }
 
     pub fn size_of(&self) -> usize {

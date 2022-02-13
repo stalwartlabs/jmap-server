@@ -1,6 +1,7 @@
 pub mod changes;
 pub mod get;
 pub mod import;
+pub mod mailbox;
 pub mod parse;
 pub mod query;
 pub mod set;
@@ -26,7 +27,7 @@ use parse::JMAPMailLocalStoreParse;
 use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery, MailboxId};
 use serde::{Deserialize, Serialize};
 use set::JMAPMailLocalStoreSet;
-use store::{AccountId, BlobIndex, DocumentId, Tag, ThreadId};
+use store::{AccountId, BlobIndex, DocumentId, FieldId, Tag, ThreadId};
 use thread::JMAPMailLocalStoreThread;
 
 pub const MESSAGE_RAW: BlobIndex = 0;
@@ -144,9 +145,9 @@ pub enum MessageField {
     Mailbox = 137,
 }
 
-impl From<MessageField> for u8 {
+impl From<MessageField> for FieldId {
     fn from(field: MessageField) -> Self {
-        field as u8
+        field as FieldId
     }
 }
 

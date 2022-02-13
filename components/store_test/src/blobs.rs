@@ -32,7 +32,7 @@ where
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
-                        document.add_binary(0, blob.into(), FieldOptions::StoreAsBlob(blob_index));
+                        document.binary(0, blob.into(), FieldOptions::StoreAsBlob(blob_index));
                     }
                     db.update_document(account, document, None).unwrap();
                 });

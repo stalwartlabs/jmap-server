@@ -312,7 +312,7 @@ impl RocksDBStore {
     ) -> crate::Result<()> {
         for field in fields {
             match field {
-                UpdateField::TagSet(ref tag) | UpdateField::TagRemove(ref tag) => {
+                UpdateField::Tag(ref tag) => {
                     write_batch.delete_cf(
                         cf_bitmaps,
                         &serialize_bm_tag_key(
@@ -349,12 +349,15 @@ impl RocksDBStore {
         for field in fields.iter() {
             match field {
                 UpdateField::Text(t) => {
-                    let (is_stored, is_sorted, blob_index) = match t.get_options() {
-                        FieldOptions::None => (false, false, None),
-                        FieldOptions::Store => (true, false, None),
-                        FieldOptions::Sort => (false, true, None),
-                        FieldOptions::StoreAndSort => (true, true, None),
-                        FieldOptions::StoreAsBlob(blob_index) => (false, false, Some(blob_index)),
+                    let (is_stored, is_sorted, is_clear, blob_index) = match t.get_options() {
+                        FieldOptions::None => (false, false, false, None),
+                        FieldOptions::Store => (true, false, false, None),
+                        FieldOptions::Sort => (false, true, false, None),
+                        FieldOptions::StoreAndSort => (true, true, false, None),
+                        FieldOptions::StoreAsBlob(blob_index) => {
+                            (false, false, false, Some(blob_index))
+                        }
+                        FieldOptions::Clear => (false, false, true, None),
                     };
 
                     let text = match &t.value {
@@ -368,7 +371,7 @@ impl RocksDBStore {
                                     text,
                                 ))
                                 .or_insert_with(HashMap::new)
-                                .insert(document_id, true);
+                                .insert(document_id, !is_clear);
                             text
                         }
                         Text::Tokenized(text) => {
@@ -381,7 +384,7 @@ impl RocksDBStore {
                                         &token.word,
                                     ))
                                     .or_insert_with(HashMap::new)
-                                    .insert(document_id, true);
+                                    .insert(document_id, !is_clear);
                             }
                             text
                         }
@@ -406,7 +409,7 @@ impl RocksDBStore {
                                             true,
                                         ))
                                         .or_insert_with(HashMap::new)
-                                        .insert(document_id, true);
+                                        .insert(document_id, !is_clear);
 
                                     if term.id_stemmed > 0 {
                                         bitmap_list
@@ -418,7 +421,7 @@ impl RocksDBStore {
                                                 false,
                                             ))
                                             .or_insert_with(HashMap::new)
-                                            .insert(document_id, true);
+                                            .insert(document_id, !is_clear);
                                     }
                                 }
 
@@ -430,7 +433,7 @@ impl RocksDBStore {
 
                     if let Some(blob_index) = blob_index {
                         blob_fields.push((blob_index, text.as_bytes()));
-                    } else {
+                    } else if !is_clear {
                         if is_stored {
                             batch.put_cf(
                                 cf_values,
@@ -457,9 +460,25 @@ impl RocksDBStore {
                                 &[],
                             );
                         }
+                    } else {
+                        batch.delete_cf(
+                            cf_values,
+                            serialize_stored_key(account, collection, document_id, t.get_field()),
+                        );
+
+                        batch.delete_cf(
+                            cf_indexes,
+                            &serialize_index_key(
+                                account,
+                                collection,
+                                document_id,
+                                t.get_field(),
+                                text.as_bytes(),
+                            ),
+                        );
                     }
                 }
-                UpdateField::TagSet(t) => {
+                UpdateField::Tag(t) => {
                     bitmap_list
                         .entry(serialize_bm_tag_key(
                             account,
@@ -468,18 +487,7 @@ impl RocksDBStore {
                             &t.value,
                         ))
                         .or_insert_with(HashMap::new)
-                        .insert(document_id, true);
-                }
-                UpdateField::TagRemove(t) => {
-                    bitmap_list
-                        .entry(serialize_bm_tag_key(
-                            account,
-                            collection,
-                            t.get_field(),
-                            &t.value,
-                        ))
-                        .or_insert_with(HashMap::new)
-                        .insert(document_id, false);
+                        .insert(document_id, !t.is_clear());
                 }
                 UpdateField::Binary(b) => {
                     if let FieldOptions::StoreAsBlob(blob_index) = b.get_options() {
@@ -493,16 +501,40 @@ impl RocksDBStore {
                     }
                 }
                 UpdateField::Integer(i) => {
-                    if i.is_stored() {
-                        batch.put_cf(
+                    if !i.is_clear() {
+                        if i.is_stored() {
+                            batch.put_cf(
+                                cf_values,
+                                serialize_stored_key(
+                                    account,
+                                    collection,
+                                    document_id,
+                                    i.get_field(),
+                                ),
+                                &i.value.to_le_bytes(),
+                            );
+                        }
+
+                        if i.is_sorted() {
+                            batch.put_cf(
+                                cf_indexes,
+                                &serialize_index_key(
+                                    account,
+                                    collection,
+                                    document_id,
+                                    i.get_field(),
+                                    &i.value.to_be_bytes(),
+                                ),
+                                &[],
+                            );
+                        }
+                    } else {
+                        batch.delete_cf(
                             cf_values,
                             serialize_stored_key(account, collection, document_id, i.get_field()),
-                            &i.value.to_le_bytes(),
                         );
-                    }
 
-                    if i.is_sorted() {
-                        batch.put_cf(
+                        batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
                                 account,
@@ -511,21 +543,44 @@ impl RocksDBStore {
                                 i.get_field(),
                                 &i.value.to_be_bytes(),
                             ),
-                            &[],
                         );
                     }
                 }
                 UpdateField::LongInteger(i) => {
-                    if i.is_stored() {
-                        batch.put_cf(
+                    if !i.is_clear() {
+                        if i.is_stored() {
+                            batch.put_cf(
+                                cf_values,
+                                serialize_stored_key(
+                                    account,
+                                    collection,
+                                    document_id,
+                                    i.get_field(),
+                                ),
+                                &i.value.to_le_bytes(),
+                            );
+                        }
+
+                        if i.is_sorted() {
+                            batch.put_cf(
+                                cf_indexes,
+                                &serialize_index_key(
+                                    account,
+                                    collection,
+                                    document_id,
+                                    i.get_field(),
+                                    &i.value.to_be_bytes(),
+                                ),
+                                &[],
+                            );
+                        }
+                    } else {
+                        batch.delete_cf(
                             cf_values,
                             serialize_stored_key(account, collection, document_id, i.get_field()),
-                            &i.value.to_le_bytes(),
                         );
-                    }
 
-                    if i.is_sorted() {
-                        batch.put_cf(
+                        batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
                                 account,
@@ -534,21 +589,44 @@ impl RocksDBStore {
                                 i.get_field(),
                                 &i.value.to_be_bytes(),
                             ),
-                            &[],
                         );
                     }
                 }
                 UpdateField::Float(f) => {
-                    if f.is_stored() {
-                        batch.put_cf(
+                    if !f.is_clear() {
+                        if f.is_stored() {
+                            batch.put_cf(
+                                cf_values,
+                                serialize_stored_key(
+                                    account,
+                                    collection,
+                                    document_id,
+                                    f.get_field(),
+                                ),
+                                &f.value.to_le_bytes(),
+                            );
+                        }
+
+                        if f.is_sorted() {
+                            batch.put_cf(
+                                cf_indexes,
+                                &serialize_index_key(
+                                    account,
+                                    collection,
+                                    document_id,
+                                    f.get_field(),
+                                    &f.value.to_be_bytes(),
+                                ),
+                                &[],
+                            );
+                        }
+                    } else {
+                        batch.delete_cf(
                             cf_values,
                             serialize_stored_key(account, collection, document_id, f.get_field()),
-                            &f.value.to_le_bytes(),
                         );
-                    }
 
-                    if f.is_sorted() {
-                        batch.put_cf(
+                        batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
                                 account,
@@ -557,7 +635,6 @@ impl RocksDBStore {
                                 f.get_field(),
                                 &f.value.to_be_bytes(),
                             ),
-                            &[],
                         );
                     }
                 }

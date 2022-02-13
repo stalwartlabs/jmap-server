@@ -16,17 +16,17 @@ where
     for raw_doc_num in 0..10 {
         last_assigned_id = Some(db.assign_document_id(0, 0, last_assigned_id).unwrap());
         let mut builder = DocumentWriter::insert(0, last_assigned_id.clone().unwrap());
-        builder.add_text(
+        builder.text(
             0,
             Text::Keyword(format!("keyword_{}", raw_doc_num).into()),
             FieldOptions::StoreAndSort,
         );
-        builder.add_text(
+        builder.text(
             1,
             Text::Tokenized(format!("this is the text number {}", raw_doc_num).into()),
             FieldOptions::StoreAndSort,
         );
-        builder.add_text(
+        builder.text(
             2,
             Text::Full(FullText::new_lang(
                 format!("and here goes the full text number {}", raw_doc_num).into(),
@@ -34,12 +34,12 @@ where
             )),
             FieldOptions::StoreAndSort,
         );
-        builder.add_float(3, raw_doc_num as Float, FieldOptions::StoreAndSort);
-        builder.add_integer(4, raw_doc_num as Integer, FieldOptions::StoreAndSort);
-        builder.add_long_int(5, raw_doc_num as LongInteger, FieldOptions::StoreAndSort);
-        builder.set_tag(6, Tag::Id(0));
-        builder.set_tag(7, Tag::Static(0));
-        builder.set_tag(8, Tag::Text("my custom tag".into()));
+        builder.float(3, raw_doc_num as Float, FieldOptions::StoreAndSort);
+        builder.integer(4, raw_doc_num as Integer, FieldOptions::StoreAndSort);
+        builder.long_int(5, raw_doc_num as LongInteger, FieldOptions::StoreAndSort);
+        builder.tag(6, Tag::Id(0), FieldOptions::None);
+        builder.tag(7, Tag::Static(0), FieldOptions::None);
+        builder.tag(8, Tag::Text("my custom tag".into()), FieldOptions::None);
 
         db.update_document(0, builder, 0.into()).unwrap();
     }

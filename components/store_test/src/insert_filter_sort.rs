@@ -99,7 +99,7 @@ where
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {
                                     if !field.is_empty() {
-                                        builder.add_text(
+                                        builder.text(
                                             pos as u8,
                                             Text::Tokenized(field.to_lowercase().into()),
                                             FieldOptions::Sort,
@@ -108,7 +108,7 @@ where
                                 }
                                 FieldType::FullText => {
                                     if !field.is_empty() {
-                                        builder.add_text(
+                                        builder.text(
                                             pos as u8,
                                             Text::Full(FullText::new_lang(
                                                 field.to_lowercase().into(),
@@ -119,7 +119,7 @@ where
                                     }
                                 }
                                 FieldType::Integer => {
-                                    builder.add_integer(
+                                    builder.integer(
                                         pos as u8,
                                         field.parse::<u32>().unwrap_or(0),
                                         FieldOptions::StoreAndSort,
@@ -127,7 +127,7 @@ where
                                 }
                                 FieldType::Keyword => {
                                     if !field.is_empty() {
-                                        builder.add_text(
+                                        builder.text(
                                             pos as u8,
                                             Text::Keyword(field.to_lowercase().into()),
                                             FieldOptions::StoreAndSort,
