@@ -1,15 +1,17 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap_mail::{
-    get::JMAPMailStoreGetArguments, parse::get_message_blob, JMAPMailBodyProperties,
-    JMAPMailLocalStore, JMAPMailProperties,
+    get::JMAPMailStoreGetArguments, parse::get_message_blob, JMAPMailBodyProperties, JMAPMailGet,
+    JMAPMailProperties, JMAPMailSet,
 };
 use jmap_store::{
+    blob::JMAPLocalBlobStore,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
+    local_store::JMAPLocalStore,
     JMAPGet, JMAPId, JMAPSet, JMAP_MAILBOX,
 };
-use store::batch::DocumentWriter;
+use store::{batch::DocumentWriter, Store};
 
 use crate::jmap_mail_get::UntaggedJSONValue;
 
@@ -32,7 +34,10 @@ impl<'x> From<UntaggedJSONValue> for JSONValue {
     }
 }
 
-fn store_blobs<'x>(mail_store: &impl JMAPMailLocalStore<'x>, value: &mut JSONValue) {
+fn store_blobs<'x, T>(mail_store: &JMAPLocalStore<T>, value: &mut JSONValue)
+where
+    T: Store<'x>,
+{
     match value {
         JSONValue::Object(o) => {
             for (k, v) in o.iter_mut() {
@@ -96,40 +101,45 @@ fn assert_diff(str1: &str, str2: &str, filename: &str) {
     assert_eq!(str1.len(), str2.len(), "{}", filename);
 }
 
-pub fn test_jmap_mail_set<T>(mail_store: T)
+pub fn test_jmap_mail_set<T>(mail_store: JMAPLocalStore<T>)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     // TODO use mailbox create API
     mail_store
+        .store
         .update_document(
             0,
             DocumentWriter::insert(
                 JMAP_MAILBOX,
                 mail_store
-                    .assign_document_id(0, JMAP_MAILBOX, None)
+                    .store
+                    .assign_document_id(0, JMAP_MAILBOX)
                     .unwrap(),
             ),
-            None,
         )
         .unwrap();
     mail_store
+        .store
         .update_document(
             0,
             DocumentWriter::insert(
                 JMAP_MAILBOX,
                 mail_store
-                    .assign_document_id(0, JMAP_MAILBOX, None)
+                    .store
+                    .assign_document_id(0, JMAP_MAILBOX)
                     .unwrap(),
             ),
-            None,
         )
         .unwrap();
 
     test_jmap_mail_update(&mail_store, test_jmap_mail_create(&mail_store));
 }
 
-fn test_jmap_mail_create<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) -> Vec<String> {
+fn test_jmap_mail_create<'x, T>(mail_store: &'x JMAPLocalStore<T>) -> Vec<String>
+where
+    T: Store<'x>,
+{
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
     test_dir.push("jmap_mail_set");
@@ -300,10 +310,13 @@ fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
         .into()
 }
 
-fn get_mailboxes_and_keywords<'x>(
-    mail_store: &'x impl JMAPMailLocalStore<'x>,
+fn get_mailboxes_and_keywords<'x, T>(
+    mail_store: &'x JMAPLocalStore<T>,
     message_id: &str,
-) -> (Vec<String>, Vec<String>) {
+) -> (Vec<String>, Vec<String>)
+where
+    T: Store<'x>,
+{
     let mut result = mail_store
         .mail_get(
             JMAPGet {
@@ -352,10 +365,10 @@ fn get_mailboxes_and_keywords<'x>(
     (mailboxes, keywords)
 }
 
-fn test_jmap_mail_update<'x>(
-    mail_store: &'x impl JMAPMailLocalStore<'x>,
-    mut message_ids: Vec<String>,
-) {
+fn test_jmap_mail_update<'x, T>(mail_store: &'x JMAPLocalStore<T>, mut message_ids: Vec<String>)
+where
+    T: Store<'x>,
+{
     let message_id_1 = message_ids.pop().unwrap();
     let message_id_2 = message_ids.pop().unwrap();
     let message_id_3 = message_ids.pop().unwrap();

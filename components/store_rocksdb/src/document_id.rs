@@ -14,6 +14,48 @@ pub enum AssignedDocumentId {
     Freed(DocumentId),
 }
 
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct DocumentIdCacheKey {
+    pub account_id: AccountId,
+    pub collection_id: CollectionId,
+}
+
+impl DocumentIdCacheKey {
+    pub fn new(account_id: AccountId, collection_id: CollectionId) -> Self {
+        Self {
+            account_id,
+            collection_id,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DocumentIdAssigner {
+    pub freed_ids: Option<RoaringBitmap>,
+    pub next_id: DocumentId,
+}
+
+impl DocumentIdAssigner {
+    pub fn new(freed_ids: Option<RoaringBitmap>, next_id: DocumentId) -> Self {
+        Self { freed_ids, next_id }
+    }
+
+    pub fn assign_id(&mut self) -> AssignedDocumentId {
+        if let Some(freed_ids) = &mut self.freed_ids {
+            let id = freed_ids.min().unwrap();
+            freed_ids.remove(id);
+            if freed_ids.is_empty() {
+                self.freed_ids = None;
+            }
+            AssignedDocumentId::Freed(id)
+        } else {
+            let id = self.next_id;
+            self.next_id += 1;
+            AssignedDocumentId::New(id)
+        }
+    }
+}
+
 impl UncommittedDocumentId for AssignedDocumentId {
     fn get_document_id(&self) -> DocumentId {
         match self {

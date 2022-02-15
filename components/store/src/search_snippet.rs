@@ -181,7 +181,7 @@ mod tests {
                 let mut terms = Vec::new();
                 for token in tokenize(part, Language::English, 40) {
                     let dict_len = term_dict.len() as u64 + 1;
-                    terms.push(Term::new(
+                    terms.push(Term::from_token(
                         *term_dict
                             .entry(token.word.to_string())
                             .or_insert_with(|| dict_len),

@@ -10,6 +10,9 @@ jmap_mail = { path = "components/jmap_mail" }
 store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
 rayon = "1.5.1"
+num_cpus = "1.13.1"
+actix-web = "4.0.0-rc.1"
+env_logger = "0.9.0"
 
 [workspace]
 resolver = "2"

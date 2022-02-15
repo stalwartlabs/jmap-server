@@ -1,19 +1,23 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap_mail::{
+    import::JMAPMailLocalStoreImport,
     query::{JMAPMailComparator, JMAPMailFilterCondition},
-    JMAPMailIdImpl, JMAPMailLocalStore, MessageField,
+    JMAPMailChanges, JMAPMailIdImpl, MessageField,
 };
-use jmap_store::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPId, JMAPQueryChanges};
+use jmap_store::{
+    changes::JMAPState, local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId,
+    JMAPQueryChanges,
+};
 use store::{
     batch::{DocumentWriter, LogAction},
     field::FieldOptions,
-    Tag,
+    Store, Tag,
 };
 
-pub fn test_jmap_mail_query_changes<T>(mail_store: T)
+pub fn test_jmap_mail_query_changes<T>(mail_store: JMAPLocalStore<T>)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     let mut states = vec![JMAPState::Initial];
     let mut id_map = HashMap::new();
@@ -93,10 +97,10 @@ where
                 let id = *id_map.get(id).unwrap();
 
                 mail_store
+                    .store
                     .update_document(
                         0,
                         DocumentWriter::update(0, id.get_document_id()).log(LogAction::Update(id)),
-                        0.into(),
                     )
                     .unwrap();
                 updated_ids.insert(id);
@@ -104,10 +108,10 @@ where
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
                 mail_store
+                    .store
                     .update_document(
                         0,
                         DocumentWriter::delete(0, id.get_document_id()).log(LogAction::Delete(id)),
-                        0.into(),
                     )
                     .unwrap();
                 removed_ids.insert(id);
@@ -124,7 +128,7 @@ where
                     FieldOptions::None,
                 );
                 batch.log_move(id, new_id);
-                mail_store.update_document(0, batch, 0.into()).unwrap();
+                mail_store.store.update_document(0, batch).unwrap();
 
                 id_map.insert(*to, new_id);
                 if type1_ids.contains(&id) {

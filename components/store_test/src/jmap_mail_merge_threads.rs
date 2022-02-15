@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use jmap_mail::{JMAPMailLocalStore, MessageField};
-use jmap_store::JMAP_MAIL;
-use store::{Comparator, DocumentSet, Filter, Tag, ThreadId};
+use jmap_mail::{import::JMAPMailLocalStoreImport, MessageField};
+use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL};
+use store::{Comparator, DocumentSet, Filter, Store, Tag, ThreadId};
 
 pub enum ThreadTest {
     Message,
@@ -56,9 +56,9 @@ fn build_messages(
     messages_per_thread
 }
 
-pub fn test_jmap_mail_merge_threads<T>(mail_store: T)
+pub fn test_jmap_mail_merge_threads<T>(mail_store: JMAPLocalStore<T>)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
         let base_test_num = (base_test_num * 6) as u32;
@@ -108,6 +108,7 @@ where
 
         for test_num in 0..=5 {
             let message_doc_ids = mail_store
+                .store
                 .query(
                     base_test_num + test_num,
                     JMAP_MAIL,
@@ -129,6 +130,7 @@ where
             for message_doc_id in message_doc_ids {
                 thread_ids.insert(
                     mail_store
+                        .store
                         .get_document_value(
                             base_test_num + test_num,
                             JMAP_MAIL,
@@ -152,6 +154,7 @@ where
             for thread_id in thread_ids {
                 messages_per_thread_db.push(
                     mail_store
+                        .store
                         .get_tag(
                             base_test_num + test_num,
                             JMAP_MAIL,

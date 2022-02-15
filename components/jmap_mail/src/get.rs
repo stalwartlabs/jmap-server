@@ -4,8 +4,10 @@ use std::{
 };
 
 use jmap_store::{
+    changes::JMAPLocalChanges,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
+    local_store::JMAPLocalStore,
     JMAPError, JMAPGet, JMAPGetResponse, JMAPId, JMAP_MAIL,
 };
 
@@ -24,16 +26,15 @@ use store::{leb128::Leb128, DocumentSet};
 use store::{BlobEntry, DocumentId, Store, StoreError, Tag};
 
 use crate::{
-    changes::JMAPMailLocalStoreChanges,
     import::bincode_deserialize,
     parse::{
         header_to_jmap_address, header_to_jmap_date, header_to_jmap_id, header_to_jmap_text,
         header_to_jmap_url,
     },
     query::MailboxId,
-    JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailHeaders,
-    JMAPMailIdImpl, JMAPMailProperties, MessageData, MessageField, MessageOutline, MimePart,
-    MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
+    JMAPMailBodyProperties, JMAPMailGet, JMAPMailHeaderForm, JMAPMailHeaderProperty,
+    JMAPMailHeaders, JMAPMailIdImpl, JMAPMailProperties, MessageData, MessageField, MessageOutline,
+    MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
 #[derive(Debug, Default)]
@@ -71,11 +72,15 @@ impl BlobIdClone for BlobId {
         }
     }
 }
-pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
+
+impl<'x, T> JMAPMailGet<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties<'x>>,
-        mut arguments: JMAPMailStoreGetArguments,
+        mut arguments: JMAPMailStoreGetArguments<'x>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
         let properties = request.properties.unwrap_or_else(|| {
             vec![
@@ -152,36 +157,38 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
         };
 
         let request_ids = if let Some(request_ids) = request.ids {
-            if request_ids.len() > self.get_config().jmap_mail_options.get_max_results {
+            if request_ids.len() > self.mail_config.get_max_results {
                 return Err(JMAPError::RequestTooLarge);
             } else {
                 request_ids
             }
         } else {
             let document_ids = self
+                .store
                 .get_document_ids(request.account_id, JMAP_MAIL)?
                 .into_iter()
-                .take(self.get_config().jmap_mail_options.get_max_results)
+                .take(self.mail_config.get_max_results)
                 .collect::<Vec<DocumentId>>();
             if !document_ids.is_empty() {
-                self.get_multi_document_value(
-                    request.account_id,
-                    JMAP_MAIL,
-                    document_ids.iter().copied(),
-                    MessageField::ThreadId.into(),
-                )?
-                .into_iter()
-                .zip(document_ids)
-                .filter_map(|(thread_id, document_id)| {
-                    JMAPId::from_email(thread_id?, document_id).into()
-                })
-                .collect::<Vec<u64>>()
+                self.store
+                    .get_multi_document_value(
+                        request.account_id,
+                        JMAP_MAIL,
+                        document_ids.iter().copied(),
+                        MessageField::ThreadId.into(),
+                    )?
+                    .into_iter()
+                    .zip(document_ids)
+                    .filter_map(|(thread_id, document_id)| {
+                        JMAPId::from_email(thread_id?, document_id).into()
+                    })
+                    .collect::<Vec<u64>>()
             } else {
                 Vec::new()
             }
         };
 
-        let document_ids = self.get_document_ids(request.account_id, JMAP_MAIL)?;
+        let document_ids = self.store.get_document_ids(request.account_id, JMAP_MAIL)?;
         let mut not_found = Vec::new();
         let mut results = Vec::with_capacity(request_ids.len());
 
@@ -193,6 +200,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
             }
 
             let message_data_bytes = self
+                .store
                 .get_blob(
                     request.account_id,
                     JMAP_MAIL,
@@ -211,14 +219,15 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
             let (message_raw, mut message_outline) = match &fetch_raw {
                 FetchRaw::All => (
                     Some(
-                        self.get_blob(
-                            request.account_id,
-                            JMAP_MAIL,
-                            document_id,
-                            BlobEntry::new(MESSAGE_RAW),
-                        )?
-                        .ok_or(StoreError::DataCorruption)?
-                        .value,
+                        self.store
+                            .get_blob(
+                                request.account_id,
+                                JMAP_MAIL,
+                                document_id,
+                                BlobEntry::new(MESSAGE_RAW),
+                            )?
+                            .ok_or(StoreError::DataCorruption)?
+                            .value,
                     ),
                     Some(bincode_deserialize::<MessageOutline>(
                         &message_data_bytes[read_bytes + message_data_len..],
@@ -230,14 +239,18 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                     )?;
                     (
                         Some(
-                            self.get_blob(
-                                request.account_id,
-                                JMAP_MAIL,
-                                document_id,
-                                BlobEntry::new_range(MESSAGE_RAW, 0..message_outline.body_offset),
-                            )?
-                            .ok_or(StoreError::DataCorruption)?
-                            .value,
+                            self.store
+                                .get_blob(
+                                    request.account_id,
+                                    JMAP_MAIL,
+                                    document_id,
+                                    BlobEntry::new_range(
+                                        MESSAGE_RAW,
+                                        0..message_outline.body_offset,
+                                    ),
+                                )?
+                                .ok_or(StoreError::DataCorruption)?
+                                .value,
                         ),
                         Some(message_outline),
                     )
@@ -369,7 +382,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             JSONValue::String((jmap_id.get_thread_id() as JMAPId).to_jmap_string())
                         }
                         JMAPMailProperties::MailboxIds => {
-                            if let Some(mailboxes) = self.get_document_value::<Vec<u8>>(
+                            if let Some(mailboxes) = self.store.get_document_value::<Vec<u8>>(
                                 request.account_id,
                                 JMAP_MAIL,
                                 document_id,
@@ -391,7 +404,7 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                             }
                         }
                         JMAPMailProperties::Keywords => {
-                            if let Some(tags) = self.get_document_value::<Vec<u8>>(
+                            if let Some(tags) = self.store.get_document_value::<Vec<u8>>(
                                 request.account_id,
                                 JMAP_MAIL,
                                 document_id,
@@ -453,25 +466,28 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                                 JSONValue::String(
                                     preview_text(
                                         String::from_utf8(
-                                            self.get_blob(
-                                                request.account_id,
-                                                JMAP_MAIL,
-                                                document_id,
-                                                BlobEntry::new_range(
-                                                    MESSAGE_PARTS
-                                                        + message_data
-                                                            .text_body
-                                                            .get(0)
-                                                            .and_then(|p| {
-                                                                message_data.mime_parts.get(p + 1)
-                                                            })
-                                                            .ok_or(StoreError::DataCorruption)?
-                                                            .blob_index,
-                                                    0..260,
-                                                ),
-                                            )?
-                                            .ok_or(StoreError::DataCorruption)?
-                                            .value,
+                                            self.store
+                                                .get_blob(
+                                                    request.account_id,
+                                                    JMAP_MAIL,
+                                                    document_id,
+                                                    BlobEntry::new_range(
+                                                        MESSAGE_PARTS
+                                                            + message_data
+                                                                .text_body
+                                                                .get(0)
+                                                                .and_then(|p| {
+                                                                    message_data
+                                                                        .mime_parts
+                                                                        .get(p + 1)
+                                                                })
+                                                                .ok_or(StoreError::DataCorruption)?
+                                                                .blob_index,
+                                                        0..260,
+                                                    ),
+                                                )?
+                                                .ok_or(StoreError::DataCorruption)?
+                                                .value,
                                         )
                                         .map_or_else(
                                             |err| {
@@ -488,24 +504,27 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
                                 JSONValue::String(
                                     preview_html(
                                         String::from_utf8(
-                                            self.get_blob(
-                                                request.account_id,
-                                                JMAP_MAIL,
-                                                document_id,
-                                                BlobEntry::new(
-                                                    MESSAGE_PARTS
-                                                        + message_data
-                                                            .html_body
-                                                            .get(0)
-                                                            .and_then(|p| {
-                                                                message_data.mime_parts.get(p + 1)
-                                                            })
-                                                            .ok_or(StoreError::DataCorruption)?
-                                                            .blob_index,
-                                                ),
-                                            )?
-                                            .ok_or(StoreError::DataCorruption)?
-                                            .value,
+                                            self.store
+                                                .get_blob(
+                                                    request.account_id,
+                                                    JMAP_MAIL,
+                                                    document_id,
+                                                    BlobEntry::new(
+                                                        MESSAGE_PARTS
+                                                            + message_data
+                                                                .html_body
+                                                                .get(0)
+                                                                .and_then(|p| {
+                                                                    message_data
+                                                                        .mime_parts
+                                                                        .get(p + 1)
+                                                                })
+                                                                .ok_or(StoreError::DataCorruption)?
+                                                                .blob_index,
+                                                    ),
+                                                )?
+                                                .ok_or(StoreError::DataCorruption)?
+                                                .value,
                                         )
                                         .map_or_else(
                                             |err| {
@@ -559,41 +578,45 @@ pub trait JMAPMailLocalStoreGet<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
 
                             if !fetch_parts.is_empty() {
                                 JSONValue::Object(HashMap::from_iter(
-                                    self.get_blobs(
-                                        request.account_id,
-                                        JMAP_MAIL,
-                                        document_id,
-                                        fetch_parts.keys().map(|k| {
-                                            if arguments.max_body_value_bytes == 0 {
-                                                BlobEntry::new(*k)
-                                            } else {
-                                                BlobEntry::new_range(
-                                                    *k,
-                                                    0..(arguments.max_body_value_bytes + 10),
-                                                )
-                                            }
-                                        }),
-                                    )?
-                                    .into_iter()
-                                    .map(|blob_entry| {
-                                        let (mime_part, part_id) =
-                                            fetch_parts.get(&blob_entry.index).unwrap();
+                                    self.store
+                                        .get_blobs(
+                                            request.account_id,
+                                            JMAP_MAIL,
+                                            document_id,
+                                            fetch_parts.keys().map(|k| {
+                                                if arguments.max_body_value_bytes == 0 {
+                                                    BlobEntry::new(*k)
+                                                } else {
+                                                    BlobEntry::new_range(
+                                                        *k,
+                                                        0..(arguments.max_body_value_bytes + 10),
+                                                    )
+                                                }
+                                            }),
+                                        )?
+                                        .into_iter()
+                                        .map(|blob_entry| {
+                                            let (mime_part, part_id) =
+                                                fetch_parts.get(&blob_entry.index).unwrap();
 
-                                        (
-                                            part_id.to_string(),
-                                            add_body_value(
-                                                mime_part,
-                                                String::from_utf8(blob_entry.value).map_or_else(
-                                                    |err| {
-                                                        String::from_utf8_lossy(err.as_bytes())
-                                                            .into_owned()
-                                                    },
-                                                    |s| s,
+                                            (
+                                                part_id.to_string(),
+                                                add_body_value(
+                                                    mime_part,
+                                                    String::from_utf8(blob_entry.value)
+                                                        .map_or_else(
+                                                            |err| {
+                                                                String::from_utf8_lossy(
+                                                                    err.as_bytes(),
+                                                                )
+                                                                .into_owned()
+                                                            },
+                                                            |s| s,
+                                                        ),
+                                                    &arguments,
                                                 ),
-                                                &arguments,
-                                            ),
-                                        )
-                                    }),
+                                            )
+                                        }),
                                 ))
                             } else {
                                 JSONValue::Null
@@ -759,7 +782,7 @@ pub fn add_body_structure<'x, 'y>(
 
         if let Some((prev_part_list_iter, mut prev_subparts)) = stack.pop() {
             let mut prev_part = parts_stack.pop().unwrap();
-            prev_part.insert("subparts".into(), JSONValue::Array(subparts));
+            prev_part.insert("subParts".into(), JSONValue::Array(subparts));
             prev_subparts.push(JSONValue::Object(prev_part));
             part_list_iter = prev_part_list_iter;
             subparts = prev_subparts;
@@ -769,7 +792,7 @@ pub fn add_body_structure<'x, 'y>(
     }
 
     let mut root_part = parts_stack.pop().unwrap();
-    root_part.insert("subparts".into(), JSONValue::Array(subparts));
+    root_part.insert("subParts".into(), JSONValue::Array(subparts));
     Some(JSONValue::Object(root_part))
 }
 

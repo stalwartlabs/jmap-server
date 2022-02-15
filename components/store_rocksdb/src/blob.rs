@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use store::leb128::Leb128;
 use store::serialize::{serialize_blob_key, serialize_temporary_blob_key};
 use store::serialize::{BLOB_KEY, TEMP_BLOB_KEY};
-use store::{AccountId, BlobEntry, CollectionId, DocumentId, Store, StoreBlob, StoreError};
+use store::{AccountId, BlobEntry, CollectionId, DocumentId, StoreBlob, StoreError};
 
 use crate::RocksDBStore;
 pub struct BlobFile {
@@ -164,7 +164,7 @@ impl StoreBlob for RocksDBStore {
         for entry in entries {
             let (blob_entry, blob_len) = deserialize_blob_entry(
                 self.blob_path.clone(),
-                &self.config.db_options.hash_levels,
+                &self.config.hash_levels,
                 &blob_entries,
                 entry.index,
             )?;
@@ -246,9 +246,9 @@ impl StoreBlob for RocksDBStore {
                         ))
                     })?;
                 if (current_time >= timestamp
-                    && current_time - timestamp > self.config.db_options.temp_blob_ttl)
+                    && current_time - timestamp > self.config.temp_blob_ttl)
                     || (current_time < timestamp
-                        && timestamp - current_time > self.config.db_options.temp_blob_ttl)
+                        && timestamp - current_time > self.config.temp_blob_ttl)
                 {
                     batch.delete_cf(&cf_values, key);
                     let mut blob_key = Vec::with_capacity(value.len() + BLOB_KEY.len());
@@ -287,7 +287,7 @@ impl StoreBlob for RocksDBStore {
                     BlobFile::new(
                         self.blob_path.clone(),
                         &key[BLOB_KEY.len()..],
-                        &self.config.db_options.hash_levels,
+                        &self.config.hash_levels,
                         false,
                     )
                     .map_err(|err| {
@@ -308,7 +308,8 @@ impl StoreBlob for RocksDBStore {
 
     fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<(u64, u64)> {
         let mut batch = rocksdb::WriteBatch::default();
-        let blob_key = self.store_blob(bytes)?;
+        let blob_key = blob_to_key(bytes);
+        self.store_blob(&blob_key, bytes)?;
         let cf_values = self.get_handle("values")?;
 
         // Obtain second from Unix epoch
@@ -355,7 +356,7 @@ impl StoreBlob for RocksDBStore {
         {
             let (blob_entry, blob_len) = deserialize_blob_entry(
                 self.blob_path.clone(),
-                &self.config.db_options.hash_levels,
+                &self.config.hash_levels,
                 &blob_key,
                 0,
             )?;
@@ -383,14 +384,7 @@ impl StoreBlob for RocksDBStore {
         }
     }
 
-    fn store_blob(&self, bytes: &[u8]) -> store::Result<Vec<u8>> {
-        // Create blob key
-        let mut hasher = Sha256::new();
-        hasher.update(bytes);
-        let mut blob_key = Vec::with_capacity(32 + std::mem::size_of::<u32>() + BLOB_KEY.len());
-        blob_key.extend_from_slice(BLOB_KEY);
-        blob_key.extend_from_slice(&hasher.finalize());
-        blob_key.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    fn store_blob(&self, blob_key: &[u8], bytes: &[u8]) -> store::Result<()> {
         let blob_hash = &blob_key[BLOB_KEY.len()..];
 
         // Lock blob key
@@ -410,7 +404,7 @@ impl StoreBlob for RocksDBStore {
             let blob = BlobFile::new(
                 self.blob_path.clone(),
                 blob_hash,
-                &self.get_config().db_options.hash_levels,
+                &self.config.hash_levels,
                 true,
             )
             .map_err(|err| {
@@ -446,8 +440,19 @@ impl StoreBlob for RocksDBStore {
             blob.commit();
         }
 
-        Ok(blob_key)
+        Ok(())
     }
+}
+
+pub fn blob_to_key(bytes: &[u8]) -> Vec<u8> {
+    // Create blob key
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let mut blob_key = Vec::with_capacity(32 + std::mem::size_of::<u32>() + BLOB_KEY.len());
+    blob_key.extend_from_slice(BLOB_KEY);
+    blob_key.extend_from_slice(&hasher.finalize());
+    blob_key.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    blob_key
 }
 
 #[cfg(test)]
@@ -474,7 +479,7 @@ impl StoreBlobTest for RocksDBStore {
                     BlobFile::new(
                         self.blob_path.clone(),
                         &key[BLOB_KEY.len()..],
-                        &self.config.db_options.hash_levels,
+                        &self.config.hash_levels,
                         false,
                     )
                     .map_err(|err| {

@@ -1,9 +1,9 @@
 use std::{borrow::Cow, collections::HashSet};
 
-use crate::{changes::JMAPMailLocalStoreChanges, JMAPMailIdImpl};
+use crate::{JMAPMailIdImpl, JMAPMailQuery};
 use jmap_store::{
-    JMAPError, JMAPFilter, JMAPId, JMAPLogicalOperator, JMAPQuery, JMAPQueryChanges,
-    JMAPQueryChangesResponse, JMAPQueryChangesResponseItem, JMAPQueryResponse, JMAP_MAIL,
+    changes::JMAPLocalChanges, local_store::JMAPLocalStore, JMAPError, JMAPFilter, JMAPId,
+    JMAPLogicalOperator, JMAPQuery, JMAPQueryResponse, JMAP_MAIL,
 };
 use mail_parser::RfcHeader;
 use nlp::Language;
@@ -63,14 +63,17 @@ where
     it: std::vec::IntoIter<JMAPFilter<JMAPMailFilterCondition<'x>>>,
 }
 
-pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x> {
+impl<'x, T> JMAPMailQuery<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
     fn mail_query(
         &'x self,
         mut query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
         collapse_threads: bool,
     ) -> jmap_store::Result<JMAPQueryResponse> {
         let mut is_immutable = true;
-        let state: Option<QueryState<Self::Set>> = match query.filter {
+        let state: Option<QueryState<T::Set>> = match query.filter {
             JMAPFilter::Operator(op) => Some(QueryState {
                 op: op.operator,
                 terms: Vec::with_capacity(op.conditions.len()),
@@ -84,7 +87,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
             }),
         };
 
-        let filter: Filter<Self::Set> = if let Some(mut state) = state {
+        let filter: Filter<T::Set> = if let Some(mut state) = state {
             let mut state_stack = Vec::new();
             let mut filter;
 
@@ -112,7 +115,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                                                     FieldValue::Tag(Tag::Id(mailbox)),
                                                 )
                                             })
-                                            .collect::<Vec<Filter<Self::Set>>>(),
+                                            .collect::<Vec<Filter<T::Set>>>(),
                                     ));
                                     if is_immutable {
                                         is_immutable = false;
@@ -143,7 +146,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                                     ));
                                 }
                                 JMAPMailFilterCondition::HasAttachment(has_attachment) => {
-                                    let filter: Filter<Self::Set> = Filter::eq(
+                                    let filter: Filter<T::Set> = Filter::eq(
                                         MessageField::Attachment.into(),
                                         FieldValue::Tag(Tag::Static(0)),
                                     );
@@ -318,7 +321,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
         };
 
         let sort = if !query.sort.is_empty() {
-            let mut terms: Vec<Comparator<Self::Set>> = Vec::with_capacity(query.sort.len());
+            let mut terms: Vec<Comparator<T::Set>> = Vec::with_capacity(query.sort.len());
             for comp in query.sort {
                 terms.push(match comp.property {
                     JMAPMailComparator::ReceivedAt => Comparator::Field(FieldComparator {
@@ -351,6 +354,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                         }
                         Comparator::DocumentSet(DocumentSetComparator {
                             set: self
+                                .store
                                 .get_tag(
                                     query.account_id,
                                     JMAP_MAIL,
@@ -386,7 +390,9 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
             Comparator::None
         };
 
-        let doc_ids = self.query(query.account_id, JMAP_MAIL, filter, sort)?;
+        let doc_ids = self
+            .store
+            .query(query.account_id, JMAP_MAIL, filter, sort)?;
         let query_state = self.get_state(query.account_id, JMAP_MAIL)?;
         let num_results = doc_ids.len();
 
@@ -402,7 +408,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
             let mut seen_threads = HashSet::with_capacity(results_len);
 
             for doc_id in doc_ids {
-                if let Some(thread_id) = self.get_document_value::<ThreadId>(
+                if let Some(thread_id) = self.store.get_document_value::<ThreadId>(
                     query.account_id,
                     JMAP_MAIL,
                     doc_id,
@@ -515,16 +521,17 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
                 doc_ids.collect::<Vec<DocumentId>>()
             };
 
-            self.get_multi_document_value(
-                query.account_id,
-                JMAP_MAIL,
-                doc_ids.iter().copied(),
-                MessageField::ThreadId.into(),
-            )?
-            .into_iter()
-            .zip(doc_ids.into_iter())
-            .filter_map(|(thread_id, doc_id)| JMAPId::from_email(thread_id?, doc_id).into())
-            .collect()
+            self.store
+                .get_multi_document_value(
+                    query.account_id,
+                    JMAP_MAIL,
+                    doc_ids.iter().copied(),
+                    MessageField::ThreadId.into(),
+                )?
+                .into_iter()
+                .zip(doc_ids.into_iter())
+                .filter_map(|(thread_id, doc_id)| JMAPId::from_email(thread_id?, doc_id).into())
+                .collect()
         };
 
         Ok(JMAPQueryResponse {
@@ -534,44 +541,62 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
             is_immutable,
         })
     }
+}
 
+pub trait JMAPThreadKeywords<'x, T>
+where
+    T: Store<'x>,
+{
     fn get_thread_keywords(
         &self,
         account: AccountId,
         keyword: Cow<'x, str>,
         match_all: bool,
-    ) -> store::Result<Self::Set> {
-        if let Some(tagged_doc_ids) = self.get_tag(
+    ) -> store::Result<T::Set>;
+}
+
+impl<'x, T> JMAPThreadKeywords<'x, T> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
+    fn get_thread_keywords(
+        &self,
+        account: AccountId,
+        keyword: Cow<'x, str>,
+        match_all: bool,
+    ) -> store::Result<T::Set> {
+        if let Some(tagged_doc_ids) = self.store.get_tag(
             account,
             JMAP_MAIL,
             MessageField::Keyword.into(),
             Tag::Text(keyword),
         )? {
-            let mut not_matched_ids = Self::Set::new();
-            let mut matched_ids = Self::Set::new();
+            let mut not_matched_ids = T::Set::new();
+            let mut matched_ids = T::Set::new();
 
             for tagged_doc_id in tagged_doc_ids.clone().into_iter() {
                 if matched_ids.contains(tagged_doc_id) || not_matched_ids.contains(tagged_doc_id) {
                     continue;
                 }
 
-                if let Some(thread_doc_ids) = self.get_tag(
+                if let Some(thread_doc_ids) = self.store.get_tag(
                     account,
                     JMAP_MAIL,
                     MessageField::ThreadId.into(),
                     Tag::Id(
-                        self.get_document_value(
-                            account,
-                            JMAP_MAIL,
-                            tagged_doc_id,
-                            MessageField::ThreadId.into(),
-                        )?
-                        .ok_or_else(|| {
-                            StoreError::InternalError(format!(
-                                "Thread id for document {} not found.",
-                                tagged_doc_id
-                            ))
-                        })?,
+                        self.store
+                            .get_document_value(
+                                account,
+                                JMAP_MAIL,
+                                tagged_doc_id,
+                                MessageField::ThreadId.into(),
+                            )?
+                            .ok_or_else(|| {
+                                StoreError::InternalError(format!(
+                                    "Thread id for document {} not found.",
+                                    tagged_doc_id
+                                ))
+                            })?,
                     ),
                 )? {
                     let mut thread_tag_intersection = thread_doc_ids.clone();
@@ -588,84 +613,7 @@ pub trait JMAPMailLocalStoreQuery<'x>: JMAPMailLocalStoreChanges<'x> + Store<'x>
             }
             Ok(matched_ids)
         } else {
-            Ok(Self::Set::new())
+            Ok(T::Set::new())
         }
-    }
-
-    fn mail_query_changes(
-        &'x self,
-        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
-        collapse_threads: bool,
-    ) -> jmap_store::Result<JMAPQueryChangesResponse> {
-        let changes = self.get_jmap_changes(
-            query.account_id,
-            JMAP_MAIL,
-            query.since_query_state,
-            query.max_changes,
-        )?;
-
-        let mut removed;
-        let mut added;
-
-        let total = if changes.total_changes > 0 || query.calculate_total {
-            let query_results = self.mail_query(
-                JMAPQuery {
-                    account_id: query.account_id,
-                    filter: query.filter,
-                    sort: query.sort,
-                    position: 0,
-                    anchor: None,
-                    anchor_offset: 0,
-                    limit: 0,
-                    calculate_total: true,
-                },
-                collapse_threads,
-            )?;
-
-            removed = Vec::with_capacity(changes.total_changes);
-            added = Vec::with_capacity(changes.total_changes);
-
-            if changes.total_changes > 0 {
-                if !query_results.is_immutable {
-                    for updated_id in &changes.updated {
-                        removed.push(*updated_id);
-                    }
-                    for (index, id) in query_results.ids.into_iter().enumerate() {
-                        if changes.created.contains(&id) || changes.updated.contains(&id) {
-                            added.push(JMAPQueryChangesResponseItem { id, index });
-                        }
-                    }
-                } else {
-                    for (index, id) in query_results.ids.into_iter().enumerate() {
-                        //TODO test up to id properly
-                        if let Some(up_to_id) = &query.up_to_id {
-                            if &id == up_to_id {
-                                break;
-                            }
-                        }
-                        if changes.created.contains(&id) {
-                            added.push(JMAPQueryChangesResponseItem { id, index });
-                        }
-                    }
-                }
-                for deleted_id in changes.destroyed {
-                    removed.push(deleted_id);
-                }
-            }
-
-            query_results.total
-        } else {
-            removed = Vec::new();
-            added = Vec::new();
-            0
-        };
-
-        Ok(JMAPQueryChangesResponse {
-            old_query_state: changes.old_state,
-            new_query_state: changes.new_state,
-            total,
-            removed,
-            added,
-        })
     }
 }

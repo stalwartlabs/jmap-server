@@ -6,61 +6,13 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use std::{borrow::Cow, iter::FromIterator, ops::Range, sync::MutexGuard};
+use std::{borrow::Cow, iter::FromIterator, ops::Range};
 
 use batch::DocumentWriter;
 use nlp::Language;
 use serialize::StoreDeserialize;
 
-pub struct JMAPMailConfig {
-    pub get_max_results: usize,
-    pub set_max_changes: usize,
-    pub mailbox_set_max_changes: usize,
-    pub mailbox_max_total: usize,
-    pub mailbox_max_depth: usize,
-    pub thread_max_results: usize,
-    pub import_max_items: usize,
-    pub parse_max_items: usize,
-}
-
-impl JMAPMailConfig {
-    pub fn new() -> Self {
-        JMAPMailConfig {
-            get_max_results: 100,
-            set_max_changes: 100,
-            mailbox_set_max_changes: 100,
-            mailbox_max_total: 1000,
-            mailbox_max_depth: 10,
-            thread_max_results: 100,
-            import_max_items: 2,
-            parse_max_items: 5,
-        }
-    }
-}
-
-impl Default for JMAPMailConfig {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct StoreConfig<T> {
-    pub default_language: Language,
-    pub db_options: T,
-    pub jmap_mail_options: JMAPMailConfig,
-}
-
-impl<T> StoreConfig<T> {
-    pub fn new(db_options: T) -> Self {
-        Self {
-            default_language: Language::English,
-            db_options,
-            jmap_mail_options: JMAPMailConfig::new(),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StoreError {
     InternalError(String),
     SerializeError(String),
@@ -70,6 +22,12 @@ pub enum StoreError {
     DataCorruption,
     NotFound,
     InvalidArgument,
+}
+
+impl StoreError {
+    pub fn into_owned(&self) -> StoreError {
+        self.clone()
+    }
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -306,30 +264,21 @@ pub trait StoreUpdate {
         &self,
         account: AccountId,
         collection: CollectionId,
-        last_assigned_id: Option<Self::UncommittedId>,
     ) -> crate::Result<Self::UncommittedId>;
 
     fn update_document(
         &self,
         account: AccountId,
         document: DocumentWriter<Self::UncommittedId>,
-        lock_collection: Option<CollectionId>,
     ) -> crate::Result<()> {
-        self.update_documents(account, vec![document], lock_collection)
+        self.update_documents(account, vec![document])
     }
 
     fn update_documents(
         &self,
         account: AccountId,
         documents: Vec<DocumentWriter<Self::UncommittedId>>,
-        lock_collection: Option<CollectionId>,
     ) -> Result<()>;
-
-    fn lock_collection(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> Result<MutexGuard<usize>>;
 }
 
 pub trait StoreQuery<'x>: StoreDocumentSet {
@@ -402,7 +351,7 @@ pub trait StoreBlob {
         timestamp: u64,
     ) -> Result<Option<Vec<u8>>>;
 
-    fn store_blob(&self, bytes: &[u8]) -> Result<Vec<u8>>;
+    fn store_blob(&self, blob_key: &[u8], bytes: &[u8]) -> Result<()>;
 
     fn get_blob(
         &self,
@@ -539,5 +488,5 @@ pub trait Store<'x>:
     + Sized
 {
     type Config;
-    fn get_config(&self) -> &StoreConfig<Self::Config>;
+    fn open(config: Self::Config) -> Result<Self>;
 }

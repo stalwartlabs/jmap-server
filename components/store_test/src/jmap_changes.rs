@@ -1,10 +1,18 @@
 use std::collections::HashSet;
 
-use jmap_mail::JMAPMailLocalStore;
-use jmap_store::changes::JMAPState;
-use store::batch::{DocumentWriter, LogAction};
+use jmap_store::{
+    changes::{JMAPLocalChanges, JMAPState},
+    local_store::JMAPLocalStore,
+};
+use store::{
+    batch::{DocumentWriter, LogAction},
+    Store,
+};
 
-pub fn test_jmap_changes<'x>(mail_store: impl JMAPMailLocalStore<'x>) {
+pub fn test_jmap_changes<'x, T>(mail_store: JMAPLocalStore<T>)
+where
+    T: Store<'x>,
+{
     let mut states = vec![JMAPState::Initial];
 
     for (changes, expected_changelog) in [
@@ -118,19 +126,15 @@ pub fn test_jmap_changes<'x>(mail_store: impl JMAPMailLocalStore<'x>) {
         ),
     ] {
         let mut documents = Vec::new();
-        let mut last_assigned_id = None;
 
         for change in changes {
-            last_assigned_id = mail_store
-                .assign_document_id(0, 0, last_assigned_id)
-                .unwrap()
-                .into();
             documents.push(
-                DocumentWriter::insert(0, last_assigned_id.as_ref().unwrap().clone()).log(change),
+                DocumentWriter::insert(0, mail_store.store.assign_document_id(0, 0).unwrap())
+                    .log(change),
             );
         }
 
-        mail_store.update_documents(0, documents, 0.into()).unwrap();
+        mail_store.store.update_documents(0, documents).unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {

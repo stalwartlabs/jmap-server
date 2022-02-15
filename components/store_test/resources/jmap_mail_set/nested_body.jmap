@@ -116,7 +116,7 @@
           "value": "RFC 8621 Section 4.1.4 test"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "blobId": "ignored_value",
           "disposition": "inline",
@@ -145,7 +145,7 @@
               "value": "multipart/mixed; \r\n\tboundary=\"boundary_1\""
             }
           ],
-          "subparts": [
+          "subParts": [
             {
               "headers": [
                 {
@@ -153,7 +153,7 @@
                   "value": "multipart/alternative; \r\n\tboundary=\"boundary_2\""
                 }
               ],
-              "subparts": [
+              "subParts": [
                 {
                   "headers": [
                     {
@@ -161,7 +161,7 @@
                       "value": "multipart/mixed; \r\n\tboundary=\"boundary_3\""
                     }
                   ],
-                  "subparts": [
+                  "subParts": [
                     {
                       "blobId": "ignored_value",
                       "disposition": "inline",
@@ -235,7 +235,7 @@
                       "value": "multipart/related; \r\n\tboundary=\"boundary_4\""
                     }
                   ],
-                  "subparts": [
+                  "subParts": [
                     {
                       "blobId": "ignored_value",
                       "headers": [

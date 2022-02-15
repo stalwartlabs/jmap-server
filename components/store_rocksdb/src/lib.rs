@@ -13,57 +13,58 @@ pub mod term;
 use std::{
     convert::TryInto,
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{atomic::AtomicU64, Arc, Mutex},
+    time::Duration,
 };
 
 use bitmaps::{bitmap_compact, bitmap_merge};
-use dashmap::DashMap;
-use jmap_mail::{
-    changes::JMAPMailLocalStoreChanges, get::JMAPMailLocalStoreGet,
-    import::JMAPMailLocalStoreImport, parse::JMAPMailLocalStoreParse,
-    query::JMAPMailLocalStoreQuery, set::JMAPMailLocalStoreSet, thread::JMAPMailLocalStoreThread,
-    JMAPMailLocalStore,
-};
-use jmap_store::{blob::JMAPLocalBlobStore, changes::JMAPLocalChanges};
+use document_id::{DocumentIdAssigner, DocumentIdCacheKey};
+use moka::sync::Cache;
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded,
     Options,
 };
-use store::{
-    mutex_map::MutexMap, serialize::LAST_TERM_ID_KEY, Result, Store, StoreConfig, StoreError,
-};
-use term::TermLock;
+use store::{mutex_map::MutexMap, serialize::LAST_TERM_ID_KEY, Result, Store, StoreError, TermId};
 
 pub struct RocksDBStoreConfig {
     pub path: String,
     pub hash_levels: Vec<usize>,
     pub temp_blob_ttl: u64,
+    pub term_cache_ttl: u64,
+    pub term_cache_size: u64,
+    pub doc_id_cache_size: u64,
 }
 
 impl RocksDBStoreConfig {
-    pub fn default_config(path: &str) -> StoreConfig<RocksDBStoreConfig> {
-        StoreConfig::new(RocksDBStoreConfig {
+    pub fn default_config(path: &str) -> RocksDBStoreConfig {
+        RocksDBStoreConfig {
             path: path.to_string(),
             hash_levels: vec![1],
             temp_blob_ttl: 3600,
-        })
+            term_cache_ttl: 10 * 60 * 1000,
+            term_cache_size: 32 * 1024 * 1024,
+            doc_id_cache_size: 32 * 1024 * 1024,
+        }
     }
 }
 
 pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
-    account_lock: MutexMap<usize>,
     blob_path: PathBuf,
-    blob_lock: MutexMap<usize>,
-    term_id_lock: DashMap<String, TermLock>,
+    blob_lock: MutexMap<()>,
+    doc_id_cache: Cache<DocumentIdCacheKey, Arc<Mutex<DocumentIdAssigner>>>,
+    term_id_cache: Cache<String, TermId>,
+    term_id_lock: MutexMap<()>,
     term_id_last: AtomicU64,
-    config: StoreConfig<RocksDBStoreConfig>,
+    config: RocksDBStoreConfig,
 }
 
-impl RocksDBStore {
-    pub fn open(config: StoreConfig<RocksDBStoreConfig>) -> Result<RocksDBStore> {
+impl<'x> Store<'x> for RocksDBStore {
+    type Config = RocksDBStoreConfig;
+
+    fn open(config: Self::Config) -> Result<Self> {
         // Create the database directory if it doesn't exist
-        let path = PathBuf::from(&config.db_options.path);
+        let path = PathBuf::from(&config.path);
         let mut blob_path = path.clone();
         let mut idx_path = path;
         blob_path.push("blobs");
@@ -130,15 +131,26 @@ impl RocksDBStore {
 
         Ok(Self {
             term_id_last: get_last_id(&db, LAST_TERM_ID_KEY)?.into(),
-            account_lock: MutexMap::with_capacity(1024),
+            term_id_cache: Cache::builder()
+                .initial_capacity(1024)
+                .max_capacity(config.term_cache_size)
+                .time_to_idle(Duration::from_millis(config.term_cache_ttl))
+                .build(),
+            doc_id_cache: Cache::builder()
+                .initial_capacity(128)
+                .max_capacity(config.doc_id_cache_size)
+                .time_to_idle(Duration::from_secs(60 * 60))
+                .build(),
+            term_id_lock: MutexMap::with_capacity(1024),
             blob_lock: MutexMap::with_capacity(1024),
-            term_id_lock: DashMap::with_capacity(1024),
             blob_path,
             db,
             config,
         })
     }
+}
 
+impl RocksDBStore {
     #[inline(always)]
     fn get_handle(&self, name: &str) -> Result<Arc<BoundColumnFamily>> {
         self.db.cf_handle(name).ok_or_else(|| {
@@ -170,7 +182,7 @@ impl RocksDBStore {
 pub fn numeric_value_merge(
     key: &[u8],
     value: Option<&[u8]>,
-    operands: &mut MergeOperands,
+    operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
     if key == LAST_TERM_ID_KEY {
         let mut value = if let Some(value) = value {
@@ -178,7 +190,7 @@ pub fn numeric_value_merge(
         } else {
             0
         };
-        for op in operands {
+        for op in operands.iter() {
             value += usize::from_le_bytes(op.try_into().ok()?);
         }
         //println!("Merging last term: {}", value);
@@ -191,7 +203,7 @@ pub fn numeric_value_merge(
         } else {
             0
         };
-        for op in operands {
+        for op in operands.iter() {
             value += i64::from_le_bytes(op.try_into().ok()?);
         }
         //println!("Merging key {:?}: {}", key, value);
@@ -213,29 +225,11 @@ pub fn get_last_id(db: &DBWithThreadMode<MultiThreaded>, key: &[u8]) -> crate::R
         .unwrap_or(0))
 }
 
-impl<'x> Store<'x> for RocksDBStore
-where
-    RocksDBStore: store::StoreQuery<'x>,
-{
-    type Config = RocksDBStoreConfig;
-
-    fn get_config(&self) -> &StoreConfig<Self::Config> {
-        &self.config
-    }
-}
-impl<'x> JMAPMailLocalStore<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreSet<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreChanges<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreQuery<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreGet<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreImport<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreParse<'x> for RocksDBStore {}
-impl<'x> JMAPMailLocalStoreThread<'x> for RocksDBStore {}
-impl<'x> JMAPLocalChanges<'x> for RocksDBStore {}
-impl<'x> JMAPLocalBlobStore<'x> for RocksDBStore {}
-
 #[cfg(test)]
 mod tests {
+    use jmap_store::{local_store::JMAPLocalStore, JMAPStoreConfig};
+    use store::Store;
+
     use crate::{RocksDBStore, RocksDBStoreConfig};
 
     #[test]
@@ -303,9 +297,13 @@ mod tests {
         }
 
         store_test::jmap_mail_merge_threads::test_jmap_mail_merge_threads(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 
@@ -321,9 +319,13 @@ mod tests {
         }
 
         store_test::jmap_mail_query::test_jmap_mail_query(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
             true,
         );
@@ -340,9 +342,13 @@ mod tests {
         }
 
         store_test::jmap_changes::test_jmap_changes(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 
@@ -358,9 +364,13 @@ mod tests {
         }
 
         store_test::jmap_mail_query_changes::test_jmap_mail_query_changes(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 
@@ -376,9 +386,13 @@ mod tests {
         }
 
         store_test::jmap_mail_get::test_jmap_mail_get(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 
@@ -394,9 +408,13 @@ mod tests {
         }
 
         store_test::jmap_mail_set::test_jmap_mail_set(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 
@@ -412,9 +430,13 @@ mod tests {
         }
 
         store_test::jmap_mail_parse::test_jmap_mail_parse(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 
@@ -430,9 +452,13 @@ mod tests {
         }
 
         store_test::jmap_mail_thread::test_jmap_mail_thread(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
             .unwrap(),
         );
 

@@ -7,6 +7,7 @@ use store::{
 
 use crate::{
     id::{hex_reader, HexWriter, JMAPIdSerialize},
+    local_store::JMAPLocalStore,
     JMAPChangesResponse,
 };
 
@@ -99,9 +100,24 @@ impl JMAPIdSerialize for JMAPState {
     }
 }
 
-pub trait JMAPLocalChanges<'x>: Store<'x> {
+pub trait JMAPLocalChanges<'x> {
+    fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState>;
+    fn get_jmap_changes(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        since_state: JMAPState,
+        max_changes: usize,
+    ) -> store::Result<JMAPChangesResponse>;
+}
+
+impl<'x, T> JMAPLocalChanges<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
     fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState> {
         Ok(self
+            .store
             .get_last_change_id(account, collection)?
             .map(JMAPState::Exact)
             .unwrap_or(JMAPState::Initial))
@@ -117,6 +133,7 @@ pub trait JMAPLocalChanges<'x>: Store<'x> {
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self
+                    .store
                     .get_changes(account, collection, ChangeLogQuery::All)?
                     .unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
@@ -135,11 +152,13 @@ pub trait JMAPLocalChanges<'x>: Store<'x> {
             }
             JMAPState::Exact(change_id) => (
                 0,
-                self.get_changes(account, collection, ChangeLogQuery::Since(*change_id))?
+                self.store
+                    .get_changes(account, collection, ChangeLogQuery::Since(*change_id))?
                     .ok_or(StoreError::NotFound)?,
             ),
             JMAPState::Intermediate(intermediate_state) => {
                 let mut changelog = self
+                    .store
                     .get_changes(
                         account,
                         collection,
@@ -152,12 +171,13 @@ pub trait JMAPLocalChanges<'x>: Store<'x> {
                 if intermediate_state.items_sent >= changelog.changes.len() {
                     (
                         0,
-                        self.get_changes(
-                            account,
-                            collection,
-                            ChangeLogQuery::Since(intermediate_state.to_id),
-                        )?
-                        .ok_or(StoreError::NotFound)?,
+                        self.store
+                            .get_changes(
+                                account,
+                                collection,
+                                ChangeLogQuery::Since(intermediate_state.to_id),
+                            )?
+                            .ok_or(StoreError::NotFound)?,
                     )
                 } else {
                     changelog.changes.drain(

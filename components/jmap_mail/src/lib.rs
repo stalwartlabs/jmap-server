@@ -7,28 +7,26 @@ pub mod query;
 pub mod set;
 pub mod thread;
 
+use parse::{JMAPMailParseRequest, JMAPMailParseResponse};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
-use changes::JMAPMailLocalStoreChanges;
-use get::{JMAPMailLocalStoreGet, JMAPMailStoreGetArguments};
-use import::JMAPMailLocalStoreImport;
+use get::JMAPMailStoreGetArguments;
+use import::{JMAPMailImportRequest, JMAPMailImportResponse};
 use jmap_store::{
-    blob::JMAPLocalBlobStore,
     changes::{JMAPLocalChanges, JMAPState},
     json::JSONValue,
-    JMAPChangesResponse, JMAPGet, JMAPGetResponse, JMAPId, JMAPQuery, JMAPQueryChanges,
-    JMAPQueryChangesResponse, JMAPQueryResponse, JMAPSet, JMAPSetResponse,
+    local_store::JMAPLocalStore,
+    JMAPChangesResponse, JMAPGet, JMAPId, JMAPQuery, JMAPQueryChanges, JMAPQueryChangesResponse,
+    JMAPQueryResponse, JMAPSet, JMAPSetResponse,
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderName, MessagePartId, MessageStructure, RawHeaders, RfcHeader,
 };
-use parse::JMAPMailLocalStoreParse;
-use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailLocalStoreQuery, MailboxId};
+
+use query::{JMAPMailComparator, JMAPMailFilterCondition};
 use serde::{Deserialize, Serialize};
-use set::JMAPMailLocalStoreSet;
-use store::{AccountId, BlobIndex, DocumentId, FieldId, Tag, ThreadId};
-use thread::JMAPMailLocalStoreThread;
+use store::{BlobIndex, DocumentId, FieldId, Store, ThreadId};
 
 pub const MESSAGE_RAW: BlobIndex = 0;
 pub const MESSAGE_DATA: BlobIndex = 1;
@@ -464,22 +462,18 @@ impl<'x> Display for JMAPMailBodyProperties<'x> {
     }
 }
 
-pub trait JMAPMailStoreImport<'x> {
-    fn mail_import_blob(
+pub trait JMAPMailImport<'x> {
+    fn mail_import(
         &'x self,
-        account: AccountId,
-        blob: &[u8],
-        mailbox_ids: Vec<MailboxId>,
-        keywords: Vec<Tag<'x>>,
-        received_at: Option<i64>,
-    ) -> jmap_store::Result<JSONValue>;
+        request: JMAPMailImportRequest<'x>,
+    ) -> jmap_store::Result<JMAPMailImportResponse>;
 }
 
-pub trait JMAPMailStoreSet<'x> {
-    fn mail_set(&self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse>;
+pub trait JMAPMailSet<'x> {
+    fn mail_set(&'x self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse>;
 }
 
-pub trait JMAPMailStoreQuery<'x> {
+pub trait JMAPMailQuery<'x> {
     fn mail_query(
         &'x self,
         query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
@@ -487,10 +481,10 @@ pub trait JMAPMailStoreQuery<'x> {
     ) -> jmap_store::Result<JMAPQueryResponse>;
 }
 
-pub trait JMAPMailStoreChanges<'x>: JMAPLocalChanges<'x> {
+pub trait JMAPMailChanges<'x>: JMAPLocalChanges<'x> {
     fn mail_changes(
         &'x self,
-        account: AccountId,
+        account: store::AccountId,
         since_state: JMAPState,
         max_changes: usize,
     ) -> jmap_store::Result<JMAPChangesResponse>;
@@ -502,31 +496,53 @@ pub trait JMAPMailStoreChanges<'x>: JMAPLocalChanges<'x> {
     ) -> jmap_store::Result<JMAPQueryChangesResponse>;
 }
 
-pub trait JMAPMailStoreGet<'x> {
+pub trait JMAPMailGet<'x> {
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties<'x>>,
-        arguments: JMAPMailStoreGetArguments,
-    ) -> jmap_store::Result<JMAPGetResponse>;
+        arguments: JMAPMailStoreGetArguments<'x>,
+    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
 }
 
-pub trait JMAPMailStore<'x>:
-    JMAPMailStoreImport<'x>
-    + JMAPMailStoreSet<'x>
-    + JMAPMailStoreQuery<'x>
-    + JMAPMailStoreGet<'x>
-    + JMAPMailStoreChanges<'x>
+pub trait JMAPMailParse<'x> {
+    fn mail_parse(
+        &'x self,
+        request: JMAPMailParseRequest<'x>,
+    ) -> jmap_store::Result<JMAPMailParseResponse>;
+}
+
+pub trait JMAPMailThread<'x> {
+    fn thread_get(
+        &'x self,
+        request: JMAPGet<JMAPMailProperties<'x>>,
+    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
+
+    fn thread_changes(
+        &'x self,
+        account: store::AccountId,
+        since_state: JMAPState,
+        max_changes: usize,
+    ) -> jmap_store::Result<JMAPChangesResponse>;
+}
+
+pub trait JMAPMailMailbox<'x> {
+    fn mailbox_set(
+        &'x self,
+        request: JMAPSet,
+        remove_emails: bool,
+    ) -> jmap_store::Result<JMAPSetResponse>;
+}
+
+pub trait JMAPMail<'x>:
+    JMAPMailImport<'x>
+    + JMAPMailSet<'x>
+    + JMAPMailQuery<'x>
+    + JMAPMailGet<'x>
+    + JMAPMailChanges<'x>
+    + JMAPMailParse<'x>
+    + JMAPMailThread<'x>
+    + JMAPMailMailbox<'x>
 {
 }
 
-pub trait JMAPMailLocalStore<'x>:
-    JMAPLocalBlobStore<'x>
-    + JMAPMailLocalStoreGet<'x>
-    + JMAPMailLocalStoreQuery<'x>
-    + JMAPMailLocalStoreImport<'x>
-    + JMAPMailLocalStoreSet<'x>
-    + JMAPMailLocalStoreChanges<'x>
-    + JMAPMailLocalStoreParse<'x>
-    + JMAPMailLocalStoreThread<'x>
-{
-}
+impl<'x, T> JMAPMail<'x> for JMAPLocalStore<T> where T: Store<'x> {}

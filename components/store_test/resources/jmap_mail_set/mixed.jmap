@@ -73,7 +73,7 @@
           "value": "\"Colleagues\": \"James Smythe\" <james@vandelay.com>; \r\n\t\"Friends\": <jane@example.com>, \r\n\t\"=?utf-8?Q?John_Sm=C3=AEth?=\" <john@example.com>"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "headers": [
             {
@@ -81,7 +81,7 @@
               "value": "multipart/alternative; \r\n\tboundary=\"boundary_1\""
             }
           ],
-          "subparts": [
+          "subParts": [
             {
               "blobId": "ignored_value",
               "headers": [

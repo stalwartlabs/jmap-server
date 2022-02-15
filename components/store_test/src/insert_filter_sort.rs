@@ -80,7 +80,6 @@ where
                 let db = Arc::new(&db);
                 let now = Instant::now();
                 let documents = Arc::new(Mutex::new(Vec::new()));
-                let mut last_assigned_id = None;
 
                 for record in csv::ReaderBuilder::new()
                     .has_headers(true)
@@ -90,8 +89,7 @@ where
                 {
                     let record = record.unwrap();
                     let documents = documents.clone();
-                    last_assigned_id = Some(db.assign_document_id(0, 0, last_assigned_id).unwrap());
-                    let record_id = last_assigned_id.clone().unwrap();
+                    let record_id = db.assign_document_id(0, 0).unwrap();
 
                     s.spawn_fifo(move |_| {
                         let mut builder = DocumentWriter::insert(0, record_id);
@@ -160,7 +158,7 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            db.update_documents(0, chunk, 0.into()).unwrap();
+                            db.update_documents(0, chunk).unwrap();
                             println!(
                                 "Inserted {} entries in {} ms (Thread {}/{}).",
                                 num_docs,

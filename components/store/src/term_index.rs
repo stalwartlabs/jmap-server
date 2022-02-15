@@ -64,7 +64,16 @@ pub struct MatchTerm {
 }
 
 impl Term {
-    pub fn new(id: TermId, id_stemmed: TermId, token: &Token) -> Self {
+    pub fn new(id: TermId, id_stemmed: TermId, offset: u32, len: u8) -> Self {
+        Term {
+            id,
+            id_stemmed,
+            offset,
+            len,
+        }
+    }
+
+    pub fn from_token(id: TermId, id_stemmed: TermId, token: &Token) -> Self {
         Term {
             id,
             id_stemmed,
@@ -722,7 +731,7 @@ mod tests {
                 } else {
                     0
                 };
-                terms.push(Term::new(term_id, term_id_stemmed, &token));
+                terms.push(Term::from_token(term_id, term_id_stemmed, &token));
             }
             builder.add_item(*field_id, blob_id as BlobIndex, terms);
         }

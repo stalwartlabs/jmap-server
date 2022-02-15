@@ -1,8 +1,8 @@
 use jmap_mail::{
-    get::JMAPMailStoreGetArguments, JMAPMailBodyProperties, JMAPMailHeaderForm,
-    JMAPMailHeaderProperty, JMAPMailLocalStore, JMAPMailProperties,
+    get::JMAPMailStoreGetArguments, import::JMAPMailLocalStoreImport, JMAPMailBodyProperties,
+    JMAPMailGet, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailProperties,
 };
-use jmap_store::{json::JSONValue, JMAPGet};
+use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPGet};
 use mail_parser::{HeaderName, RfcHeader};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,7 +10,7 @@ use std::{
     fs,
     path::PathBuf,
 };
-use store::Tag;
+use store::{Store, Tag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -69,9 +69,9 @@ impl<'x> From<JSONValue> for UntaggedJSONValue {
     }
 }
 
-pub fn test_jmap_mail_get<T>(mail_store: T)
+pub fn test_jmap_mail_get<T>(mail_store: JMAPLocalStore<T>)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
@@ -391,10 +391,13 @@ where
         file_name.set_extension("json");
 
         //fs::write(file_name, &serde_json::to_string_pretty(&UntaggedJSONValue::from(result)).unwrap()).unwrap();
+        let result = UntaggedJSONValue::from(result);
 
         assert_eq!(
-            UntaggedJSONValue::from(result),
-            serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&file_name).unwrap()).unwrap()
+            &result,
+            &serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&file_name).unwrap()).unwrap(),
+            "{}",
+            serde_json::to_string_pretty(&result).unwrap()
         );
     }
 }

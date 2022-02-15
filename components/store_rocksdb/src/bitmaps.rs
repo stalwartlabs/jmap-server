@@ -25,7 +25,7 @@ pub const IS_BITMAP: u8 = 1;
 pub fn bitmap_merge(
     _new_key: &[u8],
     existing_val: Option<&[u8]>,
-    operands: &mut MergeOperands,
+    operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
     /*print!(
         "Merge operands {:?}, has val {} -> ",
@@ -35,14 +35,14 @@ pub fn bitmap_merge(
 
     let mut bm = match existing_val {
         Some(existing_val) => into_bitmap(existing_val).ok()?,
-        None if operands.size_hint().0 == 1 => {
+        None if operands.len() == 1 => {
             //println!("return unserialized");
             return Some(Vec::from(operands.into_iter().next().unwrap()));
         }
         _ => RoaringBitmap::new(),
     };
 
-    for op in operands {
+    for op in operands.iter() {
         match *op.get(0)? {
             IS_BITMAP => {
                 if let Ok(union_bm) = deserialize_bitmap(op) {

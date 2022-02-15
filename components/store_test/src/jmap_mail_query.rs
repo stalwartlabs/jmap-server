@@ -5,20 +5,21 @@ use std::{
 
 use jmap_mail::{
     get::JMAPMailStoreGetArguments,
+    import::JMAPMailLocalStoreImport,
     query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
-    JMAPMailIdImpl, JMAPMailLocalStore, JMAPMailProperties, MessageField,
+    JMAPMailGet, JMAPMailIdImpl, JMAPMailProperties, JMAPMailQuery, MessageField,
 };
 use jmap_store::{
-    json::JSONValue, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQuery, JMAP_MAIL,
+    local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQuery, JMAP_MAIL,
 };
 use mail_parser::RfcHeader;
-use store::{Comparator, FieldValue, Filter, Integer, Tag};
+use store::{Comparator, FieldValue, Filter, Integer, Store, Tag};
 
 use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
 
-pub fn test_jmap_mail_query<T>(mail_store: T, do_insert: bool)
+pub fn test_jmap_mail_query<T>(mail_store: JMAPLocalStore<T>, do_insert: bool)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     const MAX_THREADS: usize = 100;
     const MAX_MESSAGES: usize = 1000;
@@ -155,6 +156,7 @@ where
     for thread_id in 0..MAX_THREADS {
         assert!(
             mail_store
+                .store
                 .get_tag(
                     0,
                     JMAP_MAIL,
@@ -170,6 +172,7 @@ where
 
     assert!(
         mail_store
+            .store
             .get_tag(
                 0,
                 JMAP_MAIL,
@@ -189,7 +192,10 @@ where
     test_query_options(&mail_store);
 }
 
-fn test_query<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
+fn test_query<'x, T>(mail_store: &'x JMAPLocalStore<T>)
+where
+    T: Store<'x>,
+{
     for (filter, sort, expected_results) in [
         (
             JMAPFilter::and(vec![
@@ -439,7 +445,10 @@ fn test_query<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
     }
 }
 
-fn test_query_options<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
+fn test_query_options<'x, T>(mail_store: &'x JMAPLocalStore<T>)
+where
+    T: Store<'x>,
+{
     for (query, expected_results, expected_results_collapsed) in [
         (
             JMAPQuery {
@@ -711,8 +720,12 @@ fn test_query_options<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>) {
     }
 }
 
-fn get_anchor<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, anchor: &'x str) -> Option<JMAPId> {
+fn get_anchor<'x, T>(mail_store: &'x JMAPLocalStore<T>, anchor: &'x str) -> Option<JMAPId>
+where
+    T: Store<'x>,
+{
     let doc_id = mail_store
+        .store
         .query(
             0,
             JMAP_MAIL,
@@ -727,6 +740,7 @@ fn get_anchor<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, anchor: &'x str) 
         .unwrap();
 
     let thread_id = mail_store
+        .store
         .get_document_value(0, JMAP_MAIL, doc_id, MessageField::ThreadId.into())
         .unwrap()
         .unwrap();
@@ -734,8 +748,11 @@ fn get_anchor<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, anchor: &'x str) 
     JMAPId::from_email(thread_id, doc_id).into()
 }
 
-fn get_message_id<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, jmap_id: JMAPId) -> String {
-    if let JSONValue::Array(mut list) = mail_store
+fn get_message_id<'x, T>(mail_store: &'x JMAPLocalStore<T>, jmap_id: JMAPId) -> String
+where
+    T: Store<'x>,
+{
+    mail_store
         .mail_get(
             JMAPGet {
                 account_id: 0,
@@ -746,13 +763,18 @@ fn get_message_id<'x>(mail_store: &'x impl JMAPMailLocalStore<'x>, jmap_id: JMAP
         )
         .unwrap()
         .list
-    {
-        if let JSONValue::Object(mut obj) = list.pop().unwrap() {
-            if let JSONValue::String(message_id) = obj.remove("MessageId").unwrap() {
-                return message_id;
-            }
-        }
-    }
-
-    panic!("Could not get message id");
+        .unwrap_array()
+        .unwrap()
+        .pop()
+        .unwrap()
+        .unwrap_object()
+        .unwrap()
+        .remove("messageId")
+        .unwrap()
+        .unwrap_array()
+        .unwrap()
+        .pop()
+        .unwrap()
+        .unwrap_string()
+        .unwrap()
 }

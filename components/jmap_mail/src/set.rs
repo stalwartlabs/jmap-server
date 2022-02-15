@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
-
 use chrono::DateTime;
 use jmap_store::blob::JMAPLocalBlobStore;
+use jmap_store::changes::JMAPLocalChanges;
 use jmap_store::id::{BlobId, JMAPIdSerialize};
 use jmap_store::json::JSONValue;
+use jmap_store::local_store::JMAPLocalStore;
 use jmap_store::{
     json::JSONPointer, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAIL,
     JMAP_MAILBOX,
@@ -18,23 +18,25 @@ use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use mail_parser::HeaderName;
+use std::collections::{BTreeMap, HashMap};
 use store::field::FieldOptions;
 use store::{
     batch::{DocumentWriter, LogAction},
     DocumentSet,
 };
-use store::{AccountId, DocumentId, Tag};
+use store::{AccountId, DocumentId, Store, Tag};
 
-use crate::changes::JMAPMailLocalStoreChanges;
 use crate::import::{bincode_deserialize, bincode_serialize, JMAPMailLocalStoreImport};
 use crate::parse::get_message_blob;
 use crate::query::MailboxId;
 use crate::{
-    JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailIdImpl, JMAPMailProperties, MessageField,
+    JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailIdImpl, JMAPMailProperties, JMAPMailSet,
+    MessageField,
 };
 
-pub trait JMAPMailLocalStoreSet<'x>:
-    JMAPMailLocalStoreChanges<'x> + JMAPMailLocalStoreImport<'x> + JMAPLocalBlobStore<'x>
+impl<'x, T> JMAPMailSet<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
 {
     fn mail_set(&'x self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
@@ -47,7 +49,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
         let total_changes = request.create.to_object().map_or(0, |c| c.len())
             + request.update.to_object().map_or(0, |c| c.len())
             + request.destroy.to_array().map_or(0, |c| c.len());
-        if total_changes > self.get_config().jmap_mail_options.set_max_changes {
+        if total_changes > self.mail_config.set_max_changes {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -56,7 +58,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
             old_state,
             ..Default::default()
         };
-        let document_ids = self.get_document_ids(request.account_id, JMAP_MAIL)?;
+        let document_ids = self.store.get_document_ids(request.account_id, JMAP_MAIL)?;
         let mut mailbox_ids = None;
 
         if let JSONValue::Object(create) = request.create {
@@ -68,6 +70,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
                     mailbox_ids
                 } else {
                     mailbox_ids = self
+                        .store
                         .get_document_ids(request.account_id, JMAP_MAILBOX)?
                         .into();
                     mailbox_ids.as_ref().unwrap()
@@ -314,14 +317,15 @@ pub trait JMAPMailLocalStoreSet<'x>:
                         mailbox_ids
                     } else {
                         mailbox_ids = self
+                            .store
                             .get_document_ids(request.account_id, JMAP_MAILBOX)?
                             .into();
                         mailbox_ids.as_ref().unwrap()
                     };
 
                     // Deserialize mailbox list
-                    let current_mailboxes = if let Some(current_mailboxes) = self
-                        .get_document_value::<Vec<u8>>(
+                    let current_mailboxes = if let Some(current_mailboxes) =
+                        self.store.get_document_value::<Vec<u8>>(
                             request.account_id,
                             JMAP_MAIL,
                             document_id,
@@ -408,8 +412,8 @@ pub trait JMAPMailLocalStoreSet<'x>:
 
                 if !keyword_op_list.is_empty() || keyword_op_clear_all {
                     // Deserialize current keywords
-                    let current_keywords = if let Some(current_keywords) = self
-                        .get_document_value::<Vec<u8>>(
+                    let current_keywords = if let Some(current_keywords) =
+                        self.store.get_document_value::<Vec<u8>>(
                             request.account_id,
                             JMAP_MAIL,
                             document_id,
@@ -527,7 +531,7 @@ pub trait JMAPMailLocalStoreSet<'x>:
         }
 
         if !changes.is_empty() {
-            self.update_documents(request.account_id, changes, JMAP_MAIL.into())?;
+            self.store.update_documents(request.account_id, changes)?;
             response.new_state = self.get_state(request.account_id, JMAP_MAIL)?;
         } else {
             response.new_state = response.old_state.clone();

@@ -12,10 +12,8 @@ pub fn test_tombstones<T>(db: T)
 where
     T: for<'x> Store<'x> + StoreTombstone,
 {
-    let mut last_assigned_id = None;
     for raw_doc_num in 0..10 {
-        last_assigned_id = Some(db.assign_document_id(0, 0, last_assigned_id).unwrap());
-        let mut builder = DocumentWriter::insert(0, last_assigned_id.clone().unwrap());
+        let mut builder = DocumentWriter::insert(0, db.assign_document_id(0, 0).unwrap());
         builder.text(
             0,
             Text::Keyword(format!("keyword_{}", raw_doc_num).into()),
@@ -41,13 +39,11 @@ where
         builder.tag(7, Tag::Static(0), FieldOptions::None);
         builder.tag(8, Tag::Text("my custom tag".into()), FieldOptions::None);
 
-        db.update_document(0, builder, 0.into()).unwrap();
+        db.update_document(0, builder).unwrap();
     }
 
-    db.update_document(0, DocumentWriter::delete(0, 9), None)
-        .unwrap();
-    db.update_document(0, DocumentWriter::delete(0, 0), None)
-        .unwrap();
+    db.update_document(0, DocumentWriter::delete(0, 9)).unwrap();
+    db.update_document(0, DocumentWriter::delete(0, 0)).unwrap();
 
     for do_purge in [true, false] {
         for field in 0..6 {

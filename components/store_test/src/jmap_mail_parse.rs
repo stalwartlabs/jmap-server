@@ -2,22 +2,26 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap_mail::{
     get::JMAPMailStoreGetArguments,
-    parse::{get_message_blob, JMAPMailParse},
-    JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailLocalStore,
+    import::JMAPMailLocalStoreImport,
+    parse::{get_message_blob, JMAPMailParseRequest},
+    JMAPMailBodyProperties, JMAPMailGet, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailParse,
     JMAPMailProperties,
 };
 use jmap_store::{
+    blob::JMAPLocalBlobStore,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
+    local_store::JMAPLocalStore,
     JMAPGet,
 };
 use mail_parser::{HeaderName, RfcHeader};
+use store::Store;
 
 use crate::jmap_mail_get::UntaggedJSONValue;
 
-pub fn test_jmap_mail_parse<T>(mail_store: T)
+pub fn test_jmap_mail_parse<T>(mail_store: JMAPLocalStore<T>)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
@@ -83,7 +87,7 @@ where
         .unwrap();
 
         let result = mail_store
-            .mail_parse(JMAPMailParse {
+            .mail_parse(JMAPMailParseRequest {
                 account_id: 0,
                 blob_ids: vec![blob_id.clone()],
                 properties: vec![
@@ -379,7 +383,7 @@ where
     for property in properties {
         result.extend(
             mail_store
-                .mail_parse(JMAPMailParse {
+                .mail_parse(JMAPMailParseRequest {
                     account_id: 0,
                     blob_ids: vec![blob_id.clone()],
                     properties: vec![property],

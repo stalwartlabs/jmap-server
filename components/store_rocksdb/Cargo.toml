@@ -7,14 +7,13 @@ publish = false
 [dependencies]
 nlp = { path = "../nlp" }
 store = { path = "../store" }
-jmap_store = { path = "../jmap_store" }
-jmap_mail = { path = "../jmap_mail" }
-rocksdb = "0.17"
+rocksdb = "0.18"
 roaring = "0.8.1"
-dashmap = "4.0.2"
 sha2 = "0.10.1"
 base32 = "0.4.0"
+moka = "0.7.2"
 
 [dev-dependencies]
 store_test = { path = "../store_test" }
+jmap_store = { path = "../jmap_store" }
 rayon = "1.5.1"

@@ -2,11 +2,13 @@ pub mod blob;
 pub mod changes;
 pub mod id;
 pub mod json;
+pub mod local_store;
 
 use std::collections::{HashMap, HashSet};
 
 use changes::JMAPState;
 use json::JSONValue;
+use nlp::Language;
 use store::{AccountId, ChangeLogId, StoreError};
 
 pub const JMAP_MAIL: u8 = 0;
@@ -263,4 +265,58 @@ pub struct JMAPGetResponse {
     pub state: JMAPState,
     pub list: JSONValue,
     pub not_found: Option<Vec<JMAPId>>,
+}
+
+pub struct JMAPMailConfig {
+    pub get_max_results: usize,
+    pub set_max_changes: usize,
+    pub mailbox_set_max_changes: usize,
+    pub mailbox_max_total: usize,
+    pub mailbox_max_depth: usize,
+    pub thread_max_results: usize,
+    pub import_max_items: usize,
+    pub parse_max_items: usize,
+}
+
+impl JMAPMailConfig {
+    pub fn new() -> Self {
+        JMAPMailConfig {
+            get_max_results: 100,
+            set_max_changes: 100,
+            mailbox_set_max_changes: 100,
+            mailbox_max_total: 1000,
+            mailbox_max_depth: 10,
+            thread_max_results: 100,
+            import_max_items: 2,
+            parse_max_items: 5,
+        }
+    }
+}
+
+impl Default for JMAPMailConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct JMAPStoreConfig {
+    pub jmap_mail_options: JMAPMailConfig,
+    pub default_language: Language,
+    pub worker_pool_size: usize,
+}
+
+impl JMAPStoreConfig {
+    pub fn new() -> Self {
+        Self {
+            default_language: Language::English,
+            jmap_mail_options: JMAPMailConfig::new(),
+            worker_pool_size: 0,
+        }
+    }
+}
+
+impl Default for JMAPStoreConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }

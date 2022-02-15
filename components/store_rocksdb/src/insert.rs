@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, MutexGuard},
+    sync::{Arc, Mutex},
 };
 
 use nlp::Language;
@@ -19,8 +19,11 @@ use store::{
 };
 
 use crate::{
-    bitmaps::set_clear_bits, blob::serialize_blob_keys_from_value, changelog::ChangeLogWriter,
-    document_id::AssignedDocumentId, RocksDBStore,
+    bitmaps::set_clear_bits,
+    blob::{blob_to_key, serialize_blob_keys_from_value},
+    changelog::ChangeLogWriter,
+    document_id::{AssignedDocumentId, DocumentIdAssigner, DocumentIdCacheKey},
+    RocksDBStore,
 };
 
 impl StoreUpdate for RocksDBStore {
@@ -30,7 +33,6 @@ impl StoreUpdate for RocksDBStore {
         &self,
         account: AccountId,
         batches: Vec<DocumentWriter<AssignedDocumentId>>,
-        lock_collection: Option<CollectionId>,
     ) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
         let cf_indexes = self.get_handle("indexes")?;
@@ -39,12 +41,6 @@ impl StoreUpdate for RocksDBStore {
 
         let mut change_log_list = HashMap::new();
         let mut bitmap_list = HashMap::new();
-
-        let _collection_lock = if let Some(lock_collection) = lock_collection {
-            self.lock_collection(account, lock_collection)?.into()
-        } else {
-            None
-        };
 
         for batch in batches {
             match batch.action {
@@ -216,45 +212,28 @@ impl StoreUpdate for RocksDBStore {
         &self,
         account: AccountId,
         collection: CollectionId,
-        last_assigned_id: Option<Self::UncommittedId>,
     ) -> store::Result<AssignedDocumentId> {
-        if let Some(last_assigned_id) = last_assigned_id {
-            match last_assigned_id {
-                AssignedDocumentId::Freed(last_assigned_id) => {
-                    if let Some(mut freed_ids) = self.get_document_ids_freed(account, collection)? {
-                        freed_ids.remove_range(0..=last_assigned_id);
-                        if !freed_ids.is_empty() {
-                            return Ok(AssignedDocumentId::Freed(freed_ids.min().unwrap()));
-                        }
-                    }
-                }
-                AssignedDocumentId::New(last_assigned_id) => {
-                    return Ok(AssignedDocumentId::New(last_assigned_id + 1));
-                }
-            }
-        } else if let Some(freed_ids) = self.get_document_ids_freed(account, collection)? {
-            return Ok(AssignedDocumentId::Freed(freed_ids.min().unwrap()));
-        };
-
-        Ok(
-            if let Some(used_ids) = self.get_document_ids_used(account, collection)? {
-                AssignedDocumentId::New(used_ids.max().unwrap() + 1)
-            } else {
-                AssignedDocumentId::New(0)
-            },
-        )
-    }
-
-    fn lock_collection(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<MutexGuard<usize>> {
-        self.account_lock
-            .lock(
-                ((account as u64) << (8 * std::mem::size_of::<CollectionId>())) | collection as u64,
+        let id_assigner_lock = self
+            .doc_id_cache
+            .get_or_try_insert_with::<_, StoreError>(
+                DocumentIdCacheKey::new(account, collection),
+                || {
+                    Ok(Arc::new(Mutex::new(DocumentIdAssigner::new(
+                        self.get_document_ids_freed(account, collection)?,
+                        if let Some(used_ids) = self.get_document_ids_used(account, collection)? {
+                            used_ids.max().unwrap() + 1
+                        } else {
+                            0
+                        },
+                    ))))
+                },
             )
-            .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))
+            .map_err(|e| e.as_ref().clone())?;
+        let mut id_assigner = id_assigner_lock
+            .lock()
+            .map_err(|_| StoreError::InternalError("Failed to obtain MutexLock".to_string()))?;
+
+        Ok(id_assigner.assign_id())
     }
 }
 
@@ -411,7 +390,7 @@ impl RocksDBStore {
                                         .or_insert_with(HashMap::new)
                                         .insert(document_id, !is_clear);
 
-                                    if term.id_stemmed > 0 {
+                                    if term.id_stemmed != term.id {
                                         bitmap_list
                                             .entry(serialize_bm_term_key(
                                                 account,
@@ -673,7 +652,8 @@ impl RocksDBStore {
                     ));
                 }
                 blob_index_last = Some(blob_index);
-                let blob_key = self.store_blob(blob)?;
+                let blob_key = blob_to_key(blob);
+                self.store_blob(&blob_key, blob)?;
 
                 // Increment blob count
                 batch.merge_cf(cf_values, &blob_key, (1i64).to_le_bytes());

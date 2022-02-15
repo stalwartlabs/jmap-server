@@ -29,7 +29,7 @@
           "value": "\"John\" <john@example.com>"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "blobId": "ignored_value",
           "charset": "utf-8",

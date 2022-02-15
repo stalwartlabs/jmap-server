@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse::get_message_blob, JMAPMailIdImpl, MESSAGE_RAW};
+use crate::{parse::get_message_blob, JMAPMailIdImpl, JMAPMailImport, MESSAGE_RAW};
 use jmap_store::{
     blob::JMAPLocalBlobStore,
     changes::{JMAPLocalChanges, JMAPState},
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
+    local_store::JMAPLocalStore,
     JMAPError, JMAPId, JMAP_MAIL, JMAP_MAILBOX, JMAP_THREAD,
 };
 use mail_parser::Message;
@@ -33,7 +34,7 @@ where
     bincode::deserialize(bytes).map_err(|e| StoreError::DeserializeError(e.to_string()))
 }
 
-pub struct JMAPMailImport<'x> {
+pub struct JMAPMailImportRequest<'x> {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
     pub emails: Vec<JMAPMailImportItem<'x>>,
@@ -53,12 +54,13 @@ pub struct JMAPMailImportResponse {
     pub not_created: JSONValue,
 }
 
-pub trait JMAPMailLocalStoreImport<'x>:
-    Store<'x> + JMAPLocalChanges<'x> + JMAPLocalBlobStore<'x>
+impl<'x, T> JMAPMailImport<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
 {
     fn mail_import(
         &'x self,
-        request: JMAPMailImport<'x>,
+        request: JMAPMailImportRequest<'x>,
     ) -> jmap_store::Result<JMAPMailImportResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
@@ -67,11 +69,13 @@ pub trait JMAPMailLocalStoreImport<'x>:
             }
         }
 
-        if request.emails.len() > self.get_config().jmap_mail_options.import_max_items {
+        if request.emails.len() > self.mail_config.import_max_items {
             return Err(JMAPError::RequestTooLarge);
         }
 
-        let mailbox_ids = self.get_document_ids(request.account_id, JMAP_MAILBOX)?;
+        let mailbox_ids = self
+            .store
+            .get_document_ids(request.account_id, JMAP_MAILBOX)?;
 
         let mut created = HashMap::with_capacity(request.emails.len());
         let mut not_created = HashMap::with_capacity(request.emails.len());
@@ -146,7 +150,30 @@ pub trait JMAPMailLocalStoreImport<'x>:
             },
         })
     }
+}
 
+pub trait JMAPMailLocalStoreImport<'x> {
+    fn mail_import_blob(
+        &'x self,
+        account_id: AccountId,
+        blob: &[u8],
+        mailbox_ids: Vec<MailboxId>,
+        keywords: Vec<Tag<'x>>,
+        received_at: Option<i64>,
+    ) -> jmap_store::Result<JSONValue>;
+
+    fn mail_merge_threads(
+        &self,
+        account: AccountId,
+        documents: &mut Vec<DocumentWriter<impl UncommittedDocumentId>>,
+        thread_ids: Vec<ThreadId>,
+    ) -> store::Result<ThreadId>;
+}
+
+impl<'x, T> JMAPMailLocalStoreImport<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
     fn mail_import_blob(
         &'x self,
         account: AccountId,
@@ -156,11 +183,9 @@ pub trait JMAPMailLocalStoreImport<'x>:
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue> {
         // Build message document
-        let (mut document, document_id) = {
-            let assigned_id = self.assign_document_id(account, JMAP_MAIL, None)?;
-            let document_id = assigned_id.get_document_id();
-            (DocumentWriter::insert(JMAP_MAIL, assigned_id), document_id)
-        };
+        let assigned_id = self.store.assign_document_id(account, JMAP_MAIL)?;
+        let document_id = assigned_id.get_document_id();
+        let mut document = DocumentWriter::insert(JMAP_MAIL, assigned_id);
         let (reference_ids, thread_name) = build_message_document(
             &mut document,
             Message::parse(blob).ok_or(StoreError::ParseError)?,
@@ -198,16 +223,17 @@ pub trait JMAPMailLocalStoreImport<'x>:
         }
 
         // Lock account
-        let _collection_lock = self.lock_collection(account, JMAP_MAIL)?;
+        let _lock = self.lock_account(account, JMAP_MAIL)?;
 
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
             // Obtain thread ids for all matching document ids
             let thread_ids = self
+                .store
                 .get_multi_document_value(
                     account,
                     JMAP_MAIL,
-                    self.query(
+                    self.store.query(
                         account,
                         JMAP_MAIL,
                         Filter::and(vec![
@@ -257,7 +283,7 @@ pub trait JMAPMailLocalStoreImport<'x>:
         let thread_id = if let Some(thread_id) = thread_id {
             thread_id
         } else {
-            let thread_id = self.assign_document_id(account, JMAP_THREAD, None)?;
+            let thread_id = self.store.assign_document_id(account, JMAP_THREAD)?;
             documents.push(DocumentWriter::insert(JMAP_THREAD, thread_id.clone()));
             thread_id.get_document_id()
         };
@@ -288,7 +314,7 @@ pub trait JMAPMailLocalStoreImport<'x>:
         documents.push(document);
 
         // Write documents to store
-        self.update_documents(account, documents, None)?;
+        self.store.update_documents(account, documents)?;
 
         // Generate JSON object
         let mut values: HashMap<String, JSONValue> = HashMap::with_capacity(4);
@@ -318,6 +344,7 @@ pub trait JMAPMailLocalStoreImport<'x>:
         let mut document_sets = Vec::with_capacity(thread_ids.len());
 
         for (pos, document_set) in self
+            .store
             .get_tags(
                 account,
                 JMAP_MAIL,
@@ -348,7 +375,7 @@ pub trait JMAPMailLocalStoreImport<'x>:
         for (document_set, delete_thread_id) in document_sets {
             for document_id in document_set {
                 let mut document = DocumentWriter::update(JMAP_MAIL, document_id);
-                document.integer(MessageField::ThreadId, thread_id, FieldOptions::Sort);
+                document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
                 document.tag(
                     MessageField::ThreadId,
                     Tag::Id(thread_id),

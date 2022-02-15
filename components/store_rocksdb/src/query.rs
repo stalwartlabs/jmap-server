@@ -216,9 +216,7 @@ impl<'x> StoreQuery<'x> for RocksDBStore {
                                                 (match_term.id_stemmed, true),
                                                 (match_term.id_stemmed, false),
                                             ] {
-                                                if term_op.0 > 0
-                                                    && !requested_ids.contains(&term_op)
-                                                {
+                                                if !requested_ids.contains(&term_op) {
                                                     requested_ids.insert(term_op);
                                                     keys.push((
                                                         &cf_bitmaps,

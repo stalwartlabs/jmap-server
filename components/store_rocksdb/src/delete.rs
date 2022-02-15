@@ -13,6 +13,7 @@ use store::{
 use crate::{
     bitmaps::{clear_bits, into_bitmap, set_bits, RocksDBDocumentSet},
     blob::serialize_blob_keys_from_value,
+    document_id::DocumentIdCacheKey,
     RocksDBStore,
 };
 
@@ -269,6 +270,9 @@ impl StoreTombstone for RocksDBStore {
         self.db
             .write(batch)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
+
+        self.doc_id_cache
+            .invalidate(&DocumentIdCacheKey::new(account, collection));
 
         Ok(())
     }

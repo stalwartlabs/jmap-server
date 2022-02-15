@@ -28,13 +28,13 @@ where
                 let blobs = blobs.clone();
                 s.spawn_fifo(move |_| {
                     let mut document =
-                        DocumentWriter::insert(0, db.assign_document_id(account, 0, None).unwrap());
+                        DocumentWriter::insert(0, db.assign_document_id(account, 0).unwrap());
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
                         document.binary(0, blob.into(), FieldOptions::StoreAsBlob(blob_index));
                     }
-                    db.update_document(account, document, None).unwrap();
+                    db.update_document(account, document).unwrap();
                 });
             }
         });
@@ -69,7 +69,7 @@ where
     assert_eq!(blobs.len(), 40);
 
     for account in 0..100 {
-        db.update_document(account, DocumentWriter::delete(0, 0), None)
+        db.update_document(account, DocumentWriter::delete(0, 0))
             .unwrap();
     }
 

@@ -1,9 +1,10 @@
-use jmap_mail::JMAPMailLocalStore;
-use jmap_store::{json::JSONValue, JMAPGet};
+use jmap_mail::{import::JMAPMailLocalStoreImport, JMAPMailThread};
+use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPGet};
+use store::Store;
 
-pub fn test_jmap_mail_thread<T>(mail_store: T)
+pub fn test_jmap_mail_thread<T>(mail_store: JMAPLocalStore<T>)
 where
-    T: for<'x> JMAPMailLocalStore<'x>,
+    T: for<'x> Store<'x>,
 {
     let mut expected_result = vec![JSONValue::Null; 5];
     let mut thread_id = 0;

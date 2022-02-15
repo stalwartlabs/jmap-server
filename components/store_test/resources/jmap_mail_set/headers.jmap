@@ -107,7 +107,7 @@
           "value": "this is some text"
         }
       ],
-      "subparts": [
+      "subParts": [
         {
           "blobId": "ignored_value",
           "charset": "us-ascii",

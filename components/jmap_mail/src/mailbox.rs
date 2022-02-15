@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use jmap_store::changes::JMAPLocalChanges;
 use jmap_store::id::JMAPIdSerialize;
+use jmap_store::local_store::JMAPLocalStore;
 use jmap_store::JMAP_MAIL;
 use jmap_store::{
     json::JSONValue, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAILBOX,
@@ -18,7 +20,7 @@ use store::{
 
 use crate::import::{bincode_deserialize, bincode_serialize};
 use crate::MessageField;
-use crate::{changes::JMAPMailLocalStoreChanges, JMAPMailIdImpl};
+use crate::{JMAPMailIdImpl, JMAPMailMailbox};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JMAPMailbox {
@@ -67,7 +69,10 @@ impl JMAPMailboxProperties {
     }
 }
 
-pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'x> {
+impl<'x, T> JMAPMailMailbox<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
     fn mailbox_set(
         &'x self,
         request: JMAPSet,
@@ -82,7 +87,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
         let total_changes = request.create.to_object().map_or(0, |c| c.len())
             + request.update.to_object().map_or(0, |c| c.len())
             + request.destroy.to_array().map_or(0, |c| c.len());
-        if total_changes > self.get_config().jmap_mail_options.mailbox_set_max_changes {
+        if total_changes > self.mail_config.mailbox_set_max_changes {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -91,25 +96,23 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
             old_state,
             ..Default::default()
         };
-        let document_ids = self.get_document_ids(request.account_id, JMAP_MAILBOX)?;
+        let document_ids = self
+            .store
+            .get_document_ids(request.account_id, JMAP_MAILBOX)?;
 
         if let JSONValue::Object(create) = request.create {
             let mut created = HashMap::with_capacity(create.len());
             let mut not_created = HashMap::with_capacity(create.len());
-            let mut assigned_id =
-                self.assign_document_id(request.account_id, JMAP_MAILBOX, None)?;
 
             'create: for (pos, (create_id, properties)) in create.into_iter().enumerate() {
-                if document_ids.len() + pos + 1
-                    > self.get_config().jmap_mail_options.mailbox_max_total
-                {
+                if document_ids.len() + pos + 1 > self.mail_config.mailbox_max_total {
                     not_created.insert(
                         create_id,
                         JSONValue::new_error(
                             JMAPSetErrorType::Forbidden,
                             format!(
                                 "Too many mailboxes (max {})",
-                                self.get_config().jmap_mail_options.mailbox_max_total
+                                self.mail_config.mailbox_max_total
                             ),
                         ),
                     );
@@ -123,7 +126,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
                     None,
                     properties,
                     &request.destroy,
-                    self.get_config().jmap_mail_options.mailbox_max_depth,
+                    self.mail_config.mailbox_max_depth,
                 )? {
                     Ok(mailbox) => mailbox,
                     Err(err) => {
@@ -139,8 +142,9 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
                     sort_order: mailbox.sort_order.unwrap_or(0),
                 };
 
-                assigned_id =
-                    self.assign_document_id(request.account_id, JMAP_MAILBOX, assigned_id.into())?;
+                let assigned_id = self
+                    .store
+                    .assign_document_id(request.account_id, JMAP_MAILBOX)?;
                 let mut document = DocumentWriter::insert(JMAP_MAILBOX, assigned_id.clone());
 
                 document.text(
@@ -232,6 +236,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
 
                 let mut mailbox: JMAPMailbox = bincode_deserialize(
                     &self
+                        .store
                         .get_document_value::<Vec<u8>>(
                             request.account_id,
                             JMAP_MAILBOX,
@@ -250,7 +255,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
                     (&mailbox).into(),
                     properties,
                     &request.destroy,
-                    self.get_config().jmap_mail_options.mailbox_max_depth,
+                    self.mail_config.mailbox_max_depth,
                 )? {
                     Ok(mailbox) => mailbox,
                     Err(err) => {
@@ -359,6 +364,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
                         if document_ids.contains(document_id) {
                             // Verify that this mailbox does not have sub-mailboxes
                             if !self
+                                .store
                                 .query(
                                     request.account_id,
                                     JMAP_MAILBOX,
@@ -382,7 +388,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
                             }
 
                             // Verify that the mailbox is empty
-                            if let Some(message_doc_ids) = self.get_tag(
+                            if let Some(message_doc_ids) = self.store.get_tag(
                                 request.account_id,
                                 JMAP_MAIL,
                                 MessageField::Mailbox.into(),
@@ -405,6 +411,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
 
                                 // Obtain thread ids for all messages to be deleted
                                 for (thread_id, message_doc_id) in self
+                                    .store
                                     .get_multi_document_value(
                                         request.account_id,
                                         JMAP_MAIL,
@@ -453,7 +460,7 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
         }
 
         if !changes.is_empty() {
-            self.update_documents(request.account_id, changes, JMAP_MAILBOX.into())?;
+            self.store.update_documents(request.account_id, changes)?;
             response.new_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
         } else {
             response.new_state = response.old_state.clone();
@@ -464,15 +471,18 @@ pub trait JMAPMailLocalStoreMailbox<'x>: Store<'x> + JMAPMailLocalStoreChanges<'
 }
 
 #[allow(clippy::blocks_in_if_conditions)]
-fn validate_properties<'x>(
-    store: &'x impl Store<'x>,
+fn validate_properties<'x, T>(
+    store: &'x JMAPLocalStore<T>,
     account_id: AccountId,
     mailbox_id: Option<JMAPId>,
     current_mailbox: Option<&JMAPMailbox>,
     properties: JSONValue,
     destroy_ids: &JSONValue,
     max_nest_level: usize,
-) -> jmap_store::Result<Result<JMAPMailboxSet, JSONValue>> {
+) -> jmap_store::Result<Result<JMAPMailboxSet, JSONValue>>
+where
+    T: Store<'x>,
+{
     let mut mailbox = JMAPMailboxSet::default();
 
     for (property, value) in if let Some(properties) = properties.unwrap_object() {
@@ -561,6 +571,7 @@ fn validate_properties<'x>(
 
                 mailbox_parent_id = bincode_deserialize::<JMAPMailbox>(
                     &store
+                        .store
                         .get_document_value::<Vec<u8>>(
                             account_id,
                             JMAP_MAILBOX,
@@ -592,6 +603,7 @@ fn validate_properties<'x>(
     // Verify that the mailbox role is unique.
     if let Some(mailbox_role) = &mailbox.role {
         if !store
+            .store
             .query(
                 account_id,
                 JMAP_MAILBOX,
@@ -625,7 +637,7 @@ fn validate_properties<'x>(
         } else {
             0.into()
         } {
-            for document_id in store.query(
+            for document_id in store.store.query(
                 account_id,
                 JMAP_MAILBOX,
                 Filter::new_condition(
@@ -637,6 +649,7 @@ fn validate_properties<'x>(
             )? {
                 if &bincode_deserialize::<JMAPMailbox>(
                     &store
+                        .store
                         .get_document_value::<Vec<u8>>(
                             account_id,
                             JMAP_MAILBOX,

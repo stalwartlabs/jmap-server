@@ -10,6 +10,7 @@ use jmap_store::{
     blob::JMAPLocalBlobStore,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
+    local_store::JMAPLocalStore,
     JMAPError,
 };
 use mail_parser::{
@@ -36,11 +37,11 @@ use crate::{
         transform_rfc_header,
     },
     JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailMimeHeaders,
-    JMAPMailProperties, JMAPMailStoreGetArguments, MessageData, MessageField, MessageOutline,
-    MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
+    JMAPMailParse, JMAPMailProperties, JMAPMailStoreGetArguments, MessageData, MessageField,
+    MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
-pub struct JMAPMailParse<'x> {
+pub struct JMAPMailParseRequest<'x> {
     pub account_id: AccountId,
     pub blob_ids: Vec<BlobId>,
     pub properties: Vec<JMAPMailProperties<'x>>,
@@ -53,17 +54,19 @@ pub struct JMAPMailParseResponse {
     pub not_parsable: JSONValue,
     pub not_found: JSONValue,
 }
-
-pub trait JMAPMailLocalStoreParse<'x>: Store<'x> + JMAPLocalBlobStore<'x> {
+impl<'x, T> JMAPMailParse<'x> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
     fn mail_parse(
         &'x self,
-        mut request: JMAPMailParse<'x>,
+        mut request: JMAPMailParseRequest<'x>,
     ) -> jmap_store::Result<JMAPMailParseResponse> {
         let mut parsed = HashMap::new();
         let mut not_parsable = Vec::new();
         let mut not_found = Vec::new();
 
-        if request.blob_ids.len() > self.get_config().jmap_mail_options.parse_max_items {
+        if request.blob_ids.len() > self.mail_config.parse_max_items {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -203,7 +206,7 @@ fn build_message_response(
     mut message: Message,
     raw_message: &[u8],
     blob_id: &BlobId,
-    request: &JMAPMailParse,
+    request: &JMAPMailParseRequest,
 ) -> JSONValue {
     let mut total_parts = message.parts.len();
     let mut mime_parts = Vec::with_capacity(total_parts + 1);
