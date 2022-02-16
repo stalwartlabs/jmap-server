@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap_mail::{
-    get::JMAPMailStoreGetArguments,
+    get::JMAPMailGetArguments,
     import::JMAPMailLocalStoreImport,
     parse::{get_message_blob, JMAPMailParseRequest},
     JMAPMailBodyProperties, JMAPMailGet, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailParse,
@@ -17,7 +17,7 @@ use jmap_store::{
 use mail_parser::{HeaderName, RfcHeader};
 use store::Store;
 
-use crate::jmap_mail_get::UntaggedJSONValue;
+use crate::jmap_mail_get::SortedJSONValue;
 
 pub fn test_jmap_mail_parse<T>(mail_store: JMAPLocalStore<T>)
 where
@@ -34,35 +34,27 @@ where
 
         let blob_id = BlobId::from_jmap_string(
             &mail_store
-                .mail_get(
-                    JMAPGet {
-                        account_id: 0,
-                        ids: vec![mail_store
-                            .mail_import_blob(
-                                0,
-                                &fs::read(&test_file).unwrap(),
-                                vec![],
-                                vec![],
-                                None,
-                            )
-                            .unwrap()
-                            .unwrap_object()
-                            .unwrap()
-                            .get("id")
-                            .unwrap()
-                            .to_jmap_id()
-                            .unwrap()]
-                        .into(),
-                        properties: vec![JMAPMailProperties::Attachments].into(),
-                    },
-                    JMAPMailStoreGetArguments {
+                .mail_get(JMAPGet {
+                    account_id: 0,
+                    ids: vec![mail_store
+                        .mail_import_blob(0, &fs::read(&test_file).unwrap(), vec![], vec![], None)
+                        .unwrap()
+                        .unwrap_object()
+                        .unwrap()
+                        .get("id")
+                        .unwrap()
+                        .to_jmap_id()
+                        .unwrap()]
+                    .into(),
+                    properties: vec![JMAPMailProperties::Attachments].into(),
+                    arguments: JMAPMailGetArguments {
                         body_properties: vec![JMAPMailBodyProperties::BlobId],
                         fetch_text_body_values: false,
                         fetch_html_body_values: false,
                         fetch_all_body_values: false,
                         max_body_value_bytes: 100,
                     },
-                )
+                })
                 .unwrap()
                 .list
                 .unwrap_array()
@@ -117,7 +109,7 @@ where
                     JMAPMailProperties::Attachments,
                     JMAPMailProperties::BodyStructure,
                 ],
-                arguments: JMAPMailStoreGetArguments {
+                arguments: JMAPMailGetArguments {
                     body_properties: vec![
                         JMAPMailBodyProperties::PartId,
                         JMAPMailBodyProperties::BlobId,
@@ -172,7 +164,7 @@ where
 
                 test_file.set_extension(format!(
                     "part{}",
-                    part.get("partId").unwrap().to_number().unwrap()
+                    part.get("partId").unwrap().to_unsigned_int().unwrap()
                 ));
 
                 //fs::write(&test_file, inner_blob).unwrap();
@@ -185,13 +177,13 @@ where
 
         /*fs::write(
             test_file,
-            &serde_json::to_string_pretty(&UntaggedJSONValue::from(result)).unwrap(),
+            &serde_json::to_string_pretty(&SortedJSONValue::from(result)).unwrap(),
         )
         .unwrap();*/
 
         assert_eq!(
-            UntaggedJSONValue::from(result),
-            serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
+            SortedJSONValue::from(result),
+            serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
         );
     }
 
@@ -387,7 +379,7 @@ where
                     account_id: 0,
                     blob_ids: vec![blob_id.clone()],
                     properties: vec![property],
-                    arguments: JMAPMailStoreGetArguments {
+                    arguments: JMAPMailGetArguments {
                         body_properties: vec![
                             JMAPMailBodyProperties::Size,
                             JMAPMailBodyProperties::Name,
@@ -429,12 +421,12 @@ where
 
     /*fs::write(
         test_file,
-        &serde_json::to_string_pretty(&UntaggedJSONValue::from(JSONValue::Object(result))).unwrap(),
+        &serde_json::to_string_pretty(&SortedJSONValue::from(JSONValue::Object(result))).unwrap(),
     )
     .unwrap();*/
 
     assert_eq!(
-        UntaggedJSONValue::from(JSONValue::Object(result)),
-        serde_json::from_slice::<UntaggedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
+        SortedJSONValue::from(JSONValue::Object(result)),
+        serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
     );
 }

@@ -12,6 +12,7 @@ store_rocksdb = { path = "components/store_rocksdb" }
 rayon = "1.5.1"
 num_cpus = "1.13.1"
 actix-web = "4.0.0-rc.1"
+tokio = { version = "1.16.1", features = ["sync"] }
 env_logger = "0.9.0"
 
 [workspace]

@@ -1,3 +1,5 @@
+pub mod jmap;
+
 use actix_web::{get, middleware, post, web, App, HttpResponse, HttpServer, Responder};
 use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPStoreConfig};
 use store::Store;
@@ -8,15 +10,14 @@ struct JMAPServer<T> {
     pub worker_pool: rayon::ThreadPool,
 }
 
-#[post("/test")]
+//#[post("/.well-known/jmap")]
+//#[get("/.well-known/jmap")]
+
+#[post("/api")]
 async fn index(
     request: web::Json<JSONValue>,
     server: web::Data<JMAPServer<RocksDBStore>>,
 ) -> HttpResponse {
-    server.worker_pool.spawn(|| {
-        println!("Started a thread!");
-    });
-    println!("{:?}", request);
     HttpResponse::Ok().json(request.0)
 }
 
@@ -45,6 +46,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
+            .app_data(web::JsonConfig::default().limit(10000000))
             .app_data(jmap_server.clone())
             .service(index)
     })

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use store::{
     leb128::Leb128, AccountId, ChangeLogEntry, ChangeLogId, ChangeLogQuery, CollectionId, Store,
@@ -7,9 +7,76 @@ use store::{
 
 use crate::{
     id::{hex_reader, HexWriter, JMAPIdSerialize},
+    json::JSONValue,
     local_store::JMAPLocalStore,
-    JMAPChangesResponse,
+    JMAPId,
 };
+
+pub struct JMAPChangesRequest {
+    pub account: AccountId,
+    pub since_state: JMAPState,
+    pub max_changes: usize,
+}
+
+#[derive(Debug)]
+pub struct JMAPQueryChangesResponseItem {
+    pub id: JMAPId,
+    pub index: usize,
+}
+
+#[derive(Debug)]
+pub struct JMAPQueryChangesResponse {
+    pub old_query_state: JMAPState,
+    pub new_query_state: JMAPState,
+    pub total: usize,
+    pub removed: Vec<JMAPId>,
+    pub added: Vec<JMAPQueryChangesResponseItem>,
+}
+
+#[derive(Debug)]
+pub struct JMAPChangesResponse {
+    pub old_state: JMAPState,
+    pub new_state: JMAPState,
+    pub has_more_changes: bool,
+    pub total_changes: usize,
+    pub created: HashSet<ChangeLogId>,
+    pub updated: HashSet<ChangeLogId>,
+    pub destroyed: HashSet<ChangeLogId>,
+}
+
+impl From<JMAPChangesResponse> for JSONValue {
+    fn from(r: JMAPChangesResponse) -> Self {
+        let mut obj = HashMap::new();
+        obj.insert("oldState".to_string(), r.old_state.into());
+        obj.insert("newState".to_string(), r.new_state.into());
+        obj.insert("hasMoreChanges".to_string(), r.has_more_changes.into());
+        obj.insert(
+            "created".to_string(),
+            r.created
+                .into_iter()
+                .map(|id| id.to_jmap_string().into())
+                .collect::<Vec<JSONValue>>()
+                .into(),
+        );
+        obj.insert(
+            "updated".to_string(),
+            r.updated
+                .into_iter()
+                .map(|id| id.to_jmap_string().into())
+                .collect::<Vec<JSONValue>>()
+                .into(),
+        );
+        obj.insert(
+            "destroyed".to_string(),
+            r.destroyed
+                .into_iter()
+                .map(|id| id.to_jmap_string().into())
+                .collect::<Vec<JSONValue>>()
+                .into(),
+        );
+        obj.into()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
@@ -97,6 +164,12 @@ impl JMAPIdSerialize for JMAPState {
                 writer.result
             }
         }
+    }
+}
+
+impl From<JMAPState> for JSONValue {
+    fn from(state: JMAPState) -> Self {
+        JSONValue::String(state.to_jmap_string())
     }
 }
 

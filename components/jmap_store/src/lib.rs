@@ -4,12 +4,13 @@ pub mod id;
 pub mod json;
 pub mod local_store;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use changes::JMAPState;
+use id::JMAPIdSerialize;
 use json::JSONValue;
 use nlp::Language;
-use store::{AccountId, ChangeLogId, StoreError};
+use store::{AccountId, StoreError};
 
 pub const JMAP_MAIL: u8 = 0;
 pub const JMAP_MAILBOX: u8 = 1;
@@ -38,7 +39,7 @@ impl From<StoreError> for JMAPError {
 pub type Result<T> = std::result::Result<T, JMAPError>;
 
 #[derive(Debug, Clone)]
-pub struct JMAPQuery<T, U> {
+pub struct JMAPQuery<T, U, V> {
     pub account_id: AccountId,
     pub filter: JMAPFilter<T>,
     pub sort: Vec<JMAPComparator<U>>,
@@ -47,10 +48,11 @@ pub struct JMAPQuery<T, U> {
     pub anchor_offset: i32,
     pub limit: usize,
     pub calculate_total: bool,
+    pub arguments: V,
 }
 
 #[derive(Debug, Clone)]
-pub struct JMAPQueryChanges<T, U> {
+pub struct JMAPQueryChanges<T, U, V> {
     pub account_id: AccountId,
     pub filter: JMAPFilter<T>,
     pub sort: Vec<JMAPComparator<U>>,
@@ -58,29 +60,51 @@ pub struct JMAPQueryChanges<T, U> {
     pub max_changes: usize,
     pub up_to_id: Option<JMAPId>,
     pub calculate_total: bool,
+    pub arguments: V,
 }
 
 #[derive(Debug)]
 pub struct JMAPQueryResponse {
+    pub account_id: AccountId,
     pub query_state: JMAPState,
     pub is_immutable: bool,
+    pub include_total: bool,
+    pub position: usize,
     pub total: usize,
+    pub limit: usize,
     pub ids: Vec<JMAPId>,
 }
 
-#[derive(Debug)]
-pub struct JMAPQueryChangesResponseItem {
-    pub id: JMAPId,
-    pub index: usize,
-}
-
-#[derive(Debug)]
-pub struct JMAPQueryChangesResponse {
-    pub old_query_state: JMAPState,
-    pub new_query_state: JMAPState,
-    pub total: usize,
-    pub removed: Vec<JMAPId>,
-    pub added: Vec<JMAPQueryChangesResponseItem>,
+impl From<JMAPQueryResponse> for JSONValue {
+    fn from(value: JMAPQueryResponse) -> Self {
+        let mut obj = HashMap::new();
+        obj.insert(
+            "accountId".to_string(),
+            (value.account_id as JMAPId).to_jmap_string().into(),
+        );
+        obj.insert("canCalculateChanges".to_string(), true.into());
+        obj.insert(
+            "queryState".to_string(),
+            value.query_state.to_jmap_string().into(),
+        );
+        if value.include_total {
+            obj.insert("total".to_string(), value.total.into());
+        }
+        if value.limit > 0 && value.total > value.limit {
+            obj.insert("limit".to_string(), value.limit.into());
+        }
+        obj.insert("position".to_string(), value.position.into());
+        obj.insert(
+            "ids".to_string(),
+            value
+                .ids
+                .into_iter()
+                .map(|id| id.to_jmap_string().into())
+                .collect::<Vec<JSONValue>>()
+                .into(),
+        );
+        obj.into()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -156,23 +180,13 @@ impl<T> JMAPFilter<T> {
 }
 
 #[derive(Debug)]
-pub struct JMAPChangesResponse {
-    pub old_state: JMAPState,
-    pub new_state: JMAPState,
-    pub has_more_changes: bool,
-    pub total_changes: usize,
-    pub created: HashSet<ChangeLogId>,
-    pub updated: HashSet<ChangeLogId>,
-    pub destroyed: HashSet<ChangeLogId>,
-}
-
-#[derive(Debug)]
-pub struct JMAPSet {
+pub struct JMAPSet<U> {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
     pub create: JSONValue,
     pub update: JSONValue,
     pub destroy: JSONValue,
+    pub arguments: U,
 }
 
 #[derive(Debug)]
@@ -222,6 +236,21 @@ pub struct JMAPSetResponse {
     pub not_destroyed: JSONValue,
 }
 
+impl From<JMAPSetResponse> for JSONValue {
+    fn from(value: JMAPSetResponse) -> Self {
+        let mut obj = HashMap::new();
+        obj.insert("oldState".to_string(), value.old_state.into());
+        obj.insert("newState".to_string(), value.new_state.into());
+        obj.insert("created".to_string(), value.created);
+        obj.insert("updated".to_string(), value.updated);
+        obj.insert("destroyed".to_string(), value.destroyed);
+        obj.insert("notCreated".to_string(), value.not_created);
+        obj.insert("notUpdated".to_string(), value.not_updated);
+        obj.insert("notDestroyed".to_string(), value.not_destroyed);
+        obj.into()
+    }
+}
+
 impl JSONValue {
     pub fn new_error(error_type: JMAPSetErrorType, description: impl Into<String>) -> Self {
         let mut o = HashMap::with_capacity(2);
@@ -254,10 +283,11 @@ impl JSONValue {
     }
 }
 
-pub struct JMAPGet<T> {
+pub struct JMAPGet<T, U> {
     pub account_id: AccountId,
     pub ids: Option<Vec<JMAPId>>,
     pub properties: Option<Vec<T>>,
+    pub arguments: U,
 }
 
 #[derive(Debug)]
@@ -265,6 +295,27 @@ pub struct JMAPGetResponse {
     pub state: JMAPState,
     pub list: JSONValue,
     pub not_found: Option<Vec<JMAPId>>,
+}
+
+impl From<JMAPGetResponse> for JSONValue {
+    fn from(value: JMAPGetResponse) -> Self {
+        let mut obj = HashMap::new();
+        obj.insert("state".to_string(), value.state.into());
+        obj.insert("list".to_string(), value.list);
+        obj.insert(
+            "notFound".to_string(),
+            if let Some(not_found) = value.not_found {
+                not_found
+                    .into_iter()
+                    .map(|id| id.to_jmap_string().into())
+                    .collect::<Vec<JSONValue>>()
+                    .into()
+            } else {
+                JSONValue::Null
+            },
+        );
+        obj.into()
+    }
 }
 
 pub struct JMAPMailConfig {

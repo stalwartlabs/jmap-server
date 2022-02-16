@@ -26,7 +26,7 @@ use store::{leb128::Leb128, DocumentSet};
 use store::{BlobEntry, DocumentId, Store, StoreError, Tag};
 
 use crate::{
-    import::bincode_deserialize,
+    import::{bincode_deserialize, messagepack_deserialize},
     parse::{
         header_to_jmap_address, header_to_jmap_date, header_to_jmap_id, header_to_jmap_text,
         header_to_jmap_url,
@@ -38,7 +38,7 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
-pub struct JMAPMailStoreGetArguments<'x> {
+pub struct JMAPMailGetArguments<'x> {
     pub body_properties: Vec<JMAPMailBodyProperties<'x>>,
     pub fetch_text_body_values: bool,
     pub fetch_html_body_values: bool,
@@ -79,8 +79,7 @@ where
 {
     fn mail_get(
         &self,
-        request: JMAPGet<JMAPMailProperties<'x>>,
-        mut arguments: JMAPMailStoreGetArguments<'x>,
+        request: JMAPGet<JMAPMailProperties<'x>, JMAPMailGetArguments<'x>>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
         let properties = request.properties.unwrap_or_else(|| {
             vec![
@@ -111,6 +110,7 @@ where
             ]
         });
 
+        let mut arguments = request.arguments;
         if arguments.body_properties.is_empty() {
             arguments.body_properties = vec![
                 JMAPMailBodyProperties::PartId,
@@ -213,7 +213,7 @@ where
             let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
                 .ok_or(StoreError::DataCorruption)?;
 
-            let mut message_data = bincode_deserialize::<MessageData>(
+            let mut message_data = messagepack_deserialize::<MessageData>(
                 &message_data_bytes[read_bytes..read_bytes + message_data_len],
             )?;
             let (message_raw, mut message_outline) = match &fetch_raw {
@@ -418,7 +418,7 @@ where
                                                 match tag {
                                                     Tag::Static(_) => "todo!()".to_string(), //TODO map static keywords
                                                     Tag::Id(_) => "todo!()".to_string(),
-                                                    Tag::Text(text) => text.to_string(),
+                                                    Tag::Text(text) => text,
                                                 },
                                                 JSONValue::Bool(true),
                                             )
@@ -644,7 +644,7 @@ where
                 }
             }
 
-            results.push(JSONValue::Object(result));
+            results.push(result.into());
         }
 
         Ok(JMAPGetResponse {
@@ -666,7 +666,7 @@ where
 pub fn add_body_value(
     mime_part: &MimePart,
     body_text: String,
-    arguments: &JMAPMailStoreGetArguments,
+    arguments: &JMAPMailGetArguments,
 ) -> JSONValue {
     let mut body_value = HashMap::with_capacity(3);
     body_value.insert(
@@ -906,7 +906,7 @@ fn add_body_part<'x, 'y>(
             }
             JMAPMailBodyProperties::PartId => {
                 if let Some(part_id) = part_id {
-                    body_part.insert("partId".into(), JSONValue::Number(part_id as i64));
+                    body_part.insert("partId".into(), part_id.into());
                 }
             }
             _ => (),

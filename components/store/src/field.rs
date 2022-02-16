@@ -18,7 +18,7 @@ pub enum UpdateField<'x> {
     Binary(Field<Cow<'x, [u8]>>),
     Integer(Field<Integer>),
     LongInteger(Field<LongInteger>),
-    Tag(Field<Tag<'x>>),
+    Tag(Field<Tag>),
     Float(Field<Float>),
 }
 
@@ -126,7 +126,7 @@ impl<T> Field<T> {
     }
 }
 
-impl<'x> Tag<'x> {
+impl Tag {
     pub fn len(&self) -> usize {
         match self {
             Tag::Static(_) => std::mem::size_of::<TagId>(),

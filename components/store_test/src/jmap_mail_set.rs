@@ -1,31 +1,31 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap_mail::{
-    get::JMAPMailStoreGetArguments, parse::get_message_blob, JMAPMailBodyProperties, JMAPMailGet,
+    get::JMAPMailGetArguments, parse::get_message_blob, JMAPMailBodyProperties, JMAPMailGet,
     JMAPMailProperties, JMAPMailSet,
 };
 use jmap_store::{
     blob::JMAPLocalBlobStore,
     id::{BlobId, JMAPIdSerialize},
-    json::JSONValue,
+    json::{JSONNumber, JSONValue},
     local_store::JMAPLocalStore,
     JMAPGet, JMAPId, JMAPSet, JMAP_MAILBOX,
 };
 use store::{batch::DocumentWriter, Store};
 
-use crate::jmap_mail_get::UntaggedJSONValue;
+use crate::jmap_mail_get::SortedJSONValue;
 
-impl<'x> From<UntaggedJSONValue> for JSONValue {
-    fn from(value: UntaggedJSONValue) -> Self {
+impl<'x> From<SortedJSONValue> for JSONValue {
+    fn from(value: SortedJSONValue) -> Self {
         match value {
-            UntaggedJSONValue::Null => JSONValue::Null,
-            UntaggedJSONValue::Bool(b) => JSONValue::Bool(b),
-            UntaggedJSONValue::String(s) => JSONValue::String(s),
-            UntaggedJSONValue::Number(n) => JSONValue::Number(n),
-            UntaggedJSONValue::Array(a) => {
+            SortedJSONValue::Null => JSONValue::Null,
+            SortedJSONValue::Bool(b) => JSONValue::Bool(b),
+            SortedJSONValue::String(s) => JSONValue::String(s),
+            SortedJSONValue::Number(n) => JSONValue::Number(JSONNumber::PosInt(n)),
+            SortedJSONValue::Array(a) => {
                 JSONValue::Array(a.into_iter().map(JSONValue::from).collect())
             }
-            UntaggedJSONValue::Object(o) => JSONValue::Object(
+            SortedJSONValue::Object(o) => JSONValue::Object(
                 o.into_iter()
                     .map(|(k, v)| (k, JSONValue::from(v)))
                     .collect(),
@@ -159,7 +159,7 @@ where
                     vec![(
                         "1".to_string(),
                         JSONValue::from(
-                            serde_json::from_slice::<UntaggedJSONValue>(
+                            serde_json::from_slice::<SortedJSONValue>(
                                 &fs::read(&file_name).unwrap(),
                             )
                             .unwrap(),
@@ -179,6 +179,7 @@ where
                 .into(),
                 update: JSONValue::Null,
                 destroy: JSONValue::Null,
+                arguments: (),
             })
             .unwrap();
 
@@ -207,41 +208,39 @@ where
         let jmap_id = JMAPId::from_jmap_string(&jmap_id_str).unwrap();
         message_ids.push(jmap_id_str);
 
-        let parsed_message = UntaggedJSONValue::from(
+        let parsed_message = SortedJSONValue::from(
             mail_store
-                .mail_get(
-                    JMAPGet {
-                        account_id: 0,
-                        ids: vec![jmap_id].into(),
-                        properties: vec![
-                            JMAPMailProperties::Id,
-                            JMAPMailProperties::BlobId,
-                            JMAPMailProperties::ThreadId,
-                            JMAPMailProperties::MailboxIds,
-                            JMAPMailProperties::Keywords,
-                            JMAPMailProperties::ReceivedAt,
-                            JMAPMailProperties::MessageId,
-                            JMAPMailProperties::InReplyTo,
-                            JMAPMailProperties::References,
-                            JMAPMailProperties::Sender,
-                            JMAPMailProperties::From,
-                            JMAPMailProperties::To,
-                            JMAPMailProperties::Cc,
-                            JMAPMailProperties::Bcc,
-                            JMAPMailProperties::ReplyTo,
-                            JMAPMailProperties::Subject,
-                            JMAPMailProperties::SentAt,
-                            JMAPMailProperties::HasAttachment,
-                            JMAPMailProperties::Preview,
-                            JMAPMailProperties::BodyValues,
-                            JMAPMailProperties::TextBody,
-                            JMAPMailProperties::HtmlBody,
-                            JMAPMailProperties::Attachments,
-                            JMAPMailProperties::BodyStructure,
-                        ]
-                        .into(),
-                    },
-                    JMAPMailStoreGetArguments {
+                .mail_get(JMAPGet {
+                    account_id: 0,
+                    ids: vec![jmap_id].into(),
+                    properties: vec![
+                        JMAPMailProperties::Id,
+                        JMAPMailProperties::BlobId,
+                        JMAPMailProperties::ThreadId,
+                        JMAPMailProperties::MailboxIds,
+                        JMAPMailProperties::Keywords,
+                        JMAPMailProperties::ReceivedAt,
+                        JMAPMailProperties::MessageId,
+                        JMAPMailProperties::InReplyTo,
+                        JMAPMailProperties::References,
+                        JMAPMailProperties::Sender,
+                        JMAPMailProperties::From,
+                        JMAPMailProperties::To,
+                        JMAPMailProperties::Cc,
+                        JMAPMailProperties::Bcc,
+                        JMAPMailProperties::ReplyTo,
+                        JMAPMailProperties::Subject,
+                        JMAPMailProperties::SentAt,
+                        JMAPMailProperties::HasAttachment,
+                        JMAPMailProperties::Preview,
+                        JMAPMailProperties::BodyValues,
+                        JMAPMailProperties::TextBody,
+                        JMAPMailProperties::HtmlBody,
+                        JMAPMailProperties::Attachments,
+                        JMAPMailProperties::BodyStructure,
+                    ]
+                    .into(),
+                    arguments: JMAPMailGetArguments {
                         body_properties: vec![
                             JMAPMailBodyProperties::PartId,
                             JMAPMailBodyProperties::BlobId,
@@ -260,7 +259,7 @@ where
                         fetch_all_body_values: true,
                         max_body_value_bytes: 100,
                     },
-                )
+                })
                 .unwrap()
                 .list,
         );
@@ -303,7 +302,7 @@ fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
         .map(|(jmap_id, bytes)| {
             (
                 jmap_id,
-                JSONValue::from(serde_json::from_slice::<UntaggedJSONValue>(bytes).unwrap()),
+                JSONValue::from(serde_json::from_slice::<SortedJSONValue>(bytes).unwrap()),
             )
         })
         .collect::<HashMap<String, JSONValue>>()
@@ -318,21 +317,18 @@ where
     T: Store<'x>,
 {
     let mut result = mail_store
-        .mail_get(
-            JMAPGet {
-                account_id: 0,
-                ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
-                properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords]
-                    .into(),
-            },
-            JMAPMailStoreGetArguments {
+        .mail_get(JMAPGet {
+            account_id: 0,
+            ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
+            properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords].into(),
+            arguments: JMAPMailGetArguments {
                 body_properties: vec![],
                 fetch_text_body_values: false,
                 fetch_html_body_values: false,
                 fetch_all_body_values: false,
                 max_body_value_bytes: 100,
             },
-        )
+        })
         .unwrap()
         .list
         .unwrap_array()
@@ -387,6 +383,7 @@ where
                 )]),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
+                arguments: (),
             })
             .unwrap()
             .not_updated,
@@ -417,6 +414,7 @@ where
                 )]),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
+                arguments: (),
             })
             .unwrap()
             .not_updated,
@@ -444,6 +442,7 @@ where
                 )]),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
+                arguments: (),
             })
             .unwrap()
             .not_updated
@@ -474,6 +473,7 @@ where
                 )]),
                 create: JSONValue::Null,
                 destroy: vec![message_id_1.into()].into(),
+                arguments: (),
             })
             .unwrap()
             .not_updated
@@ -499,6 +499,7 @@ where
                 update: JSONValue::Null,
                 create: JSONValue::Null,
                 destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()].into(),
+                arguments: (),
             })
             .unwrap()
             .not_destroyed,
@@ -511,25 +512,23 @@ where
             JMAPId::from_jmap_string(&message_id_3).unwrap()
         ],
         mail_store
-            .mail_get(
-                JMAPGet {
-                    account_id: 0,
-                    ids: vec![
-                        JMAPId::from_jmap_string(&message_id_2).unwrap(),
-                        JMAPId::from_jmap_string(&message_id_3).unwrap()
-                    ]
+            .mail_get(JMAPGet {
+                account_id: 0,
+                ids: vec![
+                    JMAPId::from_jmap_string(&message_id_2).unwrap(),
+                    JMAPId::from_jmap_string(&message_id_3).unwrap()
+                ]
+                .into(),
+                properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords]
                     .into(),
-                    properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords]
-                        .into(),
-                },
-                JMAPMailStoreGetArguments {
+                arguments: JMAPMailGetArguments {
                     body_properties: vec![],
                     fetch_text_body_values: false,
                     fetch_html_body_values: false,
                     fetch_all_body_values: false,
                     max_body_value_bytes: 100,
-                },
-            )
+                }
+            },)
             .unwrap()
             .not_found
             .unwrap()

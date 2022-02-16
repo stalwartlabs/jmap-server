@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use jmap_mail::{
     import::JMAPMailLocalStoreImport,
-    query::{JMAPMailComparator, JMAPMailFilterCondition},
+    query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments},
     JMAPMailChanges, JMAPMailIdImpl, MessageField,
 };
 use jmap_store::{
@@ -151,6 +151,9 @@ where
                     max_changes: 0,
                     up_to_id: None,
                     calculate_total: false,
+                    arguments: JMAPMailQueryArguments {
+                        collapse_threads: false,
+                    },
                 },
                 JMAPQueryChanges {
                     account_id: 0,
@@ -160,6 +163,9 @@ where
                     max_changes: 0,
                     up_to_id: None,
                     calculate_total: false,
+                    arguments: JMAPMailQueryArguments {
+                        collapse_threads: false,
+                    },
                 },
                 JMAPQueryChanges {
                     account_id: 0,
@@ -169,6 +175,9 @@ where
                     max_changes: 0,
                     up_to_id: None,
                     calculate_total: false,
+                    arguments: JMAPMailQueryArguments {
+                        collapse_threads: false,
+                    },
                 },
                 JMAPQueryChanges {
                     account_id: 0,
@@ -178,6 +187,9 @@ where
                     max_changes: 0,
                     up_to_id: id_map.get(&7).copied(),
                     calculate_total: false,
+                    arguments: JMAPMailQueryArguments {
+                        collapse_threads: false,
+                    },
                 },
             ]
             .into_iter()
@@ -186,7 +198,7 @@ where
                 if test_num == 3 && query.up_to_id.is_none() {
                     continue;
                 }
-                let changes = mail_store.mail_query_changes(query.clone(), false).unwrap();
+                let changes = mail_store.mail_query_changes(query.clone()).unwrap();
 
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.

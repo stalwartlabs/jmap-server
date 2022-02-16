@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use jmap_store::{
-    changes::{JMAPLocalChanges, JMAPState},
+    changes::{JMAPChangesRequest, JMAPChangesResponse, JMAPLocalChanges},
     id::JMAPIdSerialize,
     json::JSONValue,
     local_store::JMAPLocalStore,
-    JMAPChangesResponse, JMAPError, JMAPGet, JMAPGetResponse, JMAPId, JMAP_MAIL, JMAP_THREAD,
+    JMAPError, JMAPGet, JMAPGetResponse, JMAPId, JMAP_MAIL, JMAP_THREAD,
 };
 use store::{Comparator, DocumentSet, FieldComparator, Filter, Store, Tag};
 
@@ -17,7 +17,7 @@ where
 {
     fn thread_get(
         &'x self,
-        request: JMAPGet<JMAPMailProperties<'x>>,
+        request: JMAPGet<JMAPMailProperties<'x>, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
         let thread_ids = request.ids.unwrap_or_else(Vec::new);
 
@@ -79,11 +79,14 @@ where
 
     fn thread_changes(
         &'x self,
-        account: store::AccountId,
-        since_state: JMAPState,
-        max_changes: usize,
+        request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse> {
-        self.get_jmap_changes(account, JMAP_THREAD, since_state, max_changes)
-            .map_err(|e| e.into())
+        self.get_jmap_changes(
+            request.account,
+            JMAP_THREAD,
+            request.since_state,
+            request.max_changes,
+        )
+        .map_err(|e| e.into())
     }
 }

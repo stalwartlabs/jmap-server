@@ -4,9 +4,9 @@ use std::{
 };
 
 use jmap_mail::{
-    get::JMAPMailStoreGetArguments,
+    get::JMAPMailGetArguments,
     import::JMAPMailLocalStoreImport,
-    query::{JMAPMailComparator, JMAPMailFilterCondition, MailboxId},
+    query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments, MailboxId},
     JMAPMailGet, JMAPMailIdImpl, JMAPMailProperties, JMAPMailQuery, MessageField,
 };
 use jmap_store::{
@@ -126,17 +126,14 @@ where
                         (values_int["acquisitionYear"] + 1000) as MailboxId,
                     ],
                     vec![
-                        Tag::Text(values_str["medium"].clone().into()),
-                        Tag::Text(values_str["artistRole"].clone().into()),
-                        Tag::Text(values_str["accession_number"][0..1].into()),
-                        Tag::Text(
-                            format!(
-                                "N{}",
-                                &values_str["accession_number"]
-                                    [values_str["accession_number"].len() - 1..]
-                            )
-                            .into(),
-                        ),
+                        Tag::Text(values_str["medium"].clone()),
+                        Tag::Text(values_str["artistRole"].clone()),
+                        Tag::Text(values_str["accession_number"][0..1].to_string()),
+                        Tag::Text(format!(
+                            "N{}",
+                            &values_str["accession_number"]
+                                [values_str["accession_number"].len() - 1..]
+                        )),
                     ],
                     Some(values_int["year"] as i64),
                 )
@@ -422,19 +419,19 @@ where
     ] {
         assert_eq!(
             mail_store
-                .mail_query(
-                    JMAPQuery {
-                        account_id: 0,
-                        filter,
-                        sort,
-                        position: 0,
-                        anchor: None,
-                        anchor_offset: 0,
-                        limit: 0,
-                        calculate_total: true,
-                    },
-                    false,
-                )
+                .mail_query(JMAPQuery {
+                    account_id: 0,
+                    filter,
+                    sort,
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 0,
+                    calculate_total: true,
+                    arguments: JMAPMailQueryArguments {
+                        collapse_threads: false
+                    }
+                },)
                 .unwrap()
                 .ids
                 .into_iter()
@@ -449,7 +446,7 @@ fn test_query_options<'x, T>(mail_store: &'x JMAPLocalStore<T>)
 where
     T: Store<'x>,
 {
-    for (query, expected_results, expected_results_collapsed) in [
+    for (mut query, expected_results, expected_results_collapsed) in [
         (
             JMAPQuery {
                 account_id: 0,
@@ -463,6 +460,9 @@ where
                 anchor_offset: 0,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "N01496", "N01320", "N01321", "N05916", "N00273", "N01453", "N02984", "T08820",
@@ -486,6 +486,9 @@ where
                 anchor_offset: 0,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "N01046", "N00675", "T08891", "N00126", "T01882", "N04689", "T00925", "N00121",
@@ -509,6 +512,9 @@ where
                 anchor_offset: 0,
                 limit: 0,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "T07236", "P11481", "AR00066", "P77895", "P77896", "P77897", "AR00163", "AR00164",
@@ -532,6 +538,9 @@ where
                 anchor_offset: 0,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "P20079", "AR00024", "AR00182", "P20048", "P20044", "P20045", "P20046", "T06971",
@@ -555,6 +564,9 @@ where
                 anchor_offset: 0,
                 limit: 1,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec!["N01496"],
             vec!["N01496"],
@@ -572,6 +584,9 @@ where
                 anchor_offset: 0,
                 limit: 100000,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec!["AR00178"],
             vec!["AR00164"],
@@ -589,6 +604,9 @@ where
                 anchor_offset: 0,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "N01205", "N01976", "T01139", "N01525", "T00176", "N01405", "N02396", "N04885",
@@ -612,6 +630,9 @@ where
                 anchor_offset: 10,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "N01933", "N03618", "T03904", "N02398", "N02399", "N02688", "T01455", "N03051",
@@ -635,6 +656,9 @@ where
                 anchor_offset: -10,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![
                 "N05779", "N04652", "N01534", "A00845", "N03409", "N03410", "N02061", "N02426",
@@ -658,6 +682,9 @@ where
                 anchor_offset: -10,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec!["N01496"],
             vec!["N01496"],
@@ -675,6 +702,9 @@ where
                 anchor_offset: 10,
                 limit: 10,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec![],
             vec![],
@@ -692,6 +722,9 @@ where
                 anchor_offset: 0,
                 limit: 0,
                 calculate_total: true,
+                arguments: JMAPMailQueryArguments {
+                    collapse_threads: false,
+                },
             },
             vec!["AR00164", "AR00472", "AR00178"],
             vec!["AR00164"],
@@ -699,7 +732,7 @@ where
     ] {
         assert_eq!(
             mail_store
-                .mail_query(query.clone(), false)
+                .mail_query(query.clone())
                 .unwrap()
                 .ids
                 .into_iter()
@@ -707,9 +740,10 @@ where
                 .collect::<Vec<String>>(),
             expected_results
         );
+        query.arguments.collapse_threads = true;
         assert_eq!(
             mail_store
-                .mail_query(query, true)
+                .mail_query(query)
                 .unwrap()
                 .ids
                 .into_iter()
@@ -753,14 +787,12 @@ where
     T: Store<'x>,
 {
     mail_store
-        .mail_get(
-            JMAPGet {
-                account_id: 0,
-                ids: vec![jmap_id].into(),
-                properties: vec![JMAPMailProperties::MessageId].into(),
-            },
-            JMAPMailStoreGetArguments::default(),
-        )
+        .mail_get(JMAPGet {
+            account_id: 0,
+            ids: vec![jmap_id].into(),
+            properties: vec![JMAPMailProperties::MessageId].into(),
+            arguments: JMAPMailGetArguments::default(),
+        })
         .unwrap()
         .list
         .unwrap_array()

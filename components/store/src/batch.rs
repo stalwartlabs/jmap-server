@@ -154,7 +154,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
         )));
     }
 
-    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag<'x>, options: FieldOptions) {
+    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag, options: FieldOptions) {
         self.fields
             .push(UpdateField::Tag(Field::new(field.into(), value, options)));
     }

@@ -7,24 +7,26 @@ pub mod query;
 pub mod set;
 pub mod thread;
 
+use mailbox::{JMAPMailMailboxSetArguments, JMAPMailboxProperties};
 use parse::{JMAPMailParseRequest, JMAPMailParseResponse};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
-use get::JMAPMailStoreGetArguments;
+use get::JMAPMailGetArguments;
 use import::{JMAPMailImportRequest, JMAPMailImportResponse};
 use jmap_store::{
-    changes::{JMAPLocalChanges, JMAPState},
+    changes::{
+        JMAPChangesRequest, JMAPChangesResponse, JMAPLocalChanges, JMAPQueryChangesResponse,
+    },
     json::JSONValue,
     local_store::JMAPLocalStore,
-    JMAPChangesResponse, JMAPGet, JMAPId, JMAPQuery, JMAPQueryChanges, JMAPQueryChangesResponse,
-    JMAPQueryResponse, JMAPSet, JMAPSetResponse,
+    JMAPGet, JMAPId, JMAPQuery, JMAPQueryChanges, JMAPQueryResponse, JMAPSet, JMAPSetResponse,
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderName, MessagePartId, MessageStructure, RawHeaders, RfcHeader,
 };
 
-use query::{JMAPMailComparator, JMAPMailFilterCondition};
+use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments};
 use serde::{Deserialize, Serialize};
 use store::{BlobIndex, DocumentId, FieldId, Store, ThreadId};
 
@@ -465,42 +467,45 @@ impl<'x> Display for JMAPMailBodyProperties<'x> {
 pub trait JMAPMailImport<'x> {
     fn mail_import(
         &'x self,
-        request: JMAPMailImportRequest<'x>,
+        request: JMAPMailImportRequest,
     ) -> jmap_store::Result<JMAPMailImportResponse>;
 }
 
 pub trait JMAPMailSet<'x> {
-    fn mail_set(&'x self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse>;
+    fn mail_set(&'x self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse>;
 }
 
 pub trait JMAPMailQuery<'x> {
     fn mail_query(
         &'x self,
-        query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
-        collapse_threads: bool,
+        request: JMAPQuery<
+            JMAPMailFilterCondition<'x>,
+            JMAPMailComparator<'x>,
+            JMAPMailQueryArguments,
+        >,
     ) -> jmap_store::Result<JMAPQueryResponse>;
 }
 
 pub trait JMAPMailChanges<'x>: JMAPLocalChanges<'x> {
     fn mail_changes(
         &'x self,
-        account: store::AccountId,
-        since_state: JMAPState,
-        max_changes: usize,
+        request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse>;
 
     fn mail_query_changes(
         &'x self,
-        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
-        collapse_threads: bool,
+        request: JMAPQueryChanges<
+            JMAPMailFilterCondition<'x>,
+            JMAPMailComparator<'x>,
+            JMAPMailQueryArguments,
+        >,
     ) -> jmap_store::Result<JMAPQueryChangesResponse>;
 }
 
 pub trait JMAPMailGet<'x> {
     fn mail_get(
         &self,
-        request: JMAPGet<JMAPMailProperties<'x>>,
-        arguments: JMAPMailStoreGetArguments<'x>,
+        request: JMAPGet<JMAPMailProperties<'x>, JMAPMailGetArguments<'x>>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
 }
 
@@ -514,23 +519,25 @@ pub trait JMAPMailParse<'x> {
 pub trait JMAPMailThread<'x> {
     fn thread_get(
         &'x self,
-        request: JMAPGet<JMAPMailProperties<'x>>,
+        request: JMAPGet<JMAPMailProperties<'x>, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
 
     fn thread_changes(
         &'x self,
-        account: store::AccountId,
-        since_state: JMAPState,
-        max_changes: usize,
+        request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse>;
 }
 
 pub trait JMAPMailMailbox<'x> {
     fn mailbox_set(
         &'x self,
-        request: JMAPSet,
-        remove_emails: bool,
+        request: JMAPSet<JMAPMailMailboxSetArguments>,
     ) -> jmap_store::Result<JMAPSetResponse>;
+
+    fn mailbox_get(
+        &'x self,
+        request: JMAPGet<JMAPMailboxProperties, ()>,
+    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
 }
 
 pub trait JMAPMail<'x>:

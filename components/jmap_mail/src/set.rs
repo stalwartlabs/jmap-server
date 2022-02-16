@@ -38,7 +38,7 @@ impl<'x, T> JMAPMailSet<'x> for JMAPLocalStore<T>
 where
     T: Store<'x>,
 {
-    fn mail_set(&'x self, request: JMAPSet) -> jmap_store::Result<JMAPSetResponse> {
+    fn mail_set(&'x self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -164,8 +164,7 @@ where
                                         // Add keywords to the list
                                         for (keyword, value) in value {
                                             if let JSONValue::Bool(true) = value {
-                                                keyword_op_list
-                                                    .insert(Tag::Text(keyword.into()), true);
+                                                keyword_op_list.insert(Tag::Text(keyword), true);
                                             }
                                         }
                                         keyword_op_clear_all = true;
@@ -262,8 +261,7 @@ where
                                                     .insert(mailbox_id.get_document_id(), false);
                                             }
                                         } else {
-                                            keyword_op_list
-                                                .insert(Tag::Text(property.into()), false);
+                                            keyword_op_list.insert(Tag::Text(property), false);
                                         }
                                     }
                                     JSONValue::Bool(true) => {
@@ -275,8 +273,7 @@ where
                                                     .insert(mailbox_id.get_document_id(), true);
                                             }
                                         } else {
-                                            keyword_op_list
-                                                .insert(Tag::Text(property.into()), true);
+                                            keyword_op_list.insert(Tag::Text(property), true);
                                         }
                                     }
                                     _ => {
@@ -541,10 +538,10 @@ where
     }
 }
 
-struct MessageItem<'x> {
+struct MessageItem {
     pub blob: Vec<u8>,
     pub mailbox_ids: Vec<MailboxId>,
-    pub keywords: Vec<Tag<'x>>,
+    pub keywords: Vec<Tag>,
     pub received_at: Option<i64>,
 }
 
@@ -554,7 +551,7 @@ fn build_message<'x, 'y>(
     account: AccountId,
     fields: JSONValue,
     existing_mailboxes: &impl DocumentSet<Item = DocumentId>,
-) -> Result<MessageItem<'x>, JSONValue> {
+) -> Result<MessageItem, JSONValue> {
     let fields = if let JSONValue::Object(fields) = fields {
         fields
     } else {
@@ -623,7 +620,7 @@ fn build_message<'x, 'y>(
                             "Expected boolean value in keywords",
                         )
                     })? {
-                        keywords.push(Tag::Text(keyword.to_string().into()));
+                        keywords.push(Tag::Text(keyword.to_string()));
                     }
                 }
             }

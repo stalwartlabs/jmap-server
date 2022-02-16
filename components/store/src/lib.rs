@@ -73,14 +73,14 @@ pub enum FieldValue<'x> {
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
-    Tag(Tag<'x>),
+    Tag(Tag),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash)]
-pub enum Tag<'x> {
+pub enum Tag {
     Static(TagId),
     Id(Integer),
-    Text(Cow<'x, str>),
+    Text(String),
 }
 
 #[derive(Debug)]

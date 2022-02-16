@@ -54,6 +54,11 @@ pub enum JMAPMailComparator<'x> {
     SomeInThreadHaveKeyword(Cow<'x, str>),
 }
 
+#[derive(Debug, Clone)]
+pub struct JMAPMailQueryArguments {
+    pub collapse_threads: bool,
+}
+
 struct QueryState<'x, T>
 where
     T: DocumentSet,
@@ -69,11 +74,14 @@ where
 {
     fn mail_query(
         &'x self,
-        mut query: JMAPQuery<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
-        collapse_threads: bool,
+        mut request: JMAPQuery<
+            JMAPMailFilterCondition<'x>,
+            JMAPMailComparator<'x>,
+            JMAPMailQueryArguments,
+        >,
     ) -> jmap_store::Result<JMAPQueryResponse> {
         let mut is_immutable = true;
-        let state: Option<QueryState<T::Set>> = match query.filter {
+        let state: Option<QueryState<T::Set>> = match request.filter {
             JMAPFilter::Operator(op) => Some(QueryState {
                 op: op.operator,
                 terms: Vec::with_capacity(op.conditions.len()),
@@ -244,7 +252,7 @@ where
                                     // TODO text to id conversion
                                     state.terms.push(Filter::eq(
                                         MessageField::Keyword.into(),
-                                        FieldValue::Tag(Tag::Text(keyword)),
+                                        FieldValue::Tag(Tag::Text(keyword.into_owned())),
                                     ));
                                     if is_immutable {
                                         is_immutable = false;
@@ -253,7 +261,7 @@ where
                                 JMAPMailFilterCondition::NotKeyword(keyword) => {
                                     state.terms.push(Filter::not(vec![Filter::eq(
                                         MessageField::Keyword.into(),
-                                        FieldValue::Tag(Tag::Text(keyword)),
+                                        FieldValue::Tag(Tag::Text(keyword.into_owned())),
                                     )]));
                                     if is_immutable {
                                         is_immutable = false;
@@ -261,7 +269,11 @@ where
                                 }
                                 JMAPMailFilterCondition::AllInThreadHaveKeyword(keyword) => {
                                     state.terms.push(Filter::DocumentSet(
-                                        self.get_thread_keywords(query.account_id, keyword, true)?,
+                                        self.get_thread_keywords(
+                                            request.account_id,
+                                            keyword,
+                                            true,
+                                        )?,
                                     ));
                                     if is_immutable {
                                         is_immutable = false;
@@ -269,7 +281,11 @@ where
                                 }
                                 JMAPMailFilterCondition::SomeInThreadHaveKeyword(keyword) => {
                                     state.terms.push(Filter::DocumentSet(
-                                        self.get_thread_keywords(query.account_id, keyword, false)?,
+                                        self.get_thread_keywords(
+                                            request.account_id,
+                                            keyword,
+                                            false,
+                                        )?,
                                     ));
                                     if is_immutable {
                                         is_immutable = false;
@@ -277,7 +293,11 @@ where
                                 }
                                 JMAPMailFilterCondition::NoneInThreadHaveKeyword(keyword) => {
                                     state.terms.push(Filter::not(vec![Filter::DocumentSet(
-                                        self.get_thread_keywords(query.account_id, keyword, false)?,
+                                        self.get_thread_keywords(
+                                            request.account_id,
+                                            keyword,
+                                            false,
+                                        )?,
                                     )]));
                                     if is_immutable {
                                         is_immutable = false;
@@ -320,9 +340,9 @@ where
             Filter::None
         };
 
-        let sort = if !query.sort.is_empty() {
-            let mut terms: Vec<Comparator<T::Set>> = Vec::with_capacity(query.sort.len());
-            for comp in query.sort {
+        let sort = if !request.sort.is_empty() {
+            let mut terms: Vec<Comparator<T::Set>> = Vec::with_capacity(request.sort.len());
+            for comp in request.sort {
                 terms.push(match comp.property {
                     JMAPMailComparator::ReceivedAt => Comparator::Field(FieldComparator {
                         field: MessageField::ReceivedAt.into(),
@@ -356,10 +376,10 @@ where
                             set: self
                                 .store
                                 .get_tag(
-                                    query.account_id,
+                                    request.account_id,
                                     JMAP_MAIL,
                                     MessageField::Keyword.into(),
-                                    Tag::Text(keyword),
+                                    Tag::Text(keyword.into_owned()),
                                 )?
                                 .unwrap_or_else(DocumentSet::new),
                             ascending: comp.is_ascending,
@@ -370,7 +390,7 @@ where
                             is_immutable = false;
                         }
                         Comparator::DocumentSet(DocumentSetComparator {
-                            set: self.get_thread_keywords(query.account_id, keyword, true)?,
+                            set: self.get_thread_keywords(request.account_id, keyword, true)?,
                             ascending: comp.is_ascending,
                         })
                     }
@@ -379,7 +399,7 @@ where
                             is_immutable = false;
                         }
                         Comparator::DocumentSet(DocumentSetComparator {
-                            set: self.get_thread_keywords(query.account_id, keyword, false)?,
+                            set: self.get_thread_keywords(request.account_id, keyword, false)?,
                             ascending: comp.is_ascending,
                         })
                     }
@@ -392,14 +412,16 @@ where
 
         let doc_ids = self
             .store
-            .query(query.account_id, JMAP_MAIL, filter, sort)?;
-        let query_state = self.get_state(query.account_id, JMAP_MAIL)?;
+            .query(request.account_id, JMAP_MAIL, filter, sort)?;
+        let query_state = self.get_state(request.account_id, JMAP_MAIL)?;
         let num_results = doc_ids.len();
+        let mut start_position: usize = 0;
 
-        let results: Vec<JMAPId> = if collapse_threads || query.anchor.is_some() {
-            let has_anchor = query.anchor.is_some();
-            let results_len = if query.limit > 0 {
-                query.limit
+        let results: Vec<JMAPId> = if request.arguments.collapse_threads || request.anchor.is_some()
+        {
+            let has_anchor = request.anchor.is_some();
+            let results_len = if request.limit > 0 {
+                request.limit
             } else {
                 num_results
             };
@@ -409,12 +431,12 @@ where
 
             for doc_id in doc_ids {
                 if let Some(thread_id) = self.store.get_document_value::<ThreadId>(
-                    query.account_id,
+                    request.account_id,
                     JMAP_MAIL,
                     doc_id,
                     MessageField::ThreadId.into(),
                 )? {
-                    if collapse_threads {
+                    if request.arguments.collapse_threads {
                         if seen_threads.contains(&thread_id) {
                             continue;
                         }
@@ -423,43 +445,43 @@ where
                     let result = JMAPId::from_email(thread_id, doc_id);
 
                     if !has_anchor {
-                        if query.position >= 0 {
-                            if query.position > 0 {
-                                query.position -= 1;
+                        if request.position >= 0 {
+                            if request.position > 0 {
+                                request.position -= 1;
                             } else {
                                 results.push(result);
-                                if query.limit > 0 && results.len() == query.limit {
+                                if request.limit > 0 && results.len() == request.limit {
                                     break;
                                 }
                             }
                         } else {
                             results.push(result);
                         }
-                    } else if query.anchor_offset >= 0 {
+                    } else if request.anchor_offset >= 0 {
                         if !anchor_found {
-                            if &result != query.anchor.as_ref().unwrap() {
+                            if &result != request.anchor.as_ref().unwrap() {
                                 continue;
                             }
                             anchor_found = true;
                         }
 
-                        if query.anchor_offset > 0 {
-                            query.anchor_offset -= 1;
+                        if request.anchor_offset > 0 {
+                            request.anchor_offset -= 1;
                         } else {
                             results.push(result);
-                            if query.limit > 0 && results.len() == query.limit {
+                            if request.limit > 0 && results.len() == request.limit {
                                 break;
                             }
                         }
                     } else {
-                        anchor_found = &result == query.anchor.as_ref().unwrap();
+                        anchor_found = &result == request.anchor.as_ref().unwrap();
                         results.push(result);
 
                         if !anchor_found {
                             continue;
                         }
 
-                        query.position = query.anchor_offset;
+                        request.position = request.anchor_offset;
 
                         break;
                     }
@@ -467,17 +489,19 @@ where
             }
 
             if !has_anchor || anchor_found {
-                if query.position >= 0 {
+                if request.position >= 0 {
+                    start_position = request.position as usize;
                     results
                 } else {
-                    let position = query.position.abs() as usize;
+                    let position = request.position.abs() as usize;
                     let start_offset = if position < results.len() {
                         results.len() - position
                     } else {
                         0
                     };
-                    let end_offset = if query.limit > 0 {
-                        std::cmp::min(start_offset + query.limit, results.len())
+                    start_position = start_offset;
+                    let end_offset = if request.limit > 0 {
+                        std::cmp::min(start_offset + request.limit, results.len())
                     } else {
                         results.len()
                     };
@@ -488,42 +512,42 @@ where
                 return Err(JMAPError::AnchorNotFound);
             }
         } else {
-            let doc_ids = if query.position != 0 && query.limit > 0 {
-                doc_ids
-                    .skip(if query.position > 0 {
-                        query.position as usize
+            let doc_ids = if request.position != 0 && request.limit > 0 {
+                start_position = if request.position > 0 {
+                    request.position as usize
+                } else {
+                    let position = request.position.abs();
+                    if num_results > position as usize {
+                        num_results - position as usize
                     } else {
-                        let position = query.position.abs();
-                        if num_results > position as usize {
-                            num_results - position as usize
-                        } else {
-                            0
-                        }
-                    })
-                    .take(query.limit)
-                    .collect::<Vec<DocumentId>>()
-            } else if query.limit > 0 {
-                doc_ids.take(query.limit).collect::<Vec<DocumentId>>()
-            } else if query.position != 0 {
+                        0
+                    }
+                };
                 doc_ids
-                    .skip(if query.position > 0 {
-                        query.position as usize
-                    } else {
-                        let position = query.position.abs();
-                        if num_results > position as usize {
-                            num_results - position as usize
-                        } else {
-                            0
-                        }
-                    })
+                    .skip(start_position)
+                    .take(request.limit)
                     .collect::<Vec<DocumentId>>()
+            } else if request.limit > 0 {
+                doc_ids.take(request.limit).collect::<Vec<DocumentId>>()
+            } else if request.position != 0 {
+                start_position = if request.position > 0 {
+                    request.position as usize
+                } else {
+                    let position = request.position.abs();
+                    if num_results > position as usize {
+                        num_results - position as usize
+                    } else {
+                        0
+                    }
+                };
+                doc_ids.skip(start_position).collect::<Vec<DocumentId>>()
             } else {
                 doc_ids.collect::<Vec<DocumentId>>()
             };
 
             self.store
                 .get_multi_document_value(
-                    query.account_id,
+                    request.account_id,
                     JMAP_MAIL,
                     doc_ids.iter().copied(),
                     MessageField::ThreadId.into(),
@@ -535,8 +559,12 @@ where
         };
 
         Ok(JMAPQueryResponse {
+            account_id: request.account_id,
+            include_total: request.calculate_total,
             query_state,
+            position: start_position,
             total: num_results,
+            limit: request.limit,
             ids: results,
             is_immutable,
         })
@@ -569,7 +597,7 @@ where
             account,
             JMAP_MAIL,
             MessageField::Keyword.into(),
-            Tag::Text(keyword),
+            Tag::Text(keyword.into_owned()),
         )? {
             let mut not_matched_ids = T::Set::new();
             let mut matched_ids = T::Set::new();

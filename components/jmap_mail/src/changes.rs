@@ -1,13 +1,15 @@
 use jmap_store::{
-    changes::{JMAPLocalChanges, JMAPState},
+    changes::{
+        JMAPChangesRequest, JMAPChangesResponse, JMAPLocalChanges, JMAPQueryChangesResponse,
+        JMAPQueryChangesResponseItem,
+    },
     local_store::JMAPLocalStore,
-    JMAPChangesResponse, JMAPQuery, JMAPQueryChanges, JMAPQueryChangesResponse,
-    JMAPQueryChangesResponseItem, JMAP_MAIL,
+    JMAPQuery, JMAPQueryChanges, JMAP_MAIL,
 };
 use store::Store;
 
 use crate::{
-    query::{JMAPMailComparator, JMAPMailFilterCondition},
+    query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments},
     JMAPMailChanges, JMAPMailQuery,
 };
 
@@ -17,18 +19,24 @@ where
 {
     fn mail_changes(
         &'x self,
-        account: store::AccountId,
-        since_state: JMAPState,
-        max_changes: usize,
+        request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse> {
-        self.get_jmap_changes(account, JMAP_MAIL, since_state, max_changes)
-            .map_err(|e| e.into())
+        self.get_jmap_changes(
+            request.account,
+            JMAP_MAIL,
+            request.since_state,
+            request.max_changes,
+        )
+        .map_err(|e| e.into())
     }
 
     fn mail_query_changes(
         &'x self,
-        query: JMAPQueryChanges<JMAPMailFilterCondition<'x>, JMAPMailComparator<'x>>,
-        collapse_threads: bool,
+        query: JMAPQueryChanges<
+            JMAPMailFilterCondition<'x>,
+            JMAPMailComparator<'x>,
+            JMAPMailQueryArguments,
+        >,
     ) -> jmap_store::Result<JMAPQueryChangesResponse> {
         let changes = self.get_jmap_changes(
             query.account_id,
@@ -41,19 +49,17 @@ where
         let mut added;
 
         let total = if changes.total_changes > 0 || query.calculate_total {
-            let query_results = self.mail_query(
-                JMAPQuery {
-                    account_id: query.account_id,
-                    filter: query.filter,
-                    sort: query.sort,
-                    position: 0,
-                    anchor: None,
-                    anchor_offset: 0,
-                    limit: 0,
-                    calculate_total: true,
-                },
-                collapse_threads,
-            )?;
+            let query_results = self.mail_query(JMAPQuery {
+                account_id: query.account_id,
+                filter: query.filter,
+                sort: query.sort,
+                position: 0,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 0,
+                calculate_total: true,
+                arguments: query.arguments,
+            })?;
 
             removed = Vec::with_capacity(changes.total_changes);
             added = Vec::with_capacity(changes.total_changes);

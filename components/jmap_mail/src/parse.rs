@@ -27,7 +27,7 @@ use store::{
     batch::{DocumentWriter, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::{FieldOptions, FullText, Text},
     leb128::Leb128,
-    AccountId, BlobIndex, Integer, LongInteger, Store, StoreError, Tag, UncommittedDocumentId,
+    AccountId, BlobIndex, Integer, LongInteger, Store, Tag, UncommittedDocumentId,
 };
 
 use crate::{
@@ -36,8 +36,9 @@ use crate::{
         transform_json_emailaddress, transform_json_string, transform_json_stringlist,
         transform_rfc_header,
     },
-    JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailMimeHeaders,
-    JMAPMailParse, JMAPMailProperties, JMAPMailStoreGetArguments, MessageData, MessageField,
+    import::{bincode_serialize, messagepack_serialize},
+    JMAPMailBodyProperties, JMAPMailGetArguments, JMAPMailHeaderForm, JMAPMailHeaderProperty,
+    JMAPMailMimeHeaders, JMAPMailParse, JMAPMailProperties, MessageData, MessageField,
     MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
@@ -45,7 +46,7 @@ pub struct JMAPMailParseRequest<'x> {
     pub account_id: AccountId,
     pub blob_ids: Vec<BlobId>,
     pub properties: Vec<JMAPMailProperties<'x>>,
-    pub arguments: JMAPMailStoreGetArguments<'x>,
+    pub arguments: JMAPMailGetArguments<'x>,
 }
 
 #[derive(Debug)]
@@ -54,6 +55,17 @@ pub struct JMAPMailParseResponse {
     pub not_parsable: JSONValue,
     pub not_found: JSONValue,
 }
+
+impl From<JMAPMailParseResponse> for JSONValue {
+    fn from(value: JMAPMailParseResponse) -> Self {
+        let mut result = HashMap::new();
+        result.insert("parsed".to_string(), value.parsed);
+        result.insert("notParsable".to_string(), value.not_parsable);
+        result.insert("notFound".to_string(), value.not_found);
+        result.into()
+    }
+}
+
 impl<'x, T> JMAPMailParse<'x> for JMAPLocalStore<T>
 where
     T: Store<'x>,
@@ -643,10 +655,9 @@ pub fn build_message_document<'x>(
     let mut language_detector = LanguageDetector::new();
     let mut has_attachments = false;
 
-    message_data.properties.insert(
-        JMAPMailProperties::Size,
-        JSONValue::Number(message.raw_message.len() as i64),
-    );
+    message_data
+        .properties
+        .insert(JMAPMailProperties::Size, message.raw_message.len().into());
 
     document.integer(
         MessageField::Size,
@@ -1055,10 +1066,8 @@ pub fn build_message_document<'x>(
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
 
-    let mut message_data =
-        bincode::serialize(&message_data).map_err(|e| StoreError::SerializeError(e.to_string()))?;
-    let mut message_outline = bincode::serialize(&message_outline)
-        .map_err(|e| StoreError::SerializeError(e.to_string()))?;
+    let mut message_data = messagepack_serialize(&message_data)?;
+    let mut message_outline = bincode_serialize(&message_outline)?;
     let mut buf = Vec::with_capacity(
         message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
     );
@@ -1583,7 +1592,7 @@ pub fn header_to_jmap_address(
 
 fn empty_text_mime_headers<'x>(is_html: bool, size: usize) -> JMAPMailMimeHeaders<'x> {
     let mut mime_parts = HashMap::with_capacity(2);
-    mime_parts.insert(JMAPMailBodyProperties::Size, JSONValue::Number(size as i64));
+    mime_parts.insert(JMAPMailBodyProperties::Size, size.into());
     mime_parts.insert(
         JMAPMailBodyProperties::Type,
         JSONValue::String(if is_html {
@@ -1598,7 +1607,7 @@ fn empty_text_mime_headers<'x>(is_html: bool, size: usize) -> JMAPMailMimeHeader
 fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
     let mut mime_parts = HashMap::with_capacity(headers.len());
     if size > 0 {
-        mime_parts.insert(JMAPMailBodyProperties::Size, JSONValue::Number(size as i64));
+        mime_parts.insert(JMAPMailBodyProperties::Size, size.into());
     }
     for (header, value) in headers {
         if let RfcHeader::ContentType

@@ -47,7 +47,7 @@ impl RocksDBStore {
             if token.is_exact {
                 result.push(MatchTerm {
                     id: term_id,
-                    id_stemmed: 0,
+                    id_stemmed: term_id,
                 });
             } else {
                 result.last_mut().unwrap().id_stemmed = term_id;

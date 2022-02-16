@@ -34,24 +34,49 @@ where
     bincode::deserialize(bytes).map_err(|e| StoreError::DeserializeError(e.to_string()))
 }
 
-pub struct JMAPMailImportRequest<'x> {
+pub fn messagepack_serialize<T>(value: &T) -> store::Result<Vec<u8>>
+where
+    T: Serialize,
+{
+    rmp_serde::encode::to_vec(value).map_err(|e| StoreError::SerializeError(e.to_string()))
+}
+
+pub fn messagepack_deserialize<'x, T>(bytes: &'x [u8]) -> store::Result<T>
+where
+    T: Deserialize<'x>,
+{
+    rmp_serde::decode::from_slice(bytes).map_err(|e| StoreError::DeserializeError(e.to_string()))
+}
+
+pub struct JMAPMailImportRequest {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub emails: Vec<JMAPMailImportItem<'x>>,
+    pub emails: Vec<JMAPMailImportItem>,
 }
-pub struct JMAPMailImportItem<'x> {
+pub struct JMAPMailImportItem {
     pub id: String,
     pub blob_id: BlobId,
     pub mailbox_ids: Vec<MailboxId>,
-    pub keywords: Vec<Tag<'x>>,
+    pub keywords: Vec<Tag>,
     pub received_at: Option<i64>,
 }
 
 pub struct JMAPMailImportResponse {
-    pub old_state: Option<JMAPState>,
+    pub old_state: JMAPState,
     pub new_state: JMAPState,
     pub created: JSONValue,
     pub not_created: JSONValue,
+}
+
+impl From<JMAPMailImportResponse> for JSONValue {
+    fn from(value: JMAPMailImportResponse) -> Self {
+        let mut obj = HashMap::new();
+        obj.insert("oldState".to_string(), value.old_state.into());
+        obj.insert("newState".to_string(), value.new_state.into());
+        obj.insert("created".to_string(), value.created);
+        obj.insert("notCreated".to_string(), value.not_created);
+        obj.into()
+    }
 }
 
 impl<'x, T> JMAPMailImport<'x> for JMAPLocalStore<T>
@@ -60,7 +85,7 @@ where
 {
     fn mail_import(
         &'x self,
-        request: JMAPMailImportRequest<'x>,
+        request: JMAPMailImportRequest,
     ) -> jmap_store::Result<JMAPMailImportResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
@@ -137,7 +162,7 @@ where
             } else {
                 old_state.clone()
             },
-            old_state: old_state.into(),
+            old_state,
             created: if !created.is_empty() {
                 created.into()
             } else {
@@ -158,7 +183,7 @@ pub trait JMAPMailLocalStoreImport<'x> {
         account_id: AccountId,
         blob: &[u8],
         mailbox_ids: Vec<MailboxId>,
-        keywords: Vec<Tag<'x>>,
+        keywords: Vec<Tag>,
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue>;
 
@@ -179,7 +204,7 @@ where
         account: AccountId,
         blob: &[u8],
         mailbox_ids: Vec<MailboxId>,
-        keywords: Vec<Tag<'x>>,
+        keywords: Vec<Tag>,
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue> {
         // Build message document
@@ -317,7 +342,7 @@ where
         self.store.update_documents(account, documents)?;
 
         // Generate JSON object
-        let mut values: HashMap<String, JSONValue> = HashMap::with_capacity(4);
+        let mut values = HashMap::with_capacity(4);
         values.insert("id".to_string(), jmap_mail_id.to_jmap_string().into());
         values.insert(
             "blobId".to_string(),
@@ -331,7 +356,7 @@ where
         );
         values.insert("size".to_string(), blob.len().into());
 
-        Ok(JSONValue::Object(values))
+        Ok(values.into())
     }
 
     fn mail_merge_threads(

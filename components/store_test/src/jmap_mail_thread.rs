@@ -31,6 +31,7 @@ where
                 account_id: 0,
                 ids: Some(vec![thread_id]),
                 properties: None,
+                arguments: ()
             })
             .unwrap()
             .list

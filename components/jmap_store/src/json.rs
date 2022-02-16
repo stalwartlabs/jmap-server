@@ -92,12 +92,45 @@ impl JSONPointer {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+#[serde(untagged)]
+pub enum JSONNumber {
+    PosInt(u64),
+    NegInt(i64),
+    Float(f64),
+}
+
+impl Eq for JSONNumber {}
+
+impl JSONNumber {
+    pub fn to_unsigned_int(&self) -> u64 {
+        match self {
+            JSONNumber::PosInt(i) => *i,
+            JSONNumber::NegInt(i) => {
+                if *i > 0 {
+                    *i as u64
+                } else {
+                    0
+                }
+            }
+            JSONNumber::Float(f) => {
+                if *f > 0.0 {
+                    *f as u64
+                } else {
+                    0
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[serde(untagged)]
 pub enum JSONValue {
     Null,
     Bool(bool),
     String(String),
-    Number(i64),
+    Number(JSONNumber),
     Array(Vec<JSONValue>),
     Object(HashMap<String, JSONValue>),
 }
@@ -134,13 +167,25 @@ impl From<bool> for JSONValue {
 
 impl From<i64> for JSONValue {
     fn from(i: i64) -> Self {
-        JSONValue::Number(i)
+        JSONValue::Number(JSONNumber::NegInt(i))
+    }
+}
+
+impl From<u64> for JSONValue {
+    fn from(i: u64) -> Self {
+        JSONValue::Number(JSONNumber::PosInt(i))
+    }
+}
+
+impl From<u32> for JSONValue {
+    fn from(i: u32) -> Self {
+        JSONValue::Number(JSONNumber::PosInt(i as u64))
     }
 }
 
 impl From<usize> for JSONValue {
     fn from(i: usize) -> Self {
-        JSONValue::Number(i as i64)
+        JSONValue::Number(JSONNumber::PosInt(i as u64))
     }
 }
 
@@ -170,9 +215,9 @@ impl JSONValue {
         }
     }
 
-    pub fn to_number(&self) -> Option<i64> {
+    pub fn to_unsigned_int(&self) -> Option<u64> {
         match self {
-            JSONValue::Number(number) => Some(*number),
+            JSONValue::Number(number) => Some(number.to_unsigned_int()),
             _ => None,
         }
     }
@@ -219,11 +264,8 @@ impl JSONValue {
         }
     }
 
-    pub fn unwrap_number(self) -> Option<i64> {
-        match self {
-            JSONValue::Number(num) => Some(num),
-            _ => None,
-        }
+    pub fn unwrap_unsigned_int(self) -> Option<u64> {
+        self.to_unsigned_int()
     }
 
     pub fn unwrap_bool(self) -> Option<bool> {
