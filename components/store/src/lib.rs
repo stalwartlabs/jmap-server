@@ -6,7 +6,7 @@ pub mod search_snippet;
 pub mod serialize;
 pub mod term_index;
 
-use std::{borrow::Cow, iter::FromIterator, ops::Range};
+use std::{iter::FromIterator, ops::Range};
 
 use batch::DocumentWriter;
 use nlp::Language;
@@ -66,10 +66,10 @@ pub trait UncommittedDocumentId: Clone + Send + Sync {
 }
 
 #[derive(Debug)]
-pub enum FieldValue<'x> {
-    Keyword(Cow<'x, str>),
-    Text(Cow<'x, str>),
-    FullText(TextQuery<'x>),
+pub enum FieldValue {
+    Keyword(String),
+    Text(String),
+    FullText(TextQuery),
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
@@ -84,14 +84,14 @@ pub enum Tag {
 }
 
 #[derive(Debug)]
-pub struct TextQuery<'x> {
-    pub text: Cow<'x, str>,
+pub struct TextQuery {
+    pub text: String,
     pub language: Language,
     pub match_phrase: bool,
 }
 
-impl<'x> TextQuery<'x> {
-    pub fn query(text: Cow<'x, str>, language: Language) -> Self {
+impl TextQuery {
+    pub fn query(text: String, language: Language) -> Self {
         TextQuery {
             language,
             match_phrase: (text.starts_with('"') && text.ends_with('"'))
@@ -100,7 +100,7 @@ impl<'x> TextQuery<'x> {
         }
     }
 
-    pub fn query_english(text: Cow<'x, str>) -> Self {
+    pub fn query_english(text: String) -> Self {
         TextQuery::query(text, Language::English)
     }
 }
@@ -115,10 +115,10 @@ pub enum ComparisonOperator {
 }
 
 #[derive(Debug)]
-pub struct FilterCondition<'x> {
+pub struct FilterCondition {
     pub field: FieldId,
     pub op: ComparisonOperator,
-    pub value: FieldValue<'x>,
+    pub value: FieldValue,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -129,22 +129,22 @@ pub enum LogicalOperator {
 }
 
 #[derive(Debug)]
-pub enum Filter<'x, T: DocumentSet> {
-    Condition(FilterCondition<'x>),
-    Operator(FilterOperator<'x, T>),
+pub enum Filter<T: DocumentSet> {
+    Condition(FilterCondition),
+    Operator(FilterOperator<T>),
     DocumentSet(T),
     None,
 }
 
-impl<'x, T> Filter<'x, T>
+impl<T> Filter<T>
 where
     T: DocumentSet,
 {
-    pub fn new_condition(field: FieldId, op: ComparisonOperator, value: FieldValue<'x>) -> Self {
+    pub fn new_condition(field: FieldId, op: ComparisonOperator, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition { field, op, value })
     }
 
-    pub fn eq(field: FieldId, value: FieldValue<'x>) -> Self {
+    pub fn eq(field: FieldId, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::Equal,
@@ -152,7 +152,7 @@ where
         })
     }
 
-    pub fn lt(field: FieldId, value: FieldValue<'x>) -> Self {
+    pub fn lt(field: FieldId, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::LowerThan,
@@ -160,7 +160,7 @@ where
         })
     }
 
-    pub fn le(field: FieldId, value: FieldValue<'x>) -> Self {
+    pub fn le(field: FieldId, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::LowerEqualThan,
@@ -168,7 +168,7 @@ where
         })
     }
 
-    pub fn gt(field: FieldId, value: FieldValue<'x>) -> Self {
+    pub fn gt(field: FieldId, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::GreaterThan,
@@ -176,7 +176,7 @@ where
         })
     }
 
-    pub fn ge(field: FieldId, value: FieldValue<'x>) -> Self {
+    pub fn ge(field: FieldId, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::GreaterEqualThan,
@@ -184,21 +184,21 @@ where
         })
     }
 
-    pub fn and(conditions: Vec<Filter<'x, T>>) -> Self {
+    pub fn and(conditions: Vec<Filter<T>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::And,
             conditions,
         })
     }
 
-    pub fn or(conditions: Vec<Filter<'x, T>>) -> Self {
+    pub fn or(conditions: Vec<Filter<T>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::Or,
             conditions,
         })
     }
 
-    pub fn not(conditions: Vec<Filter<'x, T>>) -> Self {
+    pub fn not(conditions: Vec<Filter<T>>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::Not,
             conditions,
@@ -207,9 +207,9 @@ where
 }
 
 #[derive(Debug)]
-pub struct FilterOperator<'x, T: DocumentSet> {
+pub struct FilterOperator<T: DocumentSet> {
     pub operator: LogicalOperator,
-    pub conditions: Vec<Filter<'x, T>>,
+    pub conditions: Vec<Filter<T>>,
 }
 
 pub struct FieldComparator {

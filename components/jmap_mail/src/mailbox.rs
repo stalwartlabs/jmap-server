@@ -5,10 +5,11 @@ use std::fmt::Display;
 use jmap_store::changes::JMAPLocalChanges;
 use jmap_store::id::JMAPIdSerialize;
 use jmap_store::local_store::JMAPLocalStore;
+use jmap_store::query::{build_query, paginate_results};
 use jmap_store::{
     json::JSONValue, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAILBOX,
 };
-use jmap_store::{JMAPGet, JMAPGetResponse, JMAP_MAIL};
+use jmap_store::{JMAPGet, JMAPGetResponse, JMAPQuery, JMAPQueryResponse, JMAP_MAIL};
 use serde::{Deserialize, Serialize};
 use store::field::{FieldOptions, Text};
 use store::{
@@ -16,8 +17,9 @@ use store::{
     DocumentSet, Store,
 };
 use store::{
-    AccountId, ChangeLogId, Comparator, ComparisonOperator, DocumentId, DocumentSetBitOps, FieldId,
-    FieldValue, Filter, LongInteger, StoreError, Tag, UncommittedDocumentId,
+    AccountId, ChangeLogId, Comparator, ComparisonOperator, DocumentId, DocumentSetBitOps,
+    FieldComparator, FieldId, FieldValue, Filter, LongInteger, StoreError, Tag,
+    UncommittedDocumentId,
 };
 
 use crate::import::{bincode_deserialize, bincode_serialize};
@@ -36,13 +38,32 @@ pub struct JMAPMailbox {
 struct JMAPMailboxSet {
     pub name: Option<String>,
     pub parent_id: Option<JMAPId>,
-    pub role: Option<String>,
+    pub role: Option<Option<String>>,
     pub sort_order: Option<u32>,
     pub is_subscribed: Option<bool>,
 }
 
 pub struct JMAPMailMailboxSetArguments {
-    remove_emails: bool,
+    pub remove_emails: bool,
+}
+
+pub enum JMAPMailMailboxFilterCondition {
+    ParentId(JMAPId),
+    Name(String),
+    Role(String),
+    HasAnyRole,
+    IsSubscribed,
+}
+
+pub enum JMAPMailMailboxComparator {
+    Name,
+    Role,
+    ParentId,
+}
+
+pub struct JMAPMailMailboxQueryArguments {
+    pub sort_as_tree: bool,
+    pub filter_as_tree: bool,
 }
 
 #[repr(u8)]
@@ -177,7 +198,7 @@ where
                 let mailbox = JMAPMailbox {
                     name: mailbox.name.unwrap(),
                     parent_id: mailbox.parent_id.unwrap_or(0),
-                    role: mailbox.role,
+                    role: mailbox.role.unwrap_or_default(),
                     sort_order: mailbox.sort_order.unwrap_or(0),
                 };
 
@@ -196,6 +217,11 @@ where
                     document.text(
                         JMAPMailboxProperties::Role,
                         Text::Keyword(mailbox_role.clone().into()),
+                        FieldOptions::None,
+                    );
+                    document.tag(
+                        JMAPMailboxProperties::Role,
+                        Tag::Static(0),
                         FieldOptions::None,
                     );
                 }
@@ -337,21 +363,41 @@ where
                     }
                 }
 
-                if let Some(new_role) = &mailbox_changes.role {
-                    if mailbox_changes.role != mailbox.role {
-                        if let Some(role) = mailbox.role {
+                if let Some(new_role) = mailbox_changes.role {
+                    if new_role != mailbox.role {
+                        let has_role = if let Some(role) = mailbox.role {
                             document.text(
                                 JMAPMailboxProperties::Role,
                                 Text::Keyword(role.into()),
                                 FieldOptions::Clear,
                             );
+                            true
+                        } else {
+                            false
+                        };
+                        if let Some(new_role) = &new_role {
+                            document.text(
+                                JMAPMailboxProperties::Role,
+                                Text::Keyword(new_role.clone().into()),
+                                FieldOptions::None,
+                            );
+                            if !has_role {
+                                // New role was added, set tag.
+                                document.tag(
+                                    JMAPMailboxProperties::Role,
+                                    Tag::Static(0),
+                                    FieldOptions::None,
+                                );
+                            }
+                        } else if has_role {
+                            // Role was removed, clear tag.
+                            document.tag(
+                                JMAPMailboxProperties::Role,
+                                Tag::Static(0),
+                                FieldOptions::Clear,
+                            );
                         }
-                        document.text(
-                            JMAPMailboxProperties::Role,
-                            Text::Keyword(new_role.clone().into()),
-                            FieldOptions::None,
-                        );
-                        mailbox.role = mailbox_changes.role;
+                        mailbox.role = new_role;
                     }
                 }
 
@@ -634,6 +680,170 @@ where
             },
         })
     }
+
+    fn mailbox_query(
+        &'x self,
+        request: JMAPQuery<
+            JMAPMailMailboxFilterCondition,
+            JMAPMailMailboxComparator,
+            JMAPMailMailboxQueryArguments,
+        >,
+    ) -> jmap_store::Result<JMAPQueryResponse> {
+        let mut doc_ids = build_query(
+            &self.store,
+            request.account_id,
+            JMAP_MAILBOX,
+            request.filter,
+            request.sort,
+            |cond| {
+                Ok(match cond {
+                    JMAPMailMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
+                        JMAPMailboxProperties::ParentId.into(),
+                        FieldValue::LongInteger(parent_id),
+                    ),
+                    JMAPMailMailboxFilterCondition::Name(text) => Filter::eq(
+                        JMAPMailboxProperties::Name.into(),
+                        FieldValue::Text(text.to_lowercase()),
+                    ),
+                    JMAPMailMailboxFilterCondition::Role(text) => {
+                        Filter::eq(JMAPMailboxProperties::Role.into(), FieldValue::Text(text))
+                    }
+                    JMAPMailMailboxFilterCondition::HasAnyRole => Filter::eq(
+                        JMAPMailboxProperties::Role.into(),
+                        FieldValue::Tag(Tag::Id(0)),
+                    ),
+                    JMAPMailMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
+                })
+            },
+            |comp| {
+                Ok(Comparator::Field(FieldComparator {
+                    field: match comp.property {
+                        JMAPMailMailboxComparator::Name => JMAPMailboxProperties::Name,
+                        JMAPMailMailboxComparator::Role => JMAPMailboxProperties::Role,
+                        JMAPMailMailboxComparator::ParentId => JMAPMailboxProperties::ParentId,
+                    }
+                    .into(),
+                    ascending: comp.is_ascending,
+                }))
+            },
+        )?
+        .into_iter()
+        .collect::<Vec<DocumentId>>();
+
+        let query_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
+        let num_results = doc_ids.len();
+
+        if num_results > 0 && (request.arguments.filter_as_tree || request.arguments.sort_as_tree) {
+            let mut hierarchy = HashMap::new();
+            let mut tree = HashMap::new();
+
+            for doc_id in self
+                .store
+                .get_document_ids(request.account_id, JMAP_MAILBOX)?
+            {
+                let mailbox: JMAPMailbox = bincode_deserialize(
+                    &self
+                        .store
+                        .get_document_value::<Vec<u8>>(
+                            request.account_id,
+                            JMAP_MAILBOX,
+                            doc_id,
+                            JMAPMailboxProperties::Id.into(),
+                        )?
+                        .ok_or_else(|| {
+                            StoreError::InternalError("Mailbox data not found".to_string())
+                        })?,
+                )?;
+                hierarchy.insert(doc_id as JMAPId, mailbox.parent_id);
+                tree.entry(mailbox.parent_id)
+                    .or_insert_with(HashSet::new)
+                    .insert(doc_id as JMAPId);
+            }
+
+            if request.arguments.filter_as_tree {
+                let mut filtered_ids = Vec::with_capacity(doc_ids.len());
+
+                for &doc_id in &doc_ids {
+                    let mut keep = false;
+                    let mut jmap_id = doc_id as JMAPId;
+
+                    for _ in 0..self.mail_config.mailbox_max_depth {
+                        if let Some(&parent_id) = hierarchy.get(&jmap_id) {
+                            if parent_id == 0 {
+                                keep = true;
+                                break;
+                            } else if !doc_ids.contains(&((parent_id - 1) as DocumentId)) {
+                                break;
+                            } else {
+                                jmap_id = parent_id;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if keep {
+                        filtered_ids.push(doc_id);
+                    }
+                }
+                if filtered_ids.len() != doc_ids.len() {
+                    doc_ids = filtered_ids;
+                }
+            }
+
+            if request.arguments.sort_as_tree && doc_ids.len() > 1 {
+                let mut stack = Vec::new();
+                let mut sorted_list = Vec::with_capacity(doc_ids.len());
+                let mut jmap_id = 0;
+
+                'outer: for _ in 0..(doc_ids.len() * 10 * self.mail_config.mailbox_max_depth) {
+                    let (children, mut it) = if let Some(children) = tree.remove(&jmap_id) {
+                        (children, doc_ids.iter())
+                    } else if let Some(prev) = stack.pop() {
+                        prev
+                    } else {
+                        break;
+                    };
+
+                    while let Some(&doc_id) = it.next() {
+                        jmap_id = doc_id as JMAPId;
+                        if children.contains(&jmap_id) {
+                            sorted_list.push(doc_id);
+                            if sorted_list.len() == doc_ids.len() {
+                                break 'outer;
+                            } else {
+                                stack.push((children, it));
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
+                doc_ids = sorted_list;
+            }
+        }
+
+        let (results, start_position) = paginate_results(
+            doc_ids.into_iter(),
+            num_results,
+            request.limit,
+            request.position,
+            request.anchor,
+            request.anchor_offset,
+            false,
+            None::<fn(DocumentId) -> jmap_store::Result<Option<JMAPId>>>,
+            None::<fn(Vec<DocumentId>) -> jmap_store::Result<Vec<JMAPId>>>,
+        )?;
+
+        Ok(JMAPQueryResponse {
+            account_id: request.account_id,
+            include_total: request.calculate_total,
+            query_state,
+            position: start_position,
+            total: num_results,
+            limit: request.limit,
+            ids: results,
+            is_immutable: false,
+        })
+    }
 }
 
 fn count_threads<'x, T>(
@@ -767,7 +977,11 @@ where
                 }
             },
             Some(JMAPMailboxProperties::Role) => {
-                mailbox.role = value.unwrap_string().map(|s| s.to_lowercase());
+                mailbox.role = match value {
+                    JSONValue::Null => Some(None),
+                    JSONValue::String(s) => Some(Some(s.to_lowercase())),
+                    _ => None,
+                };
             }
             Some(JMAPMailboxProperties::SortOrder) => {
                 mailbox.sort_order = value.unwrap_unsigned_int().map(|x| x as u32);
@@ -845,20 +1059,31 @@ where
     }
 
     // Verify that the mailbox role is unique.
-    if let Some(mailbox_role) = &mailbox.role {
-        if !store
-            .store
-            .query(
-                account_id,
-                JMAP_MAILBOX,
-                Filter::new_condition(
-                    JMAPMailboxProperties::Role.into(),
-                    ComparisonOperator::Equal,
-                    FieldValue::Keyword(mailbox_role.into()),
-                ),
-                Comparator::None,
-            )?
-            .is_empty()
+    if let Some(mailbox_role) = mailbox.role.as_ref().unwrap_or(&None) {
+        let do_check = if let Some(current_mailbox) = current_mailbox {
+            if let Some(current_role) = &current_mailbox.role {
+                mailbox_role != current_role
+            } else {
+                true
+            }
+        } else {
+            true
+        };
+
+        if do_check
+            && !store
+                .store
+                .query(
+                    account_id,
+                    JMAP_MAILBOX,
+                    Filter::new_condition(
+                        JMAPMailboxProperties::Role.into(),
+                        ComparisonOperator::Equal,
+                        FieldValue::Keyword(mailbox_role.into()),
+                    ),
+                    Comparator::None,
+                )?
+                .is_empty()
         {
             return Ok(Err(JSONValue::new_error(
                 JMAPSetErrorType::InvalidProperties,

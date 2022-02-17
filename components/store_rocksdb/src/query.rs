@@ -23,9 +23,9 @@ use crate::{
     RocksDBStore,
 };
 
-struct State<'x> {
+struct State {
     op: LogicalOperator,
-    it: IntoIter<Filter<'x, RocksDBDocumentSet>>,
+    it: IntoIter<Filter<RocksDBDocumentSet>>,
     bm: Option<RoaringBitmap>,
 }
 

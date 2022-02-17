@@ -144,7 +144,7 @@ where
             }
         }
         println!(
-            "Imported {} messages in {} ms.",
+            "Imported {} messages in {} ms (single thread).",
             total_messages,
             now.elapsed().as_millis()
         );

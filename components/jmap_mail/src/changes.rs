@@ -33,8 +33,8 @@ where
     fn mail_query_changes(
         &'x self,
         query: JMAPQueryChanges<
-            JMAPMailFilterCondition<'x>,
-            JMAPMailComparator<'x>,
+            JMAPMailFilterCondition,
+            JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryChangesResponse> {

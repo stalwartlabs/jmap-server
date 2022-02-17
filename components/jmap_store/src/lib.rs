@@ -3,6 +3,7 @@ pub mod changes;
 pub mod id;
 pub mod json;
 pub mod local_store;
+pub mod query;
 
 use std::collections::HashMap;
 

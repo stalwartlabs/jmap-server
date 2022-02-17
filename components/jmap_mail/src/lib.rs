@@ -7,7 +7,10 @@ pub mod query;
 pub mod set;
 pub mod thread;
 
-use mailbox::{JMAPMailMailboxSetArguments, JMAPMailboxProperties};
+use mailbox::{
+    JMAPMailMailboxComparator, JMAPMailMailboxFilterCondition, JMAPMailMailboxQueryArguments,
+    JMAPMailMailboxSetArguments, JMAPMailboxProperties,
+};
 use parse::{JMAPMailParseRequest, JMAPMailParseResponse};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
@@ -478,11 +481,7 @@ pub trait JMAPMailSet<'x> {
 pub trait JMAPMailQuery<'x> {
     fn mail_query(
         &'x self,
-        request: JMAPQuery<
-            JMAPMailFilterCondition<'x>,
-            JMAPMailComparator<'x>,
-            JMAPMailQueryArguments,
-        >,
+        request: JMAPQuery<JMAPMailFilterCondition, JMAPMailComparator, JMAPMailQueryArguments>,
     ) -> jmap_store::Result<JMAPQueryResponse>;
 }
 
@@ -495,8 +494,8 @@ pub trait JMAPMailChanges<'x>: JMAPLocalChanges<'x> {
     fn mail_query_changes(
         &'x self,
         request: JMAPQueryChanges<
-            JMAPMailFilterCondition<'x>,
-            JMAPMailComparator<'x>,
+            JMAPMailFilterCondition,
+            JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryChangesResponse>;
@@ -538,6 +537,15 @@ pub trait JMAPMailMailbox<'x> {
         &'x self,
         request: JMAPGet<JMAPMailboxProperties, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
+
+    fn mailbox_query(
+        &'x self,
+        request: JMAPQuery<
+            JMAPMailMailboxFilterCondition,
+            JMAPMailMailboxComparator,
+            JMAPMailMailboxQueryArguments,
+        >,
+    ) -> jmap_store::Result<JMAPQueryResponse>;
 }
 
 pub trait JMAPMail<'x>:
