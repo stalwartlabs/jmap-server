@@ -80,7 +80,7 @@ where
     fn thread_changes(
         &'x self,
         request: JMAPChangesRequest,
-    ) -> jmap_store::Result<JMAPChangesResponse> {
+    ) -> jmap_store::Result<JMAPChangesResponse<()>> {
         self.get_jmap_changes(
             request.account,
             JMAP_THREAD,

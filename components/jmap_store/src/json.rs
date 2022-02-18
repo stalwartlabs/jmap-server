@@ -189,6 +189,12 @@ impl From<usize> for JSONValue {
     }
 }
 
+impl From<()> for JSONValue {
+    fn from(_: ()) -> Self {
+        JSONValue::Null
+    }
+}
+
 impl JSONValue {
     pub fn is_null(&self) -> bool {
         matches!(self, JSONValue::Null)

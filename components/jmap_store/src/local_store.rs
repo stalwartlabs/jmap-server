@@ -31,7 +31,7 @@ where
         collection: CollectionId,
     ) -> store::Result<MutexGuard<()>> {
         self.account_lock
-            .lock(((collection as u64) << (8 * std::mem::size_of::<AccountId>())) | account as u64)
+            .lock_hash((account, collection))
             .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))
     }
 }

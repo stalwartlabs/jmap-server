@@ -15,8 +15,9 @@ use store::{AccountId, StoreError};
 
 pub const JMAP_MAIL: u8 = 0;
 pub const JMAP_MAILBOX: u8 = 1;
-pub const JMAP_THREAD: u8 = 2;
-pub const JMAP_BLOB: u8 = 3;
+pub const JMAP_MAILBOX_CHANGES: u8 = 2;
+pub const JMAP_THREAD: u8 = 3;
+pub const JMAP_BLOB: u8 = 4;
 
 pub type JMAPId = u64;
 
@@ -40,7 +41,7 @@ impl From<StoreError> for JMAPError {
 pub type Result<T> = std::result::Result<T, JMAPError>;
 
 #[derive(Debug, Clone)]
-pub struct JMAPQuery<T, U, V> {
+pub struct JMAPQueryRequest<T, U, V> {
     pub account_id: AccountId,
     pub filter: JMAPFilter<T>,
     pub sort: Vec<JMAPComparator<U>>,
@@ -53,7 +54,7 @@ pub struct JMAPQuery<T, U, V> {
 }
 
 #[derive(Debug, Clone)]
-pub struct JMAPQueryChanges<T, U, V> {
+pub struct JMAPQueryChangesRequest<T, U, V> {
     pub account_id: AccountId,
     pub filter: JMAPFilter<T>,
     pub sort: Vec<JMAPComparator<U>>,

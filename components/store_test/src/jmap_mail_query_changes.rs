@@ -7,7 +7,7 @@ use jmap_mail::{
 };
 use jmap_store::{
     changes::JMAPState, local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId,
-    JMAPQueryChanges,
+    JMAPQueryChangesRequest,
 };
 use store::{
     batch::{DocumentWriter, LogAction},
@@ -143,7 +143,7 @@ where
         let mut new_state = JMAPState::Initial;
         for state in &states {
             for (test_num, query) in vec![
-                JMAPQueryChanges {
+                JMAPQueryChangesRequest {
                     account_id: 0,
                     filter: JMAPFilter::None,
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -155,7 +155,7 @@ where
                         collapse_threads: false,
                     },
                 },
-                JMAPQueryChanges {
+                JMAPQueryChangesRequest {
                     account_id: 0,
                     filter: JMAPFilter::Condition(JMAPMailFilterCondition::From("test_1".into())),
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -167,7 +167,7 @@ where
                         collapse_threads: false,
                     },
                 },
-                JMAPQueryChanges {
+                JMAPQueryChangesRequest {
                     account_id: 0,
                     filter: JMAPFilter::Condition(JMAPMailFilterCondition::InMailbox(1)),
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -179,7 +179,7 @@ where
                         collapse_threads: false,
                     },
                 },
-                JMAPQueryChanges {
+                JMAPQueryChangesRequest {
                     account_id: 0,
                     filter: JMAPFilter::None,
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],

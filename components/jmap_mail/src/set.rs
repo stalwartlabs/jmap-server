@@ -4,6 +4,7 @@ use jmap_store::changes::JMAPLocalChanges;
 use jmap_store::id::{BlobId, JMAPIdSerialize};
 use jmap_store::json::JSONValue;
 use jmap_store::local_store::JMAPLocalStore;
+use jmap_store::JMAP_MAILBOX_CHANGES;
 use jmap_store::{
     json::JSONPointer, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAIL,
     JMAP_MAILBOX,
@@ -18,13 +19,13 @@ use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use mail_parser::HeaderName;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use store::field::FieldOptions;
 use store::{
     batch::{DocumentWriter, LogAction},
     DocumentSet,
 };
-use store::{AccountId, DocumentId, Store, Tag};
+use store::{AccountId, ChangeLogId, DocumentId, Store, Tag};
 
 use crate::import::{bincode_deserialize, bincode_serialize, JMAPMailLocalStoreImport};
 use crate::parse::get_message_blob;
@@ -308,6 +309,7 @@ where
                     }
                 }
 
+                let mut changed_mailboxes = HashSet::with_capacity(mailbox_op_list.len());
                 if !mailbox_op_list.is_empty() || mailbox_op_clear_all {
                     // Obtain mailboxes
                     let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
@@ -347,6 +349,7 @@ where
                                     Tag::Id(*mailbox_id),
                                     FieldOptions::Clear,
                                 );
+                                changed_mailboxes.insert(*mailbox_id);
                             }
                         } else if !mailbox_op_list.get(mailbox_id).unwrap_or(&true) {
                             // Untag mailbox if is marked for untagging
@@ -355,6 +358,7 @@ where
                                 Tag::Id(*mailbox_id),
                                 FieldOptions::Clear,
                             );
+                            changed_mailboxes.insert(*mailbox_id);
                         } else {
                             // Keep mailbox in the list
                             new_mailboxes.push(*mailbox_id);
@@ -372,6 +376,7 @@ where
                                         Tag::Id(mailbox_id),
                                         FieldOptions::None,
                                     );
+                                    changed_mailboxes.insert(mailbox_id);
                                 }
                                 new_mailboxes.push(mailbox_id);
                             } else {
@@ -426,6 +431,7 @@ where
                         current_keywords.len(),
                     ));
 
+                    let mut unread_changed = false;
                     for keyword in &current_keywords {
                         if keyword_op_clear_all {
                             // Untag keyword unless it is in the list of keywords to tag
@@ -435,6 +441,12 @@ where
                                     keyword.clone(),
                                     FieldOptions::Clear,
                                 );
+                                if !unread_changed
+                                    && matches!(keyword, Tag::Text(text) if text == "$seen" )
+                                {
+                                    //TODO use id
+                                    unread_changed = true;
+                                }
                             }
                         } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
                             // Untag keyword if is marked for untagging
@@ -443,6 +455,12 @@ where
                                 keyword.clone(),
                                 FieldOptions::Clear,
                             );
+                            if !unread_changed
+                                && matches!(keyword, Tag::Text(text) if text == "$seen" )
+                            {
+                                //TODO use id
+                                unread_changed = true;
+                            }
                         } else {
                             // Keep keyword in the list
                             new_keywords.push(keyword.clone());
@@ -458,8 +476,30 @@ where
                                     keyword.clone(),
                                     FieldOptions::None,
                                 );
+                                if !unread_changed
+                                    && matches!(&keyword, Tag::Text(text) if text == "$seen" )
+                                {
+                                    //TODO use id
+                                    unread_changed = true;
+                                }
                             }
                             new_keywords.push(keyword);
+                        }
+                    }
+
+                    // Mark mailboxes as changed if the message is tagged/untagged with $seen
+                    if unread_changed {
+                        if let Some(current_mailboxes) = self.store.get_document_value::<Vec<u8>>(
+                            request.account_id,
+                            JMAP_MAIL,
+                            document_id,
+                            MessageField::Mailbox.into(),
+                        )? {
+                            for mailbox_id in
+                                bincode_deserialize::<Vec<MailboxId>>(&current_mailboxes)?
+                            {
+                                changed_mailboxes.insert(mailbox_id);
+                            }
                         }
                     }
 
@@ -469,6 +509,28 @@ where
                         bincode_serialize(&new_keywords)?.into(),
                         FieldOptions::Store,
                     );
+                }
+
+                // Log mailbox changes
+                if !changed_mailboxes.is_empty() {
+                    let change_id = self
+                        .store
+                        .assign_change_id(request.account_id, JMAP_MAILBOX)?;
+                    for changed_mailbox_id in changed_mailboxes {
+                        changes.push(
+                            DocumentWriter::update(JMAP_MAILBOX, changed_mailbox_id).log_with_id(
+                                LogAction::Update(changed_mailbox_id as ChangeLogId),
+                                change_id,
+                            ),
+                        );
+                        changes.push(
+                            DocumentWriter::update(JMAP_MAILBOX_CHANGES, changed_mailbox_id)
+                                .log_with_id(
+                                    LogAction::Update(changed_mailbox_id as ChangeLogId),
+                                    change_id,
+                                ),
+                        );
+                    }
                 }
 
                 if !document.is_empty() {

@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use nlp::Language;
 use rocksdb::BoundColumnFamily;
@@ -15,14 +12,14 @@ use store::{
         BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, CollectionId, DocumentId, StoreBlob, StoreChangeLog, StoreError, StoreUpdate,
+    AccountId, ChangeLogId, CollectionId, DocumentId, StoreBlob, StoreError, StoreUpdate,
 };
 
 use crate::{
     bitmaps::set_clear_bits,
     blob::{blob_to_key, serialize_blob_keys_from_value},
     changelog::ChangeLogWriter,
-    document_id::{AssignedDocumentId, DocumentIdAssigner, DocumentIdCacheKey},
+    document_id::AssignedDocumentId,
     RocksDBStore,
 };
 
@@ -149,46 +146,38 @@ impl StoreUpdate for RocksDBStore {
                 }
             }
 
-            match batch.log_action {
-                LogAction::Insert(id) => change_log_list
-                    .entry((account, batch.collection))
-                    .or_insert_with(ChangeLogWriter::default)
-                    .inserts
-                    .push(id),
-                LogAction::Update(id) => change_log_list
-                    .entry((account, batch.collection))
-                    .or_insert_with(ChangeLogWriter::default)
-                    .updates
-                    .push(id),
-                LogAction::Delete(id) => change_log_list
-                    .entry((account, batch.collection))
-                    .or_insert_with(ChangeLogWriter::default)
-                    .deletes
-                    .push(id),
-                LogAction::Move(old_id, id) => {
-                    let change_log_list = change_log_list
-                        .entry((account, batch.collection))
-                        .or_insert_with(ChangeLogWriter::default);
-                    change_log_list.inserts.push(id);
-                    change_log_list.deletes.push(old_id);
+            if !batch.log_action.is_none() {
+                let change_id = if let Some(change_id) = batch.log_id {
+                    change_id
+                } else {
+                    self.assign_change_id(account, batch.collection)?
+                };
+                let change_log_entry = change_log_list
+                    .entry((account, batch.collection, change_id))
+                    .or_insert_with(ChangeLogWriter::new);
+
+                match batch.log_action {
+                    LogAction::Insert(id) => {
+                        change_log_entry.inserts.push(id);
+                    }
+                    LogAction::Update(id) => {
+                        change_log_entry.updates.push(id);
+                    }
+                    LogAction::Delete(id) => {
+                        change_log_entry.deletes.push(id);
+                    }
+                    LogAction::Move(old_id, id) => {
+                        change_log_entry.inserts.push(id);
+                        change_log_entry.deletes.push(old_id);
+                    }
+                    LogAction::None => (),
                 }
-                LogAction::None => (),
             }
         }
 
         if !change_log_list.is_empty() {
             let cf_log = self.get_handle("log")?;
-            for ((account, collection), change_log) in change_log_list {
-                let change_id = self
-                    .get_last_change_id(account, collection)?
-                    .map(|id| id + 1)
-                    .unwrap_or(0);
-                // TODO find better key name for change id
-                write_batch.put_cf(
-                    &cf_values,
-                    serialize_stored_key_global(account.into(), collection.into(), None),
-                    &change_id.to_le_bytes(),
-                );
+            for ((account, collection, change_id), change_log) in change_log_list {
                 write_batch.put_cf(
                     &cf_log,
                     serialize_changelog_key(account, collection, change_id),
@@ -208,27 +197,25 @@ impl StoreUpdate for RocksDBStore {
         Ok(())
     }
 
+    fn assign_change_id(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> store::Result<ChangeLogId> {
+        let id_assigner_lock = self.get_id_assigner(account, collection)?;
+        let mut id_assigner = id_assigner_lock
+            .lock()
+            .map_err(|_| StoreError::InternalError("Failed to obtain MutexLock".to_string()))?;
+
+        Ok(id_assigner.assign_change_id())
+    }
+
     fn assign_document_id(
         &self,
         account: AccountId,
         collection: CollectionId,
     ) -> store::Result<AssignedDocumentId> {
-        let id_assigner_lock = self
-            .doc_id_cache
-            .get_or_try_insert_with::<_, StoreError>(
-                DocumentIdCacheKey::new(account, collection),
-                || {
-                    Ok(Arc::new(Mutex::new(DocumentIdAssigner::new(
-                        self.get_document_ids_freed(account, collection)?,
-                        if let Some(used_ids) = self.get_document_ids_used(account, collection)? {
-                            used_ids.max().unwrap() + 1
-                        } else {
-                            0
-                        },
-                    ))))
-                },
-            )
-            .map_err(|e| e.as_ref().clone())?;
+        let id_assigner_lock = self.get_id_assigner(account, collection)?;
         let mut id_assigner = id_assigner_lock
             .lock()
             .map_err(|_| StoreError::InternalError("Failed to obtain MutexLock".to_string()))?;

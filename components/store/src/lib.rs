@@ -266,6 +266,12 @@ pub trait StoreUpdate {
         collection: CollectionId,
     ) -> crate::Result<Self::UncommittedId>;
 
+    fn assign_change_id(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> crate::Result<ChangeLogId>;
+
     fn update_document(
         &self,
         account: AccountId,

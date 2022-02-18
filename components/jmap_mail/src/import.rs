@@ -7,12 +7,12 @@ use jmap_store::{
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
     local_store::JMAPLocalStore,
-    JMAPError, JMAPId, JMAP_MAIL, JMAP_MAILBOX, JMAP_THREAD,
+    JMAPError, JMAPId, JMAP_MAIL, JMAP_MAILBOX, JMAP_MAILBOX_CHANGES, JMAP_THREAD,
 };
 use mail_parser::Message;
 use serde::{Deserialize, Serialize};
 use store::{
-    batch::DocumentWriter,
+    batch::{DocumentWriter, LogAction},
     field::{FieldOptions, Text},
     AccountId, ChangeLogId, Comparator, DocumentSet, FieldValue, Filter, Store, StoreError, Tag,
     ThreadId, UncommittedDocumentId,
@@ -226,11 +226,20 @@ where
                 bincode_serialize(&mailbox_ids)?.into(),
                 FieldOptions::Store,
             );
+            let change_id = self.store.assign_change_id(account, JMAP_MAILBOX)?;
             for mailbox_id in mailbox_ids {
                 document.tag(
                     MessageField::Mailbox,
                     Tag::Id(mailbox_id),
                     FieldOptions::None,
+                );
+                documents.push(
+                    DocumentWriter::update(JMAP_MAILBOX, mailbox_id)
+                        .log_with_id(LogAction::Update(mailbox_id as ChangeLogId), change_id),
+                );
+                documents.push(
+                    DocumentWriter::update(JMAP_MAILBOX_CHANGES, mailbox_id)
+                        .log_with_id(LogAction::Update(mailbox_id as ChangeLogId), change_id),
                 );
             }
         }

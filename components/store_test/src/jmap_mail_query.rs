@@ -10,7 +10,8 @@ use jmap_mail::{
     JMAPMailGet, JMAPMailIdImpl, JMAPMailProperties, JMAPMailQuery, MessageField,
 };
 use jmap_store::{
-    local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQuery, JMAP_MAIL,
+    local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQueryRequest,
+    JMAP_MAIL,
 };
 use mail_parser::RfcHeader;
 use store::{Comparator, FieldValue, Filter, Integer, Store, Tag};
@@ -419,7 +420,7 @@ where
     ] {
         assert_eq!(
             mail_store
-                .mail_query(JMAPQuery {
+                .mail_query(JMAPQueryRequest {
                     account_id: 0,
                     filter,
                     sort,
@@ -448,7 +449,7 @@ where
 {
     for (mut query, expected_results, expected_results_collapsed) in [
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -474,7 +475,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -500,7 +501,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -526,7 +527,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -552,7 +553,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -572,7 +573,7 @@ where
             vec!["N01496"],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -592,7 +593,7 @@ where
             vec!["AR00164"],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -618,7 +619,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -644,7 +645,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -670,7 +671,7 @@ where
             ],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -690,7 +691,7 @@ where
             vec!["N01496"],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
@@ -710,7 +711,7 @@ where
             vec![],
         ),
         (
-            JMAPQuery {
+            JMAPQueryRequest {
                 account_id: 0,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![

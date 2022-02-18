@@ -16,6 +16,7 @@ pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 pub struct DocumentWriter<'x, T: UncommittedDocumentId> {
     pub collection: CollectionId,
     pub default_language: Language,
+    pub log_id: Option<ChangeLogId>,
     pub log_action: LogAction,
     pub action: WriteAction<T>,
     pub fields: Vec<UpdateField<'x>>,
@@ -28,6 +29,12 @@ pub enum LogAction {
     Delete(ChangeLogId),
     Move(ChangeLogId, ChangeLogId),
     None,
+}
+
+impl LogAction {
+    pub fn is_none(&self) -> bool {
+        matches!(self, LogAction::None)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -47,6 +54,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
             log_action: LogAction::None,
             action: WriteAction::Insert(uncommited_id),
             fields: Vec::new(),
+            log_id: None,
         }
     }
 
@@ -57,6 +65,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
             log_action: LogAction::None,
             action: WriteAction::Update(document),
             fields: Vec::new(),
+            log_id: None,
         }
     }
 
@@ -67,6 +76,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
             log_action: LogAction::None,
             action: WriteAction::Delete(document),
             fields: Vec::new(),
+            log_id: None,
         }
     }
 
@@ -77,6 +87,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
             log_action: LogAction::None,
             action: WriteAction::UpdateMany,
             fields: Vec::new(),
+            log_id: None,
         }
     }
 
@@ -87,6 +98,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
             log_action: LogAction::None,
             action: WriteAction::DeleteMany,
             fields: Vec::new(),
+            log_id: None,
         }
     }
 
@@ -108,6 +120,12 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
 
     pub fn log(mut self, log_action: LogAction) -> Self {
         self.log_action = log_action;
+        self
+    }
+
+    pub fn log_with_id(mut self, log_action: LogAction, change_id: ChangeLogId) -> Self {
+        self.log_action = log_action;
+        self.log_id = Some(change_id);
         self
     }
 

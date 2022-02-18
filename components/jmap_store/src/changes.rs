@@ -9,7 +9,7 @@ use crate::{
     id::{hex_reader, HexWriter, JMAPIdSerialize},
     json::JSONValue,
     local_store::JMAPLocalStore,
-    JMAPId,
+    JMAPId, JMAPQueryChangesRequest, JMAPQueryRequest, JMAPQueryResponse,
 };
 
 pub struct JMAPChangesRequest {
@@ -34,7 +34,7 @@ pub struct JMAPQueryChangesResponse {
 }
 
 #[derive(Debug)]
-pub struct JMAPChangesResponse {
+pub struct JMAPChangesResponse<T> {
     pub old_state: JMAPState,
     pub new_state: JMAPState,
     pub has_more_changes: bool,
@@ -42,10 +42,14 @@ pub struct JMAPChangesResponse {
     pub created: HashSet<ChangeLogId>,
     pub updated: HashSet<ChangeLogId>,
     pub destroyed: HashSet<ChangeLogId>,
+    pub arguments: T,
 }
 
-impl From<JMAPChangesResponse> for JSONValue {
-    fn from(r: JMAPChangesResponse) -> Self {
+impl<T> From<JMAPChangesResponse<T>> for JSONValue
+where
+    T: Into<JSONValue>,
+{
+    fn from(r: JMAPChangesResponse<T>) -> Self {
         let mut obj = HashMap::new();
         obj.insert("oldState".to_string(), r.old_state.into());
         obj.insert("newState".to_string(), r.new_state.into());
@@ -74,6 +78,9 @@ impl From<JMAPChangesResponse> for JSONValue {
                 .collect::<Vec<JSONValue>>()
                 .into(),
         );
+        if let JSONValue::Object(arguments) = r.arguments.into() {
+            obj.extend(arguments);
+        }
         obj.into()
     }
 }
@@ -181,7 +188,19 @@ pub trait JMAPLocalChanges<'x> {
         collection: CollectionId,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse>;
+    ) -> store::Result<JMAPChangesResponse<()>>;
+}
+
+pub trait JMAPLocalQueryChanges<'x, T: 'x, U, V, W> {
+    fn query_changes(
+        &'x self,
+        query: JMAPQueryChangesRequest<U, V, W>,
+        query_fnc: impl Fn(
+            &'x JMAPLocalStore<T>,
+            JMAPQueryRequest<U, V, W>,
+        ) -> crate::Result<JMAPQueryResponse>,
+        collection: CollectionId,
+    ) -> crate::Result<JMAPQueryChangesResponse>;
 }
 
 impl<'x, T> JMAPLocalChanges<'x> for JMAPLocalStore<T>
@@ -202,7 +221,7 @@ where
         collection: CollectionId,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse> {
+    ) -> store::Result<JMAPChangesResponse<()>> {
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self
@@ -218,6 +237,7 @@ where
                         created: HashSet::new(),
                         updated: HashSet::new(),
                         destroyed: HashSet::new(),
+                        arguments: (),
                     });
                 }
 
@@ -310,6 +330,94 @@ where
             created,
             updated,
             destroyed,
+            arguments: (),
+        })
+    }
+}
+
+impl<'x, T: 'x, U, V, W> JMAPLocalQueryChanges<'x, T, U, V, W> for JMAPLocalStore<T>
+where
+    T: Store<'x>,
+{
+    fn query_changes(
+        &'x self,
+        query: JMAPQueryChangesRequest<U, V, W>,
+        query_fnc: impl Fn(
+            &'x JMAPLocalStore<T>,
+            JMAPQueryRequest<U, V, W>,
+        ) -> crate::Result<JMAPQueryResponse>,
+        collection: CollectionId,
+    ) -> crate::Result<JMAPQueryChangesResponse> {
+        let changes = self.get_jmap_changes(
+            query.account_id,
+            collection,
+            query.since_query_state,
+            query.max_changes,
+        )?;
+
+        let mut removed;
+        let mut added;
+
+        let total = if changes.total_changes > 0 || query.calculate_total {
+            let query_results = query_fnc(
+                self,
+                JMAPQueryRequest {
+                    account_id: query.account_id,
+                    filter: query.filter,
+                    sort: query.sort,
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 0,
+                    calculate_total: true,
+                    arguments: query.arguments,
+                },
+            )?;
+
+            removed = Vec::with_capacity(changes.total_changes);
+            added = Vec::with_capacity(changes.total_changes);
+
+            if changes.total_changes > 0 {
+                if !query_results.is_immutable {
+                    for updated_id in &changes.updated {
+                        removed.push(*updated_id);
+                    }
+                    for (index, id) in query_results.ids.into_iter().enumerate() {
+                        if changes.created.contains(&id) || changes.updated.contains(&id) {
+                            added.push(JMAPQueryChangesResponseItem { id, index });
+                        }
+                    }
+                } else {
+                    for (index, id) in query_results.ids.into_iter().enumerate() {
+                        //TODO test up to id properly
+                        if let Some(up_to_id) = &query.up_to_id {
+                            if &id == up_to_id {
+                                break;
+                            }
+                        }
+                        if changes.created.contains(&id) {
+                            added.push(JMAPQueryChangesResponseItem { id, index });
+                        }
+                    }
+                }
+                for deleted_id in changes.destroyed {
+                    removed.push(deleted_id);
+                }
+            }
+
+            query_results.total
+        } else {
+            removed = Vec::new();
+            added = Vec::new();
+            0
+        };
+
+        Ok(JMAPQueryChangesResponse {
+            old_query_state: changes.old_state,
+            new_query_state: changes.new_state,
+            total,
+            removed,
+            added,
         })
     }
 }

@@ -5,7 +5,7 @@ use jmap_store::{
     changes::JMAPLocalChanges,
     local_store::JMAPLocalStore,
     query::{build_query, paginate_results},
-    JMAPId, JMAPQuery, JMAPQueryResponse, JMAP_MAIL,
+    JMAPId, JMAPQueryRequest, JMAPQueryResponse, JMAP_MAIL,
 };
 use mail_parser::RfcHeader;
 use nlp::Language;
@@ -66,7 +66,11 @@ where
 {
     fn mail_query(
         &'x self,
-        request: JMAPQuery<JMAPMailFilterCondition, JMAPMailComparator, JMAPMailQueryArguments>,
+        request: JMAPQueryRequest<
+            JMAPMailFilterCondition,
+            JMAPMailComparator,
+            JMAPMailQueryArguments,
+        >,
     ) -> jmap_store::Result<JMAPQueryResponse> {
         let mut is_immutable_filter = true;
         let mut is_immutable_sort = true;

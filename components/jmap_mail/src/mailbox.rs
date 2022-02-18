@@ -2,14 +2,20 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
-use jmap_store::changes::JMAPLocalChanges;
+use jmap_store::changes::{
+    JMAPChangesRequest, JMAPChangesResponse, JMAPLocalChanges, JMAPLocalQueryChanges,
+    JMAPQueryChangesResponse,
+};
 use jmap_store::id::JMAPIdSerialize;
 use jmap_store::local_store::JMAPLocalStore;
 use jmap_store::query::{build_query, paginate_results};
 use jmap_store::{
     json::JSONValue, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAILBOX,
 };
-use jmap_store::{JMAPGet, JMAPGetResponse, JMAPQuery, JMAPQueryResponse, JMAP_MAIL};
+use jmap_store::{
+    JMAPGet, JMAPGetResponse, JMAPQueryChangesRequest, JMAPQueryRequest, JMAPQueryResponse,
+    JMAP_MAIL, JMAP_MAILBOX_CHANGES,
+};
 use serde::{Deserialize, Serialize};
 use store::field::{FieldOptions, Text};
 use store::{
@@ -43,11 +49,14 @@ struct JMAPMailboxSet {
     pub is_subscribed: Option<bool>,
 }
 
-pub struct JMAPMailMailboxSetArguments {
+pub struct JMAPMailboxSetArguments {
     pub remove_emails: bool,
 }
 
-pub enum JMAPMailMailboxFilterCondition {
+pub struct JMAPMailboxChangesResponse {
+    pub updated_properties: Vec<JMAPMailboxProperties>,
+}
+pub enum JMAPMailboxFilterCondition {
     ParentId(JMAPId),
     Name(String),
     Role(String),
@@ -55,13 +64,13 @@ pub enum JMAPMailMailboxFilterCondition {
     IsSubscribed,
 }
 
-pub enum JMAPMailMailboxComparator {
+pub enum JMAPMailboxComparator {
     Name,
     Role,
     ParentId,
 }
 
-pub struct JMAPMailMailboxQueryArguments {
+pub struct JMAPMailboxQueryArguments {
     pub sort_as_tree: bool,
     pub filter_as_tree: bool,
 }
@@ -136,7 +145,7 @@ where
 {
     fn mailbox_set(
         &'x self,
-        request: JMAPSet<JMAPMailMailboxSetArguments>,
+        request: JMAPSet<JMAPMailboxSetArguments>,
     ) -> jmap_store::Result<JMAPSetResponse> {
         let old_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
         if let Some(if_in_state) = request.if_in_state {
@@ -589,7 +598,9 @@ where
                 .collect::<Vec<JMAPId>>()
         };
 
-        let document_ids = self.store.get_document_ids(request.account_id, JMAP_MAIL)?;
+        let document_ids = self
+            .store
+            .get_document_ids(request.account_id, JMAP_MAILBOX)?;
         let mut not_found = Vec::new();
         let mut results = Vec::with_capacity(request_ids.len());
 
@@ -683,10 +694,10 @@ where
 
     fn mailbox_query(
         &'x self,
-        request: JMAPQuery<
-            JMAPMailMailboxFilterCondition,
-            JMAPMailMailboxComparator,
-            JMAPMailMailboxQueryArguments,
+        request: JMAPQueryRequest<
+            JMAPMailboxFilterCondition,
+            JMAPMailboxComparator,
+            JMAPMailboxQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryResponse> {
         let mut doc_ids = build_query(
@@ -697,30 +708,30 @@ where
             request.sort,
             |cond| {
                 Ok(match cond {
-                    JMAPMailMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
+                    JMAPMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
                         JMAPMailboxProperties::ParentId.into(),
                         FieldValue::LongInteger(parent_id),
                     ),
-                    JMAPMailMailboxFilterCondition::Name(text) => Filter::eq(
+                    JMAPMailboxFilterCondition::Name(text) => Filter::eq(
                         JMAPMailboxProperties::Name.into(),
                         FieldValue::Text(text.to_lowercase()),
                     ),
-                    JMAPMailMailboxFilterCondition::Role(text) => {
+                    JMAPMailboxFilterCondition::Role(text) => {
                         Filter::eq(JMAPMailboxProperties::Role.into(), FieldValue::Text(text))
                     }
-                    JMAPMailMailboxFilterCondition::HasAnyRole => Filter::eq(
+                    JMAPMailboxFilterCondition::HasAnyRole => Filter::eq(
                         JMAPMailboxProperties::Role.into(),
                         FieldValue::Tag(Tag::Id(0)),
                     ),
-                    JMAPMailMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
+                    JMAPMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
                 })
             },
             |comp| {
                 Ok(Comparator::Field(FieldComparator {
                     field: match comp.property {
-                        JMAPMailMailboxComparator::Name => JMAPMailboxProperties::Name,
-                        JMAPMailMailboxComparator::Role => JMAPMailboxProperties::Role,
-                        JMAPMailMailboxComparator::ParentId => JMAPMailboxProperties::ParentId,
+                        JMAPMailboxComparator::Name => JMAPMailboxProperties::Name,
+                        JMAPMailboxComparator::Role => JMAPMailboxProperties::Role,
+                        JMAPMailboxComparator::ParentId => JMAPMailboxProperties::ParentId,
                     }
                     .into(),
                     ascending: comp.is_ascending,
@@ -843,6 +854,62 @@ where
             ids: results,
             is_immutable: false,
         })
+    }
+
+    fn mailbox_changes(
+        &'x self,
+        request: JMAPChangesRequest,
+    ) -> jmap_store::Result<JMAPChangesResponse<JMAPMailboxChangesResponse>> {
+        let changes = self.get_jmap_changes(
+            request.account,
+            JMAP_MAILBOX,
+            request.since_state.clone(),
+            request.max_changes,
+        )?;
+
+        let mut updated_properties = None;
+        if !changes.updated.is_empty() {
+            let message_changes = self.get_jmap_changes(
+                request.account,
+                JMAP_MAILBOX_CHANGES,
+                request.since_state,
+                request.max_changes,
+            )?;
+
+            if message_changes.updated == changes.updated {
+                updated_properties = vec![
+                    JMAPMailboxProperties::TotalEmails,
+                    JMAPMailboxProperties::UnreadEmails,
+                    JMAPMailboxProperties::TotalThreads,
+                    JMAPMailboxProperties::UnreadThreads,
+                ]
+                .into();
+            }
+        }
+
+        Ok(JMAPChangesResponse {
+            old_state: changes.old_state,
+            new_state: changes.new_state,
+            has_more_changes: changes.has_more_changes,
+            total_changes: changes.total_changes,
+            created: changes.created,
+            updated: changes.updated,
+            destroyed: changes.destroyed,
+            arguments: JMAPMailboxChangesResponse {
+                updated_properties: updated_properties.unwrap_or_default(),
+            },
+        })
+    }
+
+    fn mailbox_query_changes(
+        &'x self,
+        request: JMAPQueryChangesRequest<
+            JMAPMailboxFilterCondition,
+            JMAPMailboxComparator,
+            JMAPMailboxQueryArguments,
+        >,
+    ) -> jmap_store::Result<JMAPQueryChangesResponse> {
+        self.query_changes(request, JMAPLocalStore::mailbox_query, JMAP_MAILBOX)
     }
 }
 

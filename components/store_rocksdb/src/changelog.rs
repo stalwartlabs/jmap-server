@@ -3,10 +3,7 @@ use std::{array::TryFromSliceError, convert::TryInto};
 use rocksdb::{Direction, IteratorMode};
 use store::{
     leb128::Leb128,
-    serialize::{
-        serialize_changelog_key, serialize_stored_key_global, StoreDeserialize,
-        COLLECTION_PREFIX_LEN,
-    },
+    serialize::{serialize_changelog_key, COLLECTION_PREFIX_LEN},
     AccountId, ChangeLog, ChangeLogEntry, ChangeLogId, ChangeLogQuery, CollectionId,
     StoreChangeLog, StoreError,
 };
@@ -20,6 +17,7 @@ pub struct ChangeLogWriter {
     pub deletes: Vec<ChangeLogId>,
 }
 
+//TODO delete old changelog entries
 impl ChangeLogWriter {
     pub fn new() -> Self {
         ChangeLogWriter::default()
@@ -166,20 +164,29 @@ impl StoreChangeLog for RocksDBStore {
         account: AccountId,
         collection: CollectionId,
     ) -> store::Result<Option<ChangeLogId>> {
-        Ok(
-            if let Some(change_id) = self
-                .db
-                .get_cf(
-                    &self.get_handle("values")?,
-                    &serialize_stored_key_global(account.into(), collection.into(), None),
-                )
-                .map_err(|e| StoreError::InternalError(e.into_string()))?
-            {
-                Some(ChangeLogId::deserialize(change_id)?)
-            } else {
-                None
-            },
-        )
+        let key = serialize_changelog_key(account, collection, ChangeLogId::MAX);
+
+        if let Some((key, _)) = self
+            .db
+            .iterator_cf(
+                &self.get_handle("log")?,
+                IteratorMode::From(&key, Direction::Reverse),
+            )
+            .into_iter()
+            .next()
+        {
+            if key.starts_with(&key[0..COLLECTION_PREFIX_LEN]) {
+                return Ok(Some(ChangeLogId::from_be_bytes(
+                    key.get(COLLECTION_PREFIX_LEN..)
+                        .ok_or_else(|| {
+                            StoreError::InternalError(format!("Failed to changelog key: {:?}", key))
+                        })?
+                        .try_into()
+                        .map_err(|e: TryFromSliceError| StoreError::InternalError(e.to_string()))?,
+                )));
+            }
+        }
+        Ok(None)
     }
 
     fn get_changes(
