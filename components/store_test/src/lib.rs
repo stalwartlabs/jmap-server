@@ -12,6 +12,7 @@ pub mod jmap_mail_query;
 pub mod jmap_mail_query_changes;
 pub mod jmap_mail_set;
 pub mod jmap_mail_thread;
+pub mod jmap_mailbox;
 pub mod tombstones;
 
 pub fn deflate_artwork_data() -> Vec<u8> {

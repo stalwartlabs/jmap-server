@@ -464,4 +464,26 @@ mod tests {
 
         std::fs::remove_dir_all(&temp_dir).unwrap();
     }
+
+    #[test]
+    fn test_jmap_mailbox() {
+        let mut temp_dir = std::env::temp_dir();
+        temp_dir.push("strdb_mailbox_test");
+        if temp_dir.exists() {
+            std::fs::remove_dir_all(&temp_dir).unwrap();
+        }
+
+        store_test::jmap_mailbox::test_jmap_mailbox(
+            JMAPLocalStore::open(
+                RocksDBStore::open(RocksDBStoreConfig::default_config(
+                    temp_dir.to_str().unwrap(),
+                ))
+                .unwrap(),
+                JMAPStoreConfig::new(),
+            )
+            .unwrap(),
+        );
+
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
 }

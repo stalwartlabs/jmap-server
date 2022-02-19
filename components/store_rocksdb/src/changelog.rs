@@ -196,12 +196,20 @@ impl StoreChangeLog for RocksDBStore {
         query: ChangeLogQuery,
     ) -> store::Result<Option<ChangeLog>> {
         let mut changelog = ChangeLog::default();
-        let (is_inclusive, mut match_from_change_id, from_change_id, to_change_id) = match query {
+        /*let (is_inclusive, mut match_from_change_id, from_change_id, to_change_id) = match query {
             ChangeLogQuery::All => (true, false, 0, 0),
             ChangeLogQuery::Since(change_id) => (false, true, change_id, 0),
             ChangeLogQuery::SinceInclusive(change_id) => (true, true, change_id, 0),
             ChangeLogQuery::RangeInclusive(from_change_id, to_change_id) => {
                 (true, true, from_change_id, to_change_id)
+            }
+        };*/
+        let (is_inclusive, from_change_id, to_change_id) = match query {
+            ChangeLogQuery::All => (true, 0, 0),
+            ChangeLogQuery::Since(change_id) => (false, change_id, 0),
+            ChangeLogQuery::SinceInclusive(change_id) => (true, change_id, 0),
+            ChangeLogQuery::RangeInclusive(from_change_id, to_change_id) => {
+                (true, from_change_id, to_change_id)
             }
         };
         let key = serialize_changelog_key(account, collection, from_change_id);
@@ -224,13 +232,13 @@ impl StoreChangeLog for RocksDBStore {
                     .map_err(|e: TryFromSliceError| StoreError::InternalError(e.to_string()))?,
             );
 
-            if match_from_change_id {
+            /*if match_from_change_id {
                 if change_id != from_change_id {
                     return Ok(None);
                 } else {
                     match_from_change_id = false;
                 }
-            }
+            }*/
 
             if change_id > from_change_id || (is_inclusive && change_id == from_change_id) {
                 if to_change_id > 0 && change_id > to_change_id {

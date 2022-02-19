@@ -183,7 +183,7 @@ where
             })
             .unwrap();
 
-        assert!(result.not_created.is_null(), "{:?}", result.not_created);
+        assert_eq!(result.not_created, JSONValue::Null);
 
         let mut values = result
             .created

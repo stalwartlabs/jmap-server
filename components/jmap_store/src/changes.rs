@@ -12,6 +12,7 @@ use crate::{
     JMAPId, JMAPQueryChangesRequest, JMAPQueryRequest, JMAPQueryResponse,
 };
 
+#[derive(Debug)]
 pub struct JMAPChangesRequest {
     pub account: AccountId,
     pub since_state: JMAPState,
