@@ -1,19 +1,13 @@
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
-    env, fs,
-    hash::{Hash, Hasher},
+    collections::HashMap,
+    env,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
-    path::PathBuf,
     process::exit,
     str::FromStr,
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use store_rocksdb::RocksDBStoreConfig;
 use tracing::error;
-
-use crate::cluster::PeerId;
 
 pub struct EnvSettings {
     pub args: HashMap<String, String>,
@@ -36,16 +30,16 @@ impl EnvSettings {
                 let key = parts.next().unwrap();
                 let value = parts.next().unwrap();
 
-                if key.starts_with("--") {
+                if let Some(key) = key.strip_prefix("--") {
                     args.insert(key.to_lowercase(), value.to_string());
                 } else {
                     error!("Invalid command line argument: {}", key);
                     exit(1);
                 }
             } else if let Some(key) = std::mem::take(&mut current_key) {
-                args.insert(key.to_lowercase(), arg);
-            } else if arg.starts_with("--") {
-                current_key = Some(arg);
+                args.insert(key, arg);
+            } else if let Some(key) = arg.strip_prefix("--") {
+                current_key = Some(key.to_lowercase());
             } else {
                 error!("Invalid command line argument: {}", arg);
                 exit(1);

@@ -14,6 +14,7 @@ use config::EnvSettings;
 use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPStoreConfig};
 use store::Store;
 use store_rocksdb::RocksDBStore;
+use tracing::info;
 
 pub struct JMAPServer<T> {
     pub jmap_store: JMAPLocalStore<T>,
@@ -36,7 +37,6 @@ async fn index(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    std::env::set_var("RUST_LOG", "actix_web=info");
     tracing_subscriber::fmt::init();
 
     let settings = EnvSettings::new();
@@ -63,16 +63,20 @@ async fn main() -> std::io::Result<()> {
 
     // Start cluster
     if jmap_server.cluster.is_some() {
-        start_swim(
-            jmap_server.clone(),
-            SocketAddr::from((
-                bind_addr,
-                settings.parse("swim-port").unwrap_or(DEFAULT_SWIM_PORT),
-            )),
-        )
-        .await;
+        let swim_addr = SocketAddr::from((
+            bind_addr,
+            settings.parse("swim-port").unwrap_or(DEFAULT_SWIM_PORT),
+        ));
+        info!("Starting Stalwart SWIM gossiper on {}...", swim_addr);
+        start_swim(jmap_server.clone(), swim_addr).await;
     }
 
+    // Start HTTP server
+    let http_addr = SocketAddr::from((
+        bind_addr,
+        settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT),
+    ));
+    info!("Starting Stalwart JMAP server on {}...", http_addr);
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
@@ -81,10 +85,7 @@ async fn main() -> std::io::Result<()> {
             .service(index)
             .service(swim_http_sync)
     })
-    .bind(SocketAddr::from((
-        bind_addr,
-        settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT),
-    )))?
+    .bind(http_addr)?
     .run()
     .await
 }

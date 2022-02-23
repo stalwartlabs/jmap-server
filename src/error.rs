@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use actix_web::{
     error,
     http::{header, StatusCode},

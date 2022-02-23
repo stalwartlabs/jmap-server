@@ -1,7 +1,4 @@
 use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    io::Read,
     net::SocketAddr,
     sync::{atomic::Ordering, Arc},
     time::{Duration, Instant},
@@ -9,13 +6,12 @@ use std::{
 
 use actix_web::{
     post,
-    web::{self, Bytes},
-    HttpResponse,
+    web::{self},
 };
-use dashmap::mapref::entry::Entry;
+
 use serde::{Deserialize, Serialize};
 use store_rocksdb::RocksDBStore;
-use tokio::{io, net::UdpSocket, sync::mpsc, time};
+use tokio::{net::UdpSocket, sync::mpsc, time};
 use tracing::{debug, error, info};
 
 use crate::{error::JMAPServerError, JMAPServer};
@@ -35,7 +31,7 @@ const HB_PHI_CONVICT_THRESHOLD: f64 = 9.0;
 
 #[derive(Debug)]
 pub enum SWIMStatus {
-    Bootstrap,
+    Seed,
     Alive,
     Suspected,
     Leaving,
@@ -135,7 +131,7 @@ impl From<SWIMPeerInfo> for JMAPPeer {
             jmap_url: peer.jmap_url,
             status: SWIMStatus::Alive,
             last_heartbeat: Instant::now(),
-            hb_window: [0; HEARTBEAT_WINDOW],
+            hb_window: vec![0; HEARTBEAT_WINDOW],
             hb_window_pos: 0,
             hb_sum: 0,
             hb_sq_sum: 0,
@@ -150,7 +146,6 @@ enum SWIMRequest {
     Synchronize(String),
     Ping(Vec<SWIMPeerState>),
     Pong(Vec<SWIMPeerState>),
-    Leave(PeerId),
 }
 
 pub async fn start_swim(core: web::Data<JMAPServer<RocksDBStore>>, bind_addr: SocketAddr) {
@@ -166,8 +161,7 @@ pub async fn start_swim(core: web::Data<JMAPServer<RocksDBStore>>, bind_addr: So
     let socket = _socket.clone();
     tokio::spawn(async move {
         let mut last_ping = Instant::now();
-        let mut ping_list = Vec::with_capacity(3);
-        let mut ping_list_pos = u32::MAX as usize;
+        let mut last_peer_pinged = u32::MAX as usize;
         let cluster = core.cluster.as_ref().unwrap();
 
         loop {
@@ -194,44 +188,63 @@ pub async fn start_swim(core: web::Data<JMAPServer<RocksDBStore>>, bind_addr: So
                 Err(_) => (),
             }
 
-            let num_peers = cluster.peers.len();
-            if num_peers > 0 && last_ping.elapsed().as_millis() as u64 >= PING_INTERVAL {
-                for mut peer in cluster.peers.iter_mut() {
-                    let peer = peer.value_mut();
+            if last_ping.elapsed().as_millis() as u64 >= PING_INTERVAL {
+                let mut ping_peer = None;
 
-                    if !matches!(peer.status, SWIMStatus::Offline) {
-                        if !ping_list.contains(&peer.peer_id) {
-                            ping_list.push(peer.peer_id);
+                if let Ok(mut local_peers) = cluster.peers.write() {
+                    if !local_peers.is_empty() {
+                        for peer in local_peers.iter_mut() {
+                            // Failure detection
+                            if !matches!(peer.status, SWIMStatus::Offline) {
+                                check_heartbeat(peer);
+                            }
                         }
 
-                        check_heartbeat(peer);
-                    } else if let Some(pos) = ping_list.iter().position(|&id| id == peer.peer_id) {
-                        ping_list.remove(pos);
-                    }
-                }
+                        // Find next peer to ping
+                        let num_peers = local_peers.len();
+                        for _ in 0..num_peers {
+                            last_peer_pinged = (last_peer_pinged + 1) % num_peers;
+                            let peer = &local_peers[last_peer_pinged];
 
-                let num_peers = ping_list.len();
-                if num_peers > 0 {
-                    ping_list_pos = (ping_list_pos + 1) % num_peers;
-                    if let Some(peer) = cluster.peers.get(&ping_list[ping_list_pos]) {
-                        match bincode::serialize(&SWIMRequest::Ping(build_peer_state(cluster))) {
-                            Ok(bytes) => {
-                                if let Err(e) = socket.send_to(&bytes, &peer.swim_addr).await {
-                                    error!(
-                                        "Failed to send UDP packet to {}: {}",
-                                        peer.swim_addr, e
-                                    );
+                            match peer.status {
+                                SWIMStatus::Seed => {
+                                    ping_peer = Some((false, peer.swim_addr));
+                                    break;
                                 }
-                            }
-                            Err(e) => {
-                                error!("Failed to serialize UDP packet: {}", e);
+                                SWIMStatus::Alive | SWIMStatus::Suspected => {
+                                    ping_peer = Some((true, peer.swim_addr));
+                                    break;
+                                }
+                                SWIMStatus::Leaving | SWIMStatus::Offline => (),
                             }
                         }
                     }
+                } else {
+                    error!("Failed to acquire cluster.peers write lock.");
                 }
-                /*let ping = SWIMRequest::Join;
-                let ping_bytes = serde_cbor::to_vec(&ping).unwrap();
-                socket.send_to(&ping_bytes, &addr).await?;*/
+
+                if let Some((has_joined, target_addr)) = ping_peer {
+                    //debug!("Sending pingReq to {}.", target_addr.port());
+                    let request = if has_joined {
+                        // Increase Epoch
+                        cluster.epoch.fetch_add(1, Ordering::Relaxed);
+                        SWIMRequest::Ping(build_peer_state(cluster))
+                    } else {
+                        SWIMRequest::Join(cluster.swim_addr.port())
+                    };
+
+                    match bincode::serialize(&request) {
+                        Ok(bytes) => {
+                            if let Err(e) = socket.send_to(&bytes, &target_addr).await {
+                                error!("Failed to send UDP packet to {}: {}", target_addr, e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to serialize UDP packet: {}", e);
+                        }
+                    }
+                }
+
                 last_ping = Instant::now();
             }
         }
@@ -269,7 +282,15 @@ fn handle_request(
     request: SWIMRequest,
     source_addr: SocketAddr,
 ) -> Option<(SocketAddr, SWIMRequest)> {
-    debug!("Received request {:?} from {}.", request, source_addr);
+    //debug!("Received request {:?} from {}.", request, source_addr);
+
+    // Increase epoch
+    core.cluster
+        .as_ref()
+        .unwrap()
+        .epoch
+        .fetch_add(1, Ordering::Relaxed);
+
     match request {
         SWIMRequest::Join(reply_port) => Some((
             SocketAddr::from((source_addr.ip(), reply_port)),
@@ -291,7 +312,6 @@ fn handle_request(
             sync_peer_state(core, peer_list);
             None
         }
-        SWIMRequest::Leave(peer_id) => None, //TODO
     }
 }
 
@@ -317,7 +337,21 @@ async fn swim_http_sync(
         return Err(JMAPServerError::from("Invalid cluster key."));
     }
 
-    sync_peer_info(cluster, request.peers);
+    //debug!("Full sync request: {:?}", request);
+
+    sync_peer_info(
+        cluster,
+        request.peers,
+        cluster
+            .peers
+            .read()
+            .map(|peers| {
+                peers
+                    .iter()
+                    .any(|peer| matches!(peer.status, SWIMStatus::Seed))
+            })
+            .unwrap_or(false),
+    );
 
     Ok(bincode::serialize(&build_peer_info(cluster))
         .map_err(|e| {
@@ -350,7 +384,7 @@ fn full_sync(core: web::Data<JMAPServer<RocksDBStore>>, rpc_url: String) {
                 Ok(response) => match response.bytes().await {
                     Ok(bytes) => match bincode::deserialize::<Vec<SWIMPeerInfo>>(&bytes) {
                         Ok(peer_info) => {
-                            sync_peer_info(cluster, peer_info);
+                            sync_peer_info(cluster, peer_info, false);
                             debug!("Successful full sync with {}.", rpc_url);
                         }
                         Err(err) => {
@@ -387,106 +421,136 @@ fn sync_peer_state(
         return None;
     }
     let cluster = core.cluster.as_ref().unwrap();
+    let mut local_peers = cluster.peers.write().ok()?;
+    let mut source_peer_idx = None;
 
-    let mut do_full_sync = cluster.peers.len() + 1 != peers.len();
-    for peer in &peers {
-        if let Some(mut local_peer) = cluster.peers.get_mut(&peer.peer_id) {
-            if peer.epoch > local_peer.epoch {
-                local_peer.epoch = peer.epoch;
-                update_heartbeat(&mut local_peer);
+    let mut do_full_sync = local_peers.len() + 1 != peers.len();
+    'outer: for (pos, peer) in peers.iter().enumerate() {
+        if cluster.peer_id != peer.peer_id {
+            for (idx, mut local_peer) in local_peers.iter_mut().enumerate() {
+                if local_peer.peer_id == peer.peer_id {
+                    if peer.epoch > local_peer.epoch {
+                        local_peer.epoch = peer.epoch;
+                        update_heartbeat(&mut local_peer);
 
-                if local_peer.generation != peer.generation && !do_full_sync {
-                    do_full_sync = true;
+                        if local_peer.generation != peer.generation && !do_full_sync {
+                            do_full_sync = true;
+                        }
+                    }
+                    // Keep idx of first item, the source peer.
+                    if pos == 0 {
+                        source_peer_idx = idx.into();
+                    }
+                    continue 'outer;
                 }
             }
-        } else if !do_full_sync {
-            do_full_sync = true;
+            if !do_full_sync {
+                do_full_sync = true;
+            }
         }
     }
 
-    let source_peer = if let Some(source_peer) = cluster.peers.get(&peers.first().unwrap().peer_id)
-    {
-        source_peer
+    if let Some(source_peer_idx) = source_peer_idx {
+        if do_full_sync {
+            let rpc_url = local_peers[source_peer_idx].rpc_url.clone();
+            drop(local_peers);
+            full_sync(core, rpc_url);
+            None
+        } else {
+            let swim_addr = local_peers[source_peer_idx].swim_addr;
+            drop(local_peers);
+            Some((core, swim_addr))
+        }
     } else {
         debug!(
             "Received SWIM sync packet from unknown peer: {}",
             peers.first().unwrap().peer_id
         );
-        return None;
-    };
-
-    if do_full_sync {
-        let rpc_url = source_peer.rpc_url.clone();
-        drop(source_peer);
-        full_sync(core, rpc_url);
         None
-    } else {
-        let swim_addr = source_peer.swim_addr;
-        drop(source_peer);
-        Some((core, swim_addr))
     }
 }
 
-fn sync_peer_info(cluster: &JMAPCluster, peers: Vec<SWIMPeerInfo>) {
-    for (pos, peer) in peers.into_iter().enumerate() {
-        if peer.peer_id != cluster.peer_id {
-            match cluster.peers.entry(peer.peer_id) {
-                Entry::Occupied(mut entry) => {
-                    let local_peer = entry.get_mut();
-                    let mut update_peer_info = pos == 0 && local_peer.generation != peer.generation;
+fn sync_peer_info(cluster: &JMAPCluster, peers: Vec<SWIMPeerInfo>, mut remove_seeds: bool) {
+    if let Ok(mut local_peers) = cluster.peers.write() {
+        'outer: for (pos, peer) in peers.into_iter().enumerate() {
+            if peer.peer_id != cluster.peer_id {
+                if remove_seeds {
+                    local_peers.clear();
+                    remove_seeds = false;
+                }
 
-                    if peer.epoch > local_peer.epoch {
-                        if !update_peer_info && local_peer.generation != peer.generation {
-                            update_peer_info = true;
+                for local_peer in local_peers.iter_mut() {
+                    if local_peer.peer_id == peer.peer_id {
+                        let mut update_peer_info =
+                            pos == 0 && local_peer.generation != peer.generation;
+
+                        if peer.epoch > local_peer.epoch {
+                            if !update_peer_info && local_peer.generation != peer.generation {
+                                update_peer_info = true;
+                            }
+
+                            local_peer.epoch = peer.epoch;
+                            update_heartbeat(local_peer);
                         }
 
-                        local_peer.epoch = peer.epoch;
-                        update_heartbeat(local_peer);
-                    }
+                        // Update peer info if generationId has changed and
+                        // the request comes from the peer itself, or if the epoch is higher.
+                        if update_peer_info {
+                            local_peer.generation = peer.generation;
+                            local_peer.swim_addr = peer.swim_addr;
+                            local_peer.shard_id = peer.shard_id;
+                            local_peer.rpc_url = peer.rpc_url;
+                            local_peer.jmap_url = peer.jmap_url;
+                        }
 
-                    // Update peer info if generationId has changed and
-                    // the request comes from the peer itself, or if the epoch is higher.
-                    if update_peer_info {
-                        local_peer.generation = peer.generation;
-                        local_peer.swim_addr = peer.swim_addr;
-                        local_peer.shard_id = peer.shard_id;
-                        local_peer.rpc_url = peer.rpc_url;
-                        local_peer.jmap_url = peer.jmap_url;
+                        continue 'outer;
                     }
                 }
-                Entry::Vacant(entry) => {
-                    info!(
-                        "Adding new peer {}, shard {} listening at {}.",
-                        peer.peer_id, peer.shard_id, peer.swim_addr
-                    );
-                    entry.insert(peer.into());
-                }
+
+                // Peer not found, add it to the list.
+                info!(
+                    "Adding new peer {}, shard {} listening at {}.",
+                    peer.peer_id, peer.shard_id, peer.swim_addr
+                );
+                local_peers.push(peer.into());
+            } else if peer.epoch > cluster.epoch.load(Ordering::Relaxed) {
+                info!("Updating local epoch to {}", peer.epoch);
+                cluster.epoch.store(peer.epoch + 1, Ordering::Relaxed);
             }
-        } else if peer.epoch > cluster.epoch.load(Ordering::Relaxed) {
-            info!("Updating local epoch to {}", peer.epoch);
-            cluster.epoch.store(peer.epoch, Ordering::Relaxed);
         }
+    } else {
+        error!("Failed to acquire cluster.peers write lock.");
     }
 }
 
 fn build_peer_state(cluster: &JMAPCluster) -> Vec<SWIMPeerState> {
-    // Build response
-    let mut result: Vec<SWIMPeerState> = Vec::with_capacity(cluster.peers.len() + 1);
-    result.push(cluster.into());
-    for peer in &cluster.peers {
-        result.push(peer.value().into());
+    if let Ok(local_peers) = cluster.peers.read() {
+        let mut result: Vec<SWIMPeerState> = Vec::with_capacity(local_peers.len() + 1);
+        result.push(cluster.into());
+        for peer in local_peers.iter() {
+            result.push(peer.into());
+        }
+        result
+    } else {
+        error!("Failed to acquire cluster.peers read lock.");
+        vec![]
     }
-    result
 }
 
 fn build_peer_info(cluster: &JMAPCluster) -> Vec<SWIMPeerInfo> {
-    // Build response
-    let mut result: Vec<SWIMPeerInfo> = Vec::with_capacity(cluster.peers.len() + 1);
-    result.push(cluster.into());
-    for peer in &cluster.peers {
-        result.push(peer.value().into());
+    if let Ok(local_peers) = cluster.peers.read() {
+        let mut result: Vec<SWIMPeerInfo> = Vec::with_capacity(local_peers.len() + 1);
+        result.push(cluster.into());
+        for peer in local_peers.iter() {
+            if !matches!(peer.status, SWIMStatus::Seed) {
+                result.push(peer.into());
+            }
+        }
+        result
+    } else {
+        error!("Failed to acquire cluster.peers read lock.");
+        vec![]
     }
-    result
 }
 
 fn update_heartbeat(peer: &mut JMAPPeer) {
@@ -513,6 +577,10 @@ fn update_heartbeat(peer: &mut JMAPPeer) {
     peer.last_heartbeat = now;
 }
 
+/*
+   Phi Accrual Failure Detection
+   Ported from https://github.com/akka/akka/blob/main/akka-remote/src/main/scala/akka/remote/PhiAccrualFailureDetector.scala
+*/
 fn check_heartbeat(peer: &mut JMAPPeer) {
     if peer.hb_sum == 0 {
         return;
@@ -537,16 +605,13 @@ fn check_heartbeat(peer: &mut JMAPPeer) {
         -(1.0 - 1.0 / (1.0 + e)).log10()
     };
 
-    //if (core->cluster->local_info->peer_id == 1)
-    //printf("mean: %f (%d), variance: %f, std_dev: %f, y: %f, e: %f, phi: %f (%s).\n", hb_mean, sample_size, hb_variance, hb_std_dev, y, e, phi, (phi < HB_PHI_CONVICT_THRESHOLD) ? "ALIVE" : "DEAD");
-
-    if phi > HB_PHI_CONVICT_THRESHOLD && (peer.hb_is_full || peer.hb_window_pos > 40) {
+    if phi > HB_PHI_CONVICT_THRESHOLD {
         peer.status = SWIMStatus::Offline;
     } else if phi > HB_PHI_SUSPECT_THRESHOLD {
         peer.status = SWIMStatus::Suspected;
     }
 
-    println!(
+    debug!(
         "Heartbeat[{}]: mean={:.2}ms, variance={:.2}ms, std_dev={:.2}ms, phi={:.2}, status={:?}",
         peer.peer_id, hb_mean, hb_variance, hb_std_dev, phi, peer.status
     );

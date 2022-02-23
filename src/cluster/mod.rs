@@ -4,12 +4,14 @@ use std::{
     hash::{Hash, Hasher},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    sync::atomic::{AtomicBool, AtomicU64},
+    sync::{
+        atomic::{AtomicBool, AtomicU64},
+        RwLock,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use dashmap::DashMap;
 use tracing::{error, info};
 
 use crate::{config::EnvSettings, DEFAULT_HTTP_PORT};
@@ -42,7 +44,7 @@ pub struct JMAPPeer {
 
     // Heartbeat state
     pub last_heartbeat: Instant,
-    pub hb_window: [u32; HEARTBEAT_WINDOW],
+    pub hb_window: Vec<u32>,
     pub hb_window_pos: usize,
     pub hb_sum: u32,
     pub hb_sq_sum: u32,
@@ -57,11 +59,11 @@ impl JMAPPeer {
             epoch: 0,
             generation: 0,
             swim_addr,
-            status: SWIMStatus::Bootstrap,
+            status: SWIMStatus::Seed,
             rpc_url: "".to_string(),
             jmap_url: "".to_string(),
             last_heartbeat: Instant::now(),
-            hb_window: [0; HEARTBEAT_WINDOW],
+            hb_window: vec![0; HEARTBEAT_WINDOW],
             hb_window_pos: 0,
             hb_sum: 0,
             hb_sq_sum: 0,
@@ -79,7 +81,7 @@ pub struct JMAPCluster {
     pub rpc_url: String,
     pub epoch: AtomicU64,
     pub full_sync_active: AtomicBool,
-    pub peers: DashMap<PeerId, JMAPPeer>,
+    pub peers: RwLock<Vec<JMAPPeer>>,
     pub key: String,
 }
 
@@ -149,34 +151,33 @@ impl From<&EnvSettings> for Option<JMAPCluster> {
             shard_id
         };
 
-        let peers = DashMap::new();
-
-        if let Some(seed_nodes) = settings.parse_list("seed-nodes") {
+        let peers = if let Some(seed_nodes) = settings.parse_list("seed-nodes") {
+            let mut peers = Vec::with_capacity(seed_nodes.len());
             for (node_id, seed_node) in seed_nodes.into_iter().enumerate() {
-                peers.insert(
+                peers.push(JMAPPeer::new_seed(
                     node_id as PeerId,
-                    JMAPPeer::new_seed(
-                        node_id as PeerId,
-                        if !seed_node.contains(':') {
-                            format!("{}:{}", seed_node, swim_port)
-                        } else {
-                            seed_node.to_string()
-                        }
-                        .to_socket_addrs()
-                        .map_err(|e| {
-                            error!("Failed to parse seed node '{}': {}", seed_node, e);
-                            std::process::exit(1);
-                        })
-                        .unwrap()
-                        .next()
-                        .unwrap_or_else(|| {
-                            error!("Failed to parse seed node '{}'.", seed_node);
-                            std::process::exit(1);
-                        }),
-                    ),
-                );
+                    if !seed_node.contains(':') {
+                        format!("{}:{}", seed_node, swim_port)
+                    } else {
+                        seed_node.to_string()
+                    }
+                    .to_socket_addrs()
+                    .map_err(|e| {
+                        error!("Failed to parse seed node '{}': {}", seed_node, e);
+                        std::process::exit(1);
+                    })
+                    .unwrap()
+                    .next()
+                    .unwrap_or_else(|| {
+                        error!("Failed to parse seed node '{}'.", seed_node);
+                        std::process::exit(1);
+                    }),
+                ));
             }
-        }
+            peers
+        } else {
+            Vec::new()
+        };
 
         // Create advertise addresses
         let swim_addr = SocketAddr::from((advertise_addr, swim_port));
@@ -209,7 +210,7 @@ impl From<&EnvSettings> for Option<JMAPCluster> {
             generation: generation.finish(),
             epoch: 0.into(),
             full_sync_active: false.into(),
-            peers,
+            peers: peers.into(),
             swim_addr,
             key,
             rpc_url,
