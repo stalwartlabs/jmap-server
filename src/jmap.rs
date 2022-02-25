@@ -1,9 +1,9 @@
-use actix_web::web;
+use actix_web::{web, HttpResponse};
 use jmap_mail::{
     import::{JMAPMailImportRequest, JMAPMailImportResponse},
     JMAPMailImport, JMAPMailSet,
 };
-use jmap_store::{JMAPSet, JMAPSetResponse};
+use jmap_store::{json::JSONValue, JMAPSet, JMAPSetResponse};
 use store::StoreError;
 use store_rocksdb::RocksDBStore;
 use tokio::sync::oneshot;
@@ -38,4 +38,11 @@ async fn mail_set(
 
     rx.await
         .map_err(|e| StoreError::InternalError(format!("Await error: {}", e)))?
+}
+
+pub async fn jmap_request(
+    request: web::Json<JSONValue>,
+    _server: web::Data<JMAPServer<RocksDBStore>>,
+) -> HttpResponse {
+    HttpResponse::Ok().json(request.0)
 }

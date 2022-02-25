@@ -4,10 +4,7 @@ use std::{
     hash::{Hash, Hasher},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, AtomicU64},
-        RwLock,
-    },
+    sync::Mutex,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -16,29 +13,114 @@ use tracing::{error, info};
 
 use crate::{config::EnvSettings, DEFAULT_HTTP_PORT};
 
-use self::swim::{SWIMStatus, DEFAULT_SWIM_PORT};
+use self::{
+    gossip::{PeerInfo, PeerStatus, DEFAULT_GOSSIP_PORT},
+    raft::{LogIndex, TermId},
+};
 
-pub mod swim;
+pub mod gossip;
+pub mod main;
+pub mod raft;
+pub mod rpc;
 
 pub type PeerId = u64;
 pub type ShardId = u32;
 pub type EpochId = u64;
 pub type GenerationId = u64;
 
+pub const IPC_CHANNEL_BUFFER: usize = 1024;
 const HEARTBEAT_WINDOW: usize = 1 << 10;
 const HEARTBEAT_WINDOW_MASK: usize = HEARTBEAT_WINDOW - 1;
 
-pub struct JMAPPeer {
+pub struct Cluster {
+    // Local node peer and shard id
     pub peer_id: PeerId,
     pub shard_id: ShardId,
 
-    // SWIM state
+    // Gossip state
+    pub generation: GenerationId,
+    pub epoch: EpochId,
+
+    // Local gossip address and API urls
+    pub gossip_addr: SocketAddr,
+    pub jmap_url: String,
+    pub rpc_url: String,
+
+    // Cluster key
+    pub key: String,
+
+    // Peer list
+    pub peers: Vec<Peer>,
+
+    // Raft status
+    pub term: TermId,
+    pub last_log_index: LogIndex,
+    pub last_log_term: TermId,
+    pub commit_index: LogIndex,
+    pub state: raft::State,
+}
+
+pub enum Message {
+    SyncRequest {
+        addr: SocketAddr,
+        url: String,
+    },
+    SyncResponse {
+        url: String,
+        peers: Vec<PeerInfo>,
+    },
+    VoteRequest {
+        urls: Vec<String>,
+        term: TermId,
+        last_log_index: LogIndex,
+        last_log_term: TermId,
+    },
+    QueryLeader {
+        urls: Vec<String>,
+    },
+    Ping {
+        addr: SocketAddr,
+        peers: Vec<PeerStatus>,
+    },
+    Pong {
+        addr: SocketAddr,
+        peers: Vec<PeerStatus>,
+    },
+    Join {
+        addr: SocketAddr,
+        port: u16,
+    },
+    None,
+}
+
+impl Cluster {
+    pub fn is_enabled(&self) -> bool {
+        !self.key.is_empty()
+    }
+
+    pub fn quorum(&self) -> u32 {
+        ((self
+            .peers
+            .iter()
+            .filter(|p| p.shard_id == self.shard_id)
+            .count() as f64
+            + 1.0)
+            / 2.0)
+            .floor() as u32
+    }
+}
+
+pub struct Peer {
+    pub peer_id: PeerId,
+    pub shard_id: ShardId,
+
+    // Peer status
     pub epoch: EpochId,
     pub generation: GenerationId,
-    pub status: SWIMStatus,
+    pub state: gossip::State,
 
     // Peer addresses
-    pub swim_addr: SocketAddr,
+    pub gossip_addr: SocketAddr,
     pub rpc_url: String,
     pub jmap_url: String,
 
@@ -49,17 +131,45 @@ pub struct JMAPPeer {
     pub hb_sum: u32,
     pub hb_sq_sum: u32,
     pub hb_is_full: bool,
+
+    // Raft state
+    pub last_log_index: LogIndex,
+    pub last_log_term: TermId,
 }
 
-impl JMAPPeer {
-    pub fn new_seed(peer_id: PeerId, swim_addr: SocketAddr) -> Self {
-        JMAPPeer {
+impl Default for Cluster {
+    fn default() -> Self {
+        Cluster {
+            peer_id: 0,
+            shard_id: 0,
+            generation: 0,
+            epoch: 0,
+            key: String::new(),
+            gossip_addr: SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
+                DEFAULT_GOSSIP_PORT,
+            ),
+            jmap_url: String::new(),
+            rpc_url: String::new(),
+            peers: Vec::new(),
+            term: 0,
+            last_log_index: 0,
+            last_log_term: 0,
+            commit_index: 0,
+            state: raft::State::None,
+        }
+    }
+}
+
+impl Peer {
+    pub fn new_seed(peer_id: PeerId, gossip_addr: SocketAddr) -> Self {
+        Peer {
             peer_id,
             shard_id: 0,
             epoch: 0,
             generation: 0,
-            swim_addr,
-            status: SWIMStatus::Seed,
+            gossip_addr,
+            state: gossip::State::Seed,
             rpc_url: "".to_string(),
             jmap_url: "".to_string(),
             last_heartbeat: Instant::now(),
@@ -68,30 +178,23 @@ impl JMAPPeer {
             hb_sum: 0,
             hb_sq_sum: 0,
             hb_is_full: false,
+            last_log_index: 0,
+            last_log_term: 0,
         }
     }
 }
 
-pub struct JMAPCluster {
-    pub peer_id: PeerId,
-    pub shard_id: ShardId,
-    pub generation: GenerationId,
-    pub swim_addr: SocketAddr,
-    pub jmap_url: String,
-    pub rpc_url: String,
-    pub epoch: AtomicU64,
-    pub full_sync_active: AtomicBool,
-    pub peers: RwLock<Vec<JMAPPeer>>,
-    pub key: String,
-}
-
-impl From<&EnvSettings> for Option<JMAPCluster> {
+impl From<&EnvSettings> for Mutex<Cluster> {
     fn from(settings: &EnvSettings) -> Self {
-        let key = settings.get("cluster")?;
+        let key = if let Some(key) = settings.get("cluster") {
+            key
+        } else {
+            return Cluster::default().into();
+        };
 
         // Obtain public addresses to advertise
         let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
-        let swim_port = settings.parse("swim-port").unwrap_or(DEFAULT_SWIM_PORT);
+        let gossip_port = settings.parse("gossip-port").unwrap_or(DEFAULT_GOSSIP_PORT);
         let default_url = format!(
             "http://{}:{}",
             advertise_addr,
@@ -154,10 +257,10 @@ impl From<&EnvSettings> for Option<JMAPCluster> {
         let peers = if let Some(seed_nodes) = settings.parse_list("seed-nodes") {
             let mut peers = Vec::with_capacity(seed_nodes.len());
             for (node_id, seed_node) in seed_nodes.into_iter().enumerate() {
-                peers.push(JMAPPeer::new_seed(
+                peers.push(Peer::new_seed(
                     node_id as PeerId,
                     if !seed_node.contains(':') {
-                        format!("{}:{}", seed_node, swim_port)
+                        format!("{}:{}", seed_node, gossip_port)
                     } else {
                         seed_node.to_string()
                     }
@@ -180,7 +283,7 @@ impl From<&EnvSettings> for Option<JMAPCluster> {
         };
 
         // Create advertise addresses
-        let swim_addr = SocketAddr::from((advertise_addr, swim_port));
+        let gossip_addr = SocketAddr::from((advertise_addr, gossip_port));
         let rpc_url = settings.parse("rpc-url").unwrap_or_else(|| {
             info!(
                 "Warning: Parameter 'rpc-url' not specified, using default '{}'.",
@@ -200,21 +303,26 @@ impl From<&EnvSettings> for Option<JMAPCluster> {
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
         shard_id.hash(&mut generation);
-        swim_addr.hash(&mut generation);
+        gossip_addr.hash(&mut generation);
         rpc_url.hash(&mut generation);
         jmap_url.hash(&mut generation);
 
-        Some(JMAPCluster {
+        Cluster {
             peer_id,
             shard_id,
             generation: generation.finish(),
-            epoch: 0.into(),
-            full_sync_active: false.into(),
-            peers: peers.into(),
-            swim_addr,
+            epoch: 0,
+            gossip_addr,
             key,
             rpc_url,
             jmap_url,
-        })
+            term: 0,
+            last_log_index: 0,
+            last_log_term: 0,
+            commit_index: 0,
+            state: raft::State::None,
+            peers,
+        }
+        .into()
     }
 }
