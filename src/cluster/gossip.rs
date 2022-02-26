@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, ops::Deref, sync::Arc, time::Instant};
+use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 use actix_web::web::{self};
 
@@ -16,8 +16,10 @@ use super::{
 };
 
 pub const DEFAULT_GOSSIP_PORT: u16 = 7911;
-pub const PING_INTERVAL: u64 = 1000;
+pub const PING_INTERVAL: u64 = 500;
 const UDP_MAX_PAYLOAD: usize = 65500;
+
+// Phi Accrual Failure Detector defaults
 const HB_MAX_PAUSE_MS: f64 = 0.0;
 const HB_MIN_STD_DEV: f64 = 300.0;
 const HB_PHI_SUSPECT_THRESHOLD: f64 = 5.0;
@@ -170,6 +172,7 @@ pub async fn start_gossip(
     tokio::spawn(async move {
         while let Some(response) = rx.recv().await {
             let (target_addr, response) = response.into();
+            //debug!("Sending packet to {}: {:?}", target_addr, response);
             match bincode::serialize(&response) {
                 Ok(bytes) => {
                     if let Err(e) = socket.send_to(&bytes, &target_addr).await {
@@ -190,9 +193,11 @@ pub async fn start_gossip(
 
         loop {
             //TODO encrypt packets
+            //TODO use leb128 serialization
             match socket.recv_from(&mut buf).await {
                 Ok((size, addr)) => {
                     if let Ok(request) = bincode::deserialize::<Request>(&buf[..size]) {
+                        //debug!("Received packet from {}: {:?}", addr, request);
                         if let Err(e) = tx.send((addr, request)).await {
                             error!("Gossip process error, tx.send() failed: {}", e);
                         }
@@ -208,6 +213,43 @@ pub async fn start_gossip(
     });
 
     (gossip_rx, gossip_tx)
+}
+
+pub async fn handle_gossip<T>(
+    core: &web::Data<JMAPServer<T>>,
+    source_addr: SocketAddr,
+    request: Request,
+) -> Message
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    match request {
+        // Join request, reply with this node's RPC url.
+        Request::Join(reply_port) => core
+            .cluster
+            .lock()
+            .map(|cluster| Message::SyncRequest {
+                addr: SocketAddr::from((source_addr.ip(), reply_port)),
+                url: cluster.rpc_url.clone(),
+            })
+            .unwrap_or(Message::None),
+
+        // Synchronize request, perform a full sync over HTTP.
+        Request::Synchronize(rpc_url) => core
+            .cluster
+            .lock()
+            .map(|cluster| Message::SyncResponse {
+                url: rpc_url,
+                peers: build_peer_info(&cluster),
+            })
+            .unwrap_or(Message::None),
+
+        // Hearbeat request, reply with the cluster status.
+        Request::Ping(peer_list) => handle_ping(core, peer_list, true).await,
+
+        // Heartbeat response, update the cluster status if needed.
+        Request::Pong(peer_list) => handle_ping(core, peer_list, false).await,
+    }
 }
 
 pub async fn handle_ping<T>(
@@ -290,7 +332,7 @@ pub fn sync_peer_info(cluster: &mut Cluster, peers: Vec<PeerInfo>) {
     'outer: for (pos, peer) in peers.into_iter().enumerate() {
         if peer.peer_id != cluster.peer_id {
             for local_peer in cluster.peers.iter_mut() {
-                if !matches!(local_peer.state, State::Seed) {
+                if !local_peer.is_seed() {
                     if local_peer.peer_id == peer.peer_id {
                         let mut update_peer_info =
                             pos == 0 && local_peer.generation != peer.generation;
@@ -334,9 +376,7 @@ pub fn sync_peer_info(cluster: &mut Cluster, peers: Vec<PeerInfo>) {
     }
 
     if remove_seeds {
-        cluster
-            .peers
-            .retain(|peer| !matches!(peer.state, State::Seed));
+        cluster.peers.retain(|peer| !peer.is_seed());
     }
 }
 
@@ -353,7 +393,7 @@ pub fn build_peer_info(cluster: &Cluster) -> Vec<PeerInfo> {
     let mut result: Vec<PeerInfo> = Vec::with_capacity(cluster.peers.len() + 1);
     result.push(cluster.into());
     for peer in cluster.peers.iter() {
-        if !matches!(peer.state, State::Seed) {
+        if !peer.is_seed() {
             result.push(peer.into());
         }
     }
@@ -361,11 +401,9 @@ pub fn build_peer_info(cluster: &Cluster) -> Vec<PeerInfo> {
 }
 
 fn update_heartbeat(peer: &mut Peer) {
-    let now = Instant::now();
-    if !matches!(peer.state, State::Alive) {
+    if !peer.is_alive() {
         peer.state = State::Alive;
     }
-    let hb_diff = now.duration_since(peer.last_heartbeat).as_millis() as u32;
     peer.hb_window_pos = (peer.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;
 
     if !peer.hb_is_full && peer.hb_window_pos == 0 && peer.hb_sum > 0 {
@@ -377,11 +415,12 @@ fn update_heartbeat(peer: &mut Peer) {
         peer.hb_sq_sum -= u32::pow(peer.hb_window[peer.hb_window_pos], 2);
     }
 
+    let hb_diff = peer.last_heartbeat.elapsed().as_millis() as u32;
     peer.hb_window[peer.hb_window_pos] = hb_diff;
     peer.hb_sum += hb_diff;
     peer.hb_sq_sum += u32::pow(hb_diff, 2);
 
-    peer.last_heartbeat = now;
+    peer.last_heartbeat = Instant::now();
 }
 
 /*
@@ -393,9 +432,7 @@ pub fn check_heartbeat(peer: &mut Peer) -> bool {
         return false;
     }
 
-    let hb_diff = Instant::now()
-        .duration_since(peer.last_heartbeat)
-        .as_millis() as f64;
+    let hb_diff = peer.last_heartbeat.elapsed().as_millis() as f64;
     let sample_size = if peer.hb_is_full {
         HEARTBEAT_WINDOW
     } else {
@@ -412,18 +449,18 @@ pub fn check_heartbeat(peer: &mut Peer) -> bool {
         -(1.0 - 1.0 / (1.0 + e)).log10()
     };
 
-    let mut is_alive = true;
-    if phi > HB_PHI_CONVICT_THRESHOLD {
-        is_alive = false;
-        peer.state = State::Offline;
-    } else if phi > HB_PHI_SUSPECT_THRESHOLD {
-        peer.state = State::Suspected;
-    }
-
-    debug!(
+    /*debug!(
         "Heartbeat[{}]: mean={:.2}ms, variance={:.2}ms, std_dev={:.2}ms, phi={:.2}, status={:?}",
         peer.peer_id, hb_mean, hb_variance, hb_std_dev, phi, peer.state
-    );
+    );*/
 
-    is_alive
+    if phi > HB_PHI_CONVICT_THRESHOLD {
+        peer.state = State::Offline;
+        false
+    } else if phi > HB_PHI_SUSPECT_THRESHOLD {
+        peer.state = State::Suspected;
+        true
+    } else {
+        true
+    }
 }

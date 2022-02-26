@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use actix_web::web;
 use futures::stream::{self, StreamExt};
@@ -12,8 +12,8 @@ use crate::{error::JMAPServerError, JMAPServer};
 use super::{
     gossip::{build_peer_info, sync_peer_info, PeerInfo, PING_INTERVAL},
     raft::{
-        self, handle_query_leader_responses, handle_vote_request, handle_vote_responses, LogIndex,
-        TermId,
+        handle_follow_leader_request, handle_follow_leader_responses, handle_join_raft_responses,
+        handle_vote_request, handle_vote_responses, LogIndex, TermId,
     },
     Cluster, Message, PeerId, IPC_CHANNEL_BUFFER,
 };
@@ -57,11 +57,17 @@ pub enum Command {
         term: TermId,
         vote_granted: bool,
     },
-    BecomeLeader {
+    FollowLeaderRequest {
         term: TermId,
+        last_log_index: LogIndex,
+        last_log_term: TermId,
     },
-    QueryLeaderRequest,
-    QueryLeaderResponse {
+    FollowLeaderResponse {
+        term: TermId,
+        success: bool,
+    },
+    JoinRaftRequest,
+    JoinRaftResponse {
         term: TermId,
         leader_id: Option<PeerId>,
     },
@@ -111,6 +117,8 @@ where
         return Err(JMAPServerError::from("Invalid cluster key."));
     }
 
+    //debug!("OutA {:?} from {}", request.cmd, request.peer_id);
+
     let command = match request.cmd {
         Command::SynchronizePeers(peers) => {
             sync_peer_info(&mut cluster, peers);
@@ -127,25 +135,27 @@ where
             last_log_index,
             last_log_term,
         ),
-        Command::BecomeLeader { term } => {
-            if term >= cluster.term {
-                cluster.term = term;
-                cluster.state = raft::State::Follower(request.peer_id);
-            }
-            Command::BecomeLeader { term: cluster.term }
-        }
-        Command::QueryLeaderRequest => Command::QueryLeaderResponse {
+        Command::FollowLeaderRequest {
+            term,
+            last_log_index,
+            last_log_term,
+        } => handle_follow_leader_request(
+            &mut cluster,
+            request.peer_id,
+            term,
+            last_log_index,
+            last_log_term,
+        ),
+        Command::JoinRaftRequest => Command::JoinRaftResponse {
             term: cluster.term,
-            leader_id: match cluster.state {
-                raft::State::Leader => Some(cluster.peer_id),
-                raft::State::Follower(peer_id) => Some(peer_id),
-                _ => None,
-            },
+            leader_id: cluster.leader_peer_id(),
         },
         _ => {
             return Err(JMAPServerError::from("Invalid command."));
         }
     };
+
+    //debug!("InA {:?} to {}.", command, request.peer_id);
 
     Ok(bincode::serialize(&Response::new(cluster.peer_id, command))
         .map_err(|e| {
@@ -171,6 +181,8 @@ where
 
     tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
+            //debug!("OutB {:?}", message);
+
             match message {
                 Message::SyncResponse { url, peers } => {
                     request.cmd = Command::SynchronizePeers(peers);
@@ -214,21 +226,24 @@ where
                         .unwrap_or_default()
                     {
                         request.cmd = become_leader;
+
                         post_many(urls, &request)
                             .await
                             .map(|responses| {
                                 core.cluster
                                     .lock()
                                     .map(|mut cluster| {
-                                        handle_vote_responses(&mut cluster, responses)
+                                        //debug!("In FollowLeaderResponses {:?}", responses);
+
+                                        handle_follow_leader_responses(&mut cluster, responses)
                                     })
                                     .unwrap_or_default()
                             })
                             .unwrap_or_default();
                     }
                 }
-                Message::QueryLeader { urls } => {
-                    request.cmd = Command::QueryLeaderRequest;
+                Message::JoinRaftRequest { urls } => {
+                    request.cmd = Command::JoinRaftRequest;
 
                     post_many(urls.clone(), &request)
                         .await
@@ -236,7 +251,9 @@ where
                             core.cluster
                                 .lock()
                                 .map(|mut cluster| {
-                                    handle_query_leader_responses(&mut cluster, responses)
+                                    //debug!("In JoinRaftResponses {:?}", responses);
+
+                                    handle_join_raft_responses(&mut cluster, responses)
                                 })
                                 .unwrap_or_default()
                         })

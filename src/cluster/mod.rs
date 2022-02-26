@@ -9,13 +9,13 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{config::EnvSettings, DEFAULT_HTTP_PORT};
 
 use self::{
     gossip::{PeerInfo, PeerStatus, DEFAULT_GOSSIP_PORT},
-    raft::{LogIndex, TermId},
+    raft::{election_timeout, LogIndex, TermId},
 };
 
 pub mod gossip;
@@ -60,6 +60,7 @@ pub struct Cluster {
     pub state: raft::State,
 }
 
+#[derive(Debug)]
 pub enum Message {
     SyncRequest {
         addr: SocketAddr,
@@ -75,7 +76,7 @@ pub enum Message {
         last_log_index: LogIndex,
         last_log_term: TermId,
     },
-    QueryLeader {
+    JoinRaftRequest {
         urls: Vec<String>,
     },
     Ping {
@@ -91,23 +92,6 @@ pub enum Message {
         port: u16,
     },
     None,
-}
-
-impl Cluster {
-    pub fn is_enabled(&self) -> bool {
-        !self.key.is_empty()
-    }
-
-    pub fn quorum(&self) -> u32 {
-        ((self
-            .peers
-            .iter()
-            .filter(|p| p.shard_id == self.shard_id)
-            .count() as f64
-            + 1.0)
-            / 2.0)
-            .floor() as u32
-    }
 }
 
 pub struct Peer {
@@ -156,8 +140,154 @@ impl Default for Cluster {
             last_log_index: 0,
             last_log_term: 0,
             commit_index: 0,
-            state: raft::State::None,
+            state: raft::State::default(),
         }
+    }
+}
+
+impl Cluster {
+    pub fn is_enabled(&self) -> bool {
+        !self.key.is_empty()
+    }
+
+    pub fn quorum(&self) -> u32 {
+        ((self
+            .peers
+            .iter()
+            .filter(|p| p.shard_id == self.shard_id)
+            .count() as f64
+            + 1.0)
+            / 2.0)
+            .floor() as u32
+    }
+
+    pub fn shard_status(&self) -> (u32, u32) {
+        let mut total = 0;
+        let mut healthy = 0;
+        for peer in &self.peers {
+            if peer.is_in_shard(self.shard_id) {
+                if peer.is_healthy() {
+                    healthy += 1;
+                }
+                total += 1;
+            }
+        }
+        (total, healthy)
+    }
+
+    pub fn has_election_quorum(&self) -> bool {
+        let (total, healthy) = self.shard_status();
+        healthy >= ((total as f64 + 1.0) / 2.0).floor() as u32
+    }
+
+    pub fn is_peer_alive(&self, peer_id: PeerId) -> bool {
+        self.peers.iter().any(|p| {
+            p.peer_id == peer_id
+                && matches!(p.state, gossip::State::Alive | gossip::State::Suspected)
+        })
+    }
+
+    pub fn is_election_due(&self) -> bool {
+        match self.state {
+            raft::State::Candidate(timeout)
+            | raft::State::Wait(timeout)
+            | raft::State::VotedFor((_, timeout))
+                if timeout >= Instant::now() =>
+            {
+                false
+            }
+            _ => true,
+        }
+    }
+
+    pub fn time_to_next_election(&self) -> Option<u64> {
+        match self.state {
+            raft::State::Candidate(timeout)
+            | raft::State::Wait(timeout)
+            | raft::State::VotedFor((_, timeout)) => {
+                let now = Instant::now();
+                Some(if timeout > now {
+                    (timeout - now).as_millis() as u64
+                } else {
+                    0
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn log_is_behind_or_eq(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
+        last_log_term > self.last_log_term
+            || (last_log_term == self.last_log_term && last_log_index >= self.last_log_index)
+    }
+
+    pub fn log_is_behind(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
+        last_log_term > self.last_log_term
+            || (last_log_term == self.last_log_term && last_log_index > self.last_log_index)
+    }
+
+    pub fn can_grant_vote(&self, peer_id: PeerId) -> bool {
+        match self.state {
+            raft::State::Wait(_) => true,
+            raft::State::VotedFor((voted_for, _)) => voted_for == peer_id,
+            raft::State::Leader | raft::State::Follower(_) | raft::State::Candidate(_) => false,
+        }
+    }
+
+    pub fn leader_peer_id(&self) -> Option<PeerId> {
+        match self.state {
+            raft::State::Leader => Some(self.peer_id),
+            raft::State::Follower(peer_id) => Some(peer_id),
+            _ => None,
+        }
+    }
+
+    pub fn is_leading(&self) -> bool {
+        matches!(self.state, raft::State::Leader)
+    }
+
+    pub fn is_candidate(&self) -> bool {
+        matches!(self.state, raft::State::Candidate(_))
+    }
+
+    pub fn start_election_timer(&mut self) {
+        self.state = raft::State::Wait(election_timeout());
+    }
+
+    pub fn step_down(&mut self, term: TermId) {
+        self.term = term;
+        self.state = raft::State::Wait(match self.state {
+            raft::State::Wait(timeout)
+            | raft::State::Candidate(timeout)
+            | raft::State::VotedFor((_, timeout))
+                if timeout < Instant::now() =>
+            {
+                timeout
+            }
+            _ => election_timeout(),
+        });
+        debug!("Steping down for term {}.", self.term);
+    }
+
+    pub fn vote_for(&mut self, peer_id: PeerId) {
+        self.state = raft::State::VotedFor((peer_id, election_timeout()));
+        debug!("Voted for peer {}.", peer_id);
+    }
+
+    pub fn follow_leader(&mut self, peer_id: PeerId) {
+        self.state = raft::State::Follower(peer_id);
+        debug!("Following peer {}.", peer_id);
+    }
+
+    pub fn run_for_election(&mut self) {
+        self.state = raft::State::Candidate(election_timeout());
+        self.term += 1;
+        debug!("Running for election for term {}.", self.term);
+    }
+
+    pub fn become_leader(&mut self) {
+        debug!("This node is the new leader for term {}.", self.term);
+        self.state = raft::State::Leader;
     }
 }
 
@@ -181,6 +311,26 @@ impl Peer {
             last_log_index: 0,
             last_log_term: 0,
         }
+    }
+
+    pub fn is_seed(&self) -> bool {
+        self.state == gossip::State::Seed
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.state == gossip::State::Alive
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        matches!(self.state, gossip::State::Alive | gossip::State::Suspected)
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.state == gossip::State::Offline
+    }
+
+    pub fn is_in_shard(&self, shard_id: ShardId) -> bool {
+        self.shard_id == shard_id
     }
 }
 
@@ -314,13 +464,13 @@ impl From<&EnvSettings> for Mutex<Cluster> {
             epoch: 0,
             gossip_addr,
             key,
-            rpc_url,
-            jmap_url,
+            rpc_url: format!("{}/rpc", rpc_url),
+            jmap_url: format!("{}/jmap", rpc_url),
             term: 0,
             last_log_index: 0,
             last_log_term: 0,
             commit_index: 0,
-            state: raft::State::None,
+            state: raft::State::default(),
             peers,
         }
         .into()
