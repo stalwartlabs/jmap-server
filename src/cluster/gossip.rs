@@ -7,15 +7,14 @@ use store::Store;
 use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, error, info};
 
-use crate::JMAPServer;
+use crate::{cluster::rpc::new_rpc_channel, JMAPServer};
 
 use super::{
     raft::{LogIndex, TermId},
-    Cluster, EpochId, GenerationId, Message, Peer, PeerId, ShardId, HEARTBEAT_WINDOW,
+    rpc, Cluster, EpochId, GenerationId, Message, Peer, PeerId, ShardId, HEARTBEAT_WINDOW,
     HEARTBEAT_WINDOW_MASK, IPC_CHANNEL_BUFFER,
 };
 
-pub const DEFAULT_GOSSIP_PORT: u16 = 7911;
 pub const PING_INTERVAL: u64 = 500;
 const UDP_MAX_PAYLOAD: usize = 65500;
 
@@ -67,7 +66,7 @@ impl From<&Cluster> for PeerStatus {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PeerInfo {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
@@ -75,8 +74,7 @@ pub struct PeerInfo {
     pub last_log_term: TermId,
     pub last_log_index: LogIndex,
     pub generation: GenerationId,
-    pub gossip_addr: SocketAddr,
-    pub rpc_url: String,
+    pub addr: SocketAddr,
     pub jmap_url: String,
 }
 
@@ -87,10 +85,9 @@ impl From<&Peer> for PeerInfo {
             shard_id: peer.shard_id,
             epoch: peer.epoch,
             generation: peer.generation,
-            gossip_addr: peer.gossip_addr,
+            addr: peer.addr,
             last_log_index: peer.last_log_index,
             last_log_term: peer.last_log_term,
-            rpc_url: peer.rpc_url.clone(),
             jmap_url: peer.jmap_url.clone(),
         }
     }
@@ -105,59 +102,25 @@ impl From<&Cluster> for PeerInfo {
             last_log_index: cluster.last_log_index,
             last_log_term: cluster.last_log_term,
             generation: cluster.generation,
-            gossip_addr: cluster.gossip_addr,
-            rpc_url: cluster.rpc_url.clone(),
+            addr: cluster.addr,
             jmap_url: cluster.jmap_url.clone(),
-        }
-    }
-}
-
-impl From<PeerInfo> for Peer {
-    fn from(peer: PeerInfo) -> Self {
-        Peer {
-            peer_id: peer.peer_id,
-            shard_id: peer.shard_id,
-            epoch: peer.epoch,
-            generation: peer.generation,
-            gossip_addr: peer.gossip_addr,
-            rpc_url: peer.rpc_url,
-            jmap_url: peer.jmap_url,
-            state: State::Alive,
-            last_heartbeat: Instant::now(),
-            hb_window: vec![0; HEARTBEAT_WINDOW],
-            hb_window_pos: 0,
-            hb_sum: 0,
-            hb_sq_sum: 0,
-            hb_is_full: false,
-            last_log_index: 0,
-            last_log_term: 0,
         }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
-    Join(u16),
-    Synchronize(String),
+    Join(PeerInfo),
     Ping(Vec<PeerStatus>),
     Pong(Vec<PeerStatus>),
 }
 
-impl From<Message> for (SocketAddr, Request) {
-    fn from(req: Message) -> Self {
-        match req {
-            Message::SyncRequest { addr, url } => (addr, Request::Synchronize(url)),
-            Message::Pong { addr, peers } => (addr, Request::Pong(peers)),
-            Message::Ping { addr, peers } => (addr, Request::Ping(peers)),
-            Message::Join { addr, port } => (addr, Request::Join(port)),
-            _ => unreachable!(),
-        }
-    }
-}
-
 pub async fn start_gossip(
     bind_addr: SocketAddr,
-) -> (mpsc::Receiver<(SocketAddr, Request)>, mpsc::Sender<Message>) {
+) -> (
+    mpsc::Receiver<(SocketAddr, Request)>,
+    mpsc::Sender<(SocketAddr, Request)>,
+) {
     let _socket = Arc::new(match UdpSocket::bind(bind_addr).await {
         Ok(socket) => socket,
         Err(e) => {
@@ -166,12 +129,11 @@ pub async fn start_gossip(
         }
     });
     let (tx, gossip_rx) = mpsc::channel::<(SocketAddr, Request)>(IPC_CHANNEL_BUFFER);
-    let (gossip_tx, mut rx) = mpsc::channel::<Message>(IPC_CHANNEL_BUFFER);
+    let (gossip_tx, mut rx) = mpsc::channel::<(SocketAddr, Request)>(IPC_CHANNEL_BUFFER);
 
     let socket = _socket.clone();
     tokio::spawn(async move {
-        while let Some(response) = rx.recv().await {
-            let (target_addr, response) = response.into();
+        while let Some((target_addr, response)) = rx.recv().await {
             //debug!("Sending packet to {}: {:?}", target_addr, response);
             match bincode::serialize(&response) {
                 Ok(bytes) => {
@@ -215,34 +177,23 @@ pub async fn start_gossip(
     (gossip_rx, gossip_tx)
 }
 
-pub async fn handle_gossip<T>(
-    core: &web::Data<JMAPServer<T>>,
-    source_addr: SocketAddr,
-    request: Request,
-) -> Message
+pub async fn handle_gossip<T>(core: &web::Data<JMAPServer<T>>, request: Request) -> Message
 where
     T: for<'x> Store<'x> + 'static,
 {
     match request {
-        // Join request, reply with this node's RPC url.
-        Request::Join(reply_port) => core
-            .cluster
-            .lock()
-            .map(|cluster| Message::SyncRequest {
-                addr: SocketAddr::from((source_addr.ip(), reply_port)),
-                url: cluster.rpc_url.clone(),
-            })
-            .unwrap_or(Message::None),
-
-        // Synchronize request, perform a full sync over HTTP.
-        Request::Synchronize(rpc_url) => core
-            .cluster
-            .lock()
-            .map(|cluster| Message::SyncResponse {
-                url: rpc_url,
-                peers: build_peer_info(&cluster),
-            })
-            .unwrap_or(Message::None),
+        // Join request, add node and perform full sync.
+        Request::Join(peer) => {
+            let peer_id = peer.peer_id;
+            let peers = sync_peer_info(core, vec![peer], true).unwrap();
+            core.cluster
+                .lock()
+                .get_peer(peer_id)
+                .map(|p| {
+                    Message::new_rpc(p.rpc_channel.clone(), rpc::Request::SynchronizePeers(peers))
+                })
+                .unwrap_or(Message::None)
+        }
 
         // Hearbeat request, reply with the cluster status.
         Request::Ping(peer_list) => handle_ping(core, peer_list, true).await,
@@ -265,13 +216,7 @@ where
         return Message::None;
     }
 
-    let mut cluster = if let Ok(cluster) = core.cluster.lock() {
-        cluster
-    } else {
-        error!("Failed to acquire cluster write lock.");
-        return Message::None;
-    };
-
+    let mut cluster = core.cluster.lock();
     let mut source_peer_idx = None;
 
     // Increase epoch
@@ -305,15 +250,15 @@ where
 
     if let Some(source_peer_idx) = source_peer_idx {
         if do_full_sync {
-            Message::SyncResponse {
-                url: cluster.peers[source_peer_idx].rpc_url.clone(),
-                peers: build_peer_info(&cluster),
-            }
+            Message::new_rpc(
+                cluster.peers[source_peer_idx].rpc_channel.clone(),
+                rpc::Request::SynchronizePeers(build_peer_info(&cluster)),
+            )
         } else if is_ping {
-            Message::Pong {
-                addr: cluster.peers[source_peer_idx].gossip_addr,
-                peers: build_peer_status(&cluster),
-            }
+            Message::new_gossip(
+                cluster.peers[source_peer_idx].addr,
+                Request::Pong(build_peer_status(&cluster)),
+            )
         } else {
             Message::None
         }
@@ -326,8 +271,17 @@ where
     }
 }
 
-pub fn sync_peer_info(cluster: &mut Cluster, peers: Vec<PeerInfo>) {
+pub fn sync_peer_info<T>(
+    core: &web::Data<JMAPServer<T>>,
+    peers: Vec<PeerInfo>,
+    return_peers: bool,
+) -> Option<Vec<PeerInfo>>
+where
+    T: for<'x> Store<'x> + 'static,
+{
     let mut remove_seeds = false;
+
+    let mut cluster = core.cluster.lock();
 
     'outer: for (pos, peer) in peers.into_iter().enumerate() {
         if peer.peer_id != cluster.peer_id {
@@ -349,10 +303,14 @@ pub fn sync_peer_info(cluster: &mut Cluster, peers: Vec<PeerInfo>) {
                         // Update peer info if generationId has changed and
                         // the request comes from the peer itself, or if the epoch is higher.
                         if update_peer_info {
+                            if local_peer.addr != peer.addr {
+                                // Peer changed its address, reconnect.
+                                local_peer.addr = peer.addr;
+                                local_peer.rpc_channel =
+                                    new_rpc_channel(core.clone(), peer.peer_id, peer.addr);
+                            }
                             local_peer.generation = peer.generation;
-                            local_peer.gossip_addr = peer.gossip_addr;
                             local_peer.shard_id = peer.shard_id;
-                            local_peer.rpc_url = format!("{}/rpc", peer.rpc_url);
                             local_peer.jmap_url = format!("{}/jmap", peer.jmap_url);
                         }
 
@@ -366,9 +324,9 @@ pub fn sync_peer_info(cluster: &mut Cluster, peers: Vec<PeerInfo>) {
             // Peer not found, add it to the list.
             info!(
                 "Adding new peer {}, shard {} listening at {}.",
-                peer.peer_id, peer.shard_id, peer.gossip_addr
+                peer.peer_id, peer.shard_id, peer.addr
             );
-            cluster.peers.push(peer.into());
+            cluster.peers.push(Peer::new(core.clone(), peer));
         } else if peer.epoch > cluster.epoch {
             info!("Updating local epoch to {}", peer.epoch);
             cluster.epoch = peer.epoch + 1;
@@ -377,6 +335,12 @@ pub fn sync_peer_info(cluster: &mut Cluster, peers: Vec<PeerInfo>) {
 
     if remove_seeds {
         cluster.peers.retain(|peer| !peer.is_seed());
+    }
+
+    if return_peers {
+        Some(build_peer_info(&cluster))
+    } else {
+        None
     }
 }
 

@@ -3,28 +3,26 @@ pub mod config;
 pub mod error;
 pub mod jmap;
 
-use std::{net::SocketAddr, sync::Mutex};
+use std::net::SocketAddr;
 
 use actix_web::{middleware, web, App, HttpServer};
-use cluster::{gossip::DEFAULT_GOSSIP_PORT, Cluster};
+use cluster::Cluster;
 use config::EnvSettings;
 use jmap_store::{local_store::JMAPLocalStore, JMAPStoreConfig};
 use store::Store;
 use store_rocksdb::RocksDBStore;
 use tracing::info;
 
-use crate::{
-    cluster::{main::start_cluster, rpc::handle_rpc},
-    jmap::jmap_request,
-};
+use crate::{cluster::main::start_cluster, jmap::jmap_request};
 
 pub struct JMAPServer<T> {
     pub jmap_store: JMAPLocalStore<T>,
     pub worker_pool: rayon::ThreadPool,
-    pub cluster: Mutex<Cluster>,
+    pub cluster: parking_lot::Mutex<Cluster>,
 }
 
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
+pub const DEFAULT_RPC_PORT: u16 = 7911;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -54,13 +52,13 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Start cluster
-    if jmap_server.cluster.lock().unwrap().is_enabled() {
-        let gossip_addr = SocketAddr::from((
+    if jmap_server.cluster.lock().is_enabled() {
+        let rpc_addr = SocketAddr::from((
             bind_addr,
-            settings.parse("gossip-port").unwrap_or(DEFAULT_GOSSIP_PORT),
+            settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT),
         ));
-        info!("Starting node discovery service at {}...", gossip_addr);
-        start_cluster(jmap_server.clone(), gossip_addr).await;
+        info!("Starting RPC server at {} (UDP/TCP)...", rpc_addr);
+        start_cluster(jmap_server.clone(), rpc_addr).await;
     }
 
     // Start HTTP server
@@ -68,7 +66,7 @@ async fn main() -> std::io::Result<()> {
         bind_addr,
         settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT),
     ));
-    info!("Starting HTTP server at {}...", http_addr);
+    info!("Starting HTTP server at {} (TCP)...", http_addr);
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
@@ -76,7 +74,6 @@ async fn main() -> std::io::Result<()> {
             .app_data(jmap_server.clone())
             .route("/jmap", web::post().to(jmap_request))
             .route("/.well-known/jmap", web::post().to(jmap_request))
-            .route("/rpc", web::post().to(handle_rpc::<RocksDBStore>))
     })
     .bind(http_addr)?
     .run()

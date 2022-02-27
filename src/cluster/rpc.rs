@@ -1,53 +1,40 @@
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
-use actix_web::web;
-use futures::stream::{self, StreamExt};
+use actix_web::web::{self, Buf};
+use futures::{stream::StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
+use store::leb128::Leb128;
 use store::Store;
-use tokio::sync::mpsc;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc,
+    time,
+};
+use tokio_util::codec::{Decoder, Encoder, Framed};
 use tracing::{debug, error};
 
-use crate::{error::JMAPServerError, JMAPServer};
+use crate::JMAPServer;
 
 use super::{
-    gossip::{build_peer_info, sync_peer_info, PeerInfo, PING_INTERVAL},
+    gossip::{build_peer_info, sync_peer_info, PeerInfo},
     raft::{
-        handle_follow_leader_request, handle_follow_leader_responses, handle_join_raft_responses,
-        handle_vote_request, handle_vote_responses, LogIndex, TermId,
+        handle_follow_leader_request, handle_vote_request, handle_vote_response, LogIndex, TermId,
     },
-    Cluster, Message, PeerId, IPC_CHANNEL_BUFFER,
+    Cluster, PeerId, IPC_CHANNEL_BUFFER,
 };
 
-pub const MAX_PARALLEL_REQUESTS: usize = 5;
+pub const RPC_MAX_PARALLEL: usize = 5;
+pub const RPC_TIMEOUT_MS: u64 = 1000;
+pub const RPC_INACTIVITY_TIMEOUT: u64 = 5 * 60 * 1000;
+const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024; //TODO configure
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Request {
-    pub key: String,
-    pub peer_id: PeerId,
-    pub cmd: Command,
-}
-
-impl Request {
-    pub fn new(peer_id: PeerId, key: String, cmd: Command) -> Self {
-        Self { peer_id, key, cmd }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Response {
-    pub peer_id: PeerId,
-    pub cmd: Command,
-}
-
-impl Response {
-    pub fn new(peer_id: PeerId, cmd: Command) -> Self {
-        Self { peer_id, cmd }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Command {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Request {
     SynchronizePeers(Vec<PeerInfo>),
+    AuthRequest {
+        peer_id: PeerId,
+        key: String,
+    },
     VoteRequest {
         term: TermId,
         last_log_index: LogIndex,
@@ -66,200 +53,197 @@ pub enum Command {
         term: TermId,
         success: bool,
     },
-    JoinRaftRequest,
-    JoinRaftResponse {
-        term: TermId,
-        leader_id: Option<PeerId>,
-    },
 }
 
-impl Default for Command {
-    fn default() -> Self {
-        Command::VoteRequest {
-            term: 0,
-            last_log_index: 0,
-            last_log_term: 0,
-        }
-    }
-}
-
-impl From<&Cluster> for Command {
+impl From<&Cluster> for Request {
     fn from(cluster: &Cluster) -> Self {
-        Command::SynchronizePeers(build_peer_info(cluster))
+        Request::SynchronizePeers(build_peer_info(cluster))
     }
 }
 
-pub async fn handle_rpc<T>(
-    request: web::Bytes,
+pub struct RpcProtocol {}
+
+impl Default for RpcProtocol {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
+impl Decoder for RpcProtocol {
+    type Item = Request;
+
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut web::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if src.len() < std::mem::size_of::<u32>() {
+            // Not enough data to read length marker.
+            return Ok(None);
+        }
+        let (frame_len, bytes_read) = usize::from_leb128_bytes(src).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Failed to decode frame length.",
+            )
+        })?;
+
+        if frame_len > MAX_FRAME_LENGTH {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Frame of length {} is too large.", frame_len),
+            ));
+        } else if src.len() < bytes_read + frame_len {
+            src.reserve(bytes_read + frame_len - src.len());
+            return Ok(None);
+        }
+
+        let result = bincode::deserialize::<Request>(&src[bytes_read..bytes_read + frame_len])
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to deserialize RPC request.: {}", e),
+                )
+            });
+        src.advance(bytes_read + frame_len);
+
+        Ok(Some(result?))
+    }
+}
+
+impl Encoder<Request> for RpcProtocol {
+    type Error = std::io::Error;
+
+    fn encode(&mut self, item: Request, dst: &mut web::BytesMut) -> Result<(), Self::Error> {
+        let bytes = bincode::serialize(&item).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to serialize RPC request.: {}", e),
+            )
+        })?;
+        let mut bytes_len = Vec::with_capacity(std::mem::size_of::<u32>() + 1);
+        bytes.len().to_leb128_bytes(&mut bytes_len);
+
+        dst.reserve(bytes_len.len() + bytes.len());
+        dst.extend_from_slice(&bytes_len);
+        dst.extend_from_slice(&bytes);
+        Ok(())
+    }
+}
+
+pub async fn start_rpc<T>(core: web::Data<JMAPServer<T>>, bind_addr: SocketAddr)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    // Start listener for RPC requests
+    let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
+        panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
+    });
+    tokio::spawn(async move {
+        loop {
+            match listener.accept().await {
+                Ok((stream, _)) => {
+                    let core = core.clone();
+                    tokio::spawn(async move {
+                        handle_conn(core, stream).await;
+                    });
+                }
+                Err(err) => {
+                    error!("Failed to accept TCP connection: {}", err);
+                }
+            }
+        }
+    });
+}
+
+pub fn new_rpc_channel<T>(
     core: web::Data<JMAPServer<T>>,
-) -> Result<web::Bytes, JMAPServerError>
+    peer_id: PeerId,
+    peer_addr: SocketAddr,
+) -> mpsc::Sender<Request>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut cluster = core
-        .cluster
-        .lock()
-        .map_err(|_| JMAPServerError::from("Failed to obtain lock."))?;
-
-    if !cluster.is_enabled() {
-        return Err(JMAPServerError::from("Cluster not configured."));
-    }
-
-    let request = bincode::deserialize::<Request>(&request).map_err(|e| {
-        JMAPServerError::from(format!(
-            "Failed to deserialize RPC request: {}",
-            e.to_string()
-        ))
-    })?;
-
-    if request.key != cluster.key {
-        debug!("Received RPC with invalid key: {}", request.key);
-        return Err(JMAPServerError::from("Invalid cluster key."));
-    }
-
-    //debug!("OutA {:?} from {}", request.cmd, request.peer_id);
-
-    let command = match request.cmd {
-        Command::SynchronizePeers(peers) => {
-            sync_peer_info(&mut cluster, peers);
-            Command::SynchronizePeers(build_peer_info(&cluster))
-        }
-        Command::VoteRequest {
-            term,
-            last_log_index,
-            last_log_term,
-        } => handle_vote_request(
-            &mut cluster,
-            request.peer_id,
-            term,
-            last_log_index,
-            last_log_term,
-        ),
-        Command::FollowLeaderRequest {
-            term,
-            last_log_index,
-            last_log_term,
-        } => handle_follow_leader_request(
-            &mut cluster,
-            request.peer_id,
-            term,
-            last_log_index,
-            last_log_term,
-        ),
-        Command::JoinRaftRequest => Command::JoinRaftResponse {
-            term: cluster.term,
-            leader_id: cluster.leader_peer_id(),
-        },
-        _ => {
-            return Err(JMAPServerError::from("Invalid command."));
-        }
-    };
-
-    //debug!("InA {:?} to {}.", command, request.peer_id);
-
-    Ok(bincode::serialize(&Response::new(cluster.peer_id, command))
-        .map_err(|e| {
-            JMAPServerError::from(format!(
-                "Failed to serialize RPC response: {}",
-                e.to_string()
-            ))
-        })?
-        .into())
-}
-
-pub async fn start_rpc_queue<T>(core: web::Data<JMAPServer<T>>) -> mpsc::Sender<Message>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    let mut request = if let Ok(cluster) = core.cluster.lock() {
-        Request::new(cluster.peer_id, cluster.key.clone(), Command::default())
-    } else {
-        panic!("Failed to obtain cluster lock.");
-    };
-
-    let (tx, mut rx) = mpsc::channel::<Message>(IPC_CHANNEL_BUFFER);
+    let (tx, mut rx) = mpsc::channel::<Request>(IPC_CHANNEL_BUFFER);
 
     tokio::spawn(async move {
-        while let Some(message) = rx.recv().await {
-            //debug!("OutB {:?}", message);
+        let auth_frame = {
+            let cluster = core.cluster.lock();
+            Request::AuthRequest {
+                peer_id: cluster.peer_id,
+                key: cluster.key.clone(),
+            }
+        };
 
-            match message {
-                Message::SyncResponse { url, peers } => {
-                    request.cmd = Command::SynchronizePeers(peers);
-                    if let Some(Command::SynchronizePeers(peer_info)) =
-                        post_one(&url, &request).await.map(|r| r.cmd)
-                    {
-                        core.cluster
-                            .lock()
-                            .map(|mut cluster| {
-                                debug!(
-                                    "Successful full sync with {}, received {} peers.",
-                                    url,
-                                    peer_info.len()
-                                );
-                                sync_peer_info(&mut cluster, peer_info);
-                            })
-                            .unwrap_or_else(|_| {
-                                error!("Failed to obtain cluster lock.");
-                            });
+        let mut conn_ = None;
+
+        loop {
+            let request =
+                match time::timeout(Duration::from_millis(RPC_INACTIVITY_TIMEOUT), rx.recv()).await
+                {
+                    Ok(Some(request)) => request,
+                    Ok(None) => {
+                        debug!("Peer RPC process exiting.");
+                        break;
+                    }
+                    Err(_) => {
+                        // Close connection after 5 minutes of inactivity
+                        if conn_.is_some() {
+                            conn_ = None;
+                        }
+                        continue;
+                    }
+                };
+            debug!("Received RPC request: {:?}", request);
+
+            // Connect to peer if not already connected
+            let conn = if let Some(conn) = &mut conn_ {
+                conn
+            } else {
+                match connect_peer(peer_addr, auth_frame.clone()).await {
+                    Ok(conn) => {
+                        conn_ = conn.into();
+                        conn_.as_mut().unwrap()
+                    }
+                    Err(err) => {
+                        error!(
+                            "Failed to connect to peer {} at {}: {}",
+                            peer_id, peer_addr, err
+                        );
+                        continue;
                     }
                 }
-                Message::VoteRequest {
-                    urls,
-                    term,
-                    last_log_index,
-                    last_log_term,
-                } => {
-                    request.cmd = Command::VoteRequest {
-                        term,
-                        last_log_index,
-                        last_log_term,
-                    };
-                    if let Some(become_leader) = post_many(urls.clone(), &request)
-                        .await
-                        .map(|responses| {
-                            core.cluster
-                                .lock()
-                                .map(|mut cluster| handle_vote_responses(&mut cluster, responses))
-                                .unwrap_or_default()
-                        })
-                        .unwrap_or_default()
-                    {
-                        request.cmd = become_leader;
+            };
 
-                        post_many(urls, &request)
-                            .await
-                            .map(|responses| {
-                                core.cluster
-                                    .lock()
-                                    .map(|mut cluster| {
-                                        //debug!("In FollowLeaderResponses {:?}", responses);
-
-                                        handle_follow_leader_responses(&mut cluster, responses)
-                                    })
-                                    .unwrap_or_default()
-                            })
-                            .unwrap_or_default();
+            match send_rpc(conn, request).await {
+                Ok(response) => {
+                    debug!("Peer response: {:?}", response);
+                    match response {
+                        Request::SynchronizePeers(peers) => {
+                            debug!("Successful full sync, received {} peers.", peers.len());
+                            sync_peer_info(&core, peers, false);
+                        }
+                        Request::VoteResponse { term, vote_granted } => {
+                            handle_vote_response(&core, peer_id, term, vote_granted).await;
+                        }
+                        Request::FollowLeaderResponse { term, success } => {
+                            let mut cluster = core.cluster.lock();
+                            if cluster.term < term {
+                                cluster.step_down(term);
+                            } else if !success {
+                                cluster.start_election_timer();
+                            }
+                        }
+                        _ => {
+                            error!("Unexpected response from peer {}: {:?}", peer_id, response);
+                        }
                     }
                 }
-                Message::JoinRaftRequest { urls } => {
-                    request.cmd = Command::JoinRaftRequest;
-
-                    post_many(urls.clone(), &request)
-                        .await
-                        .map(|responses| {
-                            core.cluster
-                                .lock()
-                                .map(|mut cluster| {
-                                    //debug!("In JoinRaftResponses {:?}", responses);
-
-                                    handle_join_raft_responses(&mut cluster, responses)
-                                })
-                                .unwrap_or_default()
-                        })
-                        .unwrap_or_default();
+                Err(err) => {
+                    error!(
+                        "Failed to send RPC request to peer {} at {}: {}",
+                        peer_id, peer_addr, err
+                    );
+                    conn_ = None;
                 }
-                _ => unreachable!(),
             }
         }
     });
@@ -267,84 +251,123 @@ where
     tx
 }
 
-fn build_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_millis(PING_INTERVAL))
-        .connect_timeout(Duration::from_millis(PING_INTERVAL))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new())
-}
+async fn handle_conn<T>(core: web::Data<JMAPServer<T>>, stream: TcpStream)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let peer_addr = stream.peer_addr().unwrap();
+    let mut frames = Framed::new(stream, RpcProtocol::default());
 
-async fn post_many(urls: Vec<String>, request: &Request) -> Option<Vec<Option<Response>>> {
-    let body = match bincode::serialize(&request) {
-        Ok(body) => body,
-        Err(err) => {
-            error!("Failed to serialize RPC request to {:?}: {}", urls, err);
-            return None;
+    let peer_id = match time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), frames.next()).await {
+        Ok(Some(result)) => match result {
+            Ok(Request::AuthRequest { peer_id, key }) => {
+                if core.cluster.lock().key == key {
+                    debug!("Authenticated peer {}.", peer_id);
+                    peer_id
+                } else {
+                    error!("Failed to authenticate peer {}.", peer_id);
+                    return;
+                }
+            }
+            Ok(_) => {
+                error!("Received unexpected RPC request from {}.", peer_addr);
+                return;
+            }
+            Err(_) => todo!(),
+        },
+        Ok(None) => {
+            debug!("RPC connection from {} closed before auth.", peer_addr);
+            return;
+        }
+        Err(_) => {
+            error!(
+                "RPC connection from {} timed out during authentication.",
+                peer_addr
+            );
+            return;
         }
     };
-    let client = build_client();
-    let mut responses = Vec::with_capacity(urls.len());
 
-    let mut results = stream::iter(urls)
-        .map(|url| {
-            let client = client.clone();
-            let body = body.clone();
-            tokio::spawn(async move { client.post(url).body(body).send().await?.bytes().await })
-        })
-        .buffer_unordered(MAX_PARALLEL_REQUESTS);
+    while let Some(frame) = frames.next().await {
+        match frame {
+            Ok(request) => {
+                debug!("Received RPC request from {}: {:?}", peer_id, request);
+                let response = {
+                    match request {
+                        Request::SynchronizePeers(peers) => {
+                            Request::SynchronizePeers(sync_peer_info(&core, peers, true).unwrap())
+                        }
+                        Request::VoteRequest {
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        } => handle_vote_request(
+                            &mut core.cluster.lock(),
+                            peer_id,
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        ),
+                        Request::FollowLeaderRequest {
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        } => handle_follow_leader_request(
+                            &mut core.cluster.lock(),
+                            peer_id,
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        ),
+                        _ => {
+                            error!("Received unexpected RPC request from {}.", peer_id);
+                            return;
+                        }
+                    }
+                };
 
-    while let Some(result) = results.next().await {
-        match result {
-            Ok(Ok(bytes)) => match bincode::deserialize::<Response>(&bytes) {
-                Ok(response) => {
-                    responses.push(Some(response));
+                if let Err(err) = frames.send(response).await {
+                    error!("Failed to send RPC response: {}", err);
+                    return;
                 }
-                Err(err) => {
-                    error!("Failed to deserialize RPC response: {}", err);
-                    return None;
-                }
-            },
-            Ok(Err(err)) => {
-                debug!("Failed HTTP request while sending RPC request: {}", err);
-                responses.push(None);
             }
             Err(err) => {
-                error!("Failed to send RPC request: {}", err);
-                return None;
+                error!("Failed to read RPC request from {}: {}", peer_addr, err);
+                return;
             }
         }
     }
-
-    Some(responses)
 }
 
-async fn post_one(url: &str, request: &Request) -> Option<Response> {
-    let body = match bincode::serialize(&request) {
-        Ok(body) => body,
-        Err(err) => {
-            error!("Failed to serialize RPC request to {}: {}", url, err);
-            return None;
-        }
-    };
+async fn connect_peer(
+    addr: SocketAddr,
+    auth_frame: Request,
+) -> std::io::Result<Framed<TcpStream, RpcProtocol>> {
+    time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), async {
+        let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcProtocol::default());
+        conn.send(auth_frame).await?;
+        Ok(conn)
+    })
+    .await
+    .map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("RPC connection to {} timed out.", addr),
+        )
+    })?
+}
 
-    match build_client().post(url).body(body).send().await {
-        Ok(response) => match response.bytes().await {
-            Ok(bytes) => match bincode::deserialize::<Response>(&bytes) {
-                Ok(response) => Some(response),
-                Err(err) => {
-                    error!("Failed to deserialize RPC response from {}: {}", url, err);
-                    None
-                }
-            },
-            Err(err) => {
-                error!("Failed to process RPC request to {}: {}", url, err);
-                None
-            }
-        },
-        Err(err) => {
-            error!("Failed to post RPC request to {}: {}", url, err);
-            None
-        }
+async fn send_rpc(
+    conn: &mut Framed<TcpStream, RpcProtocol>,
+    request: Request,
+) -> std::io::Result<Request> {
+    conn.send(request).await?;
+    match conn.next().await {
+        Some(Ok(response)) => Ok(response),
+        Some(Err(err)) => Err(err),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "RPC connection unexpectedly closed.",
+        )),
     }
 }

@@ -1,12 +1,13 @@
 use std::time::{Duration, Instant};
 
+use actix_web::web;
 use rand::Rng;
-use tracing::{error, info};
+use store::Store;
+use tracing::{debug, info};
 
-use super::{
-    rpc::{Command, Response},
-    Cluster, Message, PeerId,
-};
+use crate::JMAPServer;
+
+use super::{rpc::Request, Cluster, Message, PeerId};
 
 pub type TermId = u64;
 pub type LogIndex = u64;
@@ -30,6 +31,142 @@ impl Default for State {
     }
 }
 
+impl Cluster {
+    pub fn has_election_quorum(&self) -> bool {
+        let (total, healthy) = self.shard_status();
+        healthy >= ((total as f64 + 1.0) / 2.0).floor() as u32
+    }
+
+    pub fn is_election_due(&self) -> bool {
+        match self.state {
+            State::Candidate(timeout) | State::Wait(timeout) | State::VotedFor((_, timeout))
+                if timeout >= Instant::now() =>
+            {
+                false
+            }
+            _ => true,
+        }
+    }
+
+    pub fn time_to_next_election(&self) -> Option<u64> {
+        match self.state {
+            State::Candidate(timeout) | State::Wait(timeout) | State::VotedFor((_, timeout)) => {
+                let now = Instant::now();
+                Some(if timeout > now {
+                    (timeout - now).as_millis() as u64
+                } else {
+                    0
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn log_is_behind_or_eq(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
+        last_log_term > self.last_log_term
+            || (last_log_term == self.last_log_term && last_log_index >= self.last_log_index)
+    }
+
+    pub fn log_is_behind(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
+        last_log_term > self.last_log_term
+            || (last_log_term == self.last_log_term && last_log_index > self.last_log_index)
+    }
+
+    pub fn can_grant_vote(&self, peer_id: PeerId) -> bool {
+        match self.state {
+            State::Wait(_) => true,
+            State::VotedFor((voted_for, _)) => voted_for == peer_id,
+            State::Leader | State::Follower(_) | State::Candidate(_) => false,
+        }
+    }
+
+    pub fn leader_peer_id(&self) -> Option<PeerId> {
+        match self.state {
+            State::Leader => Some(self.peer_id),
+            State::Follower(peer_id) => Some(peer_id),
+            _ => None,
+        }
+    }
+
+    pub fn is_leading(&self) -> bool {
+        matches!(self.state, State::Leader)
+    }
+
+    pub fn is_candidate(&self) -> bool {
+        matches!(self.state, State::Candidate(_))
+    }
+
+    pub fn start_election_timer(&mut self) {
+        self.state = State::Wait(election_timeout());
+        self.reset_votes();
+    }
+
+    pub fn step_down(&mut self, term: TermId) {
+        self.reset_votes();
+        self.term = term;
+        self.state = State::Wait(match self.state {
+            State::Wait(timeout) | State::Candidate(timeout) | State::VotedFor((_, timeout))
+                if timeout < Instant::now() =>
+            {
+                timeout
+            }
+            _ => election_timeout(),
+        });
+        debug!("Stepping down for term {}.", self.term);
+    }
+
+    pub fn vote_for(&mut self, peer_id: PeerId) {
+        self.state = State::VotedFor((peer_id, election_timeout()));
+        self.reset_votes();
+        debug!("Voted for peer {} for term {}.", peer_id, self.term);
+    }
+
+    pub fn follow_leader(&mut self, peer_id: PeerId) {
+        self.state = State::Follower(peer_id);
+        self.reset_votes();
+        debug!("Following peer {} for term {}.", peer_id, self.term);
+    }
+
+    pub fn run_for_election(&mut self) {
+        self.state = State::Candidate(election_timeout());
+        self.term += 1;
+        self.reset_votes();
+        debug!("Running for election for term {}.", self.term);
+    }
+
+    pub fn become_leader(&mut self) {
+        debug!("This node is the new leader for term {}.", self.term);
+        self.state = State::Leader;
+        self.reset_votes();
+    }
+
+    pub fn reset_votes(&mut self) {
+        self.peers.iter_mut().for_each(|peer| {
+            peer.vote_granted = false;
+        });
+    }
+
+    pub fn count_vote(&mut self, peer_id: PeerId) -> bool {
+        let mut total_peers = 0;
+        let shard_id = self.shard_id;
+        let mut votes = 1; // Count this node's vote
+
+        self.peers.iter_mut().for_each(|peer| {
+            if peer.is_in_shard(shard_id) {
+                total_peers += 1;
+                if peer.peer_id == peer_id {
+                    peer.vote_granted = true;
+                    votes += 1;
+                } else if peer.vote_granted {
+                    votes += 1;
+                }
+            }
+        });
+
+        votes > ((total_peers as f64 + 1.0) / 2.0).floor() as u32
+    }
+}
+
 pub fn election_timeout() -> Instant {
     Instant::now()
         + Duration::from_millis(
@@ -44,31 +181,35 @@ pub fn start_election(cluster: &mut Cluster, requests: &mut Vec<Message>) {
     if cluster.has_election_quorum() {
         // Assess whether this node could become the leader for the next term.
         let mut is_up_to_date = true;
-        let mut urls = Vec::with_capacity(cluster.peers.len());
+        let mut channels = Vec::new();
 
         for peer in cluster.peers.iter() {
             if peer.is_in_shard(cluster.shard_id) && !peer.is_offline() {
-                if is_up_to_date && cluster.log_is_behind(peer.last_log_term, peer.last_log_index) {
+                if cluster.log_is_behind(peer.last_log_term, peer.last_log_index) {
                     is_up_to_date = false;
+                    break;
+                } else {
+                    channels.push(peer.rpc_channel.clone());
                 }
-                urls.push(peer.rpc_url.clone());
             }
         }
 
         if is_up_to_date {
             // Increase term and start election
             cluster.run_for_election();
-            requests.push(Message::VoteRequest {
-                urls,
-                term: cluster.term,
-                last_log_index: cluster.last_log_index,
-                last_log_term: cluster.last_log_term,
-            });
+            requests.push(Message::new_rpc_many(
+                channels,
+                Request::VoteRequest {
+                    term: cluster.term,
+                    last_log_index: cluster.last_log_index,
+                    last_log_term: cluster.last_log_term,
+                },
+            ));
         } else {
             // Query who is the current leader while at the same time wait to
             // receive a vote request from a more up-to-date peer.
             cluster.start_election_timer();
-            requests.push(Message::JoinRaftRequest { urls });
+            //requests.push(Message::new_rpc_all(Request::JoinRaftRequest));
         }
     } else {
         cluster.start_election_timer();
@@ -85,12 +226,12 @@ pub fn handle_vote_request(
     term: TermId,
     last_log_index: LogIndex,
     last_log_term: TermId,
-) -> Command {
+) -> Request {
     if cluster.term < term {
         cluster.step_down(term);
     }
 
-    Command::VoteResponse {
+    Request::VoteResponse {
         term: cluster.term,
         vote_granted: if cluster.term == term
             && cluster.can_grant_vote(peer_id)
@@ -104,42 +245,47 @@ pub fn handle_vote_request(
     }
 }
 
-pub fn handle_vote_responses(
-    cluster: &mut Cluster,
-    responses: Vec<Option<Response>>,
-) -> Option<Command> {
-    let mut votes = 1; // Count the local node's vote.
-    let mut started_election = false;
+pub async fn handle_vote_response<T>(
+    core: &web::Data<JMAPServer<T>>,
+    peer_id: PeerId,
+    term: TermId,
+    vote_granted: bool,
+) where
+    T: for<'x> Store<'x> + 'static,
+{
+    let (channels, request) = {
+        let mut cluster = core.cluster.lock();
 
-    for response in responses.into_iter().flatten() {
-        if let Command::VoteResponse { term, vote_granted } = response.cmd {
-            if cluster.term < term {
-                cluster.step_down(term);
-                started_election = true;
-            } else if vote_granted {
-                votes += 1;
+        if cluster.term < term {
+            cluster.step_down(term);
+            return;
+        } else if !cluster.is_candidate() || !vote_granted || cluster.term != term {
+            return;
+        }
+
+        if cluster.count_vote(peer_id) {
+            cluster.become_leader();
+            let mut channels = Vec::new();
+            for peer in &cluster.peers {
+                if peer.is_in_shard(cluster.shard_id) && !peer.is_offline() {
+                    channels.push(peer.rpc_channel.clone());
+                }
             }
+            (
+                channels,
+                Request::FollowLeaderRequest {
+                    term: cluster.term,
+                    last_log_index: cluster.last_log_index,
+                    last_log_term: cluster.last_log_term,
+                },
+            )
         } else {
-            error!(
-                "Unexpected command {:?} from peer {}.",
-                response.cmd, response.peer_id
-            );
-            return None;
+            return;
         }
-    }
+    };
 
-    if cluster.is_candidate() && votes > cluster.quorum() {
-        cluster.become_leader();
-        Some(Command::FollowLeaderRequest {
-            term: cluster.term,
-            last_log_index: cluster.last_log_index,
-            last_log_term: cluster.last_log_term,
-        })
-    } else {
-        if !started_election {
-            cluster.start_election_timer();
-        }
-        None
+    for channel in channels {
+        channel.send(request.clone()).await.unwrap();
     }
 }
 
@@ -149,12 +295,12 @@ pub fn handle_follow_leader_request(
     term: TermId,
     last_log_index: LogIndex,
     last_log_term: TermId,
-) -> Command {
+) -> Request {
     if cluster.term < term {
         cluster.term = term;
     }
 
-    Command::FollowLeaderResponse {
+    Request::FollowLeaderResponse {
         term: cluster.term,
         success: if cluster.term == term
             && cluster.log_is_behind_or_eq(last_log_term, last_log_index)
@@ -164,55 +310,5 @@ pub fn handle_follow_leader_request(
         } else {
             false
         },
-    }
-}
-
-pub fn handle_follow_leader_responses(cluster: &mut Cluster, responses: Vec<Option<Response>>) {
-    for response in responses.into_iter().flatten() {
-        if let Command::FollowLeaderResponse { term, success } = response.cmd {
-            if cluster.term < term {
-                cluster.step_down(term);
-            } else if !success {
-                cluster.start_election_timer();
-            }
-        } else {
-            error!(
-                "Unexpected command {:?} from peer {}.",
-                response.cmd, response.peer_id
-            );
-            return;
-        }
-    }
-}
-
-pub fn handle_join_raft_responses(cluster: &mut Cluster, responses: Vec<Option<Response>>) {
-    if matches!(cluster.state, State::Wait(_)) {
-        for response in responses.into_iter().flatten() {
-            if let Command::JoinRaftResponse { term, leader_id } = response.cmd {
-                match (&cluster.state, leader_id) {
-                    (State::Wait(_), Some(leader_id)) if cluster.is_peer_alive(leader_id) => {
-                        cluster.state = State::Follower(leader_id);
-                    }
-                    (State::Follower(current_leader_id), Some(leader_id))
-                        if current_leader_id != &leader_id
-                            && cluster.term < term
-                            && cluster.is_peer_alive(leader_id) =>
-                    {
-                        cluster.state = State::Follower(leader_id);
-                    }
-                    _ => {}
-                }
-
-                if cluster.term < term {
-                    cluster.term = term;
-                }
-            } else {
-                error!(
-                    "Unexpected command {:?} from peer {}.",
-                    response.cmd, response.peer_id
-                );
-                return;
-            }
-        }
     }
 }

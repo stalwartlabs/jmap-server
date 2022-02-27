@@ -4,21 +4,25 @@ use std::{
     hash::{Hash, Hasher},
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
-    sync::Mutex,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+use actix_web::web;
+use store::Store;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
-use crate::{config::EnvSettings, DEFAULT_HTTP_PORT};
+use crate::{config::EnvSettings, JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
 
 use self::{
-    gossip::{PeerInfo, PeerStatus, DEFAULT_GOSSIP_PORT},
-    raft::{election_timeout, LogIndex, TermId},
+    gossip::PeerInfo,
+    raft::{LogIndex, TermId},
+    rpc::{new_rpc_channel, Request},
 };
 
 pub mod gossip;
+pub mod log;
 pub mod main;
 pub mod raft;
 pub mod rpc;
@@ -42,9 +46,8 @@ pub struct Cluster {
     pub epoch: EpochId,
 
     // Local gossip address and API urls
-    pub gossip_addr: SocketAddr,
+    pub addr: SocketAddr,
     pub jmap_url: String,
-    pub rpc_url: String,
 
     // Cluster key
     pub key: String,
@@ -62,41 +65,39 @@ pub struct Cluster {
 
 #[derive(Debug)]
 pub enum Message {
-    SyncRequest {
+    Gossip {
         addr: SocketAddr,
-        url: String,
+        request: gossip::Request,
     },
-    SyncResponse {
-        url: String,
-        peers: Vec<PeerInfo>,
+    Rpc {
+        channel: mpsc::Sender<Request>,
+        request: rpc::Request,
     },
-    VoteRequest {
-        urls: Vec<String>,
-        term: TermId,
-        last_log_index: LogIndex,
-        last_log_term: TermId,
-    },
-    JoinRaftRequest {
-        urls: Vec<String>,
-    },
-    Ping {
-        addr: SocketAddr,
-        peers: Vec<PeerStatus>,
-    },
-    Pong {
-        addr: SocketAddr,
-        peers: Vec<PeerStatus>,
-    },
-    Join {
-        addr: SocketAddr,
-        port: u16,
+    RpcMany {
+        channels: Vec<mpsc::Sender<Request>>,
+        request: rpc::Request,
     },
     None,
+}
+
+impl Message {
+    pub fn new_gossip(addr: SocketAddr, request: gossip::Request) -> Self {
+        Message::Gossip { addr, request }
+    }
+
+    pub fn new_rpc(channel: mpsc::Sender<Request>, request: rpc::Request) -> Self {
+        Message::Rpc { channel, request }
+    }
+
+    pub fn new_rpc_many(channels: Vec<mpsc::Sender<Request>>, request: rpc::Request) -> Self {
+        Message::RpcMany { channels, request }
+    }
 }
 
 pub struct Peer {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
+    pub rpc_channel: mpsc::Sender<rpc::Request>,
 
     // Peer status
     pub epoch: EpochId,
@@ -104,8 +105,7 @@ pub struct Peer {
     pub state: gossip::State,
 
     // Peer addresses
-    pub gossip_addr: SocketAddr,
-    pub rpc_url: String,
+    pub addr: SocketAddr,
     pub jmap_url: String,
 
     // Heartbeat state
@@ -119,6 +119,7 @@ pub struct Peer {
     // Raft state
     pub last_log_index: LogIndex,
     pub last_log_term: TermId,
+    pub vote_granted: bool,
 }
 
 impl Default for Cluster {
@@ -129,12 +130,11 @@ impl Default for Cluster {
             generation: 0,
             epoch: 0,
             key: String::new(),
-            gossip_addr: SocketAddr::new(
+            addr: SocketAddr::new(
                 std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-                DEFAULT_GOSSIP_PORT,
+                DEFAULT_RPC_PORT,
             ),
             jmap_url: String::new(),
-            rpc_url: String::new(),
             peers: Vec::new(),
             term: 0,
             last_log_index: 0,
@@ -148,17 +148,6 @@ impl Default for Cluster {
 impl Cluster {
     pub fn is_enabled(&self) -> bool {
         !self.key.is_empty()
-    }
-
-    pub fn quorum(&self) -> u32 {
-        ((self
-            .peers
-            .iter()
-            .filter(|p| p.shard_id == self.shard_id)
-            .count() as f64
-            + 1.0)
-            / 2.0)
-            .floor() as u32
     }
 
     pub fn shard_status(&self) -> (u32, u32) {
@@ -175,132 +164,29 @@ impl Cluster {
         (total, healthy)
     }
 
-    pub fn has_election_quorum(&self) -> bool {
-        let (total, healthy) = self.shard_status();
-        healthy >= ((total as f64 + 1.0) / 2.0).floor() as u32
+    pub fn is_peer_healthy(&self, peer_id: PeerId) -> bool {
+        self.peers
+            .iter()
+            .any(|p| p.peer_id == peer_id && p.is_healthy())
     }
 
-    pub fn is_peer_alive(&self, peer_id: PeerId) -> bool {
-        self.peers.iter().any(|p| {
-            p.peer_id == peer_id
-                && matches!(p.state, gossip::State::Alive | gossip::State::Suspected)
-        })
-    }
-
-    pub fn is_election_due(&self) -> bool {
-        match self.state {
-            raft::State::Candidate(timeout)
-            | raft::State::Wait(timeout)
-            | raft::State::VotedFor((_, timeout))
-                if timeout >= Instant::now() =>
-            {
-                false
-            }
-            _ => true,
-        }
-    }
-
-    pub fn time_to_next_election(&self) -> Option<u64> {
-        match self.state {
-            raft::State::Candidate(timeout)
-            | raft::State::Wait(timeout)
-            | raft::State::VotedFor((_, timeout)) => {
-                let now = Instant::now();
-                Some(if timeout > now {
-                    (timeout - now).as_millis() as u64
-                } else {
-                    0
-                })
-            }
-            _ => None,
-        }
-    }
-
-    pub fn log_is_behind_or_eq(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
-        last_log_term > self.last_log_term
-            || (last_log_term == self.last_log_term && last_log_index >= self.last_log_index)
-    }
-
-    pub fn log_is_behind(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
-        last_log_term > self.last_log_term
-            || (last_log_term == self.last_log_term && last_log_index > self.last_log_index)
-    }
-
-    pub fn can_grant_vote(&self, peer_id: PeerId) -> bool {
-        match self.state {
-            raft::State::Wait(_) => true,
-            raft::State::VotedFor((voted_for, _)) => voted_for == peer_id,
-            raft::State::Leader | raft::State::Follower(_) | raft::State::Candidate(_) => false,
-        }
-    }
-
-    pub fn leader_peer_id(&self) -> Option<PeerId> {
-        match self.state {
-            raft::State::Leader => Some(self.peer_id),
-            raft::State::Follower(peer_id) => Some(peer_id),
-            _ => None,
-        }
-    }
-
-    pub fn is_leading(&self) -> bool {
-        matches!(self.state, raft::State::Leader)
-    }
-
-    pub fn is_candidate(&self) -> bool {
-        matches!(self.state, raft::State::Candidate(_))
-    }
-
-    pub fn start_election_timer(&mut self) {
-        self.state = raft::State::Wait(election_timeout());
-    }
-
-    pub fn step_down(&mut self, term: TermId) {
-        self.term = term;
-        self.state = raft::State::Wait(match self.state {
-            raft::State::Wait(timeout)
-            | raft::State::Candidate(timeout)
-            | raft::State::VotedFor((_, timeout))
-                if timeout < Instant::now() =>
-            {
-                timeout
-            }
-            _ => election_timeout(),
-        });
-        debug!("Steping down for term {}.", self.term);
-    }
-
-    pub fn vote_for(&mut self, peer_id: PeerId) {
-        self.state = raft::State::VotedFor((peer_id, election_timeout()));
-        debug!("Voted for peer {}.", peer_id);
-    }
-
-    pub fn follow_leader(&mut self, peer_id: PeerId) {
-        self.state = raft::State::Follower(peer_id);
-        debug!("Following peer {}.", peer_id);
-    }
-
-    pub fn run_for_election(&mut self) {
-        self.state = raft::State::Candidate(election_timeout());
-        self.term += 1;
-        debug!("Running for election for term {}.", self.term);
-    }
-
-    pub fn become_leader(&mut self) {
-        debug!("This node is the new leader for term {}.", self.term);
-        self.state = raft::State::Leader;
+    pub fn get_peer(&self, peer_id: PeerId) -> Option<&Peer> {
+        self.peers.iter().find(|p| p.peer_id == peer_id)
     }
 }
 
 impl Peer {
-    pub fn new_seed(peer_id: PeerId, gossip_addr: SocketAddr) -> Self {
+    pub fn new_seed(peer_id: PeerId, addr: SocketAddr) -> Self {
+        // Create dummy RPC channel for seed node.
+        let (tx, _) = mpsc::channel::<Request>(1);
         Peer {
             peer_id,
             shard_id: 0,
+            rpc_channel: tx,
             epoch: 0,
             generation: 0,
-            gossip_addr,
+            addr,
             state: gossip::State::Seed,
-            rpc_url: "".to_string(),
             jmap_url: "".to_string(),
             last_heartbeat: Instant::now(),
             hb_window: vec![0; HEARTBEAT_WINDOW],
@@ -310,6 +196,32 @@ impl Peer {
             hb_is_full: false,
             last_log_index: 0,
             last_log_term: 0,
+            vote_granted: false,
+        }
+    }
+
+    pub fn new<T>(core: web::Data<JMAPServer<T>>, peer: PeerInfo) -> Self
+    where
+        T: for<'x> Store<'x> + 'static,
+    {
+        Peer {
+            peer_id: peer.peer_id,
+            shard_id: peer.shard_id,
+            rpc_channel: new_rpc_channel(core, peer.peer_id, peer.addr),
+            epoch: peer.epoch,
+            generation: peer.generation,
+            addr: peer.addr,
+            jmap_url: peer.jmap_url,
+            state: gossip::State::Alive,
+            last_heartbeat: Instant::now(),
+            hb_window: vec![0; HEARTBEAT_WINDOW],
+            hb_window_pos: 0,
+            hb_sum: 0,
+            hb_sq_sum: 0,
+            hb_is_full: false,
+            last_log_index: 0,
+            last_log_term: 0,
+            vote_granted: false,
         }
     }
 
@@ -334,7 +246,7 @@ impl Peer {
     }
 }
 
-impl From<&EnvSettings> for Mutex<Cluster> {
+impl From<&EnvSettings> for parking_lot::Mutex<Cluster> {
     fn from(settings: &EnvSettings) -> Self {
         let key = if let Some(key) = settings.get("cluster") {
             key
@@ -344,7 +256,7 @@ impl From<&EnvSettings> for Mutex<Cluster> {
 
         // Obtain public addresses to advertise
         let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
-        let gossip_port = settings.parse("gossip-port").unwrap_or(DEFAULT_GOSSIP_PORT);
+        let rpc_port = settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT);
         let default_url = format!(
             "http://{}:{}",
             advertise_addr,
@@ -410,7 +322,7 @@ impl From<&EnvSettings> for Mutex<Cluster> {
                 peers.push(Peer::new_seed(
                     node_id as PeerId,
                     if !seed_node.contains(':') {
-                        format!("{}:{}", seed_node, gossip_port)
+                        format!("{}:{}", seed_node, rpc_port)
                     } else {
                         seed_node.to_string()
                     }
@@ -433,14 +345,7 @@ impl From<&EnvSettings> for Mutex<Cluster> {
         };
 
         // Create advertise addresses
-        let gossip_addr = SocketAddr::from((advertise_addr, gossip_port));
-        let rpc_url = settings.parse("rpc-url").unwrap_or_else(|| {
-            info!(
-                "Warning: Parameter 'rpc-url' not specified, using default '{}'.",
-                default_url
-            );
-            default_url.clone()
-        });
+        let addr = SocketAddr::from((advertise_addr, rpc_port));
         let jmap_url = settings.parse("jmap-url").unwrap_or_else(|| {
             info!(
                 "Warning: Parameter 'jmap-url' not specified, using default '{}'.",
@@ -453,8 +358,7 @@ impl From<&EnvSettings> for Mutex<Cluster> {
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
         shard_id.hash(&mut generation);
-        gossip_addr.hash(&mut generation);
-        rpc_url.hash(&mut generation);
+        addr.hash(&mut generation);
         jmap_url.hash(&mut generation);
 
         Cluster {
@@ -462,10 +366,9 @@ impl From<&EnvSettings> for Mutex<Cluster> {
             shard_id,
             generation: generation.finish(),
             epoch: 0,
-            gossip_addr,
+            addr,
             key,
-            rpc_url: format!("{}/rpc", rpc_url),
-            jmap_url: format!("{}/jmap", rpc_url),
+            jmap_url: format!("{}/jmap", jmap_url),
             term: 0,
             last_log_index: 0,
             last_log_term: 0,

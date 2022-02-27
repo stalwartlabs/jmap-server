@@ -1093,6 +1093,7 @@ dependencies = [
  "nlp",
  "num_cpus",
  "openssl",
+ "parking_lot 0.12.0",
  "rand",
  "rayon",
  "reqwest",
@@ -1100,6 +1101,7 @@ dependencies = [
  "store",
  "store_rocksdb",
  "tokio",
+ "tokio-util 0.7.0",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2329,11 +2331,24 @@ dependencies = [
  "libc",
  "memchr",
  "mio 0.7.14",
+ "num_cpus",
  "once_cell",
  "parking_lot 0.11.2",
  "pin-project-lite",
  "signal-hook-registry",
+ "tokio-macros",
  "winapi",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b557f72f448c511a979e2564e55d74e6c4432fc96ff4f6241bc6bded342643b7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
