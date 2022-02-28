@@ -4,23 +4,18 @@ use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use serde::{Deserialize, Serialize};
 use store::leb128::Leb128;
-use store::Store;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::mpsc,
+    sync::{mpsc, oneshot},
     time,
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 use tracing::{debug, error};
 
-use crate::JMAPServer;
-
 use super::{
-    gossip::{build_peer_info, sync_peer_info, PeerInfo},
-    raft::{
-        handle_follow_leader_request, handle_vote_request, handle_vote_response, LogIndex, TermId,
-    },
-    Cluster, PeerId, IPC_CHANNEL_BUFFER,
+    gossip::PeerInfo,
+    raft::{LogIndex, TermId},
+    Message, Peer, PeerId, IPC_CHANNEL_BUFFER,
 };
 
 pub const RPC_MAX_PARALLEL: usize = 5;
@@ -31,46 +26,63 @@ const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024; //TODO configure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Request {
     SynchronizePeers(Vec<PeerInfo>),
-    AuthRequest {
+    Auth {
         peer_id: PeerId,
         key: String,
     },
-    VoteRequest {
+    Vote {
         term: TermId,
         last_log_index: LogIndex,
         last_log_term: TermId,
     },
-    VoteResponse {
-        term: TermId,
-        vote_granted: bool,
-    },
-    FollowLeaderRequest {
+    FollowLeader {
         term: TermId,
         last_log_index: LogIndex,
         last_log_term: TermId,
     },
-    FollowLeaderResponse {
-        term: TermId,
-        success: bool,
-    },
+    None,
 }
 
-impl From<&Cluster> for Request {
-    fn from(cluster: &Cluster) -> Self {
-        Request::SynchronizePeers(build_peer_info(cluster))
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Response {
+    SynchronizePeers(Vec<PeerInfo>),
+    Vote { term: TermId, vote_granted: bool },
+    FollowLeader { term: TermId, success: bool },
+    None,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Protocol {
+    Request(Request),
+    Response(Response),
+}
+
+impl Protocol {
+    pub fn unwrap_request(self) -> Request {
+        match self {
+            Protocol::Request(req) => req,
+            _ => Request::None,
+        }
+    }
+
+    pub fn unwrap_response(self) -> Response {
+        match self {
+            Protocol::Response(res) => res,
+            _ => Response::None,
+        }
     }
 }
 
-pub struct RpcProtocol {}
+pub struct RpcEncoder {}
 
-impl Default for RpcProtocol {
+impl Default for RpcEncoder {
     fn default() -> Self {
         Self {}
     }
 }
 
-impl Decoder for RpcProtocol {
-    type Item = Request;
+impl Decoder for RpcEncoder {
+    type Item = Protocol;
 
     type Error = std::io::Error;
 
@@ -96,7 +108,7 @@ impl Decoder for RpcProtocol {
             return Ok(None);
         }
 
-        let result = bincode::deserialize::<Request>(&src[bytes_read..bytes_read + frame_len])
+        let result = bincode::deserialize::<Protocol>(&src[bytes_read..bytes_read + frame_len])
             .map_err(|e| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -109,10 +121,10 @@ impl Decoder for RpcProtocol {
     }
 }
 
-impl Encoder<Request> for RpcProtocol {
+impl Encoder<Protocol> for RpcEncoder {
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: Request, dst: &mut web::BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Protocol, dst: &mut web::BytesMut) -> Result<(), Self::Error> {
         let bytes = bincode::serialize(&item).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -129,21 +141,20 @@ impl Encoder<Request> for RpcProtocol {
     }
 }
 
-pub async fn start_rpc<T>(core: web::Data<JMAPServer<T>>, bind_addr: SocketAddr)
-where
-    T: for<'x> Store<'x> + 'static,
-{
+pub async fn start_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Message>, key: String) {
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
         panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
     });
+
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
-                    let core = core.clone();
+                    let tx = tx.clone();
+                    let key = key.clone();
                     tokio::spawn(async move {
-                        handle_conn(core, stream).await;
+                        handle_conn(stream, tx, key).await;
                     });
                 }
                 Err(err) => {
@@ -154,32 +165,28 @@ where
     });
 }
 
-pub fn new_rpc_channel<T>(
-    core: web::Data<JMAPServer<T>>,
+pub fn start_peer_rpc(
+    main_tx: mpsc::Sender<Message>,
+    local_peer_id: PeerId,
+    key: String,
     peer_id: PeerId,
     peer_addr: SocketAddr,
-) -> mpsc::Sender<Request>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    let (tx, mut rx) = mpsc::channel::<Request>(IPC_CHANNEL_BUFFER);
+) -> mpsc::Sender<(Request, Option<oneshot::Sender<Response>>)> {
+    let (tx, mut rx) =
+        mpsc::channel::<(Request, Option<oneshot::Sender<Response>>)>(IPC_CHANNEL_BUFFER);
+    let auth_frame = Protocol::Request(Request::Auth {
+        peer_id: local_peer_id,
+        key,
+    });
 
     tokio::spawn(async move {
-        let auth_frame = {
-            let cluster = core.cluster.lock();
-            Request::AuthRequest {
-                peer_id: cluster.peer_id,
-                key: cluster.key.clone(),
-            }
-        };
-
         let mut conn_ = None;
 
         loop {
-            let request =
+            let (request, response_tx) =
                 match time::timeout(Duration::from_millis(RPC_INACTIVITY_TIMEOUT), rx.recv()).await
                 {
-                    Ok(Some(request)) => request,
+                    Ok(Some(message)) => message,
                     Ok(None) => {
                         debug!("Peer RPC process exiting.");
                         break;
@@ -192,7 +199,6 @@ where
                         continue;
                     }
                 };
-            debug!("Received RPC request: {:?}", request);
 
             // Connect to peer if not already connected
             let conn = if let Some(conn) = &mut conn_ {
@@ -208,6 +214,11 @@ where
                             "Failed to connect to peer {} at {}: {}",
                             peer_id, peer_addr, err
                         );
+                        if let Some(response_tx) = response_tx {
+                            if response_tx.send(Response::None).is_err() {
+                                error!("Channel failed while sending message.");
+                            }
+                        }
                         continue;
                     }
                 }
@@ -215,26 +226,15 @@ where
 
             match send_rpc(conn, request).await {
                 Ok(response) => {
-                    debug!("Peer response: {:?}", response);
-                    match response {
-                        Request::SynchronizePeers(peers) => {
-                            debug!("Successful full sync, received {} peers.", peers.len());
-                            sync_peer_info(&core, peers, false);
+                    if let Some(response_tx) = response_tx {
+                        if response_tx.send(response).is_err() {
+                            error!("Channel failed while sending message.");
                         }
-                        Request::VoteResponse { term, vote_granted } => {
-                            handle_vote_response(&core, peer_id, term, vote_granted).await;
-                        }
-                        Request::FollowLeaderResponse { term, success } => {
-                            let mut cluster = core.cluster.lock();
-                            if cluster.term < term {
-                                cluster.step_down(term);
-                            } else if !success {
-                                cluster.start_election_timer();
-                            }
-                        }
-                        _ => {
-                            error!("Unexpected response from peer {}: {:?}", peer_id, response);
-                        }
+                    } else if let Err(err) = main_tx
+                        .send(Message::RpcResponse { peer_id, response })
+                        .await
+                    {
+                        error!("Channel failed while sending message: {}", err);
                     }
                 }
                 Err(err) => {
@@ -242,6 +242,11 @@ where
                         "Failed to send RPC request to peer {} at {}: {}",
                         peer_id, peer_addr, err
                     );
+                    if let Some(response_tx) = response_tx {
+                        if response_tx.send(Response::None).is_err() {
+                            error!("Channel failed while sending message.");
+                        }
+                    }
                     conn_ = None;
                 }
             }
@@ -251,17 +256,14 @@ where
     tx
 }
 
-async fn handle_conn<T>(core: web::Data<JMAPServer<T>>, stream: TcpStream)
-where
-    T: for<'x> Store<'x> + 'static,
-{
+async fn handle_conn(stream: TcpStream, tx: mpsc::Sender<Message>, auth_key: String) {
     let peer_addr = stream.peer_addr().unwrap();
-    let mut frames = Framed::new(stream, RpcProtocol::default());
+    let mut frames = Framed::new(stream, RpcEncoder::default());
 
     let peer_id = match time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), frames.next()).await {
         Ok(Some(result)) => match result {
-            Ok(Request::AuthRequest { peer_id, key }) => {
-                if core.cluster.lock().key == key {
+            Ok(Protocol::Request(Request::Auth { peer_id, key })) => {
+                if auth_key == key {
                     debug!("Authenticated peer {}.", peer_id);
                     peer_id
                 } else {
@@ -290,46 +292,37 @@ where
 
     while let Some(frame) = frames.next().await {
         match frame {
-            Ok(request) => {
-                debug!("Received RPC request from {}: {:?}", peer_id, request);
-                let response = {
-                    match request {
-                        Request::SynchronizePeers(peers) => {
-                            Request::SynchronizePeers(sync_peer_info(&core, peers, true).unwrap())
-                        }
-                        Request::VoteRequest {
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        } => handle_vote_request(
-                            &mut core.cluster.lock(),
-                            peer_id,
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        ),
-                        Request::FollowLeaderRequest {
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        } => handle_follow_leader_request(
-                            &mut core.cluster.lock(),
-                            peer_id,
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        ),
-                        _ => {
-                            error!("Received unexpected RPC request from {}.", peer_id);
+            Ok(Protocol::Request(request)) => {
+                let (response_tx, response_rx) = oneshot::channel();
+
+                if let Err(err) = tx
+                    .send(Message::RpcRequest {
+                        peer_id,
+                        response_tx,
+                        request,
+                    })
+                    .await
+                {
+                    error!("Failed to send RPC request to core: {}", err);
+                    return;
+                }
+
+                match response_rx.await {
+                    Ok(response) => {
+                        if let Err(err) = frames.send(Protocol::Response(response)).await {
+                            error!("Failed to send RPC response: {}", err);
                             return;
                         }
                     }
-                };
-
-                if let Err(err) = frames.send(response).await {
-                    error!("Failed to send RPC response: {}", err);
-                    return;
+                    Err(err) => {
+                        error!("Failed to receive RPC response: {}", err);
+                        return;
+                    }
                 }
+            }
+            Ok(invalid) => {
+                error!("Received invalid RPC frame from {}: {:?}", peer_id, invalid);
+                return;
             }
             Err(err) => {
                 error!("Failed to read RPC request from {}: {}", peer_addr, err);
@@ -341,10 +334,10 @@ where
 
 async fn connect_peer(
     addr: SocketAddr,
-    auth_frame: Request,
-) -> std::io::Result<Framed<TcpStream, RpcProtocol>> {
+    auth_frame: Protocol,
+) -> std::io::Result<Framed<TcpStream, RpcEncoder>> {
     time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), async {
-        let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcProtocol::default());
+        let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcEncoder::default());
         conn.send(auth_frame).await?;
         Ok(conn)
     })
@@ -358,16 +351,40 @@ async fn connect_peer(
 }
 
 async fn send_rpc(
-    conn: &mut Framed<TcpStream, RpcProtocol>,
+    conn: &mut Framed<TcpStream, RpcEncoder>,
     request: Request,
-) -> std::io::Result<Request> {
-    conn.send(request).await?;
+) -> std::io::Result<Response> {
+    conn.send(Protocol::Request(request)).await?;
     match conn.next().await {
-        Some(Ok(response)) => Ok(response),
+        Some(Ok(Protocol::Response(response))) => Ok(response),
+        Some(Ok(invalid)) => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Received invalid RPC response: {:?}", invalid),
+        )),
         Some(Err(err)) => Err(err),
         None => Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "RPC connection unexpectedly closed.",
         )),
+    }
+}
+
+impl Peer {
+    // Sends and RPC and waits until the response is available.
+    pub async fn send_rpc(&self, request: Request) -> Response {
+        let (tx, rx) = oneshot::channel();
+        if let Err(err) = self.tx.send((request, tx.into())).await {
+            error!("Channel failed: {}", err);
+            return Response::None;
+        }
+        rx.await.unwrap_or(Response::None)
+    }
+
+    // Sends an RPC request and the result is returned via the main channel.
+    pub async fn send_rpc_lazy(&self, request: Request) {
+        //debug!("OUT: {:?}", request);
+        if let Err(err) = self.tx.send((request, None)).await {
+            error!("Channel failed: {}", err);
+        }
     }
 }

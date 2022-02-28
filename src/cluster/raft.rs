@@ -1,13 +1,13 @@
 use std::time::{Duration, Instant};
 
-use actix_web::web;
 use rand::Rng;
 use store::Store;
 use tracing::{debug, info};
 
-use crate::JMAPServer;
-
-use super::{rpc::Request, Cluster, Message, PeerId};
+use super::{
+    rpc::{Request, Response},
+    Cluster, PeerId,
+};
 
 pub type TermId = u64;
 pub type LogIndex = u64;
@@ -31,7 +31,10 @@ impl Default for State {
     }
 }
 
-impl Cluster {
+impl<T> Cluster<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
     pub fn has_election_quorum(&self) -> bool {
         let (total, healthy) = self.shard_status();
         healthy >= ((total as f64 + 1.0) / 2.0).floor() as u32
@@ -165,6 +168,129 @@ impl Cluster {
 
         votes > ((total_peers as f64 + 1.0) / 2.0).floor() as u32
     }
+
+    pub async fn start_election(&mut self) {
+        // Check if there is enough quorum for an election.
+        if self.has_election_quorum() {
+            // Assess whether this node could become the leader for the next term.
+            if !self.peers.iter().any(|peer| {
+                peer.is_in_shard(self.shard_id)
+                    && !peer.is_offline()
+                    && self.log_is_behind(peer.last_log_term, peer.last_log_index)
+            }) {
+                // Increase term and start election
+                self.run_for_election();
+                for peer in &self.peers {
+                    if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
+                        peer.send_rpc_lazy(Request::Vote {
+                            term: self.term,
+                            last_log_index: self.last_log_index,
+                            last_log_term: self.last_log_term,
+                        })
+                        .await;
+                    }
+                }
+            } else {
+                // Wait to receive a vote request from a more up-to-date peer.
+                self.start_election_timer();
+            }
+        } else {
+            self.start_election_timer();
+            info!(
+                "Not enough alive peers in shard {} to start election.",
+                self.shard_id
+            );
+        }
+    }
+
+    pub fn handle_vote_request(
+        &mut self,
+        peer_id: PeerId,
+        term: TermId,
+        last_log_index: LogIndex,
+        last_log_term: TermId,
+    ) -> Response {
+        if self.term < term {
+            self.step_down(term);
+        }
+
+        /*debug!(
+            "Vote: {} {} {:?} {}",
+            self.term,
+            term,
+            self.state,
+            self.log_is_behind_or_eq(last_log_term, last_log_index)
+        );*/
+
+        Response::Vote {
+            term: self.term,
+            vote_granted: if self.term == term
+                && self.can_grant_vote(peer_id)
+                && self.log_is_behind_or_eq(last_log_term, last_log_index)
+            {
+                self.vote_for(peer_id);
+                true
+            } else {
+                false
+            },
+        }
+    }
+
+    pub async fn handle_vote_response(
+        &mut self,
+        peer_id: PeerId,
+        term: TermId,
+        vote_granted: bool,
+    ) {
+        /*debug!(
+            "Vote Response: {}, {}, {:?}, {}",
+            self.term, term, self.state, vote_granted
+        );*/
+
+        if self.term < term {
+            self.step_down(term);
+            return;
+        } else if !self.is_candidate() || !vote_granted || self.term != term {
+            return;
+        }
+
+        if self.count_vote(peer_id) {
+            self.become_leader();
+            for peer in &self.peers {
+                if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
+                    peer.send_rpc_lazy(Request::FollowLeader {
+                        term: self.term,
+                        last_log_index: self.last_log_index,
+                        last_log_term: self.last_log_term,
+                    })
+                    .await;
+                }
+            }
+        }
+    }
+
+    pub fn handle_follow_leader_request(
+        &mut self,
+        peer_id: PeerId,
+        term: TermId,
+        last_log_index: LogIndex,
+        last_log_term: TermId,
+    ) -> Response {
+        if self.term < term {
+            self.term = term;
+        }
+
+        Response::FollowLeader {
+            term: self.term,
+            success: if self.term == term && self.log_is_behind_or_eq(last_log_term, last_log_index)
+            {
+                self.follow_leader(peer_id);
+                true
+            } else {
+                false
+            },
+        }
+    }
 }
 
 pub fn election_timeout() -> Instant {
@@ -174,141 +300,4 @@ pub fn election_timeout() -> Instant {
                 + rand::thread_rng()
                     .gen_range(ELECTION_TIMEOUT_RAND_FROM..ELECTION_TIMEOUT_RAND_TO),
         )
-}
-
-pub fn start_election(cluster: &mut Cluster, requests: &mut Vec<Message>) {
-    // Check if there is enough quorum for an election.
-    if cluster.has_election_quorum() {
-        // Assess whether this node could become the leader for the next term.
-        let mut is_up_to_date = true;
-        let mut channels = Vec::new();
-
-        for peer in cluster.peers.iter() {
-            if peer.is_in_shard(cluster.shard_id) && !peer.is_offline() {
-                if cluster.log_is_behind(peer.last_log_term, peer.last_log_index) {
-                    is_up_to_date = false;
-                    break;
-                } else {
-                    channels.push(peer.rpc_channel.clone());
-                }
-            }
-        }
-
-        if is_up_to_date {
-            // Increase term and start election
-            cluster.run_for_election();
-            requests.push(Message::new_rpc_many(
-                channels,
-                Request::VoteRequest {
-                    term: cluster.term,
-                    last_log_index: cluster.last_log_index,
-                    last_log_term: cluster.last_log_term,
-                },
-            ));
-        } else {
-            // Query who is the current leader while at the same time wait to
-            // receive a vote request from a more up-to-date peer.
-            cluster.start_election_timer();
-            //requests.push(Message::new_rpc_all(Request::JoinRaftRequest));
-        }
-    } else {
-        cluster.start_election_timer();
-        info!(
-            "Not enough alive peers in shard {} to start election.",
-            cluster.shard_id
-        );
-    }
-}
-
-pub fn handle_vote_request(
-    cluster: &mut Cluster,
-    peer_id: PeerId,
-    term: TermId,
-    last_log_index: LogIndex,
-    last_log_term: TermId,
-) -> Request {
-    if cluster.term < term {
-        cluster.step_down(term);
-    }
-
-    Request::VoteResponse {
-        term: cluster.term,
-        vote_granted: if cluster.term == term
-            && cluster.can_grant_vote(peer_id)
-            && cluster.log_is_behind_or_eq(last_log_term, last_log_index)
-        {
-            cluster.vote_for(peer_id);
-            true
-        } else {
-            false
-        },
-    }
-}
-
-pub async fn handle_vote_response<T>(
-    core: &web::Data<JMAPServer<T>>,
-    peer_id: PeerId,
-    term: TermId,
-    vote_granted: bool,
-) where
-    T: for<'x> Store<'x> + 'static,
-{
-    let (channels, request) = {
-        let mut cluster = core.cluster.lock();
-
-        if cluster.term < term {
-            cluster.step_down(term);
-            return;
-        } else if !cluster.is_candidate() || !vote_granted || cluster.term != term {
-            return;
-        }
-
-        if cluster.count_vote(peer_id) {
-            cluster.become_leader();
-            let mut channels = Vec::new();
-            for peer in &cluster.peers {
-                if peer.is_in_shard(cluster.shard_id) && !peer.is_offline() {
-                    channels.push(peer.rpc_channel.clone());
-                }
-            }
-            (
-                channels,
-                Request::FollowLeaderRequest {
-                    term: cluster.term,
-                    last_log_index: cluster.last_log_index,
-                    last_log_term: cluster.last_log_term,
-                },
-            )
-        } else {
-            return;
-        }
-    };
-
-    for channel in channels {
-        channel.send(request.clone()).await.unwrap();
-    }
-}
-
-pub fn handle_follow_leader_request(
-    cluster: &mut Cluster,
-    peer_id: PeerId,
-    term: TermId,
-    last_log_index: LogIndex,
-    last_log_term: TermId,
-) -> Request {
-    if cluster.term < term {
-        cluster.term = term;
-    }
-
-    Request::FollowLeaderResponse {
-        term: cluster.term,
-        success: if cluster.term == term
-            && cluster.log_is_behind_or_eq(last_log_term, last_log_index)
-        {
-            cluster.follow_leader(peer_id);
-            true
-        } else {
-            false
-        },
-    }
 }

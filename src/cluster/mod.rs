@@ -10,15 +10,15 @@ use std::{
 
 use actix_web::web;
 use store::Store;
-use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tokio::sync::{mpsc, oneshot};
+use tracing::{error, info};
 
 use crate::{config::EnvSettings, JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
 
 use self::{
     gossip::PeerInfo,
     raft::{LogIndex, TermId},
-    rpc::{new_rpc_channel, Request},
+    rpc::start_peer_rpc,
 };
 
 pub mod gossip;
@@ -36,7 +36,10 @@ pub const IPC_CHANNEL_BUFFER: usize = 1024;
 const HEARTBEAT_WINDOW: usize = 1 << 10;
 const HEARTBEAT_WINDOW_MASK: usize = HEARTBEAT_WINDOW - 1;
 
-pub struct Cluster {
+pub struct Cluster<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
     // Local node peer and shard id
     pub peer_id: PeerId,
     pub shard_id: ShardId,
@@ -54,6 +57,12 @@ pub struct Cluster {
 
     // Peer list
     pub peers: Vec<Peer>,
+    pub last_peer_pinged: usize,
+
+    // IPC
+    pub core: web::Data<JMAPServer<T>>,
+    pub tx: mpsc::Sender<Message>,
+    pub gossip_tx: mpsc::Sender<(SocketAddr, gossip::Request)>,
 
     // Raft status
     pub term: TermId,
@@ -69,35 +78,21 @@ pub enum Message {
         addr: SocketAddr,
         request: gossip::Request,
     },
-    Rpc {
-        channel: mpsc::Sender<Request>,
+    RpcRequest {
+        peer_id: PeerId,
         request: rpc::Request,
+        response_tx: oneshot::Sender<rpc::Response>,
     },
-    RpcMany {
-        channels: Vec<mpsc::Sender<Request>>,
-        request: rpc::Request,
+    RpcResponse {
+        peer_id: PeerId,
+        response: rpc::Response,
     },
-    None,
-}
-
-impl Message {
-    pub fn new_gossip(addr: SocketAddr, request: gossip::Request) -> Self {
-        Message::Gossip { addr, request }
-    }
-
-    pub fn new_rpc(channel: mpsc::Sender<Request>, request: rpc::Request) -> Self {
-        Message::Rpc { channel, request }
-    }
-
-    pub fn new_rpc_many(channels: Vec<mpsc::Sender<Request>>, request: rpc::Request) -> Self {
-        Message::RpcMany { channels, request }
-    }
 }
 
 pub struct Peer {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
-    pub rpc_channel: mpsc::Sender<rpc::Request>,
+    pub tx: mpsc::Sender<(rpc::Request, Option<oneshot::Sender<rpc::Response>>)>,
 
     // Peer status
     pub epoch: EpochId,
@@ -122,30 +117,10 @@ pub struct Peer {
     pub vote_granted: bool,
 }
 
-impl Default for Cluster {
-    fn default() -> Self {
-        Cluster {
-            peer_id: 0,
-            shard_id: 0,
-            generation: 0,
-            epoch: 0,
-            key: String::new(),
-            addr: SocketAddr::new(
-                std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-                DEFAULT_RPC_PORT,
-            ),
-            jmap_url: String::new(),
-            peers: Vec::new(),
-            term: 0,
-            last_log_index: 0,
-            last_log_term: 0,
-            commit_index: 0,
-            state: raft::State::default(),
-        }
-    }
-}
-
-impl Cluster {
+impl<T> Cluster<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
     pub fn is_enabled(&self) -> bool {
         !self.key.is_empty()
     }
@@ -173,86 +148,14 @@ impl Cluster {
     pub fn get_peer(&self, peer_id: PeerId) -> Option<&Peer> {
         self.peers.iter().find(|p| p.peer_id == peer_id)
     }
-}
 
-impl Peer {
-    pub fn new_seed(peer_id: PeerId, addr: SocketAddr) -> Self {
-        // Create dummy RPC channel for seed node.
-        let (tx, _) = mpsc::channel::<Request>(1);
-        Peer {
-            peer_id,
-            shard_id: 0,
-            rpc_channel: tx,
-            epoch: 0,
-            generation: 0,
-            addr,
-            state: gossip::State::Seed,
-            jmap_url: "".to_string(),
-            last_heartbeat: Instant::now(),
-            hb_window: vec![0; HEARTBEAT_WINDOW],
-            hb_window_pos: 0,
-            hb_sum: 0,
-            hb_sq_sum: 0,
-            hb_is_full: false,
-            last_log_index: 0,
-            last_log_term: 0,
-            vote_granted: false,
-        }
-    }
-
-    pub fn new<T>(core: web::Data<JMAPServer<T>>, peer: PeerInfo) -> Self
-    where
-        T: for<'x> Store<'x> + 'static,
-    {
-        Peer {
-            peer_id: peer.peer_id,
-            shard_id: peer.shard_id,
-            rpc_channel: new_rpc_channel(core, peer.peer_id, peer.addr),
-            epoch: peer.epoch,
-            generation: peer.generation,
-            addr: peer.addr,
-            jmap_url: peer.jmap_url,
-            state: gossip::State::Alive,
-            last_heartbeat: Instant::now(),
-            hb_window: vec![0; HEARTBEAT_WINDOW],
-            hb_window_pos: 0,
-            hb_sum: 0,
-            hb_sq_sum: 0,
-            hb_is_full: false,
-            last_log_index: 0,
-            last_log_term: 0,
-            vote_granted: false,
-        }
-    }
-
-    pub fn is_seed(&self) -> bool {
-        self.state == gossip::State::Seed
-    }
-
-    pub fn is_alive(&self) -> bool {
-        self.state == gossip::State::Alive
-    }
-
-    pub fn is_healthy(&self) -> bool {
-        matches!(self.state, gossip::State::Alive | gossip::State::Suspected)
-    }
-
-    pub fn is_offline(&self) -> bool {
-        self.state == gossip::State::Offline
-    }
-
-    pub fn is_in_shard(&self, shard_id: ShardId) -> bool {
-        self.shard_id == shard_id
-    }
-}
-
-impl From<&EnvSettings> for parking_lot::Mutex<Cluster> {
-    fn from(settings: &EnvSettings) -> Self {
-        let key = if let Some(key) = settings.get("cluster") {
-            key
-        } else {
-            return Cluster::default().into();
-        };
+    fn init(
+        settings: &EnvSettings,
+        core: web::Data<JMAPServer<T>>,
+        tx: mpsc::Sender<Message>,
+        gossip_tx: mpsc::Sender<(SocketAddr, gossip::Request)>,
+    ) -> Option<Self> {
+        let key = settings.get("cluster")?;
 
         // Obtain public addresses to advertise
         let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
@@ -320,6 +223,9 @@ impl From<&EnvSettings> for parking_lot::Mutex<Cluster> {
             let mut peers = Vec::with_capacity(seed_nodes.len());
             for (node_id, seed_node) in seed_nodes.into_iter().enumerate() {
                 peers.push(Peer::new_seed(
+                    tx.clone(),
+                    peer_id,
+                    key.clone(),
                     node_id as PeerId,
                     if !seed_node.contains(':') {
                         format!("{}:{}", seed_node, rpc_port)
@@ -366,6 +272,7 @@ impl From<&EnvSettings> for parking_lot::Mutex<Cluster> {
             shard_id,
             generation: generation.finish(),
             epoch: 0,
+            core,
             addr,
             key,
             jmap_url: format!("{}/jmap", jmap_url),
@@ -375,7 +282,91 @@ impl From<&EnvSettings> for parking_lot::Mutex<Cluster> {
             commit_index: 0,
             state: raft::State::default(),
             peers,
+            last_peer_pinged: u32::MAX as usize,
+            tx,
+            gossip_tx,
         }
         .into()
+    }
+}
+
+impl Peer {
+    pub fn new_seed(
+        main_tx: mpsc::Sender<Message>,
+        local_peer_id: PeerId,
+        key: String,
+        peer_id: PeerId,
+        addr: SocketAddr,
+    ) -> Self {
+        Peer {
+            peer_id,
+            shard_id: 0,
+            tx: start_peer_rpc(main_tx, local_peer_id, key, peer_id, addr),
+            epoch: 0,
+            generation: 0,
+            addr,
+            state: gossip::State::Seed,
+            jmap_url: "".to_string(),
+            last_heartbeat: Instant::now(),
+            hb_window: vec![0; HEARTBEAT_WINDOW],
+            hb_window_pos: 0,
+            hb_sum: 0,
+            hb_sq_sum: 0,
+            hb_is_full: false,
+            last_log_index: 0,
+            last_log_term: 0,
+            vote_granted: false,
+        }
+    }
+
+    pub fn new<T>(cluster: &Cluster<T>, peer: PeerInfo) -> Self
+    where
+        T: for<'x> Store<'x> + 'static,
+    {
+        Peer {
+            peer_id: peer.peer_id,
+            shard_id: peer.shard_id,
+            tx: start_peer_rpc(
+                cluster.tx.clone(),
+                cluster.peer_id,
+                cluster.key.clone(),
+                peer.peer_id,
+                peer.addr,
+            ),
+            epoch: peer.epoch,
+            generation: peer.generation,
+            addr: peer.addr,
+            jmap_url: peer.jmap_url,
+            state: gossip::State::Alive,
+            last_heartbeat: Instant::now(),
+            hb_window: vec![0; HEARTBEAT_WINDOW],
+            hb_window_pos: 0,
+            hb_sum: 0,
+            hb_sq_sum: 0,
+            hb_is_full: false,
+            last_log_index: 0,
+            last_log_term: 0,
+            vote_granted: false,
+        }
+    }
+
+    pub fn is_seed(&self) -> bool {
+        self.state == gossip::State::Seed
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.state == gossip::State::Alive
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        matches!(self.state, gossip::State::Alive | gossip::State::Suspected)
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.state == gossip::State::Offline
+    }
+
+    pub fn is_in_shard(&self, shard_id: ShardId) -> bool {
+        self.shard_id == shard_id
     }
 }

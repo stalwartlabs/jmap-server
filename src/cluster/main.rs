@@ -5,170 +5,219 @@ use std::{
 
 use actix_web::web;
 use store::Store;
-use tokio::time;
-use tracing::debug;
+use tokio::{sync::mpsc, time};
+use tracing::{debug, error, info};
 
-use crate::JMAPServer;
+use crate::{cluster::IPC_CHANNEL_BUFFER, config::EnvSettings, JMAPServer, DEFAULT_RPC_PORT};
 
 use super::{
-    gossip::{
-        self, build_peer_status, check_heartbeat, handle_gossip, start_gossip, PING_INTERVAL,
-    },
-    raft::start_election,
-    rpc::start_rpc,
+    gossip::{self, start_gossip, PING_INTERVAL},
+    rpc::{self, start_rpc},
     Cluster, Message,
 };
 
-pub async fn start_cluster<T>(core: web::Data<JMAPServer<T>>, bind_addr: SocketAddr)
+pub async fn start_cluster<T>(core: web::Data<JMAPServer<T>>, settings: &EnvSettings) -> Option<()>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    start_rpc(core.clone(), bind_addr).await;
-    let (mut gossip_rx, gossip_tx) = start_gossip(bind_addr).await;
+    let (tx, mut rx) = mpsc::channel::<Message>(IPC_CHANNEL_BUFFER);
+    let (gossip_tx, gossip_rx) = mpsc::channel::<(SocketAddr, gossip::Request)>(IPC_CHANNEL_BUFFER);
+
+    let mut cluster = Cluster::init(settings, core.clone(), tx.clone(), gossip_tx)?;
+
+    let bind_addr = SocketAddr::from((
+        settings.parse_ipaddr("bind-addr", "127.0.0.1"),
+        settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT),
+    ));
+    info!("Starting RPC server at {} (UDP/TCP)...", bind_addr);
+
+    start_rpc(bind_addr, tx.clone(), cluster.key.clone()).await;
+    start_gossip(bind_addr, gossip_rx, tx).await;
 
     tokio::spawn(async move {
         let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
         let mut last_ping = Instant::now();
-        let mut last_peer_pinged = u32::MAX as usize;
-        let mut requests = Vec::<Message>::with_capacity(10);
 
         loop {
-            match time::timeout(wait_timeout, gossip_rx.recv()).await {
-                Ok(Some((_, request))) => match handle_gossip(&core, request).await {
-                    Message::None => (),
-                    response => requests.push(response),
-                },
+            match time::timeout(wait_timeout, rx.recv()).await {
+                Ok(Some(message)) => cluster.handle_message(message).await,
                 Ok(None) => {
-                    debug!("Gossip thread exiting.");
+                    debug!("Cluster thread exiting.");
                     break;
                 }
                 Err(_) => (),
             }
-            //debug!("Responses: {:?}", requests);
 
-            {
-                let mut cluster = core.cluster.lock();
-                if !cluster.peers.is_empty() {
-                    let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
-                    let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
-                        last_peer_pinged =
-                            ping_peers(&mut cluster, &mut requests, last_peer_pinged);
-                        last_ping = Instant::now();
-                        PING_INTERVAL
+            if !cluster.peers.is_empty() {
+                let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
+                let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
+                    cluster.ping_peers().await;
+                    last_ping = Instant::now();
+                    PING_INTERVAL
+                } else {
+                    PING_INTERVAL - time_since_last_ping
+                };
+
+                wait_timeout = Duration::from_millis(
+                    if let Some(time_to_next_election) = cluster.time_to_next_election() {
+                        if time_to_next_election == 0 {
+                            cluster.start_election().await;
+                            time_to_next_ping
+                        } else if time_to_next_election < time_to_next_ping {
+                            time_to_next_election
+                        } else {
+                            time_to_next_ping
+                        }
                     } else {
-                        PING_INTERVAL - time_since_last_ping
-                    };
-
-                    wait_timeout = Duration::from_millis(
-                        cluster
-                            .time_to_next_election()
-                            .map(|time_to_next_election| {
-                                if time_to_next_election == 0 {
-                                    start_election(&mut cluster, &mut requests);
-                                    time_to_next_ping
-                                } else if time_to_next_election < time_to_next_ping {
-                                    time_to_next_election
-                                } else {
-                                    time_to_next_ping
-                                }
-                            })
-                            .unwrap_or(time_to_next_ping),
-                    );
-                }
-            }
-
-            // Dispatch messages to the gossip and RPC processes.
-            if !requests.is_empty() {
-                for request in requests.drain(..) {
-                    match request {
-                        Message::Gossip { addr, request } => {
-                            gossip_tx.send((addr, request)).await.ok();
-                        }
-                        Message::Rpc { channel, request } => {
-                            channel.send(request).await.ok();
-                        }
-                        Message::RpcMany { channels, request } => {
-                            for channel in channels {
-                                channel.send(request.clone()).await.ok();
-                            }
-                        }
-                        Message::None => unreachable!(),
-                    }
-                }
+                        time_to_next_ping
+                    },
+                );
             }
         }
     });
+
+    None
 }
 
-fn ping_peers(
-    cluster: &mut Cluster,
-    requests: &mut Vec<Message>,
-    mut last_peer_pinged: usize,
-) -> usize {
-    // Total and alive peers in the cluster.
-    let total_peers = cluster.peers.len();
-    let mut alive_peers: u32 = 0;
+impl<T> Cluster<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub async fn handle_message(&mut self, message: Message) {
+        match message {
+            Message::Gossip { request, .. } => match request {
+                // Join request, add node and perform full sync.
+                gossip::Request::Join { id, addr } => self.handle_join(id, addr).await,
 
-    // Start a new election on startup or on an election timeout.
-    let mut leader_is_offline = false;
-    let leader_peer_id = cluster.leader_peer_id();
+                // Join reply.
+                gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
 
-    // Count alive peers and start a new election if the current leader becomes offline.
-    for peer in cluster.peers.iter_mut() {
-        if !peer.is_offline() {
-            // Failure detection
-            if check_heartbeat(peer) {
-                alive_peers += 1;
-            } else if !leader_is_offline
-                && leader_peer_id.map(|id| id == peer.peer_id).unwrap_or(false)
-            {
-                // Current leader is offline, start election
-                leader_is_offline = true;
+                // Hearbeat request, reply with the cluster status.
+                gossip::Request::Ping(peer_list) => self.handle_ping(peer_list, true).await,
+
+                // Heartbeat response, update the cluster status if needed.
+                gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
+            },
+            Message::RpcRequest {
+                peer_id,
+                request,
+                response_tx,
+            } => {
+                //debug!("Req [{}]: {:?}", peer_id, request);
+
+                response_tx
+                    .send(match request {
+                        rpc::Request::SynchronizePeers(peers) => {
+                            self.sync_peer_info(peers);
+                            rpc::Response::SynchronizePeers(self.build_peer_info())
+                        }
+                        rpc::Request::Vote {
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        } => self.handle_vote_request(peer_id, term, last_log_index, last_log_term),
+                        rpc::Request::FollowLeader {
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        } => self.handle_follow_leader_request(
+                            peer_id,
+                            term,
+                            last_log_index,
+                            last_log_term,
+                        ),
+                        _ => rpc::Response::None,
+                    })
+                    .ok()
+                    .unwrap_or_else(|| error!("Oneshot response channel closed."));
+            }
+            Message::RpcResponse { peer_id, response } => {
+                //debug!("Reply [{}]: {:?}", peer_id, response);
+
+                match response {
+                    rpc::Response::SynchronizePeers(peers) => {
+                        debug!("Successful full sync, received {} peers.", peers.len());
+                        self.sync_peer_info(peers);
+                    }
+                    rpc::Response::Vote { term, vote_granted } => {
+                        self.handle_vote_response(peer_id, term, vote_granted).await;
+                    }
+                    rpc::Response::FollowLeader { term, success } => {
+                        if self.term < term {
+                            self.step_down(term);
+                        } else if !success {
+                            self.start_election_timer();
+                        }
+                    }
+                    rpc::Response::None => (),
+                }
             }
         }
     }
 
-    // Start a new election
-    if leader_is_offline {
-        start_election(cluster, requests);
-    }
+    pub async fn ping_peers(&mut self) {
+        // Total and alive peers in the cluster.
+        let total_peers = self.peers.len();
+        let mut alive_peers: u32 = 0;
 
-    // Find next peer to ping
-    for _ in 0..total_peers {
-        last_peer_pinged = (last_peer_pinged + 1) % total_peers;
-        let (peer_state, target_addr) = {
-            let peer = &cluster.peers[last_peer_pinged];
-            (peer.state, peer.addr)
-        };
+        // Start a new election on startup or on an election timeout.
+        let mut leader_is_offline = false;
+        let leader_peer_id = self.leader_peer_id();
 
-        match peer_state {
-            gossip::State::Seed => {
-                requests.push(Message::new_gossip(
-                    target_addr,
-                    gossip::Request::Join((&*cluster).into()),
-                ));
-                break;
+        // Count alive peers and start a new election if the current leader becomes offline.
+        for peer in self.peers.iter_mut() {
+            if !peer.is_offline() {
+                // Failure detection
+                if peer.check_heartbeat() {
+                    alive_peers += 1;
+                } else if !leader_is_offline
+                    && leader_peer_id.map(|id| id == peer.peer_id).unwrap_or(false)
+                {
+                    // Current leader is offline, start election
+                    leader_is_offline = true;
+                }
             }
-            gossip::State::Alive | gossip::State::Suspected => {
-                cluster.epoch += 1;
-                requests.push(Message::new_gossip(
-                    target_addr,
-                    gossip::Request::Ping(build_peer_status(cluster)),
-                ));
-                break;
+        }
+
+        // Start a new election
+        if leader_is_offline {
+            self.start_election().await;
+        }
+
+        // Find next peer to ping
+        for _ in 0..total_peers {
+            self.last_peer_pinged = (self.last_peer_pinged + 1) % total_peers;
+            let (peer_state, target_addr) = {
+                let peer = &self.peers[self.last_peer_pinged];
+                (peer.state, peer.addr)
+            };
+
+            match peer_state {
+                gossip::State::Seed => {
+                    self.send_gossip(
+                        target_addr,
+                        gossip::Request::Join {
+                            id: self.last_peer_pinged,
+                            addr: self.addr,
+                        },
+                    )
+                    .await;
+                    break;
+                }
+                gossip::State::Alive | gossip::State::Suspected => {
+                    self.epoch += 1;
+                    self.send_gossip(target_addr, gossip::Request::Ping(self.build_peer_status()))
+                        .await;
+                    break;
+                }
+                gossip::State::Offline if alive_peers == 0 => {
+                    // Probe offline nodes
+                    self.send_gossip(target_addr, gossip::Request::Ping(self.build_peer_status()))
+                        .await;
+                    break;
+                }
+                _ => (),
             }
-            gossip::State::Offline if alive_peers == 0 => {
-                // Probe offline nodes
-                cluster.epoch += 1;
-                requests.push(Message::new_gossip(
-                    target_addr,
-                    gossip::Request::Ping(build_peer_status(cluster)),
-                ));
-                break;
-            }
-            _ => (),
         }
     }
-
-    last_peer_pinged
 }

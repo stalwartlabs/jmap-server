@@ -1,18 +1,16 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 
-use actix_web::web::{self};
-
 use serde::{Deserialize, Serialize};
 use store::Store;
 use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, error, info};
 
-use crate::{cluster::rpc::new_rpc_channel, JMAPServer};
+use crate::cluster::rpc::start_peer_rpc;
 
 use super::{
     raft::{LogIndex, TermId},
     rpc, Cluster, EpochId, GenerationId, Message, Peer, PeerId, ShardId, HEARTBEAT_WINDOW,
-    HEARTBEAT_WINDOW_MASK, IPC_CHANNEL_BUFFER,
+    HEARTBEAT_WINDOW_MASK,
 };
 
 pub const PING_INTERVAL: u64 = 500;
@@ -54,8 +52,11 @@ impl From<&Peer> for PeerStatus {
     }
 }
 
-impl From<&Cluster> for PeerStatus {
-    fn from(cluster: &Cluster) -> Self {
+impl<T> From<&Cluster<T>> for PeerStatus
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn from(cluster: &Cluster<T>) -> Self {
         PeerStatus {
             peer_id: cluster.peer_id,
             epoch: cluster.epoch,
@@ -93,8 +94,11 @@ impl From<&Peer> for PeerInfo {
     }
 }
 
-impl From<&Cluster> for PeerInfo {
-    fn from(cluster: &Cluster) -> Self {
+impl<T> From<&Cluster<T>> for PeerInfo
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn from(cluster: &Cluster<T>) -> Self {
         PeerInfo {
             peer_id: cluster.peer_id,
             shard_id: cluster.shard_id,
@@ -110,16 +114,16 @@ impl From<&Cluster> for PeerInfo {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
-    Join(PeerInfo),
+    Join { id: usize, addr: SocketAddr },
+    JoinReply { id: usize },
     Ping(Vec<PeerStatus>),
     Pong(Vec<PeerStatus>),
 }
 
 pub async fn start_gossip(
     bind_addr: SocketAddr,
-) -> (
-    mpsc::Receiver<(SocketAddr, Request)>,
-    mpsc::Sender<(SocketAddr, Request)>,
+    mut rx: mpsc::Receiver<(SocketAddr, Request)>,
+    tx: mpsc::Sender<Message>,
 ) {
     let _socket = Arc::new(match UdpSocket::bind(bind_addr).await {
         Ok(socket) => socket,
@@ -128,8 +132,6 @@ pub async fn start_gossip(
             std::process::exit(1);
         }
     });
-    let (tx, gossip_rx) = mpsc::channel::<(SocketAddr, Request)>(IPC_CHANNEL_BUFFER);
-    let (gossip_tx, mut rx) = mpsc::channel::<(SocketAddr, Request)>(IPC_CHANNEL_BUFFER);
 
     let socket = _socket.clone();
     tokio::spawn(async move {
@@ -150,7 +152,6 @@ pub async fn start_gossip(
 
     let socket = _socket;
     tokio::spawn(async move {
-        let socket = socket.clone();
         let mut buf = vec![0; UDP_MAX_PAYLOAD];
 
         loop {
@@ -160,7 +161,7 @@ pub async fn start_gossip(
                 Ok((size, addr)) => {
                     if let Ok(request) = bincode::deserialize::<Request>(&buf[..size]) {
                         //debug!("Received packet from {}: {:?}", addr, request);
-                        if let Err(e) = tx.send((addr, request)).await {
+                        if let Err(e) = tx.send(Message::Gossip { addr, request }).await {
                             error!("Gossip process error, tx.send() failed: {}", e);
                         }
                     } else {
@@ -173,258 +174,234 @@ pub async fn start_gossip(
             }
         }
     });
-
-    (gossip_rx, gossip_tx)
 }
 
-pub async fn handle_gossip<T>(core: &web::Data<JMAPServer<T>>, request: Request) -> Message
+impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    match request {
-        // Join request, add node and perform full sync.
-        Request::Join(peer) => {
-            let peer_id = peer.peer_id;
-            let peers = sync_peer_info(core, vec![peer], true).unwrap();
-            core.cluster
-                .lock()
-                .get_peer(peer_id)
-                .map(|p| {
-                    Message::new_rpc(p.rpc_channel.clone(), rpc::Request::SynchronizePeers(peers))
-                })
-                .unwrap_or(Message::None)
+    pub async fn send_gossip(&self, dest: SocketAddr, request: Request) {
+        if let Err(err) = self.gossip_tx.send((dest, request)).await {
+            error!("Failed to send gossip message: {}", err);
+        };
+    }
+
+    pub async fn handle_ping(&mut self, peers: Vec<PeerStatus>, send_pong: bool) {
+        if peers.is_empty() {
+            debug!("Received empty peers sync packet.");
         }
 
-        // Hearbeat request, reply with the cluster status.
-        Request::Ping(peer_list) => handle_ping(core, peer_list, true).await,
+        let mut source_peer_idx = None;
 
-        // Heartbeat response, update the cluster status if needed.
-        Request::Pong(peer_list) => handle_ping(core, peer_list, false).await,
-    }
-}
+        // Increase epoch
+        self.epoch += 1;
 
-pub async fn handle_ping<T>(
-    core: &web::Data<JMAPServer<T>>,
-    peers: Vec<PeerStatus>,
-    is_ping: bool,
-) -> Message
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    if peers.is_empty() {
-        debug!("Received empty peers sync packet.");
-        return Message::None;
-    }
-
-    let mut cluster = core.cluster.lock();
-    let mut source_peer_idx = None;
-
-    // Increase epoch
-    cluster.epoch += 1;
-
-    let mut do_full_sync = cluster.peers.len() + 1 != peers.len();
-    'outer: for (pos, peer) in peers.iter().enumerate() {
-        if cluster.peer_id != peer.peer_id {
-            for (idx, mut local_peer) in cluster.peers.iter_mut().enumerate() {
-                if local_peer.peer_id == peer.peer_id {
-                    if peer.epoch > local_peer.epoch {
-                        local_peer.epoch = peer.epoch;
-                        update_heartbeat(&mut local_peer);
-
-                        if local_peer.generation != peer.generation && !do_full_sync {
-                            do_full_sync = true;
-                        }
-                    }
-                    // Keep idx of first item, the source peer.
-                    if pos == 0 {
-                        source_peer_idx = idx.into();
-                    }
-                    continue 'outer;
-                }
-            }
-            if !do_full_sync {
-                do_full_sync = true;
-            }
-        }
-    }
-
-    if let Some(source_peer_idx) = source_peer_idx {
-        if do_full_sync {
-            Message::new_rpc(
-                cluster.peers[source_peer_idx].rpc_channel.clone(),
-                rpc::Request::SynchronizePeers(build_peer_info(&cluster)),
-            )
-        } else if is_ping {
-            Message::new_gossip(
-                cluster.peers[source_peer_idx].addr,
-                Request::Pong(build_peer_status(&cluster)),
-            )
-        } else {
-            Message::None
-        }
-    } else {
-        debug!(
-            "Received peers sync packet from unknown peer: {}",
-            peers.first().unwrap().peer_id
-        );
-        Message::None
-    }
-}
-
-pub fn sync_peer_info<T>(
-    core: &web::Data<JMAPServer<T>>,
-    peers: Vec<PeerInfo>,
-    return_peers: bool,
-) -> Option<Vec<PeerInfo>>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    let mut remove_seeds = false;
-
-    let mut cluster = core.cluster.lock();
-
-    'outer: for (pos, peer) in peers.into_iter().enumerate() {
-        if peer.peer_id != cluster.peer_id {
-            for local_peer in cluster.peers.iter_mut() {
-                if !local_peer.is_seed() {
+        let mut do_full_sync = self.peers.len() + 1 != peers.len();
+        'outer: for (pos, peer) in peers.iter().enumerate() {
+            if self.peer_id != peer.peer_id {
+                for (idx, mut local_peer) in self.peers.iter_mut().enumerate() {
                     if local_peer.peer_id == peer.peer_id {
-                        let mut update_peer_info =
-                            pos == 0 && local_peer.generation != peer.generation;
-
                         if peer.epoch > local_peer.epoch {
-                            if !update_peer_info && local_peer.generation != peer.generation {
-                                update_peer_info = true;
-                            }
-
                             local_peer.epoch = peer.epoch;
-                            update_heartbeat(local_peer);
-                        }
+                            local_peer.update_heartbeat();
 
-                        // Update peer info if generationId has changed and
-                        // the request comes from the peer itself, or if the epoch is higher.
-                        if update_peer_info {
-                            if local_peer.addr != peer.addr {
-                                // Peer changed its address, reconnect.
-                                local_peer.addr = peer.addr;
-                                local_peer.rpc_channel =
-                                    new_rpc_channel(core.clone(), peer.peer_id, peer.addr);
+                            if local_peer.generation != peer.generation && !do_full_sync {
+                                do_full_sync = true;
                             }
-                            local_peer.generation = peer.generation;
-                            local_peer.shard_id = peer.shard_id;
-                            local_peer.jmap_url = format!("{}/jmap", peer.jmap_url);
                         }
-
+                        // Keep idx of first item, the source peer.
+                        if pos == 0 {
+                            source_peer_idx = idx.into();
+                        }
                         continue 'outer;
                     }
-                } else if !remove_seeds {
-                    remove_seeds = true;
+                }
+                if !do_full_sync {
+                    do_full_sync = true;
                 }
             }
+        }
 
-            // Peer not found, add it to the list.
-            info!(
-                "Adding new peer {}, shard {} listening at {}.",
-                peer.peer_id, peer.shard_id, peer.addr
+        if let Some(source_peer_idx) = source_peer_idx {
+            if do_full_sync {
+                self.peers[source_peer_idx]
+                    .send_rpc_lazy(rpc::Request::SynchronizePeers(self.build_peer_info()))
+                    .await;
+            } else if send_pong {
+                self.send_gossip(
+                    self.peers[source_peer_idx].addr,
+                    Request::Pong(self.build_peer_status()),
+                )
+                .await;
+            }
+        } else {
+            debug!(
+                "Received peers sync packet from unknown peer: {}",
+                peers.first().unwrap().peer_id
             );
-            cluster.peers.push(Peer::new(core.clone(), peer));
-        } else if peer.epoch > cluster.epoch {
-            info!("Updating local epoch to {}", peer.epoch);
-            cluster.epoch = peer.epoch + 1;
         }
     }
 
-    if remove_seeds {
-        cluster.peers.retain(|peer| !peer.is_seed());
+    pub async fn handle_join(&mut self, id: usize, dest: SocketAddr) {
+        self.send_gossip(dest, Request::JoinReply { id }).await;
     }
 
-    if return_peers {
-        Some(build_peer_info(&cluster))
-    } else {
-        None
+    pub async fn handle_join_reply(&mut self, id: usize) {
+        if let Some(peer) = self.peers.get(id) {
+            if peer.is_seed() {
+                peer.send_rpc_lazy(rpc::Request::SynchronizePeers(self.build_peer_info()))
+                    .await;
+            }
+        }
     }
-}
 
-pub fn build_peer_status(cluster: &Cluster) -> Vec<PeerStatus> {
-    let mut result: Vec<PeerStatus> = Vec::with_capacity(cluster.peers.len() + 1);
-    result.push(cluster.into());
-    for peer in cluster.peers.iter() {
-        result.push(peer.into());
+    pub fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
+        let mut remove_seeds = false;
+
+        'outer: for (pos, peer) in peers.into_iter().enumerate() {
+            if peer.peer_id != self.peer_id {
+                for local_peer in self.peers.iter_mut() {
+                    if !local_peer.is_seed() {
+                        if local_peer.peer_id == peer.peer_id {
+                            let mut update_peer_info =
+                                pos == 0 && local_peer.generation != peer.generation;
+
+                            if peer.epoch > local_peer.epoch {
+                                if !update_peer_info && local_peer.generation != peer.generation {
+                                    update_peer_info = true;
+                                }
+
+                                local_peer.epoch = peer.epoch;
+                                local_peer.update_heartbeat();
+                            }
+
+                            // Update peer info if generationId has changed and
+                            // the request comes from the peer itself, or if the epoch is higher.
+                            if update_peer_info {
+                                if local_peer.addr != peer.addr {
+                                    // Peer changed its address, reconnect.
+                                    local_peer.addr = peer.addr;
+                                    local_peer.tx = start_peer_rpc(
+                                        self.tx.clone(),
+                                        self.peer_id,
+                                        self.key.clone(),
+                                        peer.peer_id,
+                                        peer.addr,
+                                    );
+                                }
+                                local_peer.generation = peer.generation;
+                                local_peer.shard_id = peer.shard_id;
+                                local_peer.jmap_url = format!("{}/jmap", peer.jmap_url);
+                            }
+
+                            continue 'outer;
+                        }
+                    } else if !remove_seeds {
+                        remove_seeds = true;
+                    }
+                }
+
+                // Peer not found, add it to the list.
+                info!(
+                    "Adding new peer {}, shard {} listening at {}.",
+                    peer.peer_id, peer.shard_id, peer.addr
+                );
+                self.peers.push(Peer::new(self, peer));
+            } else if peer.epoch > self.epoch {
+                info!("Updating local epoch to {}", peer.epoch);
+                self.epoch = peer.epoch + 1;
+            }
+        }
+
+        if remove_seeds {
+            self.peers.retain(|peer| !peer.is_seed());
+        }
     }
-    result
-}
 
-pub fn build_peer_info(cluster: &Cluster) -> Vec<PeerInfo> {
-    let mut result: Vec<PeerInfo> = Vec::with_capacity(cluster.peers.len() + 1);
-    result.push(cluster.into());
-    for peer in cluster.peers.iter() {
-        if !peer.is_seed() {
+    pub fn build_peer_status(&self) -> Vec<PeerStatus> {
+        let mut result: Vec<PeerStatus> = Vec::with_capacity(self.peers.len() + 1);
+        result.push(self.into());
+        for peer in self.peers.iter() {
             result.push(peer.into());
         }
+        result
     }
-    result
+
+    pub fn build_peer_info(&self) -> Vec<PeerInfo> {
+        let mut result: Vec<PeerInfo> = Vec::with_capacity(self.peers.len() + 1);
+        result.push(self.into());
+        for peer in self.peers.iter() {
+            if !peer.is_seed() {
+                result.push(peer.into());
+            }
+        }
+        result
+    }
 }
 
-fn update_heartbeat(peer: &mut Peer) {
-    if !peer.is_alive() {
-        peer.state = State::Alive;
-    }
-    peer.hb_window_pos = (peer.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;
+impl Peer {
+    fn update_heartbeat(&mut self) {
+        if !self.is_alive() {
+            self.state = State::Alive;
+        }
+        self.hb_window_pos = (self.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;
 
-    if !peer.hb_is_full && peer.hb_window_pos == 0 && peer.hb_sum > 0 {
-        peer.hb_is_full = true;
-    }
+        if !self.hb_is_full && self.hb_window_pos == 0 && self.hb_sum > 0 {
+            self.hb_is_full = true;
+        }
 
-    if peer.hb_is_full {
-        peer.hb_sum -= peer.hb_window[peer.hb_window_pos];
-        peer.hb_sq_sum -= u32::pow(peer.hb_window[peer.hb_window_pos], 2);
-    }
+        if self.hb_is_full {
+            self.hb_sum -= self.hb_window[self.hb_window_pos];
+            self.hb_sq_sum -= u32::pow(self.hb_window[self.hb_window_pos], 2);
+        }
 
-    let hb_diff = peer.last_heartbeat.elapsed().as_millis() as u32;
-    peer.hb_window[peer.hb_window_pos] = hb_diff;
-    peer.hb_sum += hb_diff;
-    peer.hb_sq_sum += u32::pow(hb_diff, 2);
+        let hb_diff = self.last_heartbeat.elapsed().as_millis() as u32;
+        self.hb_window[self.hb_window_pos] = hb_diff;
+        self.hb_sum += hb_diff;
+        self.hb_sq_sum += u32::pow(hb_diff, 2);
 
-    peer.last_heartbeat = Instant::now();
-}
-
-/*
-   Phi Accrual Failure Detection
-   Ported from https://github.com/akka/akka/blob/main/akka-remote/src/main/scala/akka/remote/PhiAccrualFailureDetector.scala
-*/
-pub fn check_heartbeat(peer: &mut Peer) -> bool {
-    if peer.hb_sum == 0 {
-        return false;
+        self.last_heartbeat = Instant::now();
     }
 
-    let hb_diff = peer.last_heartbeat.elapsed().as_millis() as f64;
-    let sample_size = if peer.hb_is_full {
-        HEARTBEAT_WINDOW
-    } else {
-        peer.hb_window_pos + 1
-    } as f64;
-    let hb_mean = (peer.hb_sum as f64 / sample_size) + HB_MAX_PAUSE_MS;
-    let hb_variance = (peer.hb_sq_sum as f64 / sample_size) - (hb_mean * hb_mean);
-    let hb_std_dev = hb_variance.sqrt();
-    let y = (hb_diff - hb_mean) / hb_std_dev.max(HB_MIN_STD_DEV);
-    let e = (-y * (1.5976 + 0.070566 * y * y)).exp();
-    let phi = if hb_diff > hb_mean {
-        -(e / (1.0 + e)).log10()
-    } else {
-        -(1.0 - 1.0 / (1.0 + e)).log10()
-    };
+    /*
+       Phi Accrual Failure Detection
+       Ported from https://github.com/akka/akka/blob/main/akka-remote/src/main/scala/akka/remote/PhiAccrualFailureDetector.scala
+    */
+    pub fn check_heartbeat(&mut self) -> bool {
+        if self.hb_sum == 0 {
+            return false;
+        }
 
-    /*debug!(
-        "Heartbeat[{}]: mean={:.2}ms, variance={:.2}ms, std_dev={:.2}ms, phi={:.2}, status={:?}",
-        peer.peer_id, hb_mean, hb_variance, hb_std_dev, phi, peer.state
-    );*/
+        let hb_diff = self.last_heartbeat.elapsed().as_millis() as f64;
+        let sample_size = if self.hb_is_full {
+            HEARTBEAT_WINDOW
+        } else {
+            self.hb_window_pos + 1
+        } as f64;
+        let hb_mean = (self.hb_sum as f64 / sample_size) + HB_MAX_PAUSE_MS;
+        let hb_variance = (self.hb_sq_sum as f64 / sample_size) - (hb_mean * hb_mean);
+        let hb_std_dev = hb_variance.sqrt();
+        let y = (hb_diff - hb_mean) / hb_std_dev.max(HB_MIN_STD_DEV);
+        let e = (-y * (1.5976 + 0.070566 * y * y)).exp();
+        let phi = if hb_diff > hb_mean {
+            -(e / (1.0 + e)).log10()
+        } else {
+            -(1.0 - 1.0 / (1.0 + e)).log10()
+        };
 
-    if phi > HB_PHI_CONVICT_THRESHOLD {
-        peer.state = State::Offline;
-        false
-    } else if phi > HB_PHI_SUSPECT_THRESHOLD {
-        peer.state = State::Suspected;
-        true
-    } else {
-        true
+        /*debug!(
+            "Heartbeat[{}]: mean={:.2}ms, variance={:.2}ms, std_dev={:.2}ms, phi={:.2}, status={:?}",
+            self.peer_id, hb_mean, hb_variance, hb_std_dev, phi, self.state
+        );*/
+
+        if phi > HB_PHI_CONVICT_THRESHOLD {
+            self.state = State::Offline;
+            false
+        } else if phi > HB_PHI_SUSPECT_THRESHOLD {
+            self.state = State::Suspected;
+            true
+        } else {
+            true
+        }
     }
 }
