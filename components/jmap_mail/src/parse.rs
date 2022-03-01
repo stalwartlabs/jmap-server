@@ -24,7 +24,7 @@ use mail_parser::{
 };
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
-    batch::{DocumentWriter, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    batch::{WriteBatch, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     field::{FieldOptions, FullText, Text},
     leb128::Leb128,
     AccountId, BlobIndex, Integer, LongInteger, Store, Tag, UncommittedDocumentId,
@@ -634,7 +634,7 @@ fn build_message_response(
 }
 
 pub fn build_message_document<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     message: Message<'x>,
     received_at: Option<i64>,
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
@@ -1096,7 +1096,7 @@ pub fn build_message_document<'x>(
 }
 
 fn parse_attached_message<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     message: &mut Message,
     language_detector: &mut LanguageDetector,
 ) {
@@ -1138,7 +1138,7 @@ fn parse_attached_message<'x>(
 }
 
 fn parse_address<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     header_name: RfcHeader,
     address: &Addr<'x>,
 ) {
@@ -1157,7 +1157,7 @@ fn parse_address<'x>(
 }
 
 fn parse_address_group<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     header_name: RfcHeader,
     group: &Group<'x>,
 ) {
@@ -1171,7 +1171,7 @@ fn parse_address_group<'x>(
 }
 
 fn parse_text<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     header_name: RfcHeader,
     text: &str,
 ) {
@@ -1205,7 +1205,7 @@ fn parse_text<'x>(
 }
 
 fn parse_content_type<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     header_name: RfcHeader,
     content_type: &ContentType<'x>,
 ) {
@@ -1245,7 +1245,7 @@ fn parse_content_type<'x>(
 }
 
 fn parse_datetime(
-    document: &mut DocumentWriter<impl UncommittedDocumentId>,
+    document: &mut WriteBatch<impl UncommittedDocumentId>,
     header_name: RfcHeader,
     date_time: &DateTime,
 ) {
@@ -1274,7 +1274,7 @@ fn parse_datetime(
 
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     header_name: RfcHeader,
     header_value: &HeaderValue<'x>,
 ) {
@@ -1338,7 +1338,7 @@ fn add_addr_sort<'x>(
 }
 
 fn parse_header<'x>(
-    document: &mut DocumentWriter<'x, impl UncommittedDocumentId>,
+    document: &mut WriteBatch<'x, impl UncommittedDocumentId>,
     header_name: RfcHeader,
     header_value: &HeaderValue<'x>,
 ) {

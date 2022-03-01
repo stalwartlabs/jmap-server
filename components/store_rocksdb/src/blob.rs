@@ -388,10 +388,7 @@ impl StoreBlob for RocksDBStore {
         let blob_hash = &blob_key[BLOB_KEY.len()..];
 
         // Lock blob key
-        let _blob_lock = self
-            .blob_lock
-            .lock_hash(blob_hash)
-            .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))?;
+        let _blob_lock = self.blob_lock.lock_hash(blob_hash);
 
         // Check whether the blob is already stored
         let cf_values = self.get_handle("values")?;

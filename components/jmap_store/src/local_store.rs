@@ -1,7 +1,5 @@
-use std::sync::MutexGuard;
-
 use nlp::Language;
-use store::{mutex_map::MutexMap, AccountId, CollectionId, Store, StoreError};
+use store::{mutex_map::MutexMap, parking_lot::MutexGuard, AccountId, CollectionId, Store};
 
 use crate::{JMAPMailConfig, JMAPStoreConfig};
 
@@ -25,13 +23,7 @@ where
         })
     }
 
-    pub fn lock_account(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<MutexGuard<()>> {
-        self.account_lock
-            .lock_hash((account, collection))
-            .map_err(|_| StoreError::InternalError("Failed to obtain mutex".to_string()))
+    pub fn lock_account(&self, account: AccountId, collection: CollectionId) -> MutexGuard<()> {
+        self.account_lock.lock_hash((account, collection))
     }
 }

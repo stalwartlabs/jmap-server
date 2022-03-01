@@ -11,7 +11,7 @@ use jmap_store::{
     local_store::JMAPLocalStore,
     JMAPGet, JMAPId, JMAPSet, JMAP_MAILBOX,
 };
-use store::{batch::DocumentWriter, Store};
+use store::{batch::WriteBatch, Store, UncommittedDocumentId};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
@@ -106,31 +106,23 @@ where
     T: for<'x> Store<'x>,
 {
     // TODO use mailbox create API
-    mail_store
+    let doc_id = mail_store
         .store
-        .update_document(
-            0,
-            DocumentWriter::insert(
-                JMAP_MAILBOX,
-                mail_store
-                    .store
-                    .assign_document_id(0, JMAP_MAILBOX)
-                    .unwrap(),
-            ),
-        )
+        .assign_document_id(0, JMAP_MAILBOX)
         .unwrap();
+    let jmap_id = doc_id.get_document_id();
     mail_store
         .store
-        .update_document(
-            0,
-            DocumentWriter::insert(
-                JMAP_MAILBOX,
-                mail_store
-                    .store
-                    .assign_document_id(0, JMAP_MAILBOX)
-                    .unwrap(),
-            ),
-        )
+        .update_document(0, WriteBatch::insert(JMAP_MAILBOX, doc_id, jmap_id))
+        .unwrap();
+    let doc_id = mail_store
+        .store
+        .assign_document_id(0, JMAP_MAILBOX)
+        .unwrap();
+    let jmap_id = doc_id.get_document_id();
+    mail_store
+        .store
+        .update_document(0, WriteBatch::insert(JMAP_MAILBOX, doc_id, jmap_id))
         .unwrap();
 
     test_jmap_mail_update(&mail_store, test_jmap_mail_create(&mail_store));

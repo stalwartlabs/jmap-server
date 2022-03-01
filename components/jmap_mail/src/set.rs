@@ -21,11 +21,8 @@ use mail_builder::MessageBuilder;
 use mail_parser::HeaderName;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::field::FieldOptions;
-use store::{
-    batch::{DocumentWriter, LogAction},
-    DocumentSet,
-};
-use store::{AccountId, ChangeLogId, DocumentId, Store, Tag};
+use store::{batch::WriteBatch, DocumentSet};
+use store::{AccountId, DocumentId, Store, Tag};
 
 use crate::import::{bincode_deserialize, bincode_serialize, JMAPMailLocalStoreImport};
 use crate::parse::get_message_blob;
@@ -147,7 +144,7 @@ where
                         continue;
                     }
                 }
-                let mut document = DocumentWriter::update(JMAP_MAIL, document_id);
+                let mut document = WriteBatch::update(JMAP_MAIL, document_id, jmap_id);
 
                 let mut keyword_op_list = HashMap::new();
                 let mut keyword_op_clear_all = false;
@@ -518,23 +515,25 @@ where
                         .assign_change_id(request.account_id, JMAP_MAILBOX)?;
                     for changed_mailbox_id in changed_mailboxes {
                         changes.push(
-                            DocumentWriter::update(JMAP_MAILBOX, changed_mailbox_id).log_with_id(
-                                LogAction::Update(changed_mailbox_id as ChangeLogId),
-                                change_id,
-                            ),
+                            WriteBatch::update(
+                                JMAP_MAILBOX,
+                                changed_mailbox_id,
+                                changed_mailbox_id,
+                            )
+                            .log_with_id(change_id),
                         );
                         changes.push(
-                            DocumentWriter::update(JMAP_MAILBOX_CHANGES, changed_mailbox_id)
-                                .log_with_id(
-                                    LogAction::Update(changed_mailbox_id as ChangeLogId),
-                                    change_id,
-                                ),
+                            WriteBatch::update(
+                                JMAP_MAILBOX_CHANGES,
+                                changed_mailbox_id,
+                                changed_mailbox_id,
+                            )
+                            .log_with_id(change_id),
                         );
                     }
                 }
 
                 if !document.is_empty() {
-                    document.log_update(jmap_id);
                     changes.push(document);
                     updated.insert(jmap_id_str, JSONValue::Null);
                 } else {
@@ -564,10 +563,7 @@ where
                 if let Some(jmap_id) = destroy_id.to_jmap_id() {
                     let document_id = jmap_id.get_document_id();
                     if document_ids.contains(document_id) {
-                        changes.push(
-                            DocumentWriter::delete(JMAP_MAIL, document_id)
-                                .log(LogAction::Delete(jmap_id)),
-                        );
+                        changes.push(WriteBatch::delete(JMAP_MAIL, document_id, jmap_id));
                         destroyed.push(destroy_id);
                         continue;
                     }

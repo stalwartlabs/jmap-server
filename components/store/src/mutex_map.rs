@@ -1,9 +1,7 @@
 use core::hash::Hash;
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::Hasher,
-    sync::{Mutex, MutexGuard},
-};
+use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+
+use parking_lot::{Mutex, MutexGuard};
 
 pub struct MutexMap<T: Default> {
     map: Box<[Mutex<T>]>,
@@ -28,25 +26,21 @@ impl<T: Default> MutexMap<T> {
         }
     }
 
-    pub fn lock<U>(&self, key: U) -> Result<MutexGuard<'_, T>>
+    pub fn lock<U>(&self, key: U) -> MutexGuard<'_, T>
     where
         U: Into<u64> + Copy,
     {
         let hash = key.into() & self.mask;
-        self.map[hash as usize]
-            .lock()
-            .map_err(|_| MutexMapLockError)
+        self.map[hash as usize].lock()
     }
 
-    pub fn lock_hash<U>(&self, key: U) -> Result<MutexGuard<'_, T>>
+    pub fn lock_hash<U>(&self, key: U) -> MutexGuard<'_, T>
     where
         U: Hash,
     {
         let mut hasher = self.hasher.clone();
         key.hash(&mut hasher);
         let hash = hasher.finish() & self.mask;
-        self.map[hash as usize]
-            .lock()
-            .map_err(|_| MutexMapLockError)
+        self.map[hash as usize].lock()
     }
 }

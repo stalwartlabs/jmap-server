@@ -12,6 +12,7 @@ use mailbox::{
     JMAPMailboxProperties, JMAPMailboxQueryArguments, JMAPMailboxSetArguments,
 };
 use parse::{JMAPMailParseRequest, JMAPMailParseResponse};
+use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use get::JMAPMailGetArguments;
@@ -29,7 +30,6 @@ use mail_parser::{
 };
 
 use query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments};
-use serde::{Deserialize, Serialize};
 use store::{BlobIndex, DocumentId, FieldId, Store, ThreadId};
 
 pub const MESSAGE_RAW: BlobIndex = 0;

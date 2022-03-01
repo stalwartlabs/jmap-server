@@ -2,11 +2,14 @@ use std::time::{Duration, Instant};
 
 use rand::Rng;
 use store::Store;
+use tokio::sync::mpsc;
 use tracing::{debug, info};
+
+use crate::cluster::log::start_log_sync;
 
 use super::{
     rpc::{Request, Response},
-    Cluster, PeerId,
+    Cluster, Peer, PeerId,
 };
 
 pub type TermId = u64;
@@ -16,18 +19,18 @@ pub const ELECTION_TIMEOUT: u64 = 1000;
 pub const ELECTION_TIMEOUT_RAND_FROM: u64 = 150;
 pub const ELECTION_TIMEOUT_RAND_TO: u64 = 300;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum State {
     Leader,
     Wait(Instant),
     Candidate(Instant),
     VotedFor((PeerId, Instant)),
-    Follower(PeerId),
+    Follower((PeerId, mpsc::Sender<bool>)),
 }
 
 impl Default for State {
     fn default() -> Self {
-        State::Wait(election_timeout())
+        State::Wait(election_timeout(false))
     }
 }
 
@@ -86,7 +89,7 @@ where
     pub fn leader_peer_id(&self) -> Option<PeerId> {
         match self.state {
             State::Leader => Some(self.peer_id),
-            State::Follower(peer_id) => Some(peer_id),
+            State::Follower((peer_id, _)) => Some(peer_id),
             _ => None,
         }
     }
@@ -99,13 +102,17 @@ where
         matches!(self.state, State::Candidate(_))
     }
 
-    pub fn start_election_timer(&mut self) {
-        self.state = State::Wait(election_timeout());
-        self.reset_votes();
+    pub fn is_following(&self) -> bool {
+        matches!(self.state, State::Follower(_))
+    }
+
+    pub fn start_election_timer(&mut self, now: bool) {
+        self.state = State::Wait(election_timeout(now));
+        self.reset();
     }
 
     pub fn step_down(&mut self, term: TermId) {
-        self.reset_votes();
+        self.reset();
         self.term = term;
         self.state = State::Wait(match self.state {
             State::Wait(timeout) | State::Candidate(timeout) | State::VotedFor((_, timeout))
@@ -113,37 +120,52 @@ where
             {
                 timeout
             }
-            _ => election_timeout(),
+            _ => election_timeout(false),
         });
         debug!("Stepping down for term {}.", self.term);
     }
 
     pub fn vote_for(&mut self, peer_id: PeerId) {
-        self.state = State::VotedFor((peer_id, election_timeout()));
-        self.reset_votes();
+        self.state = State::VotedFor((peer_id, election_timeout(false)));
+        self.reset();
         debug!("Voted for peer {} for term {}.", peer_id, self.term);
     }
 
     pub fn follow_leader(&mut self, peer_id: PeerId) {
-        self.state = State::Follower(peer_id);
-        self.reset_votes();
+        self.state = State::Follower((
+            peer_id,
+            start_log_sync(
+                self.core.clone(),
+                self.get_peer(peer_id).unwrap().tx.clone(),
+            ),
+        ));
+        self.reset();
         debug!("Following peer {} for term {}.", peer_id, self.term);
     }
 
-    pub fn run_for_election(&mut self) {
-        self.state = State::Candidate(election_timeout());
+    pub async fn sync_log(&self) {
+        if let State::Follower((peer_id, log_sync_tx)) = &self.state {
+            let leader = self.get_peer(*peer_id).unwrap();
+            if self.log_is_behind(leader.last_log_term, leader.last_log_index) {
+                log_sync_tx.try_send(true).ok();
+            }
+        }
+    }
+
+    pub fn run_for_election(&mut self, now: bool) {
+        self.state = State::Candidate(election_timeout(now));
         self.term += 1;
-        self.reset_votes();
+        self.reset();
         debug!("Running for election for term {}.", self.term);
     }
 
     pub fn become_leader(&mut self) {
         debug!("This node is the new leader for term {}.", self.term);
         self.state = State::Leader;
-        self.reset_votes();
+        self.reset();
     }
 
-    pub fn reset_votes(&mut self) {
+    pub fn reset(&mut self) {
         self.peers.iter_mut().for_each(|peer| {
             peer.vote_granted = false;
         });
@@ -169,7 +191,7 @@ where
         votes > ((total_peers as f64 + 1.0) / 2.0).floor() as u32
     }
 
-    pub async fn start_election(&mut self) {
+    pub async fn start_election(&mut self, now: bool) {
         // Check if there is enough quorum for an election.
         if self.has_election_quorum() {
             // Assess whether this node could become the leader for the next term.
@@ -179,23 +201,19 @@ where
                     && self.log_is_behind(peer.last_log_term, peer.last_log_index)
             }) {
                 // Increase term and start election
-                self.run_for_election();
+                self.run_for_election(now);
                 for peer in &self.peers {
                     if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
-                        peer.send_rpc_lazy(Request::Vote {
-                            term: self.term,
-                            last_log_index: self.last_log_index,
-                            last_log_term: self.last_log_term,
-                        })
-                        .await;
+                        peer.vote_for_me(self.term, self.last_log_index, self.last_log_term)
+                            .await;
                     }
                 }
             } else {
                 // Wait to receive a vote request from a more up-to-date peer.
-                self.start_election_timer();
+                self.start_election_timer(now);
             }
         } else {
-            self.start_election_timer();
+            self.start_election_timer(false);
             info!(
                 "Not enough alive peers in shard {} to start election.",
                 self.shard_id
@@ -258,12 +276,8 @@ where
             self.become_leader();
             for peer in &self.peers {
                 if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
-                    peer.send_rpc_lazy(Request::FollowLeader {
-                        term: self.term,
-                        last_log_index: self.last_log_index,
-                        last_log_term: self.last_log_term,
-                    })
-                    .await;
+                    peer.follow_me(self.term, self.last_log_index, self.last_log_term)
+                        .await;
                 }
             }
         }
@@ -291,12 +305,40 @@ where
             },
         }
     }
+
+    pub fn handle_follow_leader_response(&mut self, term: TermId, success: bool) {
+        if self.term < term {
+            self.step_down(term);
+        } else if !success {
+            self.start_election_timer(false);
+        }
+    }
 }
 
-pub fn election_timeout() -> Instant {
+impl Peer {
+    pub async fn vote_for_me(&self, term: TermId, last_log_index: LogIndex, last_log_term: TermId) {
+        self.dispatch_request(Request::Vote {
+            term,
+            last_log_index,
+            last_log_term,
+        })
+        .await;
+    }
+
+    pub async fn follow_me(&self, term: TermId, last_log_index: LogIndex, last_log_term: TermId) {
+        self.dispatch_request(Request::FollowLeader {
+            term,
+            last_log_index,
+            last_log_term,
+        })
+        .await;
+    }
+}
+
+pub fn election_timeout(now: bool) -> Instant {
     Instant::now()
         + Duration::from_millis(
-            ELECTION_TIMEOUT
+            if now { 0 } else { ELECTION_TIMEOUT }
                 + rand::thread_rng()
                     .gen_range(ELECTION_TIMEOUT_RAND_FROM..ELECTION_TIMEOUT_RAND_TO),
         )

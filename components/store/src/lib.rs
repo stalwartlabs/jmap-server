@@ -8,9 +8,12 @@ pub mod term_index;
 
 use std::{iter::FromIterator, ops::Range};
 
-use batch::DocumentWriter;
+use batch::WriteBatch;
 use nlp::Language;
 use serialize::StoreDeserialize;
+
+pub use bincode;
+pub use parking_lot;
 
 #[derive(Debug, Clone)]
 pub enum StoreError {
@@ -275,7 +278,7 @@ pub trait StoreUpdate {
     fn update_document(
         &self,
         account: AccountId,
-        document: DocumentWriter<Self::UncommittedId>,
+        document: WriteBatch<Self::UncommittedId>,
     ) -> crate::Result<()> {
         self.update_documents(account, vec![document])
     }
@@ -283,7 +286,7 @@ pub trait StoreUpdate {
     fn update_documents(
         &self,
         account: AccountId,
-        documents: Vec<DocumentWriter<Self::UncommittedId>>,
+        documents: Vec<WriteBatch<Self::UncommittedId>>,
     ) -> Result<()>;
 }
 

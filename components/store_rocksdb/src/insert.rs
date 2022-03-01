@@ -3,13 +3,12 @@ use std::{collections::HashMap, sync::Arc};
 use nlp::Language;
 use rocksdb::BoundColumnFamily;
 use store::{
-    batch::{DocumentWriter, LogAction, WriteAction},
+    batch::{LogAction, WriteAction, WriteBatch},
     field::{FieldOptions, Text, TokenIterator, UpdateField},
     serialize::{
         serialize_acd_key_leb128, serialize_blob_key, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_changelog_key, serialize_index_key,
-        serialize_stored_key, serialize_stored_key_global, BLOB_KEY, BM_FREED_IDS,
-        BM_TOMBSTONED_IDS, BM_USED_IDS,
+        serialize_stored_key, BLOB_KEY, BM_FREED_IDS, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
     AccountId, ChangeLogId, CollectionId, DocumentId, StoreBlob, StoreError, StoreUpdate,
@@ -29,7 +28,7 @@ impl StoreUpdate for RocksDBStore {
     fn update_documents(
         &self,
         account: AccountId,
-        batches: Vec<DocumentWriter<AssignedDocumentId>>,
+        batches: Vec<WriteBatch<AssignedDocumentId>>,
     ) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
         let cf_indexes = self.get_handle("indexes")?;
@@ -68,7 +67,7 @@ impl StoreUpdate for RocksDBStore {
                         .or_insert_with(HashMap::new)
                         .insert(document_id, true);
 
-                    self._update_document(
+                    self.update_document(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
@@ -81,7 +80,7 @@ impl StoreUpdate for RocksDBStore {
                     )?;
                 }
                 WriteAction::Update(document_id) => {
-                    self._update_document(
+                    self.update_document(
                         &mut write_batch,
                         &cf_values,
                         &cf_indexes,
@@ -122,55 +121,30 @@ impl StoreUpdate for RocksDBStore {
                         .or_insert_with(HashMap::new)
                         .insert(document_id, true);
                 }
-                WriteAction::UpdateMany => {
-                    self._update_global(
-                        &mut write_batch,
-                        &cf_values,
-                        &cf_indexes,
-                        &cf_bitmaps,
-                        account.into(),
-                        batch.collection.into(),
-                        batch.fields,
-                    )?;
-                }
-                WriteAction::DeleteMany => {
-                    self._delete_global(
-                        &mut write_batch,
-                        &cf_values,
-                        &cf_indexes,
-                        &cf_bitmaps,
-                        account.into(),
-                        batch.collection.into(),
-                        batch.fields,
-                    )?;
-                }
             }
 
-            if !batch.log_action.is_none() {
-                let change_id = if let Some(change_id) = batch.log_id {
-                    change_id
-                } else {
-                    self.assign_change_id(account, batch.collection)?
-                };
-                let change_log_entry = change_log_list
-                    .entry((account, batch.collection, change_id))
-                    .or_insert_with(ChangeLogWriter::new);
+            let change_id = if let Some(change_id) = batch.log_id {
+                change_id
+            } else {
+                self.assign_change_id(account, batch.collection)?
+            };
+            let change_log_entry = change_log_list
+                .entry((account, batch.collection, change_id))
+                .or_insert_with(ChangeLogWriter::new);
 
-                match batch.log_action {
-                    LogAction::Insert(id) => {
-                        change_log_entry.inserts.push(id);
-                    }
-                    LogAction::Update(id) => {
-                        change_log_entry.updates.push(id);
-                    }
-                    LogAction::Delete(id) => {
-                        change_log_entry.deletes.push(id);
-                    }
-                    LogAction::Move(old_id, id) => {
-                        change_log_entry.inserts.push(id);
-                        change_log_entry.deletes.push(old_id);
-                    }
-                    LogAction::None => (),
+            match batch.log_action {
+                LogAction::Insert(id) => {
+                    change_log_entry.inserts.push(id);
+                }
+                LogAction::Update(id) => {
+                    change_log_entry.updates.push(id);
+                }
+                LogAction::Delete(id) => {
+                    change_log_entry.deletes.push(id);
+                }
+                LogAction::Move(old_id, id) => {
+                    change_log_entry.inserts.push(id);
+                    change_log_entry.deletes.push(old_id);
                 }
             }
         }
@@ -226,77 +200,7 @@ impl StoreUpdate for RocksDBStore {
 
 impl RocksDBStore {
     #[allow(clippy::too_many_arguments)]
-    fn _update_global(
-        &self,
-        write_batch: &mut rocksdb::WriteBatch,
-        cf_values: &Arc<BoundColumnFamily>,
-        _cf_indexes: &Arc<BoundColumnFamily>,
-        _cf_bitmaps: &Arc<BoundColumnFamily>,
-        account: Option<AccountId>,
-        collection: Option<CollectionId>,
-        fields: Vec<UpdateField>,
-    ) -> crate::Result<()> {
-        for field in fields {
-            match field {
-                UpdateField::LongInteger(ref i) => {
-                    write_batch.put_cf(
-                        cf_values,
-                        serialize_stored_key_global(account, collection, i.get_field().into()),
-                        &i.value.to_le_bytes(),
-                    );
-                }
-                UpdateField::Integer(ref i) => {
-                    write_batch.put_cf(
-                        cf_values,
-                        serialize_stored_key_global(account, collection, i.get_field().into()),
-                        &i.value.to_le_bytes(),
-                    );
-                }
-                UpdateField::Float(ref f) => {
-                    write_batch.put_cf(
-                        cf_values,
-                        serialize_stored_key_global(account, collection, f.get_field().into()),
-                        &f.value.to_le_bytes(),
-                    );
-                }
-                _ => unimplemented!(),
-            };
-        }
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn _delete_global(
-        &self,
-        write_batch: &mut rocksdb::WriteBatch,
-        _cf_values: &Arc<BoundColumnFamily>,
-        _cf_indexes: &Arc<BoundColumnFamily>,
-        cf_bitmaps: &Arc<BoundColumnFamily>,
-        account: Option<AccountId>,
-        collection: Option<CollectionId>,
-        fields: Vec<UpdateField>,
-    ) -> crate::Result<()> {
-        for field in fields {
-            match field {
-                UpdateField::Tag(ref tag) => {
-                    write_batch.delete_cf(
-                        cf_bitmaps,
-                        &serialize_bm_tag_key(
-                            account.unwrap(),
-                            collection.unwrap(),
-                            *field.get_field(),
-                            &tag.value,
-                        ),
-                    );
-                }
-                _ => unimplemented!(),
-            }
-        }
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn _update_document(
+    fn update_document(
         &self,
         batch: &mut rocksdb::WriteBatch,
         cf_values: &Arc<BoundColumnFamily>,

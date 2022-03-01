@@ -6,9 +6,9 @@ use std::{
 
 use nlp::Language;
 use store::{
-    batch::DocumentWriter,
+    batch::WriteBatch,
     field::{FieldOptions, FullText, Text},
-    Comparator, ComparisonOperator, FieldValue, Filter, Store, TextQuery,
+    Comparator, ComparisonOperator, FieldValue, Filter, Store, TextQuery, UncommittedDocumentId,
 };
 
 use crate::deflate_artwork_data;
@@ -90,9 +90,10 @@ where
                     let record = record.unwrap();
                     let documents = documents.clone();
                     let record_id = db.assign_document_id(0, 0).unwrap();
+                    let full_id = record_id.get_document_id();
 
                     s.spawn_fifo(move |_| {
-                        let mut builder = DocumentWriter::insert(0, record_id);
+                        let mut builder = WriteBatch::insert(0, record_id, full_id);
                         for (pos, field) in record.iter().enumerate() {
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {

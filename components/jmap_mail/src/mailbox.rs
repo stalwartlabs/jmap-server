@@ -16,16 +16,13 @@ use jmap_store::{
     JMAPGet, JMAPGetResponse, JMAPQueryChangesRequest, JMAPQueryRequest, JMAPQueryResponse,
     JMAP_MAIL, JMAP_MAILBOX_CHANGES,
 };
+
 use serde::{Deserialize, Serialize};
 use store::field::{FieldOptions, Text};
+use store::{batch::WriteBatch, DocumentSet, Store};
 use store::{
-    batch::{DocumentWriter, LogAction},
-    DocumentSet, Store,
-};
-use store::{
-    AccountId, ChangeLogId, Comparator, ComparisonOperator, DocumentId, DocumentSetBitOps,
-    FieldComparator, FieldId, FieldValue, Filter, LongInteger, StoreError, Tag,
-    UncommittedDocumentId,
+    AccountId, Comparator, ComparisonOperator, DocumentId, DocumentSetBitOps, FieldComparator,
+    FieldId, FieldValue, Filter, LongInteger, StoreError, Tag, UncommittedDocumentId,
 };
 
 use crate::import::{bincode_deserialize, bincode_serialize};
@@ -217,7 +214,8 @@ where
                 let assigned_id = self
                     .store
                     .assign_document_id(request.account_id, JMAP_MAILBOX)?;
-                let mut document = DocumentWriter::insert(JMAP_MAILBOX, assigned_id.clone());
+                let jmap_id = assigned_id.get_document_id() as JMAPId;
+                let mut document = WriteBatch::insert(JMAP_MAILBOX, assigned_id.clone(), jmap_id);
 
                 document.text(
                     JMAPMailboxProperties::Name,
@@ -252,8 +250,6 @@ where
                     bincode_serialize(&mailbox)?.into(),
                     FieldOptions::Store,
                 );
-                let jmap_id = assigned_id.get_document_id() as JMAPId;
-                document.log_insert(jmap_id);
                 changes.push(document);
 
                 // Generate JSON object
@@ -342,7 +338,7 @@ where
                     }
                 };
 
-                let mut document = DocumentWriter::update(JMAP_MAILBOX, document_id);
+                let mut document = WriteBatch::update(JMAP_MAILBOX, document_id, document_id);
 
                 if let Some(new_name) = mailbox_changes.name {
                     if new_name != mailbox.name {
@@ -436,7 +432,6 @@ where
                         bincode_serialize(&mailbox)?.into(),
                         FieldOptions::Store,
                     );
-                    document.log_update(document_id as ChangeLogId);
                     changes.push(document);
                 }
 
@@ -520,22 +515,16 @@ where
                                     .zip(message_doc_ids)
                                 {
                                     if let Some(thread_id) = thread_id {
-                                        changes.push(
-                                            DocumentWriter::delete(JMAP_MAIL, message_doc_id).log(
-                                                LogAction::Delete(JMAPId::from_email(
-                                                    thread_id,
-                                                    message_doc_id,
-                                                )),
-                                            ),
-                                        );
+                                        changes.push(WriteBatch::delete(
+                                            JMAP_MAIL,
+                                            message_doc_id,
+                                            JMAPId::from_email(thread_id, message_doc_id),
+                                        ));
                                     }
                                 }
                             }
 
-                            changes.push(
-                                DocumentWriter::delete(JMAP_MAILBOX, document_id)
-                                    .log(LogAction::Delete(jmap_id)),
-                            );
+                            changes.push(WriteBatch::delete(JMAP_MAILBOX, document_id, jmap_id));
                             destroyed.push(destroy_id.into());
                             continue;
                         }

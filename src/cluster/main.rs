@@ -61,7 +61,7 @@ where
                 wait_timeout = Duration::from_millis(
                     if let Some(time_to_next_election) = cluster.time_to_next_election() {
                         if time_to_next_election == 0 {
-                            cluster.start_election().await;
+                            cluster.start_election(false).await;
                             time_to_next_ping
                         } else if time_to_next_election < time_to_next_ping {
                             time_to_next_election
@@ -85,9 +85,9 @@ where
 {
     pub async fn handle_message(&mut self, message: Message) {
         match message {
-            Message::Gossip { request, .. } => match request {
+            Message::Gossip { request, addr } => match request {
                 // Join request, add node and perform full sync.
-                gossip::Request::Join { id, addr } => self.handle_join(id, addr).await,
+                gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
 
                 // Join reply.
                 gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
@@ -107,9 +107,9 @@ where
 
                 response_tx
                     .send(match request {
-                        rpc::Request::SynchronizePeers(peers) => {
-                            self.sync_peer_info(peers);
-                            rpc::Response::SynchronizePeers(self.build_peer_info())
+                        rpc::Request::Synchronize(peers) => {
+                            self.sync_peer_info(peers).await;
+                            rpc::Response::Synchronize(self.build_peer_info())
                         }
                         rpc::Request::Vote {
                             term,
@@ -135,19 +135,14 @@ where
                 //debug!("Reply [{}]: {:?}", peer_id, response);
 
                 match response {
-                    rpc::Response::SynchronizePeers(peers) => {
-                        debug!("Successful full sync, received {} peers.", peers.len());
-                        self.sync_peer_info(peers);
+                    rpc::Response::Synchronize(peers) => {
+                        self.sync_peer_info(peers).await;
                     }
                     rpc::Response::Vote { term, vote_granted } => {
                         self.handle_vote_response(peer_id, term, vote_granted).await;
                     }
                     rpc::Response::FollowLeader { term, success } => {
-                        if self.term < term {
-                            self.step_down(term);
-                        } else if !success {
-                            self.start_election_timer();
-                        }
+                        self.handle_follow_leader_response(term, success);
                     }
                     rpc::Response::None => (),
                 }
@@ -181,7 +176,7 @@ where
 
         // Start a new election
         if leader_is_offline {
-            self.start_election().await;
+            self.start_election(true).await;
         }
 
         // Find next peer to ping
@@ -198,7 +193,7 @@ where
                         target_addr,
                         gossip::Request::Join {
                             id: self.last_peer_pinged,
-                            addr: self.addr,
+                            port: self.addr.port(),
                         },
                     )
                     .await;

@@ -74,9 +74,7 @@ impl RocksDBStore {
                 term_id
             } else {
                 // Lock the term
-                let _term_lock = self.term_id_lock.lock_hash(&token_word).map_err(|_| {
-                    StoreError::InternalError("Failed to lock term id.".to_string())
-                })?;
+                let _term_lock = self.term_id_lock.lock_hash(&token_word);
 
                 // Retrieve the ID from the KV store
                 let term_id = if let Some(term_id) = self

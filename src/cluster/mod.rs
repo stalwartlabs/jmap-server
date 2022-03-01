@@ -92,7 +92,7 @@ pub enum Message {
 pub struct Peer {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
-    pub tx: mpsc::Sender<(rpc::Request, Option<oneshot::Sender<rpc::Response>>)>,
+    pub tx: mpsc::Sender<rpc::RpcMessage>,
 
     // Peer status
     pub epoch: EpochId,

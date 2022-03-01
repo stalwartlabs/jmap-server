@@ -40,116 +40,122 @@ impl ChangeLogWriter {
     }
 }
 
-fn deserialize(changelog: &mut ChangeLog, bytes: &[u8]) -> store::Result<()> {
-    let mut bytes_it = bytes.iter();
-    let total_inserts = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-        StoreError::DeserializeError(format!(
-            "Failed to deserialize total inserts from bytes: {:?}",
-            bytes
-        ))
-    })?;
-    let total_updates = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-        StoreError::DeserializeError(format!(
-            "Failed to deserialize total updates from bytes: {:?}",
-            bytes
-        ))
-    })?;
-    let total_deletes = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-        StoreError::DeserializeError(format!(
-            "Failed to deserialize total deletes from bytes: {:?}",
-            bytes
-        ))
-    })?;
+trait DeserializeChangeLog {
+    fn deserialize(&mut self, bytes: &[u8]) -> store::Result<()>;
+}
 
-    if total_inserts > 0 {
-        for _ in 0..total_inserts {
-            let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-                StoreError::DeserializeError(format!(
-                    "Failed to deserialize change id from bytes: {:?}",
-                    bytes
-                ))
-            })?;
-            changelog.changes.push(ChangeLogEntry::Insert(id));
+impl DeserializeChangeLog for ChangeLog {
+    fn deserialize(&mut self, bytes: &[u8]) -> store::Result<()> {
+        let mut bytes_it = bytes.iter();
+        let total_inserts = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
+            StoreError::DeserializeError(format!(
+                "Failed to deserialize total inserts from bytes: {:?}",
+                bytes
+            ))
+        })?;
+        let total_updates = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
+            StoreError::DeserializeError(format!(
+                "Failed to deserialize total updates from bytes: {:?}",
+                bytes
+            ))
+        })?;
+        let total_deletes = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
+            StoreError::DeserializeError(format!(
+                "Failed to deserialize total deletes from bytes: {:?}",
+                bytes
+            ))
+        })?;
+
+        if total_inserts > 0 {
+            for _ in 0..total_inserts {
+                let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
+                    StoreError::DeserializeError(format!(
+                        "Failed to deserialize change id from bytes: {:?}",
+                        bytes
+                    ))
+                })?;
+                self.changes.push(ChangeLogEntry::Insert(id));
+            }
         }
-    }
 
-    if total_updates > 0 {
-        'update_outer: for _ in 0..total_updates {
-            let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-                StoreError::DeserializeError(format!(
-                    "Failed to deserialize change id from bytes: {:?}",
-                    bytes
-                ))
-            })?;
+        if total_updates > 0 {
+            'update_outer: for _ in 0..total_updates {
+                let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
+                    StoreError::DeserializeError(format!(
+                        "Failed to deserialize change id from bytes: {:?}",
+                        bytes
+                    ))
+                })?;
 
-            if !changelog.changes.is_empty() {
-                let mut update_idx = None;
-                for (idx, change) in changelog.changes.iter().enumerate() {
-                    match change {
-                        ChangeLogEntry::Insert(insert_id) => {
-                            if *insert_id == id {
-                                // Item updated after inserted, no need to count this change.
-                                continue 'update_outer;
+                if !self.changes.is_empty() {
+                    let mut update_idx = None;
+                    for (idx, change) in self.changes.iter().enumerate() {
+                        match change {
+                            ChangeLogEntry::Insert(insert_id) => {
+                                if *insert_id == id {
+                                    // Item updated after inserted, no need to count this change.
+                                    continue 'update_outer;
+                                }
                             }
-                        }
-                        ChangeLogEntry::Update(update_id) => {
-                            if *update_id == id {
-                                update_idx = Some(idx);
-                                break;
+                            ChangeLogEntry::Update(update_id) => {
+                                if *update_id == id {
+                                    update_idx = Some(idx);
+                                    break;
+                                }
                             }
+                            _ => (),
                         }
-                        _ => (),
+                    }
+
+                    // Move update to the front
+                    if let Some(idx) = update_idx {
+                        self.changes.remove(idx);
                     }
                 }
 
-                // Move update to the front
-                if let Some(idx) = update_idx {
-                    changelog.changes.remove(idx);
-                }
+                self.changes.push(ChangeLogEntry::Update(id));
             }
-
-            changelog.changes.push(ChangeLogEntry::Update(id));
         }
-    }
 
-    if total_deletes > 0 {
-        'delete_outer: for _ in 0..total_deletes {
-            let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-                StoreError::DeserializeError(format!(
-                    "Failed to deserialize change id from bytes: {:?}",
-                    bytes
-                ))
-            })?;
+        if total_deletes > 0 {
+            'delete_outer: for _ in 0..total_deletes {
+                let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
+                    StoreError::DeserializeError(format!(
+                        "Failed to deserialize change id from bytes: {:?}",
+                        bytes
+                    ))
+                })?;
 
-            if !changelog.changes.is_empty() {
-                let mut update_idx = None;
-                for (idx, change) in changelog.changes.iter().enumerate() {
-                    match change {
-                        ChangeLogEntry::Insert(insert_id) => {
-                            if *insert_id == id {
-                                changelog.changes.remove(idx);
-                                continue 'delete_outer;
+                if !self.changes.is_empty() {
+                    let mut update_idx = None;
+                    for (idx, change) in self.changes.iter().enumerate() {
+                        match change {
+                            ChangeLogEntry::Insert(insert_id) => {
+                                if *insert_id == id {
+                                    self.changes.remove(idx);
+                                    continue 'delete_outer;
+                                }
                             }
-                        }
-                        ChangeLogEntry::Update(update_id) => {
-                            if *update_id == id {
-                                update_idx = Some(idx);
-                                break;
+                            ChangeLogEntry::Update(update_id) => {
+                                if *update_id == id {
+                                    update_idx = Some(idx);
+                                    break;
+                                }
                             }
+                            _ => (),
                         }
-                        _ => (),
+                    }
+                    if let Some(idx) = update_idx {
+                        self.changes.remove(idx);
                     }
                 }
-                if let Some(idx) = update_idx {
-                    changelog.changes.remove(idx);
-                }
+
+                self.changes.push(ChangeLogEntry::Delete(id));
             }
-
-            changelog.changes.push(ChangeLogEntry::Delete(id));
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 impl From<ChangeLogWriter> for Vec<u8> {
@@ -249,7 +255,7 @@ impl StoreChangeLog for RocksDBStore {
                     is_first = false;
                 }
                 changelog.to_change_id = change_id;
-                deserialize(&mut changelog, value.as_ref())?;
+                changelog.deserialize(value.as_ref())?;
             }
         }
 

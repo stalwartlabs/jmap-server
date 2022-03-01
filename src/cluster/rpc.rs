@@ -1,9 +1,13 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
-use store::leb128::Leb128;
+use store::{bincode, leb128::Leb128};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
@@ -18,14 +22,14 @@ use super::{
     Message, Peer, PeerId, IPC_CHANNEL_BUFFER,
 };
 
-pub const RPC_MAX_PARALLEL: usize = 5;
-pub const RPC_TIMEOUT_MS: u64 = 1000;
-pub const RPC_INACTIVITY_TIMEOUT: u64 = 5 * 60 * 1000;
+const RPC_TIMEOUT_MS: u64 = 1000;
+const RPC_MAX_BACKOFF_MS: u64 = 30000; // 30 seconds
+const RPC_INACTIVITY_TIMEOUT: u64 = 60 * 1000; //TODO configure
 const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024; //TODO configure
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Request {
-    SynchronizePeers(Vec<PeerInfo>),
+    Synchronize(Vec<PeerInfo>),
     Auth {
         peer_id: PeerId,
         key: String,
@@ -43,9 +47,21 @@ pub enum Request {
     None,
 }
 
+pub enum RpcMessage {
+    FireAndForget {
+        request: Request,
+    },
+    NeedResponse {
+        request: Request,
+        response_tx: oneshot::Sender<Response>,
+    },
+}
+
+pub struct RpcEncoder {}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Response {
-    SynchronizePeers(Vec<PeerInfo>),
+    Synchronize(Vec<PeerInfo>),
     Vote { term: TermId, vote_granted: bool },
     FollowLeader { term: TermId, success: bool },
     None,
@@ -72,8 +88,6 @@ impl Protocol {
         }
     }
 }
-
-pub struct RpcEncoder {}
 
 impl Default for RpcEncoder {
     fn default() -> Self {
@@ -165,15 +179,24 @@ pub async fn start_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Message>, key: St
     });
 }
 
+impl RpcMessage {
+    pub fn failed(self) {
+        if let RpcMessage::NeedResponse { response_tx, .. } = self {
+            if response_tx.send(Response::None).is_err() {
+                error!("Channel failed while sending message.");
+            }
+        }
+    }
+}
+
 pub fn start_peer_rpc(
     main_tx: mpsc::Sender<Message>,
     local_peer_id: PeerId,
     key: String,
     peer_id: PeerId,
     peer_addr: SocketAddr,
-) -> mpsc::Sender<(Request, Option<oneshot::Sender<Response>>)> {
-    let (tx, mut rx) =
-        mpsc::channel::<(Request, Option<oneshot::Sender<Response>>)>(IPC_CHANNEL_BUFFER);
+) -> mpsc::Sender<RpcMessage> {
+    let (tx, mut rx) = mpsc::channel::<RpcMessage>(IPC_CHANNEL_BUFFER);
     let auth_frame = Protocol::Request(Request::Auth {
         peer_id: local_peer_id,
         key,
@@ -181,9 +204,11 @@ pub fn start_peer_rpc(
 
     tokio::spawn(async move {
         let mut conn_ = None;
+        let mut connection_attempts = 0;
+        let mut next_connection_attempt = Instant::now();
 
         loop {
-            let (request, response_tx) =
+            let message =
                 match time::timeout(Duration::from_millis(RPC_INACTIVITY_TIMEOUT), rx.recv()).await
                 {
                     Ok(Some(message)) => message,
@@ -192,8 +217,9 @@ pub fn start_peer_rpc(
                         break;
                     }
                     Err(_) => {
-                        // Close connection after 5 minutes of inactivity
+                        // Close connection after 1 minute of inactivity
                         if conn_.is_some() {
+                            debug!("Closing inactive connection to peer {}.", peer_id);
                             conn_ = None;
                         }
                         continue;
@@ -204,8 +230,20 @@ pub fn start_peer_rpc(
             let conn = if let Some(conn) = &mut conn_ {
                 conn
             } else {
+                if connection_attempts > 0 && next_connection_attempt > Instant::now() {
+                    debug!(
+                        "Waiting {} ms before reconnecting to peer {}.",
+                        (next_connection_attempt - Instant::now()).as_millis(),
+                        peer_id
+                    );
+                    continue;
+                }
+
                 match connect_peer(peer_addr, auth_frame.clone()).await {
                     Ok(conn) => {
+                        if connection_attempts > 0 {
+                            connection_attempts = 0;
+                        }
                         conn_ = conn.into();
                         conn_.as_mut().unwrap()
                     }
@@ -214,42 +252,60 @@ pub fn start_peer_rpc(
                             "Failed to connect to peer {} at {}: {}",
                             peer_id, peer_addr, err
                         );
-                        if let Some(response_tx) = response_tx {
-                            if response_tx.send(Response::None).is_err() {
-                                error!("Channel failed while sending message.");
-                            }
-                        }
+                        message.failed();
+
+                        // Truncated exponential backoff
+                        next_connection_attempt = Instant::now()
+                            + Duration::from_millis(std::cmp::min(
+                                2u64.pow(connection_attempts)
+                                    + rand::thread_rng().gen_range(0..1000),
+                                RPC_MAX_BACKOFF_MS,
+                            ));
+                        connection_attempts += 1;
                         continue;
                     }
                 }
             };
 
-            match send_rpc(conn, request).await {
-                Ok(response) => {
-                    if let Some(response_tx) = response_tx {
+            let err = match message {
+                RpcMessage::NeedResponse {
+                    response_tx,
+                    request,
+                } => match send_rpc(conn, request).await {
+                    Ok(response) => {
+                        // Send response via oneshot channel
                         if response_tx.send(response).is_err() {
                             error!("Channel failed while sending message.");
                         }
-                    } else if let Err(err) = main_tx
-                        .send(Message::RpcResponse { peer_id, response })
-                        .await
-                    {
-                        error!("Channel failed while sending message: {}", err);
+                        continue;
                     }
-                }
-                Err(err) => {
-                    error!(
-                        "Failed to send RPC request to peer {} at {}: {}",
-                        peer_id, peer_addr, err
-                    );
-                    if let Some(response_tx) = response_tx {
+                    Err(err) => {
                         if response_tx.send(Response::None).is_err() {
                             error!("Channel failed while sending message.");
                         }
+                        err
                     }
-                    conn_ = None;
-                }
-            }
+                },
+                RpcMessage::FireAndForget { request } => match send_rpc(conn, request).await {
+                    Ok(response) => {
+                        // Send response via the main channel
+                        if let Err(err) = main_tx
+                            .send(Message::RpcResponse { peer_id, response })
+                            .await
+                        {
+                            error!("Channel failed while sending message: {}", err);
+                        }
+                        continue;
+                    }
+                    Err(err) => err,
+                },
+            };
+
+            error!(
+                "Failed to send RPC request to peer {} at {}: {}",
+                peer_id, peer_addr, err
+            );
+            conn_ = None;
         }
     });
 
@@ -370,20 +426,27 @@ async fn send_rpc(
 }
 
 impl Peer {
-    // Sends and RPC and waits until the response is available.
-    pub async fn send_rpc(&self, request: Request) -> Response {
-        let (tx, rx) = oneshot::channel();
-        if let Err(err) = self.tx.send((request, tx.into())).await {
+    // Sends a request and "waits" asynchronically until the response is available.
+    pub async fn send_request(&self, request: Request) -> Response {
+        let (response_tx, rx) = oneshot::channel();
+        if let Err(err) = self
+            .tx
+            .send(RpcMessage::NeedResponse {
+                request,
+                response_tx,
+            })
+            .await
+        {
             error!("Channel failed: {}", err);
             return Response::None;
         }
         rx.await.unwrap_or(Response::None)
     }
 
-    // Sends an RPC request and the result is returned via the main channel.
-    pub async fn send_rpc_lazy(&self, request: Request) {
+    // Submits a request, the result is returned at a later time via the main channel.
+    pub async fn dispatch_request(&self, request: Request) {
         //debug!("OUT: {:?}", request);
-        if let Err(err) = self.tx.send((request, None)).await {
+        if let Err(err) = self.tx.send(RpcMessage::FireAndForget { request }).await {
             error!("Channel failed: {}", err);
         }
     }

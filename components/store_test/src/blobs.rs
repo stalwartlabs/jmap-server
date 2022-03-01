@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use store::{batch::DocumentWriter, field::FieldOptions, BlobEntry, Store, StoreBlobTest};
+use store::{batch::WriteBatch, field::FieldOptions, BlobEntry, Store, StoreBlobTest};
 
 pub fn test_blobs<T>(db: T)
 where
@@ -28,7 +28,7 @@ where
                 let blobs = blobs.clone();
                 s.spawn_fifo(move |_| {
                     let mut document =
-                        DocumentWriter::insert(0, db.assign_document_id(account, 0).unwrap());
+                        WriteBatch::insert(0, db.assign_document_id(account, 0).unwrap(), 0u64);
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
@@ -69,7 +69,7 @@ where
     assert_eq!(blobs.len(), 40);
 
     for account in 0..100 {
-        db.update_document(account, DocumentWriter::delete(0, 0))
+        db.update_document(account, WriteBatch::delete(0, 0, 0u64))
             .unwrap();
     }
 

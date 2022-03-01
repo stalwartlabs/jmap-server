@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 use serde::{Deserialize, Serialize};
-use store::Store;
+use store::{leb128::Leb128, Store};
 use tokio::{net::UdpSocket, sync::mpsc};
 use tracing::{debug, error, info};
 
@@ -112,12 +112,94 @@ where
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub enum Request {
-    Join { id: usize, addr: SocketAddr },
+    Join { id: usize, port: u16 },
     JoinReply { id: usize },
     Ping(Vec<PeerStatus>),
     Pong(Vec<PeerStatus>),
+}
+
+impl Request {
+    pub fn from_bytes(bytes: &[u8]) -> Option<Request> {
+        let mut it = bytes.iter();
+        match usize::from_leb128_it(&mut it)? {
+            0 => Request::Join {
+                id: usize::from_leb128_it(&mut it)?,
+                port: u16::from_leb128_it(&mut it)?,
+            },
+            1 => Request::JoinReply {
+                id: usize::from_leb128_it(&mut it)?,
+            },
+            mut num_peers => {
+                num_peers -= 2;
+                if num_peers > (UDP_MAX_PAYLOAD / std::mem::size_of::<PeerStatus>()) {
+                    return None;
+                }
+                let mut peers = Vec::with_capacity(num_peers - 2);
+                while num_peers > 0 {
+                    let peer_id = if let Some(peer_id) = PeerId::from_leb128_it(&mut it) {
+                        peer_id
+                    } else {
+                        break;
+                    };
+                    peers.push(PeerStatus {
+                        peer_id,
+                        epoch: EpochId::from_leb128_it(&mut it)?,
+                        generation: GenerationId::from_leb128_it(&mut it)?,
+                        last_log_term: TermId::from_leb128_it(&mut it)?,
+                        last_log_index: LogIndex::from_leb128_it(&mut it)?,
+                    });
+                    num_peers -= 1;
+                }
+                match num_peers {
+                    0 => Request::Ping(peers),
+                    1 => Request::Pong(peers),
+                    _ => return None,
+                }
+            }
+        }
+        .into()
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let (flag, peers) = match self {
+            Request::Join { id, port } => {
+                let mut bytes = Vec::with_capacity(
+                    std::mem::size_of::<usize>() + std::mem::size_of::<u16>() + 1,
+                );
+                bytes.push(0);
+                id.to_leb128_bytes(&mut bytes);
+                port.to_leb128_bytes(&mut bytes);
+                return bytes;
+            }
+            Request::JoinReply { id } => {
+                let mut bytes = Vec::with_capacity(std::mem::size_of::<usize>() + 1);
+                bytes.push(1);
+                id.to_leb128_bytes(&mut bytes);
+                return bytes;
+            }
+            Request::Ping(peers) => (2, peers),
+            Request::Pong(peers) => (3, peers),
+        };
+
+        debug_assert!(!peers.is_empty());
+
+        let mut bytes = Vec::with_capacity(
+            std::mem::size_of::<usize>() + (peers.len() * std::mem::size_of::<PeerStatus>()),
+        );
+        (flag + peers.len()).to_leb128_bytes(&mut bytes);
+
+        for peer in peers {
+            peer.peer_id.to_leb128_bytes(&mut bytes);
+            peer.epoch.to_leb128_bytes(&mut bytes);
+            peer.generation.to_leb128_bytes(&mut bytes);
+            peer.last_log_term.to_leb128_bytes(&mut bytes);
+            peer.last_log_index.to_leb128_bytes(&mut bytes);
+        }
+
+        bytes
+    }
 }
 
 pub async fn start_gossip(
@@ -137,15 +219,8 @@ pub async fn start_gossip(
     tokio::spawn(async move {
         while let Some((target_addr, response)) = rx.recv().await {
             //debug!("Sending packet to {}: {:?}", target_addr, response);
-            match bincode::serialize(&response) {
-                Ok(bytes) => {
-                    if let Err(e) = socket.send_to(&bytes, &target_addr).await {
-                        error!("Failed to send UDP packet to {}: {}", target_addr, e);
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to serialize UDP packet: {}", e);
-                }
+            if let Err(e) = socket.send_to(&response.to_bytes(), &target_addr).await {
+                error!("Failed to send UDP packet to {}: {}", target_addr, e);
             }
         }
     });
@@ -156,10 +231,9 @@ pub async fn start_gossip(
 
         loop {
             //TODO encrypt packets
-            //TODO use leb128 serialization
             match socket.recv_from(&mut buf).await {
                 Ok((size, addr)) => {
-                    if let Ok(request) = bincode::deserialize::<Request>(&buf[..size]) {
+                    if let Some(request) = Request::from_bytes(&buf[..size]) {
                         //debug!("Received packet from {}: {:?}", addr, request);
                         if let Err(e) = tx.send(Message::Gossip { addr, request }).await {
                             error!("Gossip process error, tx.send() failed: {}", e);
@@ -197,18 +271,32 @@ where
         self.epoch += 1;
 
         let mut do_full_sync = self.peers.len() + 1 != peers.len();
+        let is_leading = self.is_leading();
+
         'outer: for (pos, peer) in peers.iter().enumerate() {
             if self.peer_id != peer.peer_id {
                 for (idx, mut local_peer) in self.peers.iter_mut().enumerate() {
-                    if local_peer.peer_id == peer.peer_id {
-                        if peer.epoch > local_peer.epoch {
-                            local_peer.epoch = peer.epoch;
-                            local_peer.update_heartbeat();
+                    if local_peer.peer_id == peer.peer_id && peer.epoch > local_peer.epoch {
+                        // Offline peer became available, convert to follower
+                        // if this node is leading.
+                        if is_leading
+                            && local_peer.is_in_shard(self.shard_id)
+                            && local_peer.is_offline()
+                        {
+                            local_peer
+                                .follow_me(self.term, self.last_log_index, self.last_log_term)
+                                .await;
+                        };
 
-                            if local_peer.generation != peer.generation && !do_full_sync {
-                                do_full_sync = true;
-                            }
+                        local_peer.epoch = peer.epoch;
+                        local_peer.last_log_index = peer.last_log_index;
+                        local_peer.last_log_term = peer.last_log_term;
+                        local_peer.update_heartbeat();
+
+                        if local_peer.generation != peer.generation && !do_full_sync {
+                            do_full_sync = true;
                         }
+
                         // Keep idx of first item, the source peer.
                         if pos == 0 {
                             source_peer_idx = idx.into();
@@ -222,10 +310,14 @@ where
             }
         }
 
+        if !is_leading {
+            self.sync_log().await;
+        }
+
         if let Some(source_peer_idx) = source_peer_idx {
             if do_full_sync {
                 self.peers[source_peer_idx]
-                    .send_rpc_lazy(rpc::Request::SynchronizePeers(self.build_peer_info()))
+                    .dispatch_request(rpc::Request::Synchronize(self.build_peer_info()))
                     .await;
             } else if send_pong {
                 self.send_gossip(
@@ -242,21 +334,23 @@ where
         }
     }
 
-    pub async fn handle_join(&mut self, id: usize, dest: SocketAddr) {
+    pub async fn handle_join(&mut self, id: usize, mut dest: SocketAddr, port: u16) {
+        dest.set_port(port);
         self.send_gossip(dest, Request::JoinReply { id }).await;
     }
 
     pub async fn handle_join_reply(&mut self, id: usize) {
         if let Some(peer) = self.peers.get(id) {
             if peer.is_seed() {
-                peer.send_rpc_lazy(rpc::Request::SynchronizePeers(self.build_peer_info()))
+                peer.dispatch_request(rpc::Request::Synchronize(self.build_peer_info()))
                     .await;
             }
         }
     }
 
-    pub fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
+    pub async fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
         let mut remove_seeds = false;
+        let is_leading = self.is_leading();
 
         'outer: for (pos, peer) in peers.into_iter().enumerate() {
             if peer.peer_id != self.peer_id {
@@ -270,8 +364,22 @@ where
                                 if !update_peer_info && local_peer.generation != peer.generation {
                                     update_peer_info = true;
                                 }
-
+                                // Offline peer became online, convert to follower.
+                                if is_leading
+                                    && local_peer.is_in_shard(self.shard_id)
+                                    && local_peer.is_offline()
+                                {
+                                    local_peer
+                                        .follow_me(
+                                            self.term,
+                                            self.last_log_index,
+                                            self.last_log_term,
+                                        )
+                                        .await;
+                                };
                                 local_peer.epoch = peer.epoch;
+                                local_peer.last_log_index = peer.last_log_index;
+                                local_peer.last_log_term = peer.last_log_term;
                                 local_peer.update_heartbeat();
                             }
 
@@ -301,20 +409,27 @@ where
                     }
                 }
 
-                // Peer not found, add it to the list.
+                // Add new peer to the list.
                 info!(
-                    "Adding new peer {}, shard {} listening at {}.",
+                    "Discovered new peer {} (shard {}) listening at {}.",
                     peer.peer_id, peer.shard_id, peer.addr
                 );
                 self.peers.push(Peer::new(self, peer));
             } else if peer.epoch > self.epoch {
-                info!("Updating local epoch to {}", peer.epoch);
+                debug!(
+                    "This node was already part of the cluster, updating local epoch to {}",
+                    peer.epoch
+                );
                 self.epoch = peer.epoch + 1;
             }
         }
 
         if remove_seeds {
             self.peers.retain(|peer| !peer.is_seed());
+        }
+
+        if !is_leading {
+            self.sync_log().await;
         }
     }
 

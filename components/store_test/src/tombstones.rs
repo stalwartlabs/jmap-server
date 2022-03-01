@@ -1,7 +1,7 @@
 use std::iter::FromIterator;
 
 use nlp::Language;
-use store::batch::DocumentWriter;
+use store::batch::WriteBatch;
 use store::field::{FieldOptions, FullText, Text};
 use store::{
     Comparator, DocumentId, DocumentSet, FieldId, FieldValue, Filter, Float, Integer, LongInteger,
@@ -12,8 +12,8 @@ pub fn test_tombstones<T>(db: T)
 where
     T: for<'x> Store<'x> + StoreTombstone,
 {
-    for raw_doc_num in 0..10 {
-        let mut builder = DocumentWriter::insert(0, db.assign_document_id(0, 0).unwrap());
+    for raw_doc_num in 0u64..10u64 {
+        let mut builder = WriteBatch::insert(0, db.assign_document_id(0, 0).unwrap(), raw_doc_num);
         builder.text(
             0,
             Text::Keyword(format!("keyword_{}", raw_doc_num).into()),
@@ -42,8 +42,10 @@ where
         db.update_document(0, builder).unwrap();
     }
 
-    db.update_document(0, DocumentWriter::delete(0, 9)).unwrap();
-    db.update_document(0, DocumentWriter::delete(0, 0)).unwrap();
+    db.update_document(0, WriteBatch::delete(0, 9, 9u64))
+        .unwrap();
+    db.update_document(0, WriteBatch::delete(0, 0, 0u64))
+        .unwrap();
 
     for do_purge in [true, false] {
         for field in 0..6 {

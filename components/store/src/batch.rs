@@ -13,7 +13,7 @@ pub const MAX_ID_LENGTH: usize = 80;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
-pub struct DocumentWriter<'x, T: UncommittedDocumentId> {
+pub struct WriteBatch<'x, T: UncommittedDocumentId> {
     pub collection: CollectionId,
     pub default_language: Language,
     pub log_id: Option<ChangeLogId>,
@@ -28,13 +28,6 @@ pub enum LogAction {
     Update(ChangeLogId),
     Delete(ChangeLogId),
     Move(ChangeLogId, ChangeLogId),
-    None,
-}
-
-impl LogAction {
-    pub fn is_none(&self) -> bool {
-        matches!(self, LogAction::None)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -42,89 +35,86 @@ pub enum WriteAction<T: UncommittedDocumentId> {
     Insert(T),
     Update(DocumentId),
     Delete(DocumentId),
-    UpdateMany,
-    DeleteMany,
 }
 
-impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
-    pub fn insert(collection: CollectionId, uncommited_id: T) -> DocumentWriter<'x, T> {
-        DocumentWriter {
+impl<'x, T: UncommittedDocumentId> WriteBatch<'x, T> {
+    pub fn insert(
+        collection: CollectionId,
+        uncommited_id: T,
+        full_id: impl Into<ChangeLogId>,
+    ) -> WriteBatch<'x, T> {
+        WriteBatch {
             collection,
             default_language: Language::English,
-            log_action: LogAction::None,
+            log_action: LogAction::Insert(full_id.into()),
             action: WriteAction::Insert(uncommited_id),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
-    pub fn update(collection: CollectionId, document: DocumentId) -> DocumentWriter<'x, T> {
-        DocumentWriter {
+    pub fn update(
+        collection: CollectionId,
+        document: DocumentId,
+        full_id: impl Into<ChangeLogId>,
+    ) -> WriteBatch<'x, T> {
+        WriteBatch {
             collection,
             default_language: Language::English,
-            log_action: LogAction::None,
+            log_action: LogAction::Update(full_id.into()),
             action: WriteAction::Update(document),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
-    pub fn delete(collection: CollectionId, document: DocumentId) -> DocumentWriter<'x, T> {
-        DocumentWriter {
+    pub fn delete(
+        collection: CollectionId,
+        document: DocumentId,
+        full_id: impl Into<ChangeLogId>,
+    ) -> WriteBatch<'x, T> {
+        WriteBatch {
             collection,
             default_language: Language::English,
-            log_action: LogAction::None,
+            log_action: LogAction::Delete(full_id.into()),
             action: WriteAction::Delete(document),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
-    pub fn update_many(collection: CollectionId) -> DocumentWriter<'x, T> {
-        DocumentWriter {
+    pub fn moved(
+        collection: CollectionId,
+        document: DocumentId,
+        old_log_id: impl Into<ChangeLogId>,
+        new_log_id: impl Into<ChangeLogId>,
+    ) -> WriteBatch<'x, T> {
+        WriteBatch {
             collection,
             default_language: Language::English,
-            log_action: LogAction::None,
-            action: WriteAction::UpdateMany,
+            log_action: LogAction::Move(old_log_id.into(), new_log_id.into()),
+            action: WriteAction::Update(document),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
-    pub fn delete_many(collection: CollectionId) -> DocumentWriter<'x, T> {
-        DocumentWriter {
-            collection,
-            default_language: Language::English,
-            log_action: LogAction::None,
-            action: WriteAction::DeleteMany,
-            fields: Vec::new(),
-            log_id: None,
+    pub fn update_full_id(&mut self, full_id: impl Into<ChangeLogId>) {
+        match self.log_action {
+            LogAction::Insert(ref mut id) => {
+                *id = full_id.into();
+            }
+            LogAction::Update(ref mut id) => {
+                *id = full_id.into();
+            }
+            LogAction::Delete(ref mut id) => {
+                *id = full_id.into();
+            }
+            _ => (),
         }
     }
 
-    pub fn log_insert(&mut self, changelog_id: ChangeLogId) {
-        self.log_action = LogAction::Insert(changelog_id);
-    }
-
-    pub fn log_update(&mut self, changelog_id: ChangeLogId) {
-        self.log_action = LogAction::Update(changelog_id);
-    }
-
-    pub fn log_delete(&mut self, changelog_id: ChangeLogId) {
-        self.log_action = LogAction::Delete(changelog_id);
-    }
-
-    pub fn log_move(&mut self, changelog_id: ChangeLogId, dest_changelog_id: ChangeLogId) {
-        self.log_action = LogAction::Move(changelog_id, dest_changelog_id);
-    }
-
-    pub fn log(mut self, log_action: LogAction) -> Self {
-        self.log_action = log_action;
-        self
-    }
-
-    pub fn log_with_id(mut self, log_action: LogAction, change_id: ChangeLogId) -> Self {
-        self.log_action = log_action;
+    pub fn log_with_id(mut self, change_id: ChangeLogId) -> Self {
         self.log_id = Some(change_id);
         self
     }
@@ -187,7 +177,7 @@ impl<'x, T: UncommittedDocumentId> DocumentWriter<'x, T> {
     }
 }
 
-impl<'x, T: UncommittedDocumentId> IntoIterator for DocumentWriter<'x, T> {
+impl<'x, T: UncommittedDocumentId> IntoIterator for WriteBatch<'x, T> {
     type Item = UpdateField<'x>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 

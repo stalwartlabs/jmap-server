@@ -5,7 +5,7 @@ use jmap_store::{
     local_store::JMAPLocalStore,
 };
 use store::{
-    batch::{DocumentWriter, LogAction},
+    batch::{LogAction, WriteBatch},
     Store,
 };
 
@@ -128,10 +128,10 @@ where
         let mut documents = Vec::new();
 
         for change in changes {
-            documents.push(
-                DocumentWriter::insert(0, mail_store.store.assign_document_id(0, 0).unwrap())
-                    .log(change),
-            );
+            let mut batch =
+                WriteBatch::insert(0, mail_store.store.assign_document_id(0, 0).unwrap(), 0u64);
+            batch.log_action = change;
+            documents.push(batch);
         }
 
         mail_store.store.update_documents(0, documents).unwrap();

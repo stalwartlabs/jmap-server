@@ -10,7 +10,7 @@ use jmap_store::{
     JMAPQueryChangesRequest,
 };
 use store::{
-    batch::{DocumentWriter, LogAction},
+    batch::{LogAction, WriteBatch},
     field::FieldOptions,
     Store, Tag,
 };
@@ -98,10 +98,7 @@ where
 
                 mail_store
                     .store
-                    .update_document(
-                        0,
-                        DocumentWriter::update(0, id.get_document_id()).log(LogAction::Update(id)),
-                    )
+                    .update_document(0, WriteBatch::update(0, id.get_document_id(), id))
                     .unwrap();
                 updated_ids.insert(id);
             }
@@ -109,10 +106,7 @@ where
                 let id = *id_map.get(id).unwrap();
                 mail_store
                     .store
-                    .update_document(
-                        0,
-                        DocumentWriter::delete(0, id.get_document_id()).log(LogAction::Delete(id)),
-                    )
+                    .update_document(0, WriteBatch::delete(0, id.get_document_id(), id))
                     .unwrap();
                 removed_ids.insert(id);
             }
@@ -120,14 +114,13 @@ where
                 let id = *id_map.get(from).unwrap();
                 let new_id = JMAPId::from_email(thread_id, id.get_document_id());
 
-                let mut batch = DocumentWriter::update(0, id.get_document_id());
+                let mut batch = WriteBatch::moved(0, id.get_document_id(), id, new_id);
                 batch.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
                 batch.tag(
                     MessageField::ThreadId,
                     Tag::Id(thread_id),
                     FieldOptions::None,
                 );
-                batch.log_move(id, new_id);
                 mail_store.store.update_document(0, batch).unwrap();
 
                 id_map.insert(*to, new_id);
@@ -137,7 +130,6 @@ where
                 removed_ids.insert(id);
                 thread_id += 1;
             }
-            LogAction::None => (),
         }
 
         let mut new_state = JMAPState::Initial;
