@@ -99,7 +99,7 @@ impl<'x> RocksDBIterator<'x> {
                                     .get_document_ids(account, collection)?
                                     .unwrap_or_else(RoaringBitmap::new)
                                     .into();
-                                &all_doc_ids.as_ref().unwrap()
+                                all_doc_ids.as_ref().unwrap()
                             };
                             if !comp.set.is_empty() {
                                 let mut set = comp.set.unwrap();

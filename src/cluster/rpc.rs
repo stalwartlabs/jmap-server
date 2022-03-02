@@ -57,6 +57,7 @@ pub enum RpcMessage {
     },
 }
 
+#[derive(Default)]
 pub struct RpcEncoder {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -86,12 +87,6 @@ impl Protocol {
             Protocol::Response(res) => res,
             _ => Response::None,
         }
-    }
-}
-
-impl Default for RpcEncoder {
-    fn default() -> Self {
-        Self {}
     }
 }
 

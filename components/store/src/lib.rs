@@ -1,4 +1,5 @@
 pub mod batch;
+pub mod changelog;
 pub mod field;
 pub mod leb128;
 pub mod mutex_map;
@@ -9,6 +10,7 @@ pub mod term_index;
 use std::{iter::FromIterator, ops::Range};
 
 use batch::WriteBatch;
+use changelog::{ChangeLog, ChangeLogId, ChangeLogQuery};
 use nlp::Language;
 use serialize::StoreDeserialize;
 
@@ -46,7 +48,6 @@ pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
 pub type TermId = u64;
-pub type ChangeLogId = u64;
 
 pub trait DocumentSet: DocumentSetBitOps + Eq + Clone + Sized {
     type Item;
@@ -62,10 +63,6 @@ pub trait DocumentSetBitOps<Rhs: Sized = Self> {
     fn intersection(&mut self, other: &Rhs);
     fn union(&mut self, other: &Rhs);
     fn difference(&mut self, other: &Rhs);
-}
-
-pub trait UncommittedDocumentId: Clone + Send + Sync {
-    fn get_document_id(&self) -> DocumentId;
 }
 
 #[derive(Debug)]
@@ -261,33 +258,23 @@ where
 }
 
 pub trait StoreUpdate {
-    type UncommittedId: UncommittedDocumentId;
-
     fn assign_document_id(
         &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> crate::Result<Self::UncommittedId>;
+        account_id: AccountId,
+        collection_id: CollectionId,
+    ) -> crate::Result<DocumentId>;
 
     fn assign_change_id(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
     ) -> crate::Result<ChangeLogId>;
 
-    fn update_document(
-        &self,
-        account: AccountId,
-        document: WriteBatch<Self::UncommittedId>,
-    ) -> crate::Result<()> {
-        self.update_documents(account, vec![document])
+    fn update_document(&self, account_id: AccountId, document: WriteBatch) -> crate::Result<()> {
+        self.update_documents(account_id, vec![document])
     }
 
-    fn update_documents(
-        &self,
-        account: AccountId,
-        documents: Vec<WriteBatch<Self::UncommittedId>>,
-    ) -> Result<()>;
+    fn update_documents(&self, account_id: AccountId, documents: Vec<WriteBatch>) -> Result<()>;
 }
 
 pub trait StoreQuery<'x>: StoreDocumentSet {
@@ -295,8 +282,8 @@ pub trait StoreQuery<'x>: StoreDocumentSet {
 
     fn query(
         &'x self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         filter: Filter<Self::Set>,
         sort: Comparator<Self::Set>,
     ) -> Result<Self::Iter>;
@@ -314,8 +301,8 @@ pub trait StoreGet {
 
     fn get_document_value<T>(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         document: DocumentId,
         field: FieldId,
     ) -> Result<Option<T>>
@@ -324,8 +311,8 @@ pub trait StoreGet {
 
     fn get_multi_document_value<T>(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         documents: impl Iterator<Item = DocumentId>,
         field: FieldId,
     ) -> Result<Vec<Option<T>>>
@@ -351,11 +338,11 @@ impl BlobEntry<Option<Range<usize>>> {
 }
 
 pub trait StoreBlob {
-    fn store_temporary_blob(&self, account: AccountId, bytes: &[u8]) -> Result<(u64, u64)>;
+    fn store_temporary_blob(&self, account_id: AccountId, bytes: &[u8]) -> Result<(u64, u64)>;
 
     fn get_temporary_blob(
         &self,
-        account: AccountId,
+        account_id: AccountId,
         hash: u64,
         timestamp: u64,
     ) -> Result<Option<Vec<u8>>>;
@@ -364,20 +351,20 @@ pub trait StoreBlob {
 
     fn get_blob(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         document: DocumentId,
         entry: BlobEntry<Option<Range<usize>>>,
     ) -> Result<Option<BlobEntry<Vec<u8>>>> {
         Ok(self
-            .get_blobs(account, collection, document, vec![entry].into_iter())?
+            .get_blobs(account_id, collection_id, document, vec![entry].into_iter())?
             .pop())
     }
 
     fn get_blobs(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         document: DocumentId,
         entries: impl Iterator<Item = BlobEntry<Option<Range<usize>>>>,
     ) -> Result<Vec<BlobEntry<Vec<u8>>>>;
@@ -397,90 +384,60 @@ pub trait StoreDocumentSet {
 
     fn get_document_ids(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
     ) -> crate::Result<Self::Set>;
 }
 
 pub trait StoreTag: StoreDocumentSet {
     fn get_tag(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         field: FieldId,
         tag: Tag,
     ) -> Result<Option<Self::Set>> {
         Ok(self
-            .get_tags(account, collection, field, &[tag])?
+            .get_tags(account_id, collection_id, field, &[tag])?
             .pop()
             .unwrap())
     }
 
     fn get_tags(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         field: FieldId,
         tags: &[Tag],
     ) -> Result<Vec<Option<Self::Set>>>;
 }
 
 pub trait StoreDelete {
-    fn delete_account(&self, account: AccountId) -> Result<()>;
-    fn delete_collection(&self, account: AccountId, collection: CollectionId) -> Result<()>;
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ChangeLogEntry {
-    Insert(ChangeLogId),
-    Update(ChangeLogId),
-    Delete(ChangeLogId),
-}
-
-pub struct ChangeLog {
-    pub changes: Vec<ChangeLogEntry>,
-    pub from_change_id: ChangeLogId,
-    pub to_change_id: ChangeLogId,
-}
-
-impl Default for ChangeLog {
-    fn default() -> Self {
-        Self {
-            changes: Vec::with_capacity(10),
-            from_change_id: 0,
-            to_change_id: 0,
-        }
-    }
-}
-
-pub enum ChangeLogQuery {
-    All,
-    Since(ChangeLogId),
-    SinceInclusive(ChangeLogId),
-    RangeInclusive(ChangeLogId, ChangeLogId),
+    fn delete_account(&self, account_id: AccountId) -> Result<()>;
+    fn delete_collection(&self, account_id: AccountId, collection_id: CollectionId) -> Result<()>;
 }
 
 pub trait StoreChangeLog {
     fn get_last_change_id(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
     ) -> Result<Option<ChangeLogId>>;
     fn get_changes(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         query: ChangeLogQuery,
     ) -> Result<Option<ChangeLog>>;
 }
 
 pub trait StoreTombstone: StoreDocumentSet {
-    fn purge_tombstoned(&self, account: AccountId, collection: CollectionId) -> Result<()>;
+    fn purge_tombstoned(&self, account_id: AccountId, collection_id: CollectionId) -> Result<()>;
 
     fn get_tombstoned_ids(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
     ) -> crate::Result<Option<Self::Set>>;
 }
 

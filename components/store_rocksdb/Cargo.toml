@@ -8,7 +8,7 @@ publish = false
 nlp = { path = "../nlp" }
 store = { path = "../store" }
 rocksdb = "0.18"
-roaring = "0.8.1"
+roaring = "0.9"
 sha2 = "0.10.1"
 base32 = "0.4.0"
 moka = "0.7.2"

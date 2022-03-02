@@ -52,7 +52,7 @@ impl EnvSettings {
     pub fn get(&self, name: &str) -> Option<String> {
         if let Some(value) = self.args.get(name) {
             Some(value.clone())
-        } else if let Ok(value) = env::var(name.replace("-", "_").to_uppercase()) {
+        } else if let Ok(value) = env::var(name.replace('-', "_").to_uppercase()) {
             Some(value)
         } else {
             None

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use rand::Rng;
 use store::Store;
-use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tracing::{debug, info};
 
 use crate::cluster::log::start_log_sync;
@@ -21,16 +21,29 @@ pub const ELECTION_TIMEOUT_RAND_TO: u64 = 300;
 
 #[derive(Debug)]
 pub enum State {
-    Leader,
-    Wait(Instant),
-    Candidate(Instant),
-    VotedFor((PeerId, Instant)),
-    Follower((PeerId, mpsc::Sender<bool>)),
+    Leader {
+        follower_tx: Vec<watch::Sender<LogIndex>>,
+    },
+    Wait {
+        election_due: Instant,
+    },
+    Candidate {
+        election_due: Instant,
+    },
+    VotedFor {
+        peer_id: PeerId,
+        election_due: Instant,
+    },
+    Follower {
+        peer_id: PeerId,
+    },
 }
 
 impl Default for State {
     fn default() -> Self {
-        State::Wait(election_timeout(false))
+        State::Wait {
+            election_due: election_timeout(false),
+        }
     }
 }
 
@@ -45,8 +58,10 @@ where
 
     pub fn is_election_due(&self) -> bool {
         match self.state {
-            State::Candidate(timeout) | State::Wait(timeout) | State::VotedFor((_, timeout))
-                if timeout >= Instant::now() =>
+            State::Candidate { election_due }
+            | State::Wait { election_due }
+            | State::VotedFor { election_due, .. }
+                if election_due >= Instant::now() =>
             {
                 false
             }
@@ -56,10 +71,12 @@ where
 
     pub fn time_to_next_election(&self) -> Option<u64> {
         match self.state {
-            State::Candidate(timeout) | State::Wait(timeout) | State::VotedFor((_, timeout)) => {
+            State::Candidate { election_due }
+            | State::Wait { election_due }
+            | State::VotedFor { election_due, .. } => {
                 let now = Instant::now();
-                Some(if timeout > now {
-                    (timeout - now).as_millis() as u64
+                Some(if election_due > now {
+                    (election_due - now).as_millis() as u64
                 } else {
                     0
                 })
@@ -78,82 +95,86 @@ where
             || (last_log_term == self.last_log_term && last_log_index > self.last_log_index)
     }
 
-    pub fn can_grant_vote(&self, peer_id: PeerId) -> bool {
+    pub fn can_grant_vote(&self, candidate_peer_id: PeerId) -> bool {
         match self.state {
-            State::Wait(_) => true,
-            State::VotedFor((voted_for, _)) => voted_for == peer_id,
-            State::Leader | State::Follower(_) | State::Candidate(_) => false,
+            State::Wait { .. } => true,
+            State::VotedFor { peer_id, .. } => candidate_peer_id == peer_id,
+            State::Leader { .. } | State::Follower { .. } | State::Candidate { .. } => false,
         }
     }
 
     pub fn leader_peer_id(&self) -> Option<PeerId> {
         match self.state {
-            State::Leader => Some(self.peer_id),
-            State::Follower((peer_id, _)) => Some(peer_id),
+            State::Leader { .. } => Some(self.peer_id),
+            State::Follower { peer_id, .. } => Some(peer_id),
             _ => None,
         }
     }
 
     pub fn is_leading(&self) -> bool {
-        matches!(self.state, State::Leader)
+        matches!(self.state, State::Leader { .. })
     }
 
     pub fn is_candidate(&self) -> bool {
-        matches!(self.state, State::Candidate(_))
+        matches!(self.state, State::Candidate { .. })
     }
 
     pub fn is_following(&self) -> bool {
-        matches!(self.state, State::Follower(_))
+        matches!(self.state, State::Follower { .. })
     }
 
     pub fn start_election_timer(&mut self, now: bool) {
-        self.state = State::Wait(election_timeout(now));
+        self.state = State::Wait {
+            election_due: election_timeout(now),
+        };
         self.reset();
     }
 
     pub fn step_down(&mut self, term: TermId) {
         self.reset();
         self.term = term;
-        self.state = State::Wait(match self.state {
-            State::Wait(timeout) | State::Candidate(timeout) | State::VotedFor((_, timeout))
-                if timeout < Instant::now() =>
-            {
-                timeout
-            }
-            _ => election_timeout(false),
-        });
+        self.state = State::Wait {
+            election_due: match self.state {
+                State::Wait { election_due }
+                | State::Candidate { election_due }
+                | State::VotedFor { election_due, .. }
+                    if election_due < Instant::now() =>
+                {
+                    election_due
+                }
+                _ => election_timeout(false),
+            },
+        };
         debug!("Stepping down for term {}.", self.term);
     }
 
     pub fn vote_for(&mut self, peer_id: PeerId) {
-        self.state = State::VotedFor((peer_id, election_timeout(false)));
+        self.state = State::VotedFor {
+            peer_id,
+            election_due: election_timeout(false),
+        };
         self.reset();
         debug!("Voted for peer {} for term {}.", peer_id, self.term);
     }
 
     pub fn follow_leader(&mut self, peer_id: PeerId) {
-        self.state = State::Follower((
-            peer_id,
-            start_log_sync(
-                self.core.clone(),
-                self.get_peer(peer_id).unwrap().tx.clone(),
-            ),
-        ));
+        self.state = State::Follower { peer_id };
         self.reset();
         debug!("Following peer {} for term {}.", peer_id, self.term);
     }
 
-    pub async fn sync_log(&self) {
-        if let State::Follower((peer_id, log_sync_tx)) = &self.state {
-            let leader = self.get_peer(*peer_id).unwrap();
-            if self.log_is_behind(leader.last_log_term, leader.last_log_index) {
-                log_sync_tx.try_send(true).ok();
+    pub async fn send_append_entries(&self, last_log_term: LogIndex) {
+        if let State::Leader { follower_tx } = &self.state {
+            for tx in follower_tx {
+                tx.send(last_log_term).ok();
             }
         }
     }
 
     pub fn run_for_election(&mut self, now: bool) {
-        self.state = State::Candidate(election_timeout(now));
+        self.state = State::Candidate {
+            election_due: election_timeout(now),
+        };
         self.term += 1;
         self.reset();
         debug!("Running for election for term {}.", self.term);
@@ -161,8 +182,22 @@ where
 
     pub fn become_leader(&mut self) {
         debug!("This node is the new leader for term {}.", self.term);
-        self.state = State::Leader;
+        self.state = State::Leader {
+            follower_tx: self
+                .peers
+                .iter()
+                .filter(|p| p.is_in_shard(self.shard_id))
+                .map(|p| start_log_sync(self, p.tx.clone()))
+                .collect(),
+        };
         self.reset();
+    }
+
+    pub fn add_follower(&mut self, peer_id: PeerId) {
+        let peer_tx = start_log_sync(self, self.get_peer(peer_id).unwrap().tx.clone());
+        if let State::Leader { follower_tx } = &mut self.state {
+            follower_tx.push(peer_tx);
+        }
     }
 
     pub fn reset(&mut self) {
@@ -232,14 +267,6 @@ where
             self.step_down(term);
         }
 
-        /*debug!(
-            "Vote: {} {} {:?} {}",
-            self.term,
-            term,
-            self.state,
-            self.log_is_behind_or_eq(last_log_term, last_log_index)
-        );*/
-
         Response::Vote {
             term: self.term,
             vote_granted: if self.term == term
@@ -260,11 +287,6 @@ where
         term: TermId,
         vote_granted: bool,
     ) {
-        /*debug!(
-            "Vote Response: {}, {}, {:?}, {}",
-            self.term, term, self.state, vote_granted
-        );*/
-
         if self.term < term {
             self.step_down(term);
             return;
@@ -274,12 +296,6 @@ where
 
         if self.count_vote(peer_id) {
             self.become_leader();
-            for peer in &self.peers {
-                if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
-                    peer.follow_me(self.term, self.last_log_index, self.last_log_term)
-                        .await;
-                }
-            }
         }
     }
 
@@ -305,28 +321,11 @@ where
             },
         }
     }
-
-    pub fn handle_follow_leader_response(&mut self, term: TermId, success: bool) {
-        if self.term < term {
-            self.step_down(term);
-        } else if !success {
-            self.start_election_timer(false);
-        }
-    }
 }
 
 impl Peer {
     pub async fn vote_for_me(&self, term: TermId, last_log_index: LogIndex, last_log_term: TermId) {
         self.dispatch_request(Request::Vote {
-            term,
-            last_log_index,
-            last_log_term,
-        })
-        .await;
-    }
-
-    pub async fn follow_me(&self, term: TermId, last_log_index: LogIndex, last_log_term: TermId) {
-        self.dispatch_request(Request::FollowLeader {
             term,
             last_log_index,
             last_log_term,

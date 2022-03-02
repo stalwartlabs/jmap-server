@@ -795,7 +795,7 @@ mod tests {
                     true,
                 )
                 .unwrap()
-                .unwrap_or_else(Vec::new);
+                .unwrap_or_default();
 
             let mut result_len = 0;
             for r in &result {

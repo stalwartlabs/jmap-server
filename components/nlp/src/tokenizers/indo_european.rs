@@ -45,7 +45,7 @@ impl<'x> Iterator for IndoEuropeanTokenizer<'x> {
                     })
                     .map(|(pos, _)| pos)
                     .next()
-                    .unwrap_or_else(|| self.text.len());
+                    .unwrap_or(self.text.len());
 
                 let token_len = token_end - token_start;
                 if token_end > token_start && token_len <= self.max_token_length {

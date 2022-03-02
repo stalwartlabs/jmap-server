@@ -42,7 +42,6 @@ where
             .has_headers(true)
             .from_reader(&deflate_artwork_data()[..])
             .records()
-            .into_iter()
         {
             let record = record.unwrap();
             let mut values_str = HashMap::new();

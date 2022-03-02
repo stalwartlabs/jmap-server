@@ -271,23 +271,11 @@ where
         self.epoch += 1;
 
         let mut do_full_sync = self.peers.len() + 1 != peers.len();
-        let is_leading = self.is_leading();
 
         'outer: for (pos, peer) in peers.iter().enumerate() {
             if self.peer_id != peer.peer_id {
                 for (idx, mut local_peer) in self.peers.iter_mut().enumerate() {
                     if local_peer.peer_id == peer.peer_id && peer.epoch > local_peer.epoch {
-                        // Offline peer became available, convert to follower
-                        // if this node is leading.
-                        if is_leading
-                            && local_peer.is_in_shard(self.shard_id)
-                            && local_peer.is_offline()
-                        {
-                            local_peer
-                                .follow_me(self.term, self.last_log_index, self.last_log_term)
-                                .await;
-                        };
-
                         local_peer.epoch = peer.epoch;
                         local_peer.last_log_index = peer.last_log_index;
                         local_peer.last_log_term = peer.last_log_term;
@@ -308,10 +296,6 @@ where
                     do_full_sync = true;
                 }
             }
-        }
-
-        if !is_leading {
-            self.sync_log().await;
         }
 
         if let Some(source_peer_idx) = source_peer_idx {
@@ -364,19 +348,6 @@ where
                                 if !update_peer_info && local_peer.generation != peer.generation {
                                     update_peer_info = true;
                                 }
-                                // Offline peer became online, convert to follower.
-                                if is_leading
-                                    && local_peer.is_in_shard(self.shard_id)
-                                    && local_peer.is_offline()
-                                {
-                                    local_peer
-                                        .follow_me(
-                                            self.term,
-                                            self.last_log_index,
-                                            self.last_log_term,
-                                        )
-                                        .await;
-                                };
                                 local_peer.epoch = peer.epoch;
                                 local_peer.last_log_index = peer.last_log_index;
                                 local_peer.last_log_term = peer.last_log_term;
@@ -414,7 +385,12 @@ where
                     "Discovered new peer {} (shard {}) listening at {}.",
                     peer.peer_id, peer.shard_id, peer.addr
                 );
+                let peer_id = peer.peer_id;
+                let is_follower = is_leading && peer.shard_id == self.shard_id;
                 self.peers.push(Peer::new(self, peer));
+                if is_follower {
+                    self.add_follower(peer_id);
+                }
             } else if peer.epoch > self.epoch {
                 debug!(
                     "This node was already part of the cluster, updating local epoch to {}",
@@ -426,10 +402,6 @@ where
 
         if remove_seeds {
             self.peers.retain(|peer| !peer.is_seed());
-        }
-
-        if !is_leading {
-            self.sync_log().await;
         }
     }
 

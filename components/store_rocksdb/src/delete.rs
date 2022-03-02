@@ -5,15 +5,15 @@ use store::{
     serialize::{
         deserialize_document_id_from_leb128, deserialize_index_document_id, serialize_a_key_be,
         serialize_a_key_leb128, serialize_ac_key_be, serialize_ac_key_leb128, serialize_blob_key,
-        serialize_bm_internal, BLOB_KEY, BM_FREED_IDS, BM_TOMBSTONED_IDS, BM_USED_IDS,
+        serialize_bm_internal, BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     AccountId, CollectionId, DocumentId, StoreDelete, StoreError, StoreTombstone,
 };
 
 use crate::{
-    bitmaps::{clear_bits, into_bitmap, set_bits, RocksDBDocumentSet},
+    bitmaps::{clear_bits, into_bitmap, RocksDBDocumentSet},
     blob::serialize_blob_keys_from_value,
-    document_id::DocumentIdCacheKey,
+    document_id::IdCacheKey,
     RocksDBStore,
 };
 
@@ -257,12 +257,6 @@ impl StoreTombstone for RocksDBStore {
 
         batch.merge_cf(
             &cf_bitmaps,
-            serialize_bm_internal(account, collection, BM_FREED_IDS),
-            set_bits(documents.iter()),
-        );
-
-        batch.merge_cf(
-            &cf_bitmaps,
             serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
             clear_bits(documents.iter()),
         );
@@ -272,7 +266,7 @@ impl StoreTombstone for RocksDBStore {
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
 
         self.doc_id_cache
-            .invalidate(&DocumentIdCacheKey::new(account, collection));
+            .invalidate(&IdCacheKey::new(account, collection));
 
         Ok(())
     }

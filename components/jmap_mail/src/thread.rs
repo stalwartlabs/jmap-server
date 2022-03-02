@@ -19,7 +19,7 @@ where
         &'x self,
         request: JMAPGet<JMAPMailProperties<'x>, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
-        let thread_ids = request.ids.unwrap_or_else(Vec::new);
+        let thread_ids = request.ids.unwrap_or_default();
 
         if thread_ids.len() > self.mail_config.thread_max_results {
             return Err(JMAPError::RequestTooLarge);

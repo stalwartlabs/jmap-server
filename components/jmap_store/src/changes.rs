@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use store::{
-    leb128::Leb128, AccountId, ChangeLogEntry, ChangeLogId, ChangeLogQuery, CollectionId, Store,
-    StoreError,
+    changelog::{ChangeLogEntry, ChangeLogId, ChangeLogQuery},
+    leb128::Leb128,
+    AccountId, CollectionId, Store, StoreError,
 };
 
 use crate::{
@@ -425,7 +426,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use store::ChangeLogId;
+
+    use store::changelog::ChangeLogId;
 
     use crate::id::JMAPIdSerialize;
 

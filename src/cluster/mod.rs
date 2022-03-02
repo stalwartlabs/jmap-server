@@ -87,6 +87,9 @@ pub enum Message {
         peer_id: PeerId,
         response: rpc::Response,
     },
+    StepDown {
+        term: TermId,
+    },
 }
 
 pub struct Peer {

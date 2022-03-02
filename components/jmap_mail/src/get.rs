@@ -919,7 +919,7 @@ fn add_body_part<'x, 'y>(
             JSONValue::Array(
                 headers_result
                     .into_iter()
-                    .map(|(header, values)| {
+                    .flat_map(|(header, values)| {
                         values.into_iter().map(move |value| {
                             let mut result: HashMap<String, JSONValue> = HashMap::with_capacity(2);
                             result.insert("name".into(), JSONValue::String((&header).clone()));
@@ -927,7 +927,6 @@ fn add_body_part<'x, 'y>(
                             JSONValue::Object(result)
                         })
                     })
-                    .flatten()
                     .collect(),
             ),
         );

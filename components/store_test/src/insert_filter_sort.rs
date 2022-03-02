@@ -8,7 +8,7 @@ use nlp::Language;
 use store::{
     batch::WriteBatch,
     field::{FieldOptions, FullText, Text},
-    Comparator, ComparisonOperator, FieldValue, Filter, Store, TextQuery, UncommittedDocumentId,
+    Comparator, ComparisonOperator, FieldValue, Filter, Store, TextQuery,
 };
 
 use crate::deflate_artwork_data;
@@ -85,15 +85,13 @@ where
                     .has_headers(true)
                     .from_reader(&deflate_artwork_data()[..])
                     .records()
-                    .into_iter()
                 {
                     let record = record.unwrap();
                     let documents = documents.clone();
                     let record_id = db.assign_document_id(0, 0).unwrap();
-                    let full_id = record_id.get_document_id();
 
                     s.spawn_fifo(move |_| {
-                        let mut builder = WriteBatch::insert(0, record_id, full_id);
+                        let mut builder = WriteBatch::insert(0, record_id, record_id);
                         for (pos, field) in record.iter().enumerate() {
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {

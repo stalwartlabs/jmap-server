@@ -141,10 +141,14 @@ where
                     rpc::Response::Vote { term, vote_granted } => {
                         self.handle_vote_response(peer_id, term, vote_granted).await;
                     }
-                    rpc::Response::FollowLeader { term, success } => {
-                        self.handle_follow_leader_response(term, success);
-                    }
-                    rpc::Response::None => (),
+                    _ => (),
+                }
+            }
+            Message::StepDown { term } => {
+                if term > self.term {
+                    self.step_down(term);
+                } else {
+                    self.start_election_timer(false);
                 }
             }
         }

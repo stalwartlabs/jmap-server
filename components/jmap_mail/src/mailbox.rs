@@ -22,7 +22,7 @@ use store::field::{FieldOptions, Text};
 use store::{batch::WriteBatch, DocumentSet, Store};
 use store::{
     AccountId, Comparator, ComparisonOperator, DocumentId, DocumentSetBitOps, FieldComparator,
-    FieldId, FieldValue, Filter, LongInteger, StoreError, Tag, UncommittedDocumentId,
+    FieldId, FieldValue, Filter, LongInteger, StoreError, Tag,
 };
 
 use crate::import::{bincode_deserialize, bincode_serialize};
@@ -214,8 +214,8 @@ where
                 let assigned_id = self
                     .store
                     .assign_document_id(request.account_id, JMAP_MAILBOX)?;
-                let jmap_id = assigned_id.get_document_id() as JMAPId;
-                let mut document = WriteBatch::insert(JMAP_MAILBOX, assigned_id.clone(), jmap_id);
+                let jmap_id = assigned_id as JMAPId;
+                let mut document = WriteBatch::insert(JMAP_MAILBOX, assigned_id, jmap_id);
 
                 document.text(
                     JMAPMailboxProperties::Name,

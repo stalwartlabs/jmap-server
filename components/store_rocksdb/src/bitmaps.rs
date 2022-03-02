@@ -108,7 +108,7 @@ pub fn deserialize_bitlist(bm: &mut RoaringBitmap, bytes: &[u8]) -> crate::Resul
 
 #[inline(always)]
 pub fn deserialize_bitmap(bytes: &[u8]) -> crate::Result<RoaringBitmap> {
-    RoaringBitmap::deserialize_from(&bytes[1..])
+    RoaringBitmap::deserialize_unchecked_from(&bytes[1..])
         .map_err(|e| StoreError::InternalError(e.to_string()))
 }
 

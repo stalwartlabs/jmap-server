@@ -5,7 +5,6 @@ use nlp::Language;
 use crate::{
     field::{Field, FieldOptions, Text, UpdateField},
     ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
-    UncommittedDocumentId,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -13,12 +12,12 @@ pub const MAX_ID_LENGTH: usize = 80;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
-pub struct WriteBatch<'x, T: UncommittedDocumentId> {
-    pub collection: CollectionId,
+pub struct WriteBatch<'x> {
+    pub collection_id: CollectionId,
     pub default_language: Language,
     pub log_id: Option<ChangeLogId>,
     pub log_action: LogAction,
-    pub action: WriteAction<T>,
+    pub action: WriteAction,
     pub fields: Vec<UpdateField<'x>>,
 }
 
@@ -31,69 +30,69 @@ pub enum LogAction {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum WriteAction<T: UncommittedDocumentId> {
-    Insert(T),
+pub enum WriteAction {
+    Insert(DocumentId),
     Update(DocumentId),
     Delete(DocumentId),
 }
 
-impl<'x, T: UncommittedDocumentId> WriteBatch<'x, T> {
+impl<'x> WriteBatch<'x> {
     pub fn insert(
-        collection: CollectionId,
-        uncommited_id: T,
+        collection_id: CollectionId,
+        document_id: DocumentId,
         full_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x, T> {
+    ) -> WriteBatch<'x> {
         WriteBatch {
-            collection,
+            collection_id,
             default_language: Language::English,
             log_action: LogAction::Insert(full_id.into()),
-            action: WriteAction::Insert(uncommited_id),
+            action: WriteAction::Insert(document_id),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
     pub fn update(
-        collection: CollectionId,
-        document: DocumentId,
+        collection_id: CollectionId,
+        document_id: DocumentId,
         full_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x, T> {
+    ) -> WriteBatch<'x> {
         WriteBatch {
-            collection,
+            collection_id,
             default_language: Language::English,
             log_action: LogAction::Update(full_id.into()),
-            action: WriteAction::Update(document),
+            action: WriteAction::Update(document_id),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
     pub fn delete(
-        collection: CollectionId,
-        document: DocumentId,
+        collection_id: CollectionId,
+        document_id: DocumentId,
         full_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x, T> {
+    ) -> WriteBatch<'x> {
         WriteBatch {
-            collection,
+            collection_id,
             default_language: Language::English,
             log_action: LogAction::Delete(full_id.into()),
-            action: WriteAction::Delete(document),
+            action: WriteAction::Delete(document_id),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
     pub fn moved(
-        collection: CollectionId,
-        document: DocumentId,
+        collection_id: CollectionId,
+        document_id: DocumentId,
         old_log_id: impl Into<ChangeLogId>,
         new_log_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x, T> {
+    ) -> WriteBatch<'x> {
         WriteBatch {
-            collection,
+            collection_id,
             default_language: Language::English,
             log_action: LogAction::Move(old_log_id.into(), new_log_id.into()),
-            action: WriteAction::Update(document),
+            action: WriteAction::Update(document_id),
             fields: Vec::new(),
             log_id: None,
         }
@@ -177,7 +176,7 @@ impl<'x, T: UncommittedDocumentId> WriteBatch<'x, T> {
     }
 }
 
-impl<'x, T: UncommittedDocumentId> IntoIterator for WriteBatch<'x, T> {
+impl<'x> IntoIterator for WriteBatch<'x> {
     type Item = UpdateField<'x>;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 

@@ -3,65 +3,46 @@ use std::{collections::HashMap, sync::Arc};
 use nlp::Language;
 use rocksdb::BoundColumnFamily;
 use store::{
-    batch::{LogAction, WriteAction, WriteBatch},
+    batch::{WriteAction, WriteBatch},
+    changelog::{ChangeLogId, LogWriter},
     field::{FieldOptions, Text, TokenIterator, UpdateField},
     serialize::{
         serialize_acd_key_leb128, serialize_blob_key, serialize_bm_internal, serialize_bm_tag_key,
-        serialize_bm_term_key, serialize_bm_text_key, serialize_changelog_key, serialize_index_key,
-        serialize_stored_key, BLOB_KEY, BM_FREED_IDS, BM_TOMBSTONED_IDS, BM_USED_IDS,
+        serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
+        BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, ChangeLogId, CollectionId, DocumentId, StoreBlob, StoreError, StoreUpdate,
+    AccountId, CollectionId, DocumentId, StoreBlob, StoreError, StoreUpdate,
 };
 
 use crate::{
     bitmaps::set_clear_bits,
     blob::{blob_to_key, serialize_blob_keys_from_value},
-    changelog::ChangeLogWriter,
-    document_id::AssignedDocumentId,
     RocksDBStore,
 };
 
 impl StoreUpdate for RocksDBStore {
-    type UncommittedId = AssignedDocumentId;
-
     fn update_documents(
         &self,
-        account: AccountId,
-        batches: Vec<WriteBatch<AssignedDocumentId>>,
+        account_id: AccountId,
+        batches: Vec<WriteBatch>,
     ) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
         let cf_indexes = self.get_handle("indexes")?;
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut write_batch = rocksdb::WriteBatch::default();
 
-        let mut change_log_list = HashMap::new();
+        let mut change_log = LogWriter::new();
         let mut bitmap_list = HashMap::new();
 
         for batch in batches {
             match batch.action {
                 WriteAction::Insert(document_id) => {
-                    let document_id = match document_id {
-                        AssignedDocumentId::Freed(document_id) => {
-                            // Remove document id from freed ids
-                            bitmap_list
-                                .entry(serialize_bm_internal(
-                                    account,
-                                    batch.collection,
-                                    BM_FREED_IDS,
-                                ))
-                                .or_insert_with(HashMap::new)
-                                .insert(document_id, false);
-                            document_id
-                        }
-                        AssignedDocumentId::New(document_id) => document_id,
-                    };
-
                     // Add document id to collection
                     bitmap_list
                         .entry(serialize_bm_internal(
-                            account,
-                            batch.collection,
+                            account_id,
+                            batch.collection_id,
                             BM_USED_IDS,
                         ))
                         .or_insert_with(HashMap::new)
@@ -72,8 +53,8 @@ impl StoreUpdate for RocksDBStore {
                         &cf_values,
                         &cf_indexes,
                         &mut bitmap_list,
-                        account,
-                        batch.collection,
+                        account_id,
+                        batch.collection_id,
                         document_id,
                         batch.default_language,
                         batch.fields,
@@ -85,8 +66,8 @@ impl StoreUpdate for RocksDBStore {
                         &cf_values,
                         &cf_indexes,
                         &mut bitmap_list,
-                        account,
-                        batch.collection,
+                        account_id,
+                        batch.collection_id,
                         document_id,
                         batch.default_language,
                         batch.fields,
@@ -98,7 +79,7 @@ impl StoreUpdate for RocksDBStore {
                         .db
                         .get_cf(
                             &cf_values,
-                            &serialize_blob_key(account, batch.collection, document_id),
+                            &serialize_blob_key(account_id, batch.collection_id, document_id),
                         )
                         .map_err(|e| StoreError::InternalError(e.into_string()))?
                     {
@@ -114,8 +95,8 @@ impl StoreUpdate for RocksDBStore {
                     // Add document id to tombstoned ids
                     bitmap_list
                         .entry(serialize_bm_internal(
-                            account,
-                            batch.collection,
+                            account_id,
+                            batch.collection_id,
                             BM_TOMBSTONED_IDS,
                         ))
                         .or_insert_with(HashMap::new)
@@ -123,47 +104,30 @@ impl StoreUpdate for RocksDBStore {
                 }
             }
 
-            let change_id = if let Some(change_id) = batch.log_id {
-                change_id
-            } else {
-                self.assign_change_id(account, batch.collection)?
-            };
-            let change_log_entry = change_log_list
-                .entry((account, batch.collection, change_id))
-                .or_insert_with(ChangeLogWriter::new);
-
-            match batch.log_action {
-                LogAction::Insert(id) => {
-                    change_log_entry.inserts.push(id);
-                }
-                LogAction::Update(id) => {
-                    change_log_entry.updates.push(id);
-                }
-                LogAction::Delete(id) => {
-                    change_log_entry.deletes.push(id);
-                }
-                LogAction::Move(old_id, id) => {
-                    change_log_entry.inserts.push(id);
-                    change_log_entry.deletes.push(old_id);
-                }
-            }
+            change_log.add_change(
+                account_id,
+                batch.collection_id,
+                if let Some(change_id) = batch.log_id {
+                    change_id
+                } else {
+                    self.assign_change_id(account_id, batch.collection_id)?
+                },
+                batch.log_action,
+            );
         }
 
-        if !change_log_list.is_empty() {
-            let cf_log = self.get_handle("log")?;
-            for ((account, collection, change_id), change_log) in change_log_list {
-                write_batch.put_cf(
-                    &cf_log,
-                    serialize_changelog_key(account, collection, change_id),
-                    change_log.serialize(),
-                );
-            }
+        // Write Raft and change log
+        let cf_log = self.get_handle("log")?;
+        for (key, value) in change_log.serialize(0, 0) {
+            write_batch.put_cf(&cf_log, key, value);
         }
 
+        // Update bitmaps
         for (key, doc_id_list) in bitmap_list {
             write_batch.merge_cf(&cf_bitmaps, key, set_clear_bits(doc_id_list.into_iter()))
         }
 
+        // Submit write batch
         self.db
             .write(write_batch)
             .map_err(|e| StoreError::InternalError(e.to_string()))?;
@@ -173,28 +137,24 @@ impl StoreUpdate for RocksDBStore {
 
     fn assign_change_id(
         &self,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
     ) -> store::Result<ChangeLogId> {
-        let id_assigner_lock = self.get_id_assigner(account, collection)?;
-        let mut id_assigner = id_assigner_lock
+        Ok(self
+            .get_id_assigner(account_id, collection_id)?
             .lock()
-            .map_err(|_| StoreError::InternalError("Failed to obtain MutexLock".to_string()))?;
-
-        Ok(id_assigner.assign_change_id())
+            .assign_change_id())
     }
 
     fn assign_document_id(
         &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<AssignedDocumentId> {
-        let id_assigner_lock = self.get_id_assigner(account, collection)?;
-        let mut id_assigner = id_assigner_lock
+        account_id: AccountId,
+        collection_id: CollectionId,
+    ) -> store::Result<DocumentId> {
+        Ok(self
+            .get_id_assigner(account_id, collection_id)?
             .lock()
-            .map_err(|_| StoreError::InternalError("Failed to obtain MutexLock".to_string()))?;
-
-        Ok(id_assigner.assign_id())
+            .assign_document_id())
     }
 }
 
@@ -206,8 +166,8 @@ impl RocksDBStore {
         cf_values: &Arc<BoundColumnFamily>,
         cf_indexes: &Arc<BoundColumnFamily>,
         bitmap_list: &mut HashMap<Vec<u8>, HashMap<DocumentId, bool>>,
-        account: AccountId,
-        collection: CollectionId,
+        account_id: AccountId,
+        collection_id: CollectionId,
         document_id: DocumentId,
         default_language: Language,
         fields: Vec<UpdateField>,
@@ -235,8 +195,8 @@ impl RocksDBStore {
                         Text::Keyword(text) => {
                             bitmap_list
                                 .entry(serialize_bm_text_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     t.get_field(),
                                     text,
                                 ))
@@ -248,8 +208,8 @@ impl RocksDBStore {
                             for token in TokenIterator::new(text, Language::English, false) {
                                 bitmap_list
                                     .entry(serialize_bm_text_key(
-                                        account,
-                                        collection,
+                                        account_id,
+                                        collection_id,
                                         t.get_field(),
                                         &token.word,
                                     ))
@@ -272,8 +232,8 @@ impl RocksDBStore {
                                 for term in &terms {
                                     bitmap_list
                                         .entry(serialize_bm_term_key(
-                                            account,
-                                            collection,
+                                            account_id,
+                                            collection_id,
                                             t.get_field(),
                                             term.id,
                                             true,
@@ -284,8 +244,8 @@ impl RocksDBStore {
                                     if term.id_stemmed != term.id {
                                         bitmap_list
                                             .entry(serialize_bm_term_key(
-                                                account,
-                                                collection,
+                                                account_id,
+                                                collection_id,
                                                 t.get_field(),
                                                 term.id_stemmed,
                                                 false,
@@ -308,8 +268,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_values,
                                 serialize_stored_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     t.get_field(),
                                 ),
@@ -321,8 +281,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_indexes,
                                 &serialize_index_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     t.get_field(),
                                     text.as_bytes(),
@@ -333,14 +293,19 @@ impl RocksDBStore {
                     } else {
                         batch.delete_cf(
                             cf_values,
-                            serialize_stored_key(account, collection, document_id, t.get_field()),
+                            serialize_stored_key(
+                                account_id,
+                                collection_id,
+                                document_id,
+                                t.get_field(),
+                            ),
                         );
 
                         batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
-                                account,
-                                collection,
+                                account_id,
+                                collection_id,
                                 document_id,
                                 t.get_field(),
                                 text.as_bytes(),
@@ -351,8 +316,8 @@ impl RocksDBStore {
                 UpdateField::Tag(t) => {
                     bitmap_list
                         .entry(serialize_bm_tag_key(
-                            account,
-                            collection,
+                            account_id,
+                            collection_id,
                             t.get_field(),
                             &t.value,
                         ))
@@ -365,7 +330,12 @@ impl RocksDBStore {
                     } else {
                         batch.put_cf(
                             cf_values,
-                            serialize_stored_key(account, collection, document_id, b.get_field()),
+                            serialize_stored_key(
+                                account_id,
+                                collection_id,
+                                document_id,
+                                b.get_field(),
+                            ),
                             &b.value,
                         );
                     }
@@ -376,8 +346,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_values,
                                 serialize_stored_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     i.get_field(),
                                 ),
@@ -389,8 +359,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_indexes,
                                 &serialize_index_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     i.get_field(),
                                     &i.value.to_be_bytes(),
@@ -401,14 +371,19 @@ impl RocksDBStore {
                     } else {
                         batch.delete_cf(
                             cf_values,
-                            serialize_stored_key(account, collection, document_id, i.get_field()),
+                            serialize_stored_key(
+                                account_id,
+                                collection_id,
+                                document_id,
+                                i.get_field(),
+                            ),
                         );
 
                         batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
-                                account,
-                                collection,
+                                account_id,
+                                collection_id,
                                 document_id,
                                 i.get_field(),
                                 &i.value.to_be_bytes(),
@@ -422,8 +397,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_values,
                                 serialize_stored_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     i.get_field(),
                                 ),
@@ -435,8 +410,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_indexes,
                                 &serialize_index_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     i.get_field(),
                                     &i.value.to_be_bytes(),
@@ -447,14 +422,19 @@ impl RocksDBStore {
                     } else {
                         batch.delete_cf(
                             cf_values,
-                            serialize_stored_key(account, collection, document_id, i.get_field()),
+                            serialize_stored_key(
+                                account_id,
+                                collection_id,
+                                document_id,
+                                i.get_field(),
+                            ),
                         );
 
                         batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
-                                account,
-                                collection,
+                                account_id,
+                                collection_id,
                                 document_id,
                                 i.get_field(),
                                 &i.value.to_be_bytes(),
@@ -468,8 +448,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_values,
                                 serialize_stored_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     f.get_field(),
                                 ),
@@ -481,8 +461,8 @@ impl RocksDBStore {
                             batch.put_cf(
                                 cf_indexes,
                                 &serialize_index_key(
-                                    account,
-                                    collection,
+                                    account_id,
+                                    collection_id,
                                     document_id,
                                     f.get_field(),
                                     &f.value.to_be_bytes(),
@@ -493,14 +473,19 @@ impl RocksDBStore {
                     } else {
                         batch.delete_cf(
                             cf_values,
-                            serialize_stored_key(account, collection, document_id, f.get_field()),
+                            serialize_stored_key(
+                                account_id,
+                                collection_id,
+                                document_id,
+                                f.get_field(),
+                            ),
                         );
 
                         batch.delete_cf(
                             cf_indexes,
                             &serialize_index_key(
-                                account,
-                                collection,
+                                account_id,
+                                collection_id,
                                 document_id,
                                 f.get_field(),
                                 &f.value.to_be_bytes(),
@@ -515,7 +500,7 @@ impl RocksDBStore {
         if !term_index.is_empty() {
             batch.put_cf(
                 cf_values,
-                &serialize_acd_key_leb128(account, collection, document_id),
+                &serialize_acd_key_leb128(account_id, collection_id, document_id),
                 &term_index.compress(),
             );
         }
@@ -554,7 +539,7 @@ impl RocksDBStore {
 
             batch.put_cf(
                 cf_values,
-                &serialize_blob_key(account, collection, document_id),
+                &serialize_blob_key(account_id, collection_id, document_id),
                 &blob_entries,
             );
         }

@@ -17,7 +17,6 @@ use store::{
     bincode,
     field::{FieldOptions, Text},
     AccountId, Comparator, DocumentSet, FieldValue, Filter, Store, StoreError, Tag, ThreadId,
-    UncommittedDocumentId,
 };
 
 use crate::{parse::build_message_document, query::MailboxId, MessageField};
@@ -192,7 +191,7 @@ pub trait JMAPMailLocalStoreImport<'x> {
     fn mail_merge_threads(
         &self,
         account: AccountId,
-        documents: &mut Vec<WriteBatch<impl UncommittedDocumentId>>,
+        documents: &mut Vec<WriteBatch>,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
 }
@@ -210,9 +209,8 @@ where
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue> {
         // Build message document
-        let assigned_id = self.store.assign_document_id(account, JMAP_MAIL)?;
-        let document_id = assigned_id.get_document_id();
-        let mut document = WriteBatch::insert(JMAP_MAIL, assigned_id, document_id);
+        let document_id = self.store.assign_document_id(account, JMAP_MAIL)?;
+        let mut document = WriteBatch::insert(JMAP_MAIL, document_id, document_id);
         let (reference_ids, thread_name) = build_message_document(
             &mut document,
             Message::parse(blob).ok_or(StoreError::ParseError)?,
@@ -319,12 +317,8 @@ where
             thread_id
         } else {
             let thread_id = self.store.assign_document_id(account, JMAP_THREAD)?;
-            documents.push(WriteBatch::insert(
-                JMAP_THREAD,
-                thread_id.clone(),
-                thread_id.get_document_id(),
-            ));
-            thread_id.get_document_id()
+            documents.push(WriteBatch::insert(JMAP_THREAD, thread_id, thread_id));
+            thread_id
         };
 
         for reference_id in reference_ids {
@@ -376,7 +370,7 @@ where
     fn mail_merge_threads(
         &self,
         account: AccountId,
-        documents: &mut Vec<WriteBatch<impl UncommittedDocumentId>>,
+        documents: &mut Vec<WriteBatch>,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId> {
         // Query tags for all thread ids

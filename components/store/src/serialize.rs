@@ -18,7 +18,6 @@ pub const BM_TAG_TEXT: u8 = 4;
 pub const BM_TAG_STATIC: u8 = 5;
 pub const BM_USED_IDS: u8 = 6;
 pub const BM_TOMBSTONED_IDS: u8 = 7;
-pub const BM_FREED_IDS: u8 = 8;
 
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
 pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
@@ -244,6 +243,14 @@ pub fn serialize_changelog_key(
     bytes.extend_from_slice(&account.to_be_bytes());
     bytes.extend_from_slice(&collection.to_be_bytes());
     bytes.extend_from_slice(&change_id.to_be_bytes());
+    bytes
+}
+
+pub fn serialize_raftlog_key(term: ChangeLogId, log_index: ChangeLogId) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity((std::mem::size_of::<ChangeLogId>() * 2) + 1);
+    bytes.push(INTERNAL_KEY_PREFIX);
+    bytes.extend_from_slice(&term.to_be_bytes());
+    bytes.extend_from_slice(&log_index.to_be_bytes());
     bytes
 }
 

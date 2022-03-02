@@ -13,18 +13,21 @@ pub mod term;
 use std::{
     convert::TryInto,
     path::PathBuf,
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
 
 use bitmaps::{bitmap_compact, bitmap_merge};
-use document_id::{DocumentIdAssigner, DocumentIdCacheKey};
+use document_id::{IdAssigner, IdCacheKey};
 use moka::sync::Cache;
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded,
     Options,
 };
-use store::{mutex_map::MutexMap, serialize::LAST_TERM_ID_KEY, Result, Store, StoreError, TermId};
+use store::{
+    mutex_map::MutexMap, parking_lot::Mutex, serialize::LAST_TERM_ID_KEY, Result, Store,
+    StoreError, TermId,
+};
 
 pub struct RocksDBStoreConfig {
     pub path: String,
@@ -52,7 +55,7 @@ pub struct RocksDBStore {
     db: DBWithThreadMode<MultiThreaded>,
     blob_path: PathBuf,
     blob_lock: MutexMap<()>,
-    doc_id_cache: Cache<DocumentIdCacheKey, Arc<Mutex<DocumentIdAssigner>>>,
+    doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
     term_id_cache: Cache<String, TermId>,
     term_id_lock: MutexMap<()>,
     term_id_last: AtomicU64,
