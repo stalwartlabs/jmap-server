@@ -9,27 +9,17 @@ use tracing::{debug, error};
 
 use super::{
     raft::LogIndex,
-    rpc::{self, Request, Response, RpcMessage},
-    Cluster, Message,
+    rpc::{self, Request, Response, RpcEvent},
+    Cluster, Event,
 };
-
-/*
-
-mail:
- - blob
- - tags (keyword, mailbox, thread_id)
-
-
-
-*/
 
 const RETRY_MS: u64 = 30 * 1000;
 
 pub fn start_log_sync<T>(
     cluster: &Cluster<T>,
-    peer_tx: mpsc::Sender<rpc::RpcMessage>,
-) -> watch::Sender<LogIndex>
-where
+    peer_tx: mpsc::Sender<rpc::RpcEvent>,
+    mut rx: watch::Receiver<LogIndex>,
+) where
     T: for<'x> Store<'x> + 'static,
 {
     let term = cluster.term;
@@ -37,8 +27,6 @@ where
     let last_log_term = cluster.last_log_term;
     let main_tx = cluster.tx.clone();
     let core = cluster.core.clone();
-
-    let (tx, mut rx) = watch::channel(last_log_index);
 
     tokio::spawn(async move {
         debug!("Started log sync process!");
@@ -58,7 +46,7 @@ where
             .await
             {
                 if !success || peer_term > term {
-                    if let Err(err) = main_tx.send(Message::StepDown { term: peer_term }).await {
+                    if let Err(err) = main_tx.send(Event::StepDown { term: peer_term }).await {
                         error!("Error sending step down message: {}", err);
                     }
                     break;
@@ -87,14 +75,12 @@ where
             }
         }
     });
-
-    tx
 }
 
-async fn send_request(peer_tx: &mpsc::Sender<rpc::RpcMessage>, request: Request) -> Response {
+async fn send_request(peer_tx: &mpsc::Sender<rpc::RpcEvent>, request: Request) -> Response {
     let (response_tx, rx) = oneshot::channel();
     if let Err(err) = peer_tx
-        .send(RpcMessage::NeedResponse {
+        .send(RpcEvent::NeedResponse {
             request,
             response_tx,
         })

@@ -3,9 +3,15 @@ use std::collections::HashMap;
 use crate::batch::LogAction;
 use crate::leb128::Leb128;
 use crate::serialize::{serialize_changelog_key, serialize_raftlog_key};
-use crate::{AccountId, CollectionId, StoreError};
+use crate::{AccountId, CollectionId};
 
 pub type ChangeLogId = u64;
+
+#[derive(Default)]
+pub struct RaftId {
+    pub term: ChangeLogId,
+    pub index: ChangeLogId,
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ChangeLogEntry {
@@ -30,6 +36,7 @@ impl Default for ChangeLog {
     }
 }
 
+#[derive(Debug)]
 pub enum ChangeLogQuery {
     All,
     Since(ChangeLogId),
@@ -38,47 +45,22 @@ pub enum ChangeLogQuery {
 }
 
 impl ChangeLog {
-    pub fn deserialize(&mut self, bytes: &[u8]) -> crate::Result<()> {
+    pub fn deserialize(&mut self, bytes: &[u8]) -> Option<()> {
         let mut bytes_it = bytes.iter();
-        let total_inserts = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-            StoreError::DeserializeError(format!(
-                "Failed to deserialize total inserts from bytes: {:?}",
-                bytes
-            ))
-        })?;
-        let total_updates = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-            StoreError::DeserializeError(format!(
-                "Failed to deserialize total updates from bytes: {:?}",
-                bytes
-            ))
-        })?;
-        let total_deletes = usize::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-            StoreError::DeserializeError(format!(
-                "Failed to deserialize total deletes from bytes: {:?}",
-                bytes
-            ))
-        })?;
+        let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
+        let total_updates = usize::from_leb128_it(&mut bytes_it)?;
+        let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
 
         if total_inserts > 0 {
             for _ in 0..total_inserts {
-                let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-                    StoreError::DeserializeError(format!(
-                        "Failed to deserialize change id from bytes: {:?}",
-                        bytes
-                    ))
-                })?;
+                let id = ChangeLogId::from_leb128_it(&mut bytes_it)?;
                 self.changes.push(ChangeLogEntry::Insert(id));
             }
         }
 
         if total_updates > 0 {
             'update_outer: for _ in 0..total_updates {
-                let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-                    StoreError::DeserializeError(format!(
-                        "Failed to deserialize change id from bytes: {:?}",
-                        bytes
-                    ))
-                })?;
+                let id = ChangeLogId::from_leb128_it(&mut bytes_it)?;
 
                 if !self.changes.is_empty() {
                     let mut update_idx = None;
@@ -112,12 +94,7 @@ impl ChangeLog {
 
         if total_deletes > 0 {
             'delete_outer: for _ in 0..total_deletes {
-                let id = ChangeLogId::from_leb128_it(&mut bytes_it).ok_or_else(|| {
-                    StoreError::DeserializeError(format!(
-                        "Failed to deserialize change id from bytes: {:?}",
-                        bytes
-                    ))
-                })?;
+                let id = ChangeLogId::from_leb128_it(&mut bytes_it)?;
 
                 if !self.changes.is_empty() {
                     let mut update_idx = None;
@@ -147,7 +124,7 @@ impl ChangeLog {
             }
         }
 
-        Ok(())
+        Some(())
     }
 }
 
@@ -187,26 +164,30 @@ impl LogEntry {
     }
 }
 
-#[derive(Default)]
 pub struct LogWriter {
-    pub changes: HashMap<(AccountId, CollectionId, ChangeLogId), LogEntry>,
+    pub account_id: AccountId,
+    pub raft_id: RaftId,
+    pub changes: HashMap<(CollectionId, ChangeLogId), LogEntry>,
 }
 
 impl LogWriter {
-    pub fn new() -> Self {
-        LogWriter::default()
+    pub fn new(account_id: AccountId, raft_id: RaftId) -> Self {
+        LogWriter {
+            account_id,
+            raft_id,
+            changes: HashMap::new(),
+        }
     }
 
     pub fn add_change(
         &mut self,
-        account_id: AccountId,
         collection_id: CollectionId,
         change_id: ChangeLogId,
         action: LogAction,
     ) {
         let log_entry = self
             .changes
-            .entry((account_id, collection_id, change_id))
+            .entry((collection_id, change_id))
             .or_insert_with(LogEntry::new);
 
         match action {
@@ -226,24 +207,27 @@ impl LogWriter {
         }
     }
 
-    pub fn serialize(self, term: ChangeLogId, log_index: ChangeLogId) -> Vec<(Vec<u8>, Vec<u8>)> {
+    pub fn serialize(self) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut entries = Vec::with_capacity(self.changes.len() + 1);
         let mut bytes = Vec::with_capacity(self.changes.len() * 256);
 
         self.changes.len().to_leb128_bytes(&mut bytes);
 
-        for ((account_id, collection_id, change_id), log_entry) in self.changes {
+        for ((collection_id, change_id), log_entry) in self.changes {
             let entry_bytes = log_entry.serialize();
-            account_id.to_leb128_bytes(&mut bytes);
+            self.account_id.to_leb128_bytes(&mut bytes);
             collection_id.to_leb128_bytes(&mut bytes);
             change_id.to_leb128_bytes(&mut bytes);
             bytes.extend_from_slice(&entry_bytes);
             entries.push((
-                serialize_changelog_key(account_id, collection_id, change_id),
+                serialize_changelog_key(self.account_id, collection_id, change_id),
                 entry_bytes,
             ));
         }
-        entries.push((serialize_raftlog_key(term, log_index), bytes));
+        entries.push((
+            serialize_raftlog_key(self.raft_id.term, self.raft_id.index),
+            bytes,
+        ));
 
         entries
     }

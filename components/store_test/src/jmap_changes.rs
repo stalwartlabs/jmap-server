@@ -6,6 +6,7 @@ use jmap_store::{
 };
 use store::{
     batch::{LogAction, WriteBatch},
+    changelog::RaftId,
     Store,
 };
 
@@ -134,7 +135,10 @@ where
             documents.push(batch);
         }
 
-        mail_store.store.update_documents(0, documents).unwrap();
+        mail_store
+            .store
+            .update_documents(0, RaftId::default(), documents)
+            .unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {

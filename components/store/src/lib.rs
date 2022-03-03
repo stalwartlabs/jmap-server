@@ -10,9 +10,9 @@ pub mod term_index;
 use std::{iter::FromIterator, ops::Range};
 
 use batch::WriteBatch;
-use changelog::{ChangeLog, ChangeLogId, ChangeLogQuery};
+use changelog::{ChangeLog, ChangeLogId, ChangeLogQuery, RaftId};
 use nlp::Language;
-use serialize::StoreDeserialize;
+use serialize::{StoreDeserialize, StoreSerialize};
 
 pub use bincode;
 pub use parking_lot;
@@ -270,11 +270,23 @@ pub trait StoreUpdate {
         collection_id: CollectionId,
     ) -> crate::Result<ChangeLogId>;
 
-    fn update_document(&self, account_id: AccountId, document: WriteBatch) -> crate::Result<()> {
-        self.update_documents(account_id, vec![document])
+    fn update_document(
+        &self,
+        account_id: AccountId,
+        raft_id: RaftId,
+        document: WriteBatch,
+    ) -> crate::Result<()> {
+        self.update_documents(account_id, raft_id, vec![document])
     }
 
-    fn update_documents(&self, account_id: AccountId, documents: Vec<WriteBatch>) -> Result<()>;
+    fn update_documents(
+        &self,
+        account_id: AccountId,
+        raft_id: RaftId,
+        documents: Vec<WriteBatch>,
+    ) -> Result<()>;
+
+    fn set_key(&self, key: &str, value: impl StoreSerialize) -> Result<()>;
 }
 
 pub trait StoreQuery<'x>: StoreDocumentSet {
@@ -290,12 +302,7 @@ pub trait StoreQuery<'x>: StoreDocumentSet {
 }
 
 pub trait StoreGet {
-    fn get_value<T>(
-        &self,
-        account: Option<AccountId>,
-        collection: Option<CollectionId>,
-        field: Option<FieldId>,
-    ) -> crate::Result<Option<T>>
+    fn get_key<T>(&self, key: &str) -> crate::Result<Option<T>>
     where
         T: StoreDeserialize;
 
@@ -418,6 +425,7 @@ pub trait StoreDelete {
 }
 
 pub trait StoreChangeLog {
+    fn get_last_raft_id(&self) -> Result<Option<RaftId>>;
     fn get_last_change_id(
         &self,
         account_id: AccountId,

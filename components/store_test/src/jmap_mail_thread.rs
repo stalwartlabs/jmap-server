@@ -1,6 +1,6 @@
 use jmap_mail::{import::JMAPMailLocalStoreImport, JMAPMailThread};
 use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPGet};
-use store::Store;
+use store::{changelog::RaftId, Store};
 
 pub fn test_jmap_mail_thread<T>(mail_store: JMAPLocalStore<T>)
 where
@@ -13,6 +13,7 @@ where
         let mut result = mail_store
             .mail_import_blob(
                 0,
+                RaftId::default(),
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).as_bytes(),
                 vec![],
                 vec![],

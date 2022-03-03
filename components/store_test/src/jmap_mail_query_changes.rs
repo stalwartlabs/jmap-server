@@ -11,6 +11,7 @@ use jmap_store::{
 };
 use store::{
     batch::{LogAction, WriteBatch},
+    changelog::RaftId,
     field::FieldOptions,
     Store, Tag,
 };
@@ -66,6 +67,7 @@ where
                 let jmap_id = mail_store
                     .mail_import_blob(
                         0,
+                        RaftId::default(),
                         format!(
                             "From: test_{}\nSubject: test_{}\n\ntest",
                             if change_num % 2 == 0 { 1 } else { 2 },
@@ -98,7 +100,11 @@ where
 
                 mail_store
                     .store
-                    .update_document(0, WriteBatch::update(0, id.get_document_id(), id))
+                    .update_document(
+                        0,
+                        RaftId::default(),
+                        WriteBatch::update(0, id.get_document_id(), id),
+                    )
                     .unwrap();
                 updated_ids.insert(id);
             }
@@ -106,7 +112,11 @@ where
                 let id = *id_map.get(id).unwrap();
                 mail_store
                     .store
-                    .update_document(0, WriteBatch::delete(0, id.get_document_id(), id))
+                    .update_document(
+                        0,
+                        RaftId::default(),
+                        WriteBatch::delete(0, id.get_document_id(), id),
+                    )
                     .unwrap();
                 removed_ids.insert(id);
             }
@@ -121,7 +131,10 @@ where
                     Tag::Id(thread_id),
                     FieldOptions::None,
                 );
-                mail_store.store.update_document(0, batch).unwrap();
+                mail_store
+                    .store
+                    .update_document(0, RaftId::default(), batch)
+                    .unwrap();
 
                 id_map.insert(*to, new_id);
                 if type1_ids.contains(&id) {

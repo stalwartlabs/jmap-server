@@ -10,7 +10,7 @@ use std::{
     fs,
     path::PathBuf,
 };
-use store::{Store, Tag};
+use store::{changelog::RaftId, Store, Tag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -86,6 +86,7 @@ where
         let jmap_id = mail_store
             .mail_import_blob(
                 0,
+                RaftId::default(),
                 &blob,
                 vec![],
                 vec![Tag::Text("tag".into())],

@@ -7,6 +7,7 @@ use std::{
 use nlp::Language;
 use store::{
     batch::WriteBatch,
+    changelog::RaftId,
     field::{FieldOptions, FullText, Text},
     Comparator, ComparisonOperator, FieldValue, Filter, Store, TextQuery,
 };
@@ -157,7 +158,7 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            db.update_documents(0, chunk).unwrap();
+                            db.update_documents(0, RaftId::default(), chunk).unwrap();
                             println!(
                                 "Inserted {} entries in {} ms (Thread {}/{}).",
                                 num_docs,

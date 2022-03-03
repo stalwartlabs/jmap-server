@@ -19,7 +19,7 @@ use tracing::{debug, error};
 use super::{
     gossip::PeerInfo,
     raft::{LogIndex, TermId},
-    Message, Peer, PeerId, IPC_CHANNEL_BUFFER,
+    Event, Peer, PeerId, IPC_CHANNEL_BUFFER,
 };
 
 const RPC_TIMEOUT_MS: u64 = 1000;
@@ -47,7 +47,7 @@ pub enum Request {
     None,
 }
 
-pub enum RpcMessage {
+pub enum RpcEvent {
     FireAndForget {
         request: Request,
     },
@@ -150,7 +150,7 @@ impl Encoder<Protocol> for RpcEncoder {
     }
 }
 
-pub async fn start_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Message>, key: String) {
+pub async fn start_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Event>, key: String) {
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
         panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
@@ -174,9 +174,9 @@ pub async fn start_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Message>, key: St
     });
 }
 
-impl RpcMessage {
+impl RpcEvent {
     pub fn failed(self) {
-        if let RpcMessage::NeedResponse { response_tx, .. } = self {
+        if let RpcEvent::NeedResponse { response_tx, .. } = self {
             if response_tx.send(Response::None).is_err() {
                 error!("Channel failed while sending message.");
             }
@@ -185,13 +185,13 @@ impl RpcMessage {
 }
 
 pub fn start_peer_rpc(
-    main_tx: mpsc::Sender<Message>,
+    main_tx: mpsc::Sender<Event>,
     local_peer_id: PeerId,
     key: String,
     peer_id: PeerId,
     peer_addr: SocketAddr,
-) -> mpsc::Sender<RpcMessage> {
-    let (tx, mut rx) = mpsc::channel::<RpcMessage>(IPC_CHANNEL_BUFFER);
+) -> mpsc::Sender<RpcEvent> {
+    let (tx, mut rx) = mpsc::channel::<RpcEvent>(IPC_CHANNEL_BUFFER);
     let auth_frame = Protocol::Request(Request::Auth {
         peer_id: local_peer_id,
         key,
@@ -263,7 +263,7 @@ pub fn start_peer_rpc(
             };
 
             let err = match message {
-                RpcMessage::NeedResponse {
+                RpcEvent::NeedResponse {
                     response_tx,
                     request,
                 } => match send_rpc(conn, request).await {
@@ -281,12 +281,11 @@ pub fn start_peer_rpc(
                         err
                     }
                 },
-                RpcMessage::FireAndForget { request } => match send_rpc(conn, request).await {
+                RpcEvent::FireAndForget { request } => match send_rpc(conn, request).await {
                     Ok(response) => {
                         // Send response via the main channel
-                        if let Err(err) = main_tx
-                            .send(Message::RpcResponse { peer_id, response })
-                            .await
+                        if let Err(err) =
+                            main_tx.send(Event::RpcResponse { peer_id, response }).await
                         {
                             error!("Channel failed while sending message: {}", err);
                         }
@@ -307,7 +306,7 @@ pub fn start_peer_rpc(
     tx
 }
 
-async fn handle_conn(stream: TcpStream, tx: mpsc::Sender<Message>, auth_key: String) {
+async fn handle_conn(stream: TcpStream, tx: mpsc::Sender<Event>, auth_key: String) {
     let peer_addr = stream.peer_addr().unwrap();
     let mut frames = Framed::new(stream, RpcEncoder::default());
 
@@ -347,7 +346,7 @@ async fn handle_conn(stream: TcpStream, tx: mpsc::Sender<Message>, auth_key: Str
                 let (response_tx, response_rx) = oneshot::channel();
 
                 if let Err(err) = tx
-                    .send(Message::RpcRequest {
+                    .send(Event::RpcRequest {
                         peer_id,
                         response_tx,
                         request,
@@ -426,7 +425,7 @@ impl Peer {
         let (response_tx, rx) = oneshot::channel();
         if let Err(err) = self
             .tx
-            .send(RpcMessage::NeedResponse {
+            .send(RpcEvent::NeedResponse {
                 request,
                 response_tx,
             })
@@ -441,7 +440,7 @@ impl Peer {
     // Submits a request, the result is returned at a later time via the main channel.
     pub async fn dispatch_request(&self, request: Request) {
         //debug!("OUT: {:?}", request);
-        if let Err(err) = self.tx.send(RpcMessage::FireAndForget { request }).await {
+        if let Err(err) = self.tx.send(RpcEvent::FireAndForget { request }).await {
             error!("Channel failed: {}", err);
         }
     }

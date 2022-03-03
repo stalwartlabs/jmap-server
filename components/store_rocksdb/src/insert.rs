@@ -4,12 +4,12 @@ use nlp::Language;
 use rocksdb::BoundColumnFamily;
 use store::{
     batch::{WriteAction, WriteBatch},
-    changelog::{ChangeLogId, LogWriter},
+    changelog::{ChangeLogId, LogWriter, RaftId},
     field::{FieldOptions, Text, TokenIterator, UpdateField},
     serialize::{
         serialize_acd_key_leb128, serialize_blob_key, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
-        BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
+        StoreSerialize, BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
     AccountId, CollectionId, DocumentId, StoreBlob, StoreError, StoreUpdate,
@@ -25,6 +25,7 @@ impl StoreUpdate for RocksDBStore {
     fn update_documents(
         &self,
         account_id: AccountId,
+        raft_id: RaftId,
         batches: Vec<WriteBatch>,
     ) -> store::Result<()> {
         let cf_values = self.get_handle("values")?;
@@ -32,7 +33,7 @@ impl StoreUpdate for RocksDBStore {
         let cf_bitmaps = self.get_handle("bitmaps")?;
         let mut write_batch = rocksdb::WriteBatch::default();
 
-        let mut change_log = LogWriter::new();
+        let mut change_log = LogWriter::new(account_id, raft_id);
         let mut bitmap_list = HashMap::new();
 
         for batch in batches {
@@ -105,7 +106,6 @@ impl StoreUpdate for RocksDBStore {
             }
 
             change_log.add_change(
-                account_id,
                 batch.collection_id,
                 if let Some(change_id) = batch.log_id {
                     change_id
@@ -118,7 +118,7 @@ impl StoreUpdate for RocksDBStore {
 
         // Write Raft and change log
         let cf_log = self.get_handle("log")?;
-        for (key, value) in change_log.serialize(0, 0) {
+        for (key, value) in change_log.serialize() {
             write_batch.put_cf(&cf_log, key, value);
         }
 
@@ -155,6 +155,18 @@ impl StoreUpdate for RocksDBStore {
             .get_id_assigner(account_id, collection_id)?
             .lock()
             .assign_document_id())
+    }
+
+    fn set_key(&self, key: &str, value: impl StoreSerialize) -> store::Result<()> {
+        self.db
+            .put_cf(
+                &self.get_handle("values")?,
+                key.as_bytes(),
+                value.serialize().ok_or_else(|| {
+                    StoreError::DeserializeError("Failed to serialize key value".into())
+                })?,
+            )
+            .map_err(|e| StoreError::InternalError(e.to_string()))
     }
 }
 

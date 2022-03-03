@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use store::{
     batch::WriteBatch,
     bincode,
+    changelog::RaftId,
     field::{FieldOptions, Text},
     AccountId, Comparator, DocumentSet, FieldValue, Filter, Store, StoreError, Tag, ThreadId,
 };
@@ -140,6 +141,7 @@ where
                     item.id,
                     self.mail_import_blob(
                         request.account_id,
+                        self.next_raft_id(),
                         &blob,
                         item.mailbox_ids,
                         item.keywords,
@@ -182,6 +184,7 @@ pub trait JMAPMailLocalStoreImport<'x> {
     fn mail_import_blob(
         &'x self,
         account_id: AccountId,
+        raft_id: RaftId,
         blob: &[u8],
         mailbox_ids: Vec<MailboxId>,
         keywords: Vec<Tag>,
@@ -190,7 +193,7 @@ pub trait JMAPMailLocalStoreImport<'x> {
 
     fn mail_merge_threads(
         &self,
-        account: AccountId,
+        account_id: AccountId,
         documents: &mut Vec<WriteBatch>,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
@@ -202,14 +205,15 @@ where
 {
     fn mail_import_blob(
         &'x self,
-        account: AccountId,
+        account_id: AccountId,
+        raft_id: RaftId,
         blob: &[u8],
         mailbox_ids: Vec<MailboxId>,
         keywords: Vec<Tag>,
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue> {
         // Build message document
-        let document_id = self.store.assign_document_id(account, JMAP_MAIL)?;
+        let document_id = self.store.assign_document_id(account_id, JMAP_MAIL)?;
         let mut document = WriteBatch::insert(JMAP_MAIL, document_id, document_id);
         let (reference_ids, thread_name) = build_message_document(
             &mut document,
@@ -226,7 +230,7 @@ where
                 bincode_serialize(&mailbox_ids)?.into(),
                 FieldOptions::Store,
             );
-            let change_id = self.store.assign_change_id(account, JMAP_MAILBOX)?;
+            let change_id = self.store.assign_change_id(account_id, JMAP_MAILBOX)?;
             for mailbox_id in mailbox_ids {
                 document.tag(
                     MessageField::Mailbox,
@@ -256,7 +260,7 @@ where
         }
 
         // Lock account
-        let _lock = self.lock_account(account, JMAP_MAIL);
+        let _lock = self.lock_account(account_id, JMAP_MAIL);
 
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
@@ -264,10 +268,10 @@ where
             let thread_ids = self
                 .store
                 .get_multi_document_value(
-                    account,
+                    account_id,
                     JMAP_MAIL,
                     self.store.query(
-                        account,
+                        account_id,
                         JMAP_MAIL,
                         Filter::and(vec![
                             Filter::eq(
@@ -303,7 +307,7 @@ where
                 _ => {
                     // Merge all matching threads
                     Some(self.mail_merge_threads(
-                        account,
+                        account_id,
                         &mut documents,
                         thread_ids.into_iter().collect(),
                     )?)
@@ -316,7 +320,7 @@ where
         let thread_id = if let Some(thread_id) = thread_id {
             thread_id
         } else {
-            let thread_id = self.store.assign_document_id(account, JMAP_THREAD)?;
+            let thread_id = self.store.assign_document_id(account_id, JMAP_THREAD)?;
             documents.push(WriteBatch::insert(JMAP_THREAD, thread_id, thread_id));
             thread_id
         };
@@ -347,14 +351,15 @@ where
         documents.push(document);
 
         // Write documents to store
-        self.store.update_documents(account, documents)?;
+        self.store
+            .update_documents(account_id, raft_id, documents)?;
 
         // Generate JSON object
         let mut values = HashMap::with_capacity(4);
         values.insert("id".to_string(), jmap_mail_id.to_jmap_string().into());
         values.insert(
             "blobId".to_string(),
-            BlobId::new_owned(account, JMAP_MAIL, document_id, MESSAGE_RAW)
+            BlobId::new_owned(account_id, JMAP_MAIL, document_id, MESSAGE_RAW)
                 .to_jmap_string()
                 .into(),
         );
@@ -369,7 +374,7 @@ where
 
     fn mail_merge_threads(
         &self,
-        account: AccountId,
+        account_id: AccountId,
         documents: &mut Vec<WriteBatch>,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId> {
@@ -379,7 +384,7 @@ where
         for (pos, document_set) in self
             .store
             .get_tags(
-                account,
+                account_id,
                 JMAP_MAIL,
                 MessageField::ThreadId.into(),
                 &thread_ids

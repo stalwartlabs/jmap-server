@@ -3,15 +3,14 @@ use rocksdb::{
     compaction_filter::Decision, BoundColumnFamily, Direction, IteratorMode, MergeOperands,
 };
 use std::{
-    array::TryFromSliceError,
-    convert::TryInto,
     iter::FromIterator,
     ops::{BitAndAssign, BitOrAssign, BitXorAssign},
     sync::Arc,
 };
 use store::{
-    leb128::Leb128, serialize::FIELD_PREFIX_LEN, ComparisonOperator, DocumentId, DocumentSet,
-    DocumentSetBitOps, LogicalOperator, StoreError,
+    leb128::Leb128,
+    serialize::{DeserializeBigEndian, FIELD_PREFIX_LEN},
+    ComparisonOperator, DocumentId, DocumentSet, DocumentSetBitOps, LogicalOperator, StoreError,
 };
 
 use crate::RocksDBStore;
@@ -241,18 +240,11 @@ impl RocksDBStore {
                 ComparisonOperator::GreaterEqualThan if value < match_value => break,
                 ComparisonOperator::Equal if value != match_value => break,
                 _ => {
-                    bm.insert(DocumentId::from_be_bytes(
-                        key.get(doc_id_pos..)
-                            .ok_or_else(|| {
-                                StoreError::InternalError(
-                                    "Invalid key found in 'indexes' column family.".to_string(),
-                                )
-                            })?
-                            .try_into()
-                            .map_err(|e: TryFromSliceError| {
-                                StoreError::InternalError(e.to_string())
-                            })?,
-                    ));
+                    bm.insert(key.as_ref().deserialize_be_u32(doc_id_pos).ok_or_else(|| {
+                        StoreError::InternalError(
+                            "Invalid key found in 'indexes' column family.".to_string(),
+                        )
+                    })?);
                 }
             }
         }

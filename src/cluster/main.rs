@@ -13,14 +13,14 @@ use crate::{cluster::IPC_CHANNEL_BUFFER, config::EnvSettings, JMAPServer, DEFAUL
 use super::{
     gossip::{self, start_gossip, PING_INTERVAL},
     rpc::{self, start_rpc},
-    Cluster, Message,
+    Cluster, Event,
 };
 
 pub async fn start_cluster<T>(core: web::Data<JMAPServer<T>>, settings: &EnvSettings) -> Option<()>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let (tx, mut rx) = mpsc::channel::<Message>(IPC_CHANNEL_BUFFER);
+    let (tx, mut rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
     let (gossip_tx, gossip_rx) = mpsc::channel::<(SocketAddr, gossip::Request)>(IPC_CHANNEL_BUFFER);
 
     let mut cluster = Cluster::init(settings, core.clone(), tx.clone(), gossip_tx)?;
@@ -83,9 +83,9 @@ impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn handle_message(&mut self, message: Message) {
+    pub async fn handle_message(&mut self, message: Event) {
         match message {
-            Message::Gossip { request, addr } => match request {
+            Event::Gossip { request, addr } => match request {
                 // Join request, add node and perform full sync.
                 gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
 
@@ -98,7 +98,7 @@ where
                 // Heartbeat response, update the cluster status if needed.
                 gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
             },
-            Message::RpcRequest {
+            Event::RpcRequest {
                 peer_id,
                 request,
                 response_tx,
@@ -131,7 +131,7 @@ where
                     .ok()
                     .unwrap_or_else(|| error!("Oneshot response channel closed."));
             }
-            Message::RpcResponse { peer_id, response } => {
+            Event::RpcResponse { peer_id, response } => {
                 //debug!("Reply [{}]: {:?}", peer_id, response);
 
                 match response {
@@ -144,11 +144,18 @@ where
                     _ => (),
                 }
             }
-            Message::StepDown { term } => {
+            Event::StepDown { term } => {
                 if term > self.term {
                     self.step_down(term);
                 } else {
                     self.start_election_timer(false);
+                }
+            }
+            Event::StoreChanged => {
+                let last_log_index = self.core.last_log_index();
+                if last_log_index > self.last_log_index {
+                    self.last_log_index = last_log_index;
+                    self.send_append_entries();
                 }
             }
         }

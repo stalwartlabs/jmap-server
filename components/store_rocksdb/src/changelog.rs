@@ -1,21 +1,19 @@
-use std::{array::TryFromSliceError, convert::TryInto};
-
 use rocksdb::{Direction, IteratorMode};
 use store::{
-    changelog::{ChangeLog, ChangeLogId, ChangeLogQuery},
-    serialize::{serialize_changelog_key, COLLECTION_PREFIX_LEN},
+    changelog::{ChangeLog, ChangeLogId, ChangeLogQuery, RaftId},
+    serialize::{
+        serialize_changelog_key, serialize_raftlog_key, DeserializeBigEndian,
+        COLLECTION_PREFIX_LEN, INTERNAL_KEY_PREFIX,
+    },
     AccountId, CollectionId, StoreChangeLog, StoreError,
 };
 
 use crate::RocksDBStore;
 
 impl StoreChangeLog for RocksDBStore {
-    fn get_last_change_id(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<Option<ChangeLogId>> {
-        let key = serialize_changelog_key(account, collection, ChangeLogId::MAX);
+    fn get_last_raft_id(&self) -> store::Result<Option<RaftId>> {
+        let key = serialize_raftlog_key(ChangeLogId::MAX, ChangeLogId::MAX);
+        let key_len = key.len();
 
         if let Some((key, _)) = self
             .db
@@ -26,15 +24,51 @@ impl StoreChangeLog for RocksDBStore {
             .into_iter()
             .next()
         {
-            if key.starts_with(&key[0..COLLECTION_PREFIX_LEN]) {
-                return Ok(Some(ChangeLogId::from_be_bytes(
-                    key.get(COLLECTION_PREFIX_LEN..)
+            if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
+                let term = key.as_ref().deserialize_be_u64(1).ok_or_else(|| {
+                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                })?;
+                let index = key
+                    .as_ref()
+                    .deserialize_be_u64(1 + std::mem::size_of::<ChangeLogId>())
+                    .ok_or_else(|| {
+                        StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                    })?;
+
+                return Ok(Some(RaftId { term, index }));
+            }
+        }
+        Ok(None)
+    }
+
+    fn get_last_change_id(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> store::Result<Option<ChangeLogId>> {
+        let key = serialize_changelog_key(account, collection, ChangeLogId::MAX);
+        let key_len = key.len();
+
+        if let Some((key, _)) = self
+            .db
+            .iterator_cf(
+                &self.get_handle("log")?,
+                IteratorMode::From(&key, Direction::Reverse),
+            )
+            .into_iter()
+            .next()
+        {
+            if key.starts_with(&key[0..COLLECTION_PREFIX_LEN]) && key.len() == key_len {
+                return Ok(Some(
+                    key.as_ref()
+                        .deserialize_be_u64(COLLECTION_PREFIX_LEN)
                         .ok_or_else(|| {
-                            StoreError::InternalError(format!("Failed to changelog key: {:?}", key))
-                        })?
-                        .try_into()
-                        .map_err(|e: TryFromSliceError| StoreError::InternalError(e.to_string()))?,
-                )));
+                            StoreError::InternalError(format!(
+                                "Corrupted changelog key for [{}/{}]: [{:?}]",
+                                account, collection, key
+                            ))
+                        })?,
+                ));
             }
         }
         Ok(None)
@@ -64,6 +98,7 @@ impl StoreChangeLog for RocksDBStore {
             }
         };
         let key = serialize_changelog_key(account, collection, from_change_id);
+        let key_len = key.len();
         let prefix = &key[0..COLLECTION_PREFIX_LEN];
         let mut is_first = true;
 
@@ -73,15 +108,19 @@ impl StoreChangeLog for RocksDBStore {
         ) {
             if !key.starts_with(prefix) {
                 break;
+            } else if key.len() != key_len {
+                //TODO avoid collisions with Raft keys
+                continue;
             }
-            let change_id = ChangeLogId::from_be_bytes(
-                key.get(COLLECTION_PREFIX_LEN..)
-                    .ok_or_else(|| {
-                        StoreError::InternalError(format!("Failed to changelog key: {:?}", key))
-                    })?
-                    .try_into()
-                    .map_err(|e: TryFromSliceError| StoreError::InternalError(e.to_string()))?,
-            );
+            let change_id = key
+                .as_ref()
+                .deserialize_be_u64(COLLECTION_PREFIX_LEN)
+                .ok_or_else(|| {
+                    StoreError::InternalError(format!(
+                        "Failed to deserialize changelog key for [{}/{}]: [{:?}]",
+                        account, collection, key
+                    ))
+                })?;
 
             /*if match_from_change_id {
                 if change_id != from_change_id {
@@ -100,7 +139,12 @@ impl StoreChangeLog for RocksDBStore {
                     is_first = false;
                 }
                 changelog.to_change_id = change_id;
-                changelog.deserialize(value.as_ref())?;
+                changelog.deserialize(&value).ok_or_else(|| {
+                    StoreError::InternalError(format!(
+                        "Failed to deserialize changelog for [{}/{}]: [{:?}]",
+                        account, collection, query
+                    ))
+                })?;
             }
         }
 

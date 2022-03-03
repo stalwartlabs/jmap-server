@@ -14,7 +14,7 @@ use jmap_store::{
     JMAP_MAIL,
 };
 use mail_parser::RfcHeader;
-use store::{Comparator, FieldValue, Filter, Integer, Store, Tag};
+use store::{changelog::RaftId, Comparator, FieldValue, Filter, Integer, Store, Tag};
 
 use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
 
@@ -104,6 +104,7 @@ where
             mail_store
                 .mail_import_blob(
                     0,
+                    RaftId::default(),
                     &format!(
                         concat!(
                             "From: {}\nCc: {}\nMessage-ID: <{}>\n",

@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use crate::{
     leb128::Leb128, AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer,
-    LongInteger, StoreError, Tag, TermId,
+    LongInteger, Tag, TermId,
 };
 
 pub const COLLECTION_PREFIX_LEN: usize =
@@ -255,26 +255,6 @@ pub fn serialize_raftlog_key(term: ChangeLogId, log_index: ChangeLogId) -> Vec<u
 }
 
 #[inline(always)]
-pub fn deserialize_integer(bytes: Vec<u8>) -> Option<Integer> {
-    Integer::from_le_bytes(bytes.try_into().ok()?).into()
-}
-
-#[inline(always)]
-pub fn deserialize_long_integer(bytes: Vec<u8>) -> Option<LongInteger> {
-    LongInteger::from_le_bytes(bytes.try_into().ok()?).into()
-}
-
-#[inline(always)]
-pub fn deserialize_float(bytes: Vec<u8>) -> Option<Float> {
-    Float::from_le_bytes(bytes.try_into().ok()?).into()
-}
-
-#[inline(always)]
-pub fn deserialize_text(bytes: Vec<u8>) -> Option<String> {
-    String::from_utf8(bytes).ok()
-}
-
-#[inline(always)]
 pub fn deserialize_index_document_id(bytes: &[u8]) -> Option<DocumentId> {
     DocumentId::from_be_bytes(
         bytes
@@ -285,45 +265,82 @@ pub fn deserialize_index_document_id(bytes: &[u8]) -> Option<DocumentId> {
     .into()
 }
 
+pub trait DeserializeBigEndian {
+    fn deserialize_be_u32(&self, index: usize) -> Option<Integer>;
+    fn deserialize_be_u64(&self, index: usize) -> Option<LongInteger>;
+}
+
+impl DeserializeBigEndian for &[u8] {
+    fn deserialize_be_u32(&self, index: usize) -> Option<Integer> {
+        Integer::from_be_bytes(
+            self.get(index..index + std::mem::size_of::<Integer>())?
+                .try_into()
+                .ok()?,
+        )
+        .into()
+    }
+
+    fn deserialize_be_u64(&self, index: usize) -> Option<LongInteger> {
+        LongInteger::from_be_bytes(
+            self.get(index..index + std::mem::size_of::<LongInteger>())?
+                .try_into()
+                .ok()?,
+        )
+        .into()
+    }
+}
+
 #[inline(always)]
 pub fn deserialize_document_id_from_leb128(bytes: &[u8]) -> Option<DocumentId> {
     DocumentId::from_leb128_bytes(bytes)?.0.into()
 }
 
 pub trait StoreDeserialize: Sized {
-    fn deserialize(bytes: Vec<u8>) -> crate::Result<Self>;
+    fn deserialize(bytes: Vec<u8>) -> Option<Self>;
+}
+
+pub trait StoreSerialize: Sized {
+    fn serialize(&self) -> Option<Vec<u8>>;
 }
 
 impl StoreDeserialize for Vec<u8> {
-    fn deserialize(bytes: Vec<u8>) -> crate::Result<Vec<u8>> {
-        Ok(bytes)
+    fn deserialize(bytes: Vec<u8>) -> Option<Vec<u8>> {
+        Some(bytes)
     }
 }
 
 impl StoreDeserialize for String {
-    fn deserialize(bytes: Vec<u8>) -> crate::Result<String> {
-        deserialize_text(bytes)
-            .ok_or_else(|| StoreError::InternalError("Failed to decode UTF-8 string".to_string()))
+    fn deserialize(bytes: Vec<u8>) -> Option<String> {
+        String::from_utf8(bytes).ok()
     }
 }
 
 impl StoreDeserialize for Float {
-    fn deserialize(bytes: Vec<u8>) -> crate::Result<Float> {
-        deserialize_float(bytes)
-            .ok_or_else(|| StoreError::InternalError("Failed to decode float".to_string()))
+    fn deserialize(bytes: Vec<u8>) -> Option<Float> {
+        Float::from_le_bytes(bytes.try_into().ok()?).into()
     }
 }
 
 impl StoreDeserialize for LongInteger {
-    fn deserialize(bytes: Vec<u8>) -> crate::Result<LongInteger> {
-        deserialize_long_integer(bytes)
-            .ok_or_else(|| StoreError::InternalError("Failed to decode long integer".to_string()))
+    fn deserialize(bytes: Vec<u8>) -> Option<LongInteger> {
+        LongInteger::from_le_bytes(bytes.try_into().ok()?).into()
     }
 }
 
 impl StoreDeserialize for Integer {
-    fn deserialize(bytes: Vec<u8>) -> crate::Result<Integer> {
-        deserialize_integer(bytes)
-            .ok_or_else(|| StoreError::InternalError("Failed to decode integer".to_string()))
+    fn deserialize(bytes: Vec<u8>) -> Option<Integer> {
+        Integer::from_le_bytes(bytes.try_into().ok()?).into()
+    }
+}
+
+impl StoreSerialize for LongInteger {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        Some(self.to_le_bytes().to_vec())
+    }
+}
+
+impl StoreSerialize for Integer {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        Some(self.to_le_bytes().to_vec())
     }
 }

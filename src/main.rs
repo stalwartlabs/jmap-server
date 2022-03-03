@@ -3,7 +3,10 @@ pub mod config;
 pub mod error;
 pub mod jmap;
 
-use std::net::SocketAddr;
+use std::{
+    net::SocketAddr,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use actix_web::{middleware, web, App, HttpServer};
 use config::EnvSettings;
@@ -15,7 +18,8 @@ use tracing::info;
 use crate::{cluster::main::start_cluster, jmap::jmap_request};
 
 pub struct JMAPServer<T> {
-    pub jmap_store: JMAPLocalStore<T>,
+    pub jmap_store: Arc<JMAPLocalStore<T>>,
+    pub is_raft_leader: AtomicBool,
     pub worker_pool: rayon::ThreadPool,
 }
 
@@ -35,7 +39,8 @@ async fn main() -> std::io::Result<()> {
             RocksDBStore::open((&settings).into()).unwrap(),
             JMAPStoreConfig::new(),
         )
-        .unwrap(),
+        .unwrap()
+        .into(),
         worker_pool: rayon::ThreadPoolBuilder::new()
             .num_threads(
                 settings
@@ -45,6 +50,7 @@ async fn main() -> std::io::Result<()> {
             )
             .build()
             .unwrap(),
+        is_raft_leader: false.into(),
     });
 
     // Start cluster

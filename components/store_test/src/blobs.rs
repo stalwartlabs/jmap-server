@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use store::{batch::WriteBatch, field::FieldOptions, BlobEntry, Store, StoreBlobTest};
+use store::{
+    batch::WriteBatch, changelog::RaftId, field::FieldOptions, BlobEntry, Store, StoreBlobTest,
+};
 
 pub fn test_blobs<T>(db: T)
 where
@@ -34,7 +36,8 @@ where
                     {
                         document.binary(0, blob.into(), FieldOptions::StoreAsBlob(blob_index));
                     }
-                    db.update_document(account, document).unwrap();
+                    db.update_document(account, RaftId::default(), document)
+                        .unwrap();
                 });
             }
         });
@@ -69,7 +72,7 @@ where
     assert_eq!(blobs.len(), 40);
 
     for account in 0..100 {
-        db.update_document(account, WriteBatch::delete(0, 0, 0u64))
+        db.update_document(account, RaftId::default(), WriteBatch::delete(0, 0, 0u64))
             .unwrap();
     }
 

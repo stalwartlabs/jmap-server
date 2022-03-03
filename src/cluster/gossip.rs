@@ -9,7 +9,7 @@ use crate::cluster::rpc::start_peer_rpc;
 
 use super::{
     raft::{LogIndex, TermId},
-    rpc, Cluster, EpochId, GenerationId, Message, Peer, PeerId, ShardId, HEARTBEAT_WINDOW,
+    rpc, Cluster, EpochId, Event, GenerationId, Peer, PeerId, PeerList, ShardId, HEARTBEAT_WINDOW,
     HEARTBEAT_WINDOW_MASK,
 };
 
@@ -205,7 +205,7 @@ impl Request {
 pub async fn start_gossip(
     bind_addr: SocketAddr,
     mut rx: mpsc::Receiver<(SocketAddr, Request)>,
-    tx: mpsc::Sender<Message>,
+    tx: mpsc::Sender<Event>,
 ) {
     let _socket = Arc::new(match UdpSocket::bind(bind_addr).await {
         Ok(socket) => socket,
@@ -235,7 +235,7 @@ pub async fn start_gossip(
                 Ok((size, addr)) => {
                     if let Some(request) = Request::from_bytes(&buf[..size]) {
                         //debug!("Received packet from {}: {:?}", addr, request);
-                        if let Err(e) = tx.send(Message::Gossip { addr, request }).await {
+                        if let Err(e) = tx.send(Event::Gossip { addr, request }).await {
                             error!("Gossip process error, tx.send() failed: {}", e);
                         }
                     } else {
@@ -275,14 +275,16 @@ where
         'outer: for (pos, peer) in peers.iter().enumerate() {
             if self.peer_id != peer.peer_id {
                 for (idx, mut local_peer) in self.peers.iter_mut().enumerate() {
-                    if local_peer.peer_id == peer.peer_id && peer.epoch > local_peer.epoch {
-                        local_peer.epoch = peer.epoch;
-                        local_peer.last_log_index = peer.last_log_index;
-                        local_peer.last_log_term = peer.last_log_term;
-                        local_peer.update_heartbeat();
+                    if local_peer.peer_id == peer.peer_id {
+                        if peer.epoch > local_peer.epoch {
+                            local_peer.epoch = peer.epoch;
+                            local_peer.last_log_index = peer.last_log_index;
+                            local_peer.last_log_term = peer.last_log_term;
+                            local_peer.update_heartbeat();
 
-                        if local_peer.generation != peer.generation && !do_full_sync {
-                            do_full_sync = true;
+                            if local_peer.generation != peer.generation && !do_full_sync {
+                                do_full_sync = true;
+                            }
                         }
 
                         // Keep idx of first item, the source peer.
@@ -334,6 +336,7 @@ where
 
     pub async fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
         let mut remove_seeds = false;
+        let mut peers_changed = false;
         let is_leading = self.is_leading();
 
         'outer: for (pos, peer) in peers.into_iter().enumerate() {
@@ -371,6 +374,7 @@ where
                                 local_peer.generation = peer.generation;
                                 local_peer.shard_id = peer.shard_id;
                                 local_peer.jmap_url = format!("{}/jmap", peer.jmap_url);
+                                peers_changed = true;
                             }
 
                             continue 'outer;
@@ -387,9 +391,12 @@ where
                 );
                 let peer_id = peer.peer_id;
                 let is_follower = is_leading && peer.shard_id == self.shard_id;
-                self.peers.push(Peer::new(self, peer));
+                self.peers.push(Peer::new(self, peer, State::Alive));
                 if is_follower {
                     self.add_follower(peer_id);
+                }
+                if !peers_changed {
+                    peers_changed = true;
                 }
             } else if peer.epoch > self.epoch {
                 debug!(
@@ -402,6 +409,19 @@ where
 
         if remove_seeds {
             self.peers.retain(|peer| !peer.is_seed());
+        }
+
+        // Update store
+        if peers_changed {
+            self.core.queue_set_key(
+                "peer_list",
+                PeerList::from(
+                    self.peers
+                        .iter()
+                        .map(|p| p.into())
+                        .collect::<Vec<PeerInfo>>(),
+                ),
+            );
         }
     }
 

@@ -1,43 +1,89 @@
+use std::sync::atomic::Ordering;
+
 use actix_web::{web, HttpResponse};
-use jmap_mail::{
-    import::{JMAPMailImportRequest, JMAPMailImportResponse},
-    JMAPMailImport, JMAPMailSet,
+
+use jmap_store::json::JSONValue;
+use store::{
+    changelog::ChangeLogId,
+    serialize::{StoreDeserialize, StoreSerialize},
+    Store, StoreError,
 };
-use jmap_store::{json::JSONValue, JMAPSet, JMAPSetResponse};
-use store::StoreError;
 use store_rocksdb::RocksDBStore;
 use tokio::sync::oneshot;
+use tracing::error;
 
 use crate::JMAPServer;
 
-async fn mail_import(
-    core: &web::Data<JMAPServer<RocksDBStore>>,
-    request: JMAPMailImportRequest,
-) -> jmap_store::Result<JMAPMailImportResponse> {
-    let (tx, rx) = oneshot::channel();
-    let _core = core.clone();
+impl<T> JMAPServer<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub async fn get_key<U>(&self, key: &'static str) -> store::Result<Option<U>>
+    where
+        U: StoreDeserialize + Send + Sync + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let jmap_store = self.jmap_store.clone();
 
-    core.worker_pool.spawn(move || {
-        tx.send(_core.jmap_store.mail_import(request)).ok();
-    });
+        self.worker_pool.spawn(move || {
+            tx.send(jmap_store.store.get_key(key)).ok();
+        });
 
-    rx.await
-        .map_err(|e| StoreError::InternalError(format!("Await error: {}", e)))?
-}
+        rx.await.map_err(|e| {
+            StoreError::InternalError(format!("Failed to get key: Await error: {}", e))
+        })?
+    }
 
-async fn mail_set(
-    core: &web::Data<JMAPServer<RocksDBStore>>,
-    request: JMAPSet<()>,
-) -> jmap_store::Result<JMAPSetResponse> {
-    let (tx, rx) = oneshot::channel();
-    let _core = core.clone();
+    pub async fn set_key<U>(&self, key: &'static str, value: U) -> store::Result<()>
+    where
+        U: StoreSerialize + Send + Sync + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let jmap_store = self.jmap_store.clone();
 
-    core.worker_pool.spawn(move || {
-        tx.send(_core.jmap_store.mail_set(request)).ok();
-    });
+        self.worker_pool.spawn(move || {
+            tx.send(jmap_store.store.set_key(key, value)).ok();
+        });
 
-    rx.await
-        .map_err(|e| StoreError::InternalError(format!("Await error: {}", e)))?
+        rx.await.map_err(|e| {
+            StoreError::InternalError(format!("Failed to set key: Await error: {}", e))
+        })?
+    }
+
+    pub fn queue_set_key<U>(&self, key: &'static str, value: U)
+    where
+        U: StoreSerialize + Send + Sync + 'static,
+    {
+        let jmap_store = self.jmap_store.clone();
+
+        self.worker_pool.spawn(move || {
+            if let Err(err) = jmap_store.store.set_key(key, value) {
+                error!("Failed to set key: {:?}", err);
+            }
+        });
+    }
+
+    pub fn set_raft_leader(&self, term: ChangeLogId) {
+        self.is_raft_leader.store(true, Ordering::Relaxed);
+        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
+    }
+
+    pub fn set_raft_follower(&self, term: ChangeLogId) {
+        self.is_raft_leader.store(false, Ordering::Relaxed);
+        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
+    }
+
+    pub fn last_log_index(&self) -> ChangeLogId {
+        self.jmap_store.raft_log_index.load(Ordering::Relaxed)
+    }
+
+    pub fn last_log_term(&self) -> ChangeLogId {
+        self.jmap_store.raft_log_term.load(Ordering::Relaxed)
+    }
+
+    pub fn is_leader(&self) -> bool {
+        self.is_raft_leader.load(Ordering::Relaxed)
+    }
 }
 
 pub async fn jmap_request(

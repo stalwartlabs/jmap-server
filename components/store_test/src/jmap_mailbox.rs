@@ -20,7 +20,7 @@ use jmap_store::{
     JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQueryRequest, JMAPSet,
 };
 
-use store::Store;
+use store::{changelog::RaftId, Store};
 
 const TEST_MAILBOXES: &[u8] = br#"
 [
@@ -529,6 +529,7 @@ where
     let message_id = mail_store
         .mail_import_blob(
             0,
+            RaftId::default(),
             b"From: test@test.com\nSubject: hey\n\ntest",
             vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox"))
                 .unwrap()

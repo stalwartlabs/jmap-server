@@ -2,6 +2,7 @@ use std::iter::FromIterator;
 
 use nlp::Language;
 use store::batch::WriteBatch;
+use store::changelog::RaftId;
 use store::field::{FieldOptions, FullText, Text};
 use store::{
     Comparator, DocumentId, DocumentSet, FieldId, FieldValue, Filter, Float, Integer, LongInteger,
@@ -39,12 +40,12 @@ where
         builder.tag(7, Tag::Static(0), FieldOptions::None);
         builder.tag(8, Tag::Text("my custom tag".into()), FieldOptions::None);
 
-        db.update_document(0, builder).unwrap();
+        db.update_document(0, RaftId::default(), builder).unwrap();
     }
 
-    db.update_document(0, WriteBatch::delete(0, 9, 9u64))
+    db.update_document(0, RaftId::default(), WriteBatch::delete(0, 9, 9u64))
         .unwrap();
-    db.update_document(0, WriteBatch::delete(0, 0, 0u64))
+    db.update_document(0, RaftId::default(), WriteBatch::delete(0, 0, 0u64))
         .unwrap();
 
     for do_purge in [true, false] {

@@ -355,6 +355,7 @@ impl Default for JMAPMailConfig {
 pub struct JMAPStoreConfig {
     pub jmap_mail_options: JMAPMailConfig,
     pub default_language: Language,
+    pub num_workers: usize,
 }
 
 impl JMAPStoreConfig {
@@ -362,6 +363,7 @@ impl JMAPStoreConfig {
         Self {
             default_language: Language::English,
             jmap_mail_options: JMAPMailConfig::new(),
+            num_workers: 0,
         }
     }
 }

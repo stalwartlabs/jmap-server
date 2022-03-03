@@ -1,5 +1,5 @@
 use store::{
-    serialize::{serialize_stored_key, serialize_stored_key_global, StoreDeserialize},
+    serialize::{serialize_stored_key, StoreDeserialize},
     AccountId, CollectionId, DocumentId, DocumentSet, FieldId, StoreError, StoreGet,
     StoreTombstone,
 };
@@ -7,17 +7,14 @@ use store::{
 use crate::RocksDBStore;
 
 impl StoreGet for RocksDBStore {
-    fn get_value<T>(
-        &self,
-        account: Option<AccountId>,
-        collection: Option<CollectionId>,
-        field: Option<FieldId>,
-    ) -> store::Result<Option<T>>
+    fn get_key<T>(&self, key: &str) -> store::Result<Option<T>>
     where
         T: StoreDeserialize,
     {
-        if let Some(bytes) = self.get_raw_value(account, collection, field)? {
-            Ok(Some(T::deserialize(bytes)?))
+        if let Some(bytes) = self.get_raw_key(key)? {
+            Ok(Some(T::deserialize(bytes).ok_or_else(|| {
+                StoreError::DeserializeError("Failed to deserialize key value".into())
+            })?))
         } else {
             Ok(None)
         }
@@ -34,7 +31,9 @@ impl StoreGet for RocksDBStore {
         T: StoreDeserialize,
     {
         if let Some(bytes) = self.get_document_raw_value(account, collection, document, field)? {
-            Ok(Some(T::deserialize(bytes)?))
+            Ok(Some(T::deserialize(bytes).ok_or_else(|| {
+                StoreError::DeserializeError("Failed to deserialize key value".into())
+            })?))
         } else {
             Ok(None)
         }
@@ -53,7 +52,9 @@ impl StoreGet for RocksDBStore {
         let mut result = Vec::with_capacity(documents.size_hint().0);
         for bytes in self.get_multi_document_raw_value(account, collection, documents, field)? {
             if let Some(bytes) = bytes {
-                result.push(Some(T::deserialize(bytes)?));
+                result.push(Some(T::deserialize(bytes).ok_or_else(|| {
+                    StoreError::DeserializeError("Failed to deserialize document value".into())
+                })?));
             } else {
                 result.push(None);
             }
@@ -63,17 +64,9 @@ impl StoreGet for RocksDBStore {
 }
 
 impl RocksDBStore {
-    fn get_raw_value(
-        &self,
-        account: Option<AccountId>,
-        collection: Option<CollectionId>,
-        field: Option<FieldId>,
-    ) -> crate::Result<Option<Vec<u8>>> {
+    fn get_raw_key(&self, key: &str) -> crate::Result<Option<Vec<u8>>> {
         self.db
-            .get_cf(
-                &self.get_handle("values")?,
-                &serialize_stored_key_global(account, collection, field),
-            )
+            .get_cf(&self.get_handle("values")?, key.as_bytes())
             .map_err(|e| StoreError::InternalError(e.into_string()))
     }
 

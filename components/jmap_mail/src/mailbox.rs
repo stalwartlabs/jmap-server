@@ -547,7 +547,8 @@ where
         }
 
         if !changes.is_empty() {
-            self.store.update_documents(request.account_id, changes)?;
+            self.store
+                .update_documents(request.account_id, self.next_raft_id(), changes)?;
             response.new_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
         } else {
             response.new_state = response.old_state.clone();

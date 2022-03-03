@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use rand::Rng;
 use store::Store;
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::cluster::log::start_log_sync;
 
@@ -22,7 +22,8 @@ pub const ELECTION_TIMEOUT_RAND_TO: u64 = 300;
 #[derive(Debug)]
 pub enum State {
     Leader {
-        follower_tx: Vec<watch::Sender<LogIndex>>,
+        tx: watch::Sender<LogIndex>,
+        rx: watch::Receiver<LogIndex>,
     },
     Wait {
         election_due: Instant,
@@ -127,11 +128,13 @@ where
         self.state = State::Wait {
             election_due: election_timeout(now),
         };
+        self.core.set_raft_follower(self.term);
         self.reset();
     }
 
     pub fn step_down(&mut self, term: TermId) {
         self.reset();
+        self.core.set_raft_follower(term);
         self.term = term;
         self.state = State::Wait {
             election_due: match self.state {
@@ -153,20 +156,22 @@ where
             peer_id,
             election_due: election_timeout(false),
         };
+        self.core.set_raft_follower(self.term);
         self.reset();
         debug!("Voted for peer {} for term {}.", peer_id, self.term);
     }
 
     pub fn follow_leader(&mut self, peer_id: PeerId) {
         self.state = State::Follower { peer_id };
+        self.core.set_raft_follower(self.term);
         self.reset();
         debug!("Following peer {} for term {}.", peer_id, self.term);
     }
 
-    pub async fn send_append_entries(&self, last_log_term: LogIndex) {
-        if let State::Leader { follower_tx } = &self.state {
-            for tx in follower_tx {
-                tx.send(last_log_term).ok();
+    pub fn send_append_entries(&self) {
+        if let State::Leader { tx, .. } = &self.state {
+            if let Err(err) = tx.send(self.last_log_index) {
+                error!("Failed to send append entries: {}", err);
             }
         }
     }
@@ -176,27 +181,26 @@ where
             election_due: election_timeout(now),
         };
         self.term += 1;
+        self.core.set_raft_follower(self.term);
         self.reset();
         debug!("Running for election for term {}.", self.term);
     }
 
     pub fn become_leader(&mut self) {
         debug!("This node is the new leader for term {}.", self.term);
-        self.state = State::Leader {
-            follower_tx: self
-                .peers
-                .iter()
-                .filter(|p| p.is_in_shard(self.shard_id))
-                .map(|p| start_log_sync(self, p.tx.clone()))
-                .collect(),
-        };
+        let (tx, rx) = watch::channel(self.last_log_index);
+        self.peers
+            .iter()
+            .filter(|p| p.is_in_shard(self.shard_id))
+            .for_each(|p| start_log_sync(self, p.tx.clone(), rx.clone()));
+        self.state = State::Leader { tx, rx };
+        self.core.set_raft_leader(self.term);
         self.reset();
     }
 
-    pub fn add_follower(&mut self, peer_id: PeerId) {
-        let peer_tx = start_log_sync(self, self.get_peer(peer_id).unwrap().tx.clone());
-        if let State::Leader { follower_tx } = &mut self.state {
-            follower_tx.push(peer_tx);
+    pub fn add_follower(&self, peer_id: PeerId) {
+        if let State::Leader { rx, .. } = &self.state {
+            start_log_sync(self, self.get_peer(peer_id).unwrap().tx.clone(), rx.clone())
         }
     }
 
