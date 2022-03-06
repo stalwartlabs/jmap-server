@@ -8,12 +8,8 @@ publish = false
 nlp = { path = "../nlp" }
 store = { path = "../store" }
 rocksdb = "0.18"
-roaring = "0.9"
-sha2 = "0.10.1"
-base32 = "0.4.0"
-moka = "0.7.2"
 
-[dev-dependencies]
-store_test = { path = "../store_test" }
-jmap_store = { path = "../jmap_store" }
-rayon = "1.5.1"
+#[dev-dependencies]
+#store_test = { path = "../store_test" }
+#jmap_store = { path = "../jmap_store" }
+

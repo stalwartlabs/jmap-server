@@ -1,12 +1,11 @@
-use std::{convert::TryInto, sync::atomic::Ordering};
+use std::sync::atomic::Ordering;
 
-use store::{
+use crate::{
     field::TokenIterator,
+    serialize::LAST_TERM_ID_KEY,
     term_index::{MatchTerm, Term},
-    StoreError, TermId,
+    ColumnFamily, JMAPStore, Store, TermId, WriteOperation,
 };
-
-use crate::{get_last_id, RocksDBStore, LAST_TERM_ID_KEY};
 
 #[derive(Debug, Default)]
 pub struct TermLock {
@@ -14,9 +13,14 @@ pub struct TermLock {
     pub lock_count: usize,
 }
 
-impl RocksDBStore {
-    pub fn get_match_terms(&self, tokens: TokenIterator) -> crate::Result<Option<Vec<MatchTerm>>> {
-        let cf_terms = self.get_handle("terms")?;
+impl<T> JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub async fn get_match_terms(
+        &self,
+        tokens: TokenIterator<'_>,
+    ) -> crate::Result<Option<Vec<MatchTerm>>> {
         let mut result = Vec::with_capacity(10);
 
         for token in tokens {
@@ -26,22 +30,17 @@ impl RocksDBStore {
                 term_id
             } else {
                 // Retrieve the ID from the KV store
-                let term_id = if let Some(term_id) = self
-                    .db
-                    .get_cf(&cf_terms, token_word.as_bytes())
-                    .map_err(|e| StoreError::InternalError(e.to_string()))?
+                if let Some(term_id) = self
+                    .get(ColumnFamily::Terms, token_word.as_bytes().to_vec())
+                    .await?
                 {
-                    TermId::from_le_bytes(term_id.try_into().map_err(|_| {
-                        StoreError::InternalError("Failed to deserialize term id.".into())
-                    })?)
+                    // Add term to the cache
+                    self.term_id_cache.insert(token_word, term_id).await;
+                    term_id
                 } else {
                     // Term does not exist, return None.
                     return Ok(None);
-                };
-
-                // Add term to the cache
-                self.term_id_cache.insert(token_word, term_id);
-                term_id
+                }
             };
 
             if token.is_exact {
@@ -61,10 +60,7 @@ impl RocksDBStore {
         })
     }
 
-    pub fn get_terms(&self, tokens: TokenIterator) -> crate::Result<Vec<Term>> {
-        let cf_terms = self.get_handle("terms")?;
-        let cf_values = self.get_handle("values")?;
-
+    pub async fn get_terms(&self, tokens: TokenIterator<'_>) -> crate::Result<Vec<Term>> {
         let mut result = Vec::with_capacity(10);
 
         for token in tokens {
@@ -74,27 +70,30 @@ impl RocksDBStore {
                 term_id
             } else {
                 // Lock the term
-                let _term_lock = self.term_id_lock.lock_hash(&token_word);
+                let _term_lock = self.term_id_lock.lock_hash(&token_word).await;
 
                 // Retrieve the ID from the KV store
                 let term_id = if let Some(term_id) = self
-                    .db
-                    .get_cf(&cf_terms, token_word.as_bytes())
-                    .map_err(|e| StoreError::InternalError(e.to_string()))?
+                    .get(ColumnFamily::Terms, token_word.as_bytes().to_vec())
+                    .await?
                 {
-                    TermId::from_le_bytes(term_id.try_into().map_err(|_| {
-                        StoreError::InternalError("Failed to deserialize term id.".into())
-                    })?)
+                    term_id
                 } else {
                     // Term does not exist, create it.
                     let term_id = self.term_id_last.fetch_add(1, Ordering::Relaxed);
                     //TODO on unclean exists retrieve last id manually
-                    self.db
-                        .merge_cf(&cf_values, LAST_TERM_ID_KEY, (1u64).to_le_bytes())
-                        .map_err(|e| StoreError::InternalError(e.to_string()))?;
-                    self.db
-                        .put_cf(&cf_terms, token_word.as_bytes(), term_id.to_le_bytes())
-                        .map_err(|e| StoreError::InternalError(e.to_string()))?;
+                    let mut batch = Vec::with_capacity(2);
+                    batch.push(WriteOperation::Merge {
+                        cf: ColumnFamily::Values,
+                        key: LAST_TERM_ID_KEY.to_vec(),
+                        value: (1u64).to_le_bytes().into(),
+                    });
+                    batch.push(WriteOperation::Set {
+                        cf: ColumnFamily::Terms,
+                        key: token_word.as_bytes().to_vec(),
+                        value: term_id.to_le_bytes().into(),
+                    });
+                    self.write(batch).await?;
                     term_id
                 };
 
@@ -113,23 +112,24 @@ impl RocksDBStore {
         Ok(result)
     }
 
-    pub fn get_last_term_id(&self) -> crate::Result<TermId> {
+    /*pub fn get_last_term_id(&self) -> crate::Result<TermId> {
         get_last_id(&self.db, LAST_TERM_ID_KEY)
-    }
+    }*/
 }
 
+//TODO test
+
+/*
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, sync::Arc};
 
     use nlp::Language;
-    use store::{
+
+    use crate::{
         field::TokenIterator,
         term_index::{MatchTerm, Term},
-        Store,
     };
-
-    use crate::{RocksDBStore, RocksDBStoreConfig};
 
     const NUM_TOKENS: u64 = 10;
     const NUM_THREADS: usize = 20;
@@ -261,3 +261,4 @@ mod tests {
             });
     }
 }
+*/

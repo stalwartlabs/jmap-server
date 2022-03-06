@@ -328,7 +328,7 @@ where
         for reference_id in reference_ids {
             document.text(
                 MessageField::MessageIdRef,
-                Text::Keyword(reference_id),
+                Text::Keyword(reference_id.into_owned()),
                 FieldOptions::None,
             );
         }
@@ -342,7 +342,7 @@ where
 
         document.text(
             MessageField::ThreadName,
-            Text::Keyword(thread_name.into()),
+            Text::Keyword(thread_name),
             FieldOptions::Sort,
         );
 

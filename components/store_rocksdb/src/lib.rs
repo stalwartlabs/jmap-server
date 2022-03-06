@@ -1,73 +1,185 @@
-pub mod bitmaps;
-pub mod blob;
-pub mod changelog;
-pub mod delete;
-pub mod document_id;
-pub mod get;
-pub mod insert;
-pub mod iterator;
-pub mod query;
-pub mod tag;
-pub mod term;
-
 use std::{
-    convert::TryInto,
-    path::PathBuf,
-    sync::{atomic::AtomicU64, Arc},
-    time::Duration,
+    borrow::Borrow, convert::TryInto, marker::PhantomData, ops::BitOrAssign, path::PathBuf,
+    sync::Arc,
 };
 
-use bitmaps::{bitmap_compact, bitmap_merge};
-use document_id::{IdAssigner, IdCacheKey};
-use moka::sync::Cache;
 use rocksdb::{
-    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MergeOperands, MultiThreaded,
-    Options,
+    BoundColumnFamily, ColumnFamilyDescriptor, DBIteratorWithThreadMode, DBWithThreadMode,
+    MergeOperands, MultiThreaded, Options,
 };
 use store::{
-    mutex_map::MutexMap, parking_lot::Mutex, serialize::LAST_TERM_ID_KEY, Result, Store,
-    StoreError, TermId,
+    bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITMAP},
+    config::EnvSettings,
+    roaring::RoaringBitmap,
+    serialize::{StoreDeserialize, LAST_TERM_ID_KEY},
+    JMAPStore, Result, Store, StoreError,
 };
 
-pub struct RocksDBStoreConfig {
-    pub path: String,
-    pub hash_levels: Vec<usize>,
-    pub temp_blob_ttl: u64,
-    pub term_cache_ttl: u64,
-    pub term_cache_size: u64,
-    pub doc_id_cache_size: u64,
+pub struct RocksDB {
+    db: DBWithThreadMode<MultiThreaded>,
 }
 
-impl RocksDBStoreConfig {
-    pub fn default_config(path: &str) -> RocksDBStoreConfig {
-        RocksDBStoreConfig {
-            path: path.to_string(),
-            hash_levels: vec![1],
-            temp_blob_ttl: 3600,
-            term_cache_ttl: 10 * 60 * 1000,
-            term_cache_size: 32 * 1024 * 1024,
-            doc_id_cache_size: 32 * 1024 * 1024,
+impl<'x> Store<'x> for RocksDB {
+    type Iterator = DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>;
+
+    fn delete(&self, cf: store::ColumnFamily, key: Vec<u8>) -> Result<()> {
+        self.db
+            .delete_cf(&self.cf_handle(cf)?, key)
+            .map_err(|err| StoreError::InternalError(format!("delete_cf failed: {}", err)))
+    }
+
+    fn set(&self, cf: store::ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        self.db
+            .put_cf(&self.cf_handle(cf)?, key, value)
+            .map_err(|err| StoreError::InternalError(format!("put_cf failed: {}", err)))
+    }
+
+    fn get<U>(&self, cf: store::ColumnFamily, key: Vec<u8>) -> Result<Option<U>>
+    where
+        U: StoreDeserialize,
+    {
+        if let Some(bytes) = self
+            .db
+            .get_pinned_cf(&self.cf_handle(cf)?, &key)
+            .map_err(|err| StoreError::InternalError(format!("get_cf failed: {}", err)))?
+        {
+            Ok(Some(U::deserialize(&bytes).ok_or_else(|| {
+                StoreError::DeserializeError(format!("Failed to deserialize key: {:?}", key))
+            })?))
+        } else {
+            Ok(None)
         }
+    }
+
+    fn merge(&self, cf: store::ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+        self.db
+            .merge_cf(&self.cf_handle(cf)?, key, value)
+            .map_err(|err| StoreError::InternalError(format!("merge_cf failed: {}", err)))
+    }
+
+    fn write(&self, batch: Vec<store::WriteOperation>) -> Result<()> {
+        let mut rocks_batch = rocksdb::WriteBatch::default();
+        let cf_bitmaps = self.cf_handle(store::ColumnFamily::Bitmaps)?;
+        let cf_values = self.cf_handle(store::ColumnFamily::Values)?;
+        let cf_indexes = self.cf_handle(store::ColumnFamily::Indexes)?;
+        let cf_terms = self.cf_handle(store::ColumnFamily::Terms)?;
+        let cf_logs = self.cf_handle(store::ColumnFamily::Logs)?;
+
+        for op in batch {
+            match op {
+                store::WriteOperation::Set { cf, key, value } => {
+                    rocks_batch.put_cf(
+                        match cf {
+                            store::ColumnFamily::Bitmaps => &cf_bitmaps,
+                            store::ColumnFamily::Values => &cf_values,
+                            store::ColumnFamily::Indexes => &cf_indexes,
+                            store::ColumnFamily::Terms => &cf_terms,
+                            store::ColumnFamily::Logs => &cf_logs,
+                        },
+                        key,
+                        value,
+                    );
+                }
+                store::WriteOperation::Delete { cf, key } => {
+                    rocks_batch.delete_cf(
+                        match cf {
+                            store::ColumnFamily::Bitmaps => &cf_bitmaps,
+                            store::ColumnFamily::Values => &cf_values,
+                            store::ColumnFamily::Indexes => &cf_indexes,
+                            store::ColumnFamily::Terms => &cf_terms,
+                            store::ColumnFamily::Logs => &cf_logs,
+                        },
+                        key,
+                    );
+                }
+                store::WriteOperation::Merge { cf, key, value } => {
+                    rocks_batch.merge_cf(
+                        match cf {
+                            store::ColumnFamily::Bitmaps => &cf_bitmaps,
+                            store::ColumnFamily::Values => &cf_values,
+                            store::ColumnFamily::Indexes => &cf_indexes,
+                            store::ColumnFamily::Terms => &cf_terms,
+                            store::ColumnFamily::Logs => &cf_logs,
+                        },
+                        key,
+                        value,
+                    );
+                }
+            }
+        }
+        self.db
+            .write(rocks_batch)
+            .map_err(|err| StoreError::InternalError(format!("batch write failed: {}", err)))
+    }
+
+    fn exists(&self, cf: store::ColumnFamily, key: Vec<u8>) -> Result<bool> {
+        Ok(self
+            .db
+            .get_pinned_cf(&self.cf_handle(cf)?, &key)
+            .map_err(|err| StoreError::InternalError(format!("get_cf failed: {}", err)))?
+            .is_some())
+    }
+
+    fn multi_get<U>(&self, cf: store::ColumnFamily, keys: Vec<Vec<u8>>) -> Result<Vec<Option<U>>>
+    where
+        U: StoreDeserialize,
+    {
+        let cf_handle = self.cf_handle(cf)?;
+        let mut results = Vec::with_capacity(keys.len());
+        for value in self
+            .db
+            .multi_get_cf(keys.iter().map(|key| (&cf_handle, key)).collect::<Vec<_>>())
+        {
+            results.push(
+                if let Some(bytes) = value.map_err(|err| {
+                    StoreError::InternalError(format!("multi_get_cf failed: {}", err))
+                })? {
+                    U::deserialize(&bytes)
+                        .ok_or_else(|| {
+                            StoreError::DeserializeError(format!(
+                                "Failed to deserialize keys: {:?}",
+                                keys
+                            ))
+                        })?
+                        .into()
+                } else {
+                    None
+                },
+            );
+        }
+
+        Ok(results)
+    }
+
+    fn iterator<'y: 'x>(
+        &'y self,
+        cf: store::ColumnFamily,
+        start: Vec<u8>,
+        direction: store::Direction,
+    ) -> Result<DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>> {
+        Ok(self.db.iterator_cf(
+            &self.cf_handle(cf)?,
+            rocksdb::IteratorMode::From(
+                &start,
+                match direction {
+                    store::Direction::Forward => rocksdb::Direction::Forward,
+                    store::Direction::Backward => rocksdb::Direction::Reverse,
+                },
+            ),
+        ))
+    }
+
+    fn compact(&self, cf: store::ColumnFamily) -> Result<()> {
+        self.db
+            .compact_range_cf(&self.cf_handle(cf)?, None::<&[u8]>, None::<&[u8]>);
+        Ok(())
     }
 }
 
-pub struct RocksDBStore {
-    db: DBWithThreadMode<MultiThreaded>,
-    blob_path: PathBuf,
-    blob_lock: MutexMap<()>,
-    doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
-    term_id_cache: Cache<String, TermId>,
-    term_id_lock: MutexMap<()>,
-    term_id_last: AtomicU64,
-    config: RocksDBStoreConfig,
-}
-
-impl<'x> Store<'x> for RocksDBStore {
-    type Config = RocksDBStoreConfig;
-
-    fn open(config: Self::Config) -> Result<Self> {
+impl RocksDB {
+    pub fn open(path: &str) -> Result<Self> {
         // Create the database directory if it doesn't exist
-        let path = PathBuf::from(&config.path);
+        let path = PathBuf::from(&path);
         let mut blob_path = path.clone();
         let mut idx_path = path;
         blob_path.push("blobs");
@@ -118,67 +230,39 @@ impl<'x> Store<'x> for RocksDBStore {
         // Raft log and change log
         let cf_log = {
             let cf_opts = Options::default();
-            ColumnFamilyDescriptor::new("log", cf_opts)
+            ColumnFamilyDescriptor::new("logs", cf_opts)
         };
 
         let mut db_opts = Options::default();
         db_opts.create_missing_column_families(true);
         db_opts.create_if_missing(true);
 
-        let db: DBWithThreadMode<MultiThreaded> = DBWithThreadMode::open_cf_descriptors(
-            &db_opts,
-            idx_path,
-            vec![cf_bitmaps, cf_values, cf_indexes, cf_terms, cf_log],
-        )
-        .map_err(|e| StoreError::InternalError(e.into_string()))?;
-
-        Ok(Self {
-            term_id_last: get_last_id(&db, LAST_TERM_ID_KEY)?.into(),
-            term_id_cache: Cache::builder()
-                .initial_capacity(1024)
-                .max_capacity(config.term_cache_size)
-                .time_to_idle(Duration::from_millis(config.term_cache_ttl))
-                .build(),
-            doc_id_cache: Cache::builder()
-                .initial_capacity(128)
-                .max_capacity(config.doc_id_cache_size)
-                .time_to_idle(Duration::from_secs(60 * 60))
-                .build(),
-            term_id_lock: MutexMap::with_capacity(1024),
-            blob_lock: MutexMap::with_capacity(1024),
-            blob_path,
-            db,
-            config,
+        Ok(RocksDB {
+            db: DBWithThreadMode::open_cf_descriptors(
+                &db_opts,
+                idx_path,
+                vec![cf_bitmaps, cf_values, cf_indexes, cf_terms, cf_log],
+            )
+            .map_err(|e| StoreError::InternalError(e.into_string()))?,
         })
     }
-}
 
-impl RocksDBStore {
     #[inline(always)]
-    fn get_handle(&self, name: &str) -> Result<Arc<BoundColumnFamily>> {
-        self.db.cf_handle(name).ok_or_else(|| {
-            StoreError::InternalError(format!(
-                "Failed to get handle for '{}' column family.",
-                name
-            ))
-        })
-    }
-
-    pub fn get_db(&self) -> &DBWithThreadMode<MultiThreaded> {
-        &self.db
-    }
-
-    pub fn compact(&self) -> Result<()> {
-        for cf in [
-            self.get_handle("values")?,
-            self.get_handle("indexes")?,
-            self.get_handle("bitmaps")?,
-            self.get_handle("terms")?,
-            self.get_handle("log")?,
-        ] {
-            self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
-        }
-        Ok(())
+    fn cf_handle(&self, cf: store::ColumnFamily) -> Result<Arc<BoundColumnFamily>> {
+        self.db
+            .cf_handle(match cf {
+                store::ColumnFamily::Bitmaps => "bitmaps",
+                store::ColumnFamily::Values => "values",
+                store::ColumnFamily::Indexes => "indexes",
+                store::ColumnFamily::Terms => "terms",
+                store::ColumnFamily::Logs => "logs",
+            })
+            .ok_or_else(|| {
+                StoreError::InternalError(format!(
+                    "Failed to get handle for '{:?}' column family.",
+                    cf
+                ))
+            })
     }
 }
 
@@ -216,277 +300,65 @@ pub fn numeric_value_merge(
     }
 }
 
-pub fn get_last_id(db: &DBWithThreadMode<MultiThreaded>, key: &[u8]) -> crate::Result<u64> {
-    Ok(db
-        .get_cf(
-            &db.cf_handle("values")
-                .ok_or_else(|| StoreError::InternalError("No terms column family found.".into()))?,
-            key,
-        )
-        .map_err(|e| StoreError::InternalError(e.into_string()))?
-        .map(|v| u64::from_le_bytes(v.try_into().unwrap()))
-        .unwrap_or(0))
+pub fn bitmap_merge(
+    _new_key: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &MergeOperands,
+) -> Option<Vec<u8>> {
+    /*print!(
+        "Merge operands {:?}, has val {} -> ",
+        operands.size_hint().0,
+        existing_val.is_some(),
+    );*/
+
+    let mut bm = match existing_val {
+        Some(existing_val) => RoaringBitmap::deserialize(existing_val)?,
+        None if operands.len() == 1 => {
+            //println!("return unserialized");
+            return Some(Vec::from(operands.into_iter().next().unwrap()));
+        }
+        _ => RoaringBitmap::new(),
+    };
+
+    for op in operands.iter() {
+        match *op.get(0)? {
+            IS_BITMAP => {
+                if let Some(union_bm) = deserialize_bitmap(op) {
+                    //print!("Bitmap union");
+                    if !bm.is_empty() {
+                        bm |= union_bm;
+                    } else {
+                        bm = union_bm;
+                    }
+                } else {
+                    return None;
+                }
+            }
+            IS_BITLIST => {
+                deserialize_bitlist(&mut bm, op);
+            }
+            _ => {
+                return None;
+            }
+        }
+    }
+
+    //println!(" -> {}", bm.len());
+
+    let mut bytes = Vec::with_capacity(bm.serialized_size() + 1);
+    bytes.push(IS_BITMAP);
+    bm.serialize_into(&mut bytes).ok()?;
+    Some(bytes)
 }
 
-#[cfg(test)]
-mod tests {
-    use jmap_store::{local_store::JMAPLocalStore, JMAPStoreConfig};
-    use store::Store;
-
-    use crate::{RocksDBStore, RocksDBStoreConfig};
-
-    #[test]
-    fn test_insert_filter_sort() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_filter_test");
-
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::insert_filter_sort::test_insert_filter_sort(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            true,
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_tombstones() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_tombstones_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::tombstones::test_tombstones(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_blobs() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_blobs_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::blobs::test_blobs(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_merge_threads() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_threads_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_merge_threads::test_jmap_mail_merge_threads(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_query() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_mail_query_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_query::test_jmap_mail_query(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-            true,
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_changes() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_changes_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_changes::test_jmap_changes(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_query_changes() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_query_changes_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_query_changes::test_jmap_mail_query_changes(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_get() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_mail_get_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_get::test_jmap_mail_get(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_set() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_mail_set_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_set::test_jmap_mail_set(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_parse() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_mail_parse_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_parse::test_jmap_mail_parse(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mail_thread() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_mail_thread_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mail_thread::test_jmap_mail_thread(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
-
-    #[test]
-    fn test_jmap_mailbox() {
-        let mut temp_dir = std::env::temp_dir();
-        temp_dir.push("strdb_mailbox_test");
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).unwrap();
-        }
-
-        store_test::jmap_mailbox::test_jmap_mailbox(
-            JMAPLocalStore::open(
-                RocksDBStore::open(RocksDBStoreConfig::default_config(
-                    temp_dir.to_str().unwrap(),
-                ))
-                .unwrap(),
-                JMAPStoreConfig::new(),
-            )
-            .unwrap(),
-        );
-
-        std::fs::remove_dir_all(&temp_dir).unwrap();
+pub fn bitmap_compact(
+    _level: u32,
+    _key: &[u8],
+    value: &[u8],
+) -> rocksdb::compaction_filter::Decision {
+    //println!("Compact entry with {:?} bytes.", value.len());
+    match RoaringBitmap::deserialize(value) {
+        Some(bm) if bm.is_empty() => rocksdb::compaction_filter::Decision::Remove,
+        _ => rocksdb::compaction_filter::Decision::Keep,
     }
 }

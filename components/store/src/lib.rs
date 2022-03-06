@@ -1,21 +1,45 @@
 pub mod batch;
+pub mod bitmap;
+pub mod blob;
 pub mod changelog;
+pub mod config;
+pub mod delete;
 pub mod field;
+pub mod get;
+pub mod id;
 pub mod leb128;
 pub mod mutex_map;
+pub mod query;
 pub mod search_snippet;
 pub mod serialize;
+pub mod term;
 pub mod term_index;
+pub mod update;
 
-use std::{iter::FromIterator, ops::Range};
+use std::{
+    iter::FromIterator,
+    ops::Range,
+    path::PathBuf,
+    sync::{atomic::AtomicU64, Arc},
+    time::Duration,
+};
 
 use batch::WriteBatch;
 use changelog::{ChangeLog, ChangeLogId, ChangeLogQuery, RaftId};
+use config::EnvSettings;
+use id::{IdAssigner, IdCacheKey};
+use moka::future::Cache;
+use mutex_map::MutexMap;
 use nlp::Language;
-use serialize::{StoreDeserialize, StoreSerialize};
+use parking_lot::Mutex;
+use roaring::RoaringBitmap;
+use serialize::{StoreDeserialize, StoreSerialize, LAST_TERM_ID_KEY};
 
 pub use bincode;
 pub use parking_lot;
+pub use roaring;
+pub use tokio;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Clone)]
 pub enum StoreError {
@@ -23,6 +47,7 @@ pub enum StoreError {
     SerializeError(String),
     DeserializeError(String),
     InvalidArguments(String),
+    AnchorNotFound,
     ParseError,
     DataCorruption,
     NotFound,
@@ -42,28 +67,12 @@ pub type CollectionId = u8;
 pub type DocumentId = u32;
 pub type ThreadId = u32;
 pub type FieldId = u8;
-pub type BlobIndex = usize;
 pub type TagId = u8;
 pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
 pub type TermId = u64;
-
-pub trait DocumentSet: DocumentSetBitOps + Eq + Clone + Sized {
-    type Item;
-
-    fn new() -> Self;
-    fn contains(&self, document: Self::Item) -> bool;
-
-    fn is_empty(&self) -> bool;
-    fn len(&self) -> usize;
-}
-
-pub trait DocumentSetBitOps<Rhs: Sized = Self> {
-    fn intersection(&mut self, other: &Rhs);
-    fn union(&mut self, other: &Rhs);
-    fn difference(&mut self, other: &Rhs);
-}
+pub type JMAPId = u64;
 
 #[derive(Debug)]
 pub enum FieldValue {
@@ -105,7 +114,7 @@ impl TextQuery {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ComparisonOperator {
     LowerThan,
     LowerEqualThan,
@@ -129,17 +138,20 @@ pub enum LogicalOperator {
 }
 
 #[derive(Debug)]
-pub enum Filter<T: DocumentSet> {
+pub enum Filter {
     Condition(FilterCondition),
-    Operator(FilterOperator<T>),
-    DocumentSet(T),
+    Operator(FilterOperator),
+    DocumentSet(RoaringBitmap),
     None,
 }
 
-impl<T> Filter<T>
-where
-    T: DocumentSet,
-{
+impl Default for Filter {
+    fn default() -> Self {
+        Filter::None
+    }
+}
+
+impl Filter {
     pub fn new_condition(field: FieldId, op: ComparisonOperator, value: FieldValue) -> Self {
         Filter::Condition(FilterCondition { field, op, value })
     }
@@ -184,21 +196,21 @@ where
         })
     }
 
-    pub fn and(conditions: Vec<Filter<T>>) -> Self {
+    pub fn and(conditions: Vec<Filter>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::And,
             conditions,
         })
     }
 
-    pub fn or(conditions: Vec<Filter<T>>) -> Self {
+    pub fn or(conditions: Vec<Filter>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::Or,
             conditions,
         })
     }
 
-    pub fn not(conditions: Vec<Filter<T>>) -> Self {
+    pub fn not(conditions: Vec<Filter>) -> Self {
         Filter::Operator(FilterOperator {
             operator: LogicalOperator::Not,
             conditions,
@@ -207,9 +219,9 @@ where
 }
 
 #[derive(Debug)]
-pub struct FilterOperator<T: DocumentSet> {
+pub struct FilterOperator {
     pub operator: LogicalOperator,
-    pub conditions: Vec<Filter<T>>,
+    pub conditions: Vec<Filter>,
 }
 
 pub struct FieldComparator {
@@ -217,31 +229,25 @@ pub struct FieldComparator {
     pub ascending: bool,
 }
 
-pub struct DocumentSetComparator<T: DocumentSet> {
-    pub set: T,
+pub struct DocumentSetComparator {
+    pub set: RoaringBitmap,
     pub ascending: bool,
 }
 
-pub enum Comparator<T: DocumentSet> {
-    List(Vec<Comparator<T>>),
+pub enum Comparator {
+    List(Vec<Comparator>),
     Field(FieldComparator),
-    DocumentSet(DocumentSetComparator<T>),
+    DocumentSet(DocumentSetComparator),
     None,
 }
 
-impl<T> Default for Comparator<T>
-where
-    T: DocumentSet,
-{
+impl Default for Comparator {
     fn default() -> Self {
         Comparator::None
     }
 }
 
-impl<T> Comparator<T>
-where
-    T: DocumentSet,
-{
+impl Comparator {
     pub fn ascending(field: FieldId) -> Self {
         Comparator::Field(FieldComparator {
             field,
@@ -257,210 +263,177 @@ where
     }
 }
 
-pub trait StoreUpdate {
-    fn assign_document_id(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-    ) -> crate::Result<DocumentId>;
+#[derive(Debug)]
+pub enum ColumnFamily {
+    Bitmaps,
+    Values,
+    Indexes,
+    Terms,
+    Logs,
+}
 
-    fn assign_change_id(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-    ) -> crate::Result<ChangeLogId>;
+pub enum Direction {
+    Forward,
+    Backward,
+}
 
-    fn update_document(
-        &self,
-        account_id: AccountId,
-        raft_id: RaftId,
-        document: WriteBatch,
-    ) -> crate::Result<()> {
-        self.update_documents(account_id, raft_id, vec![document])
+pub enum WriteOperation {
+    Set {
+        cf: ColumnFamily,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
+    Merge {
+        cf: ColumnFamily,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
+    Delete {
+        cf: ColumnFamily,
+        key: Vec<u8>,
+    },
+}
+
+impl WriteOperation {
+    pub fn set(cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Self {
+        WriteOperation::Set { cf, key, value }
     }
 
-    fn update_documents(
-        &self,
-        account_id: AccountId,
-        raft_id: RaftId,
-        documents: Vec<WriteBatch>,
-    ) -> Result<()>;
-
-    fn set_key(&self, key: &str, value: impl StoreSerialize) -> Result<()>;
-}
-
-pub trait StoreQuery<'x>: StoreDocumentSet {
-    type Iter: DocumentSet + Iterator<Item = DocumentId>;
-
-    fn query(
-        &'x self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        filter: Filter<Self::Set>,
-        sort: Comparator<Self::Set>,
-    ) -> Result<Self::Iter>;
-}
-
-pub trait StoreGet {
-    fn get_key<T>(&self, key: &str) -> crate::Result<Option<T>>
-    where
-        T: StoreDeserialize;
-
-    fn get_document_value<T>(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        document: DocumentId,
-        field: FieldId,
-    ) -> Result<Option<T>>
-    where
-        T: StoreDeserialize;
-
-    fn get_multi_document_value<T>(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        documents: impl Iterator<Item = DocumentId>,
-        field: FieldId,
-    ) -> Result<Vec<Option<T>>>
-    where
-        T: StoreDeserialize;
-}
-
-pub struct BlobEntry<T> {
-    pub index: BlobIndex,
-    pub value: T,
-}
-
-impl BlobEntry<Option<Range<usize>>> {
-    pub fn new(index: BlobIndex) -> Self {
-        Self { index, value: None }
+    pub fn merge(cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Self {
+        WriteOperation::Merge { cf, key, value }
     }
-    pub fn new_range(index: BlobIndex, range: Range<usize>) -> Self {
-        Self {
-            index,
-            value: range.into(),
+
+    pub fn delete(cf: ColumnFamily, key: Vec<u8>) -> Self {
+        WriteOperation::Delete { cf, key }
+    }
+}
+
+pub trait Store<'x>
+where
+    Self: Sized + Send + Sync,
+{
+    type Iterator: Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'x;
+
+    fn delete(&self, cf: ColumnFamily, key: Vec<u8>) -> Result<()>;
+    fn set(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()>;
+    fn get<U>(&self, cf: ColumnFamily, key: Vec<u8>) -> Result<Option<U>>
+    where
+        U: StoreDeserialize;
+    fn exists(&self, cf: ColumnFamily, key: Vec<u8>) -> Result<bool>;
+
+    fn merge(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()>;
+    fn write(&self, batch: Vec<WriteOperation>) -> Result<()>;
+    fn multi_get<U>(&self, cf: ColumnFamily, keys: Vec<Vec<u8>>) -> Result<Vec<Option<U>>>
+    where
+        U: StoreDeserialize;
+    fn iterator<'y: 'x>(
+        &'y self,
+        cf: ColumnFamily,
+        start: Vec<u8>,
+        direction: Direction,
+    ) -> Result<Self::Iterator>;
+    fn compact(&self, cf: ColumnFamily) -> Result<()>;
+}
+
+pub struct JMAPStore<T> {
+    pub db: Arc<T>,
+    pub worker_pool: rayon::ThreadPool,
+    pub config: JMAPStoreConfig,
+    pub blob_lock: MutexMap<()>,
+    pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
+    pub term_id_cache: Cache<String, TermId>,
+    pub term_id_lock: MutexMap<()>,
+    pub term_id_last: AtomicU64,
+}
+
+pub struct JMAPStoreConfig {
+    pub blob_base_path: PathBuf,
+    pub blob_hash_levels: Vec<usize>,
+    pub blob_temp_ttl: u64,
+}
+
+impl JMAPStoreConfig {
+    pub fn default_config(path: &str) -> JMAPStoreConfig {
+        JMAPStoreConfig {
+            blob_base_path: PathBuf::from(path),
+            blob_hash_levels: vec![1],
+            blob_temp_ttl: 3600,
         }
     }
 }
 
-pub trait StoreBlob {
-    fn store_temporary_blob(&self, account_id: AccountId, bytes: &[u8]) -> Result<(u64, u64)>;
-
-    fn get_temporary_blob(
-        &self,
-        account_id: AccountId,
-        hash: u64,
-        timestamp: u64,
-    ) -> Result<Option<Vec<u8>>>;
-
-    fn store_blob(&self, blob_key: &[u8], bytes: &[u8]) -> Result<()>;
-
-    fn get_blob(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        document: DocumentId,
-        entry: BlobEntry<Option<Range<usize>>>,
-    ) -> Result<Option<BlobEntry<Vec<u8>>>> {
-        Ok(self
-            .get_blobs(account_id, collection_id, document, vec![entry].into_iter())?
-            .pop())
-    }
-
-    fn get_blobs(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        document: DocumentId,
-        entries: impl Iterator<Item = BlobEntry<Option<Range<usize>>>>,
-    ) -> Result<Vec<BlobEntry<Vec<u8>>>>;
-
-    fn purge_blobs(&self) -> Result<()>;
-}
-
-pub trait StoreBlobTest {
-    fn get_all_blobs(&self) -> Result<Vec<(std::path::PathBuf, i64)>>;
-}
-
-pub trait StoreDocumentSet {
-    type Set: DocumentSet<Item = DocumentId>
-        + IntoIterator<Item = DocumentId>
-        + FromIterator<DocumentId>
-        + std::fmt::Debug;
-
-    fn get_document_ids(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-    ) -> crate::Result<Self::Set>;
-}
-
-pub trait StoreTag: StoreDocumentSet {
-    fn get_tag(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        field: FieldId,
-        tag: Tag,
-    ) -> Result<Option<Self::Set>> {
-        Ok(self
-            .get_tags(account_id, collection_id, field, &[tag])?
-            .pop()
-            .unwrap())
-    }
-
-    fn get_tags(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        field: FieldId,
-        tags: &[Tag],
-    ) -> Result<Vec<Option<Self::Set>>>;
-}
-
-pub trait StoreDelete {
-    fn delete_account(&self, account_id: AccountId) -> Result<()>;
-    fn delete_collection(&self, account_id: AccountId, collection_id: CollectionId) -> Result<()>;
-}
-
-pub trait StoreChangeLog {
-    fn get_last_raft_id(&self) -> Result<Option<RaftId>>;
-    fn get_last_change_id(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-    ) -> Result<Option<ChangeLogId>>;
-    fn get_changes(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        query: ChangeLogQuery,
-    ) -> Result<Option<ChangeLog>>;
-}
-
-pub trait StoreTombstone: StoreDocumentSet {
-    fn purge_tombstoned(&self, account_id: AccountId, collection_id: CollectionId) -> Result<()>;
-
-    fn get_tombstoned_ids(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-    ) -> crate::Result<Option<Self::Set>>;
-}
-
-pub trait Store<'x>:
-    StoreUpdate
-    + StoreQuery<'x>
-    + StoreGet
-    + StoreDelete
-    + StoreTag
-    + StoreChangeLog
-    + StoreBlob
-    + Send
-    + Sync
-    + Sized
+impl<'x, T> JMAPStore<T>
+where
+    T: Store<'x> + 'static,
 {
-    type Config;
-    fn open(config: Self::Config) -> Result<Self>;
+    pub fn new(db: T, settings: &EnvSettings) -> Self {
+        Self {
+            worker_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(
+                    settings
+                        .parse("worker-pool-size")
+                        .filter(|v| *v > 0)
+                        .unwrap_or_else(num_cpus::get),
+                )
+                .build()
+                .unwrap(),
+            config: JMAPStoreConfig::default_config("/tmp/jmap"),
+            term_id_last: db
+                .get::<TermId>(ColumnFamily::Terms, LAST_TERM_ID_KEY.to_vec())
+                .unwrap()
+                .unwrap()
+                .into(),
+            term_id_cache: Cache::builder()
+                .initial_capacity(1024)
+                .max_capacity(
+                    settings
+                        .parse("term-cache-size")
+                        .unwrap_or(32 * 1024 * 1024),
+                )
+                .time_to_idle(Duration::from_millis(
+                    settings.parse("term-cache-ttl").unwrap_or(10 * 60 * 1000),
+                ))
+                .build(),
+            doc_id_cache: Cache::builder()
+                .initial_capacity(128)
+                .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
+                .time_to_idle(Duration::from_secs(60 * 60))
+                .build(),
+            term_id_lock: MutexMap::with_capacity(1024),
+            blob_lock: MutexMap::with_capacity(1024),
+            db: Arc::new(db),
+        }
+    }
+
+    pub async fn spawn_worker<U, V>(&self, f: U) -> Result<V>
+    where
+        U: FnOnce() -> Result<V> + Send + 'static,
+        V: Sync + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+
+        self.worker_pool.spawn(move || {
+            tx.send(f()).ok();
+        });
+
+        rx.await.map_err(|e| {
+            StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
+        })?
+    }
+
+    pub async fn spawn_blocking<U, V>(&self, f: U) -> Result<V>
+    where
+        U: FnOnce() -> Result<V> + Send + 'static,
+        V: Sync + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+
+        tokio::task::spawn_blocking(move || {
+            tx.send(f()).ok();
+        });
+
+        rx.await.map_err(|e| {
+            StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
+        })?
+    }
 }

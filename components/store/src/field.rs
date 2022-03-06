@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use nlp::{
     lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
     stemmer::Stemmer,
@@ -8,22 +6,22 @@ use nlp::{
 };
 
 use crate::{
-    batch::MAX_TOKEN_LENGTH, BlobIndex, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
-    TagId,
+    batch::MAX_TOKEN_LENGTH, blob::BlobIndex, DocumentId, FieldId, Float, Integer, LongInteger,
+    Tag, TagId,
 };
 
 #[derive(Debug)]
-pub enum UpdateField<'x> {
-    Text(Field<Text<'x>>),
-    Binary(Field<Cow<'x, [u8]>>),
+pub enum UpdateField {
+    Text(Field<Text>),
+    Binary(Field<Vec<u8>>),
     Integer(Field<Integer>),
     LongInteger(Field<LongInteger>),
     Tag(Field<Tag>),
     Float(Field<Float>),
 }
 
-impl<'x> UpdateField<'x> {
-    pub fn len(&'x self) -> usize {
+impl UpdateField {
+    pub fn len(&self) -> usize {
         match self {
             UpdateField::Text(t) => t.value.len(),
             UpdateField::Binary(b) => b.value.len(),
@@ -34,7 +32,7 @@ impl<'x> UpdateField<'x> {
         }
     }
 
-    pub fn is_empty(&'x self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -49,7 +47,7 @@ impl<'x> UpdateField<'x> {
         }
     }
 
-    pub fn unwrap_text(&'x self) -> &Field<Text<'x>> {
+    pub fn unwrap_text(&self) -> &Field<Text> {
         match self {
             UpdateField::Text(t) => t,
             _ => panic!("unwrap_text called on non-text field"),
@@ -141,33 +139,33 @@ impl Tag {
 }
 
 #[derive(Debug)]
-pub struct FullText<'x> {
-    pub text: Cow<'x, str>,
+pub struct FullText {
+    pub text: String,
     pub language: Language,
 }
 
-impl<'x> FullText<'x> {
-    pub fn new(text: Cow<'x, str>, detector: &mut LanguageDetector) -> Self {
+impl FullText {
+    pub fn new(text: String, detector: &mut LanguageDetector) -> Self {
         Self {
             language: detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE),
             text,
         }
     }
 
-    pub fn new_lang(text: Cow<'x, str>, language: Language) -> Self {
+    pub fn new_lang(text: String, language: Language) -> Self {
         Self { text, language }
     }
 }
 
 #[derive(Debug)]
-pub enum Text<'x> {
-    Default(Cow<'x, str>),
-    Keyword(Cow<'x, str>),
-    Tokenized(Cow<'x, str>),
-    Full(FullText<'x>),
+pub enum Text {
+    Default(String),
+    Keyword(String),
+    Tokenized(String),
+    Full(FullText),
 }
 
-impl<'x> Text<'x> {
+impl Text {
     pub fn len(&self) -> usize {
         match self {
             Text::Default(s) => s.len(),

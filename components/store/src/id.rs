@@ -1,14 +1,13 @@
 use std::{ops::BitXorAssign, sync::Arc};
 
+use parking_lot::Mutex;
 use roaring::RoaringBitmap;
-use store::{
-    changelog::ChangeLogId,
-    parking_lot::Mutex,
-    serialize::{serialize_bm_internal, BM_USED_IDS},
-    AccountId, CollectionId, DocumentId, StoreChangeLog, StoreError, StoreTombstone,
-};
 
-use crate::RocksDBStore;
+use crate::{
+    changelog::ChangeLogId,
+    serialize::{serialize_bm_internal, BM_TOMBSTONED_IDS, BM_USED_IDS},
+    AccountId, CollectionId, DocumentId, JMAPStore, Store, StoreError,
+};
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct IdCacheKey {
@@ -38,7 +37,7 @@ impl IdAssigner {
             let next_id = used_ids.max().unwrap() + 1;
             //TODO test properly
             let mut freed_ids = RoaringBitmap::from_sorted_iter(0..next_id).unwrap();
-            freed_ids.bitxor_assign(&used_ids);
+            freed_ids ^= used_ids;
             (
                 next_id,
                 if !freed_ids.is_empty() {
@@ -79,8 +78,11 @@ impl IdAssigner {
     }
 }
 
-impl<'x> RocksDBStore {
-    pub fn get_id_assigner(
+impl<T> JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub async fn get_id_assigner(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
@@ -88,69 +90,117 @@ impl<'x> RocksDBStore {
         self.doc_id_cache
             .get_or_try_insert_with::<_, StoreError>(
                 IdCacheKey::new(account_id, collection_id),
-                || {
+                async {
                     Ok(Arc::new(Mutex::new(IdAssigner::new(
-                        self.get_document_ids_used(account_id, collection_id)?,
-                        self.get_last_change_id(account_id, collection_id)?
+                        self.get_document_ids_used(account_id, collection_id)
+                            .await?,
+                        self.get_last_change_id(account_id, collection_id)
+                            .await?
                             .map(|id| id + 1)
                             .unwrap_or(0),
                     ))))
                 },
             )
+            .await
             .map_err(|e| e.as_ref().clone())
     }
 
-    pub fn get_document_ids_used(
+    pub async fn assign_change_id(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
-    ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(
-            &self.get_handle("bitmaps")?,
-            &serialize_bm_internal(account_id, collection_id, BM_USED_IDS),
-        )
+    ) -> crate::Result<ChangeLogId> {
+        Ok(self
+            .get_id_assigner(account_id, collection_id)
+            .await?
+            .lock()
+            .assign_change_id())
     }
 
-    pub fn get_document_ids(
+    pub async fn assign_document_id(
+        &self,
+        account_id: AccountId,
+        collection_id: CollectionId,
+    ) -> crate::Result<DocumentId> {
+        Ok(self
+            .get_id_assigner(account_id, collection_id)
+            .await?
+            .lock()
+            .assign_document_id())
+    }
+
+    pub async fn get_document_ids_used(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(mut docs) = self.get_document_ids_used(account_id, collection_id)? {
-            if let Some(tombstoned_docs) = self.get_tombstoned_ids(account_id, collection_id)? {
-                docs.bitxor_assign(tombstoned_docs.bitmap);
+        self.get_bitmap(serialize_bm_internal(
+            account_id,
+            collection_id,
+            BM_USED_IDS,
+        ))
+        .await
+    }
+
+    pub async fn get_tombstoned_ids(
+        &self,
+        account_id: AccountId,
+        collection_id: CollectionId,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        self.get_bitmap(serialize_bm_internal(
+            account_id,
+            collection_id,
+            BM_TOMBSTONED_IDS,
+        ))
+        .await
+    }
+
+    pub async fn get_document_ids(
+        &self,
+        account_id: AccountId,
+        collection_id: CollectionId,
+    ) -> crate::Result<Option<RoaringBitmap>> {
+        if let Some(mut docs) = self
+            .get_document_ids_used(account_id, collection_id)
+            .await?
+        {
+            if let Some(tombstoned_docs) =
+                self.get_tombstoned_ids(account_id, collection_id).await?
+            {
+                docs ^= tombstoned_docs;
             }
             Ok(Some(docs))
         } else {
             Ok(None)
         }
     }
-
-    #[cfg(test)]
-    pub fn set_document_ids(
-        &self,
-        account_id: AccountId,
-        collection_id: CollectionId,
-        bitmap: RoaringBitmap,
-    ) -> crate::Result<()> {
-        use crate::bitmaps::IS_BITMAP;
-
-        let mut bytes = Vec::with_capacity(bitmap.serialized_size() + 1);
-        bytes.push(IS_BITMAP);
-        bitmap
-            .serialize_into(&mut bytes)
-            .map_err(|e| StoreError::InternalError(e.to_string()))?;
-
-        self.db
-            .put_cf(
-                &self.get_handle("bitmaps")?,
-                &serialize_bm_internal(account_id, collection_id, BM_USED_IDS),
-                bytes,
-            )
-            .map_err(|e| StoreError::InternalError(e.to_string()))
-    }
 }
 
+//TODO test
+
+/*#[cfg(test)]
+pub fn set_document_ids(
+    &self,
+    account_id: AccountId,
+    collection_id: CollectionId,
+    bitmap: RoaringBitmap,
+) -> crate::Result<()> {
+    use crate::bitmaps::IS_BITMAP;
+
+    let mut bytes = Vec::with_capacity(bitmap.serialized_size() + 1);
+    bytes.push(IS_BITMAP);
+    bitmap
+        .serialize_into(&mut bytes)
+        .map_err(|e| StoreError::InternalError(e.to_string()))?;
+
+    self.db
+        .put_cf(
+            &self.get_handle("bitmaps")?,
+            &serialize_bm_internal(account_id, collection_id, BM_USED_IDS),
+            bytes,
+        )
+        .map_err(|e| StoreError::InternalError(e.to_string()))
+}*/
 /*
 #[cfg(test)]
 mod tests {

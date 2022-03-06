@@ -295,40 +295,28 @@ pub fn deserialize_document_id_from_leb128(bytes: &[u8]) -> Option<DocumentId> {
     DocumentId::from_leb128_bytes(bytes)?.0.into()
 }
 
-pub trait StoreDeserialize: Sized {
-    fn deserialize(bytes: Vec<u8>) -> Option<Self>;
+pub trait StoreDeserialize: Sized + Sync + Send {
+    fn deserialize(bytes: &[u8]) -> Option<Self>;
 }
 
 pub trait StoreSerialize: Sized {
     fn serialize(&self) -> Option<Vec<u8>>;
 }
 
-impl StoreDeserialize for Vec<u8> {
-    fn deserialize(bytes: Vec<u8>) -> Option<Vec<u8>> {
-        Some(bytes)
-    }
-}
-
-impl StoreDeserialize for String {
-    fn deserialize(bytes: Vec<u8>) -> Option<String> {
-        String::from_utf8(bytes).ok()
-    }
-}
-
 impl StoreDeserialize for Float {
-    fn deserialize(bytes: Vec<u8>) -> Option<Float> {
+    fn deserialize(bytes: &[u8]) -> Option<Float> {
         Float::from_le_bytes(bytes.try_into().ok()?).into()
     }
 }
 
 impl StoreDeserialize for LongInteger {
-    fn deserialize(bytes: Vec<u8>) -> Option<LongInteger> {
+    fn deserialize(bytes: &[u8]) -> Option<LongInteger> {
         LongInteger::from_le_bytes(bytes.try_into().ok()?).into()
     }
 }
 
 impl StoreDeserialize for Integer {
-    fn deserialize(bytes: Vec<u8>) -> Option<Integer> {
+    fn deserialize(bytes: &[u8]) -> Option<Integer> {
         Integer::from_le_bytes(bytes.try_into().ok()?).into()
     }
 }

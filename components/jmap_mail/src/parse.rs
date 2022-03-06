@@ -634,7 +634,7 @@ fn build_message_response(
 }
 
 pub fn build_message_document<'x>(
-    document: &mut WriteBatch<'x>,
+    document: &mut WriteBatch,
     message: Message<'x>,
     received_at: Option<i64>,
 ) -> store::Result<(Vec<Cow<'x, str>>, String)> {
@@ -903,7 +903,7 @@ pub fn build_message_document<'x>(
 
                 document.text(
                     field,
-                    Text::Default(html.body),
+                    Text::Default(html.body.into_owned()),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
 
@@ -945,7 +945,10 @@ pub fn build_message_document<'x>(
 
                 document.text(
                     field,
-                    Text::Full(FullText::new(text.body, &mut language_detector)),
+                    Text::Full(FullText::new(
+                        text.body.into_owned(),
+                        &mut language_detector,
+                    )),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
 
@@ -971,7 +974,7 @@ pub fn build_message_document<'x>(
 
                 document.binary(
                     MessageField::Attachment,
-                    binary.body,
+                    binary.body.into_owned(),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
                 total_blobs += 1;
@@ -985,7 +988,7 @@ pub fn build_message_document<'x>(
                 message_outline.headers.push(binary.headers_raw);
                 document.binary(
                     MessageField::Attachment,
-                    binary.body,
+                    binary.body.into_owned(),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
                 total_blobs += 1;
@@ -1007,7 +1010,7 @@ pub fn build_message_document<'x>(
                                 let message_size = message.raw_message.len();
                                 document.binary(
                                     MessageField::Attachment,
-                                    message.raw_message,
+                                    message.raw_message.into_owned(),
                                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                                 );
                                 message_size
@@ -1023,7 +1026,7 @@ pub fn build_message_document<'x>(
                                 let message_size = raw_message.len();
                                 document.binary(
                                     MessageField::Attachment,
-                                    raw_message,
+                                    raw_message.into_owned(),
                                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                                 );
                                 message_size
@@ -1062,7 +1065,7 @@ pub fn build_message_document<'x>(
 
     document.binary(
         MessageField::Internal,
-        message.raw_message,
+        message.raw_message.into_owned(),
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
 
@@ -1096,7 +1099,7 @@ pub fn build_message_document<'x>(
 }
 
 fn parse_attached_message<'x>(
-    document: &mut WriteBatch<'x>,
+    document: &mut WriteBatch,
     message: &mut Message,
     language_detector: &mut LanguageDetector,
 ) {
@@ -1137,7 +1140,7 @@ fn parse_attached_message<'x>(
     }
 }
 
-fn parse_address<'x>(document: &mut WriteBatch<'x>, header_name: RfcHeader, address: &Addr<'x>) {
+fn parse_address<'x>(document: &mut WriteBatch, header_name: RfcHeader, address: &Addr<'x>) {
     if let Some(name) = &address.name {
         parse_text(document, header_name, name);
     };
@@ -1152,11 +1155,7 @@ fn parse_address<'x>(document: &mut WriteBatch<'x>, header_name: RfcHeader, addr
     };
 }
 
-fn parse_address_group<'x>(
-    document: &mut WriteBatch<'x>,
-    header_name: RfcHeader,
-    group: &Group<'x>,
-) {
+fn parse_address_group<'x>(document: &mut WriteBatch, header_name: RfcHeader, group: &Group<'x>) {
     if let Some(name) = &group.name {
         parse_text(document, header_name, name);
     };
@@ -1166,7 +1165,7 @@ fn parse_address_group<'x>(
     }
 }
 
-fn parse_text<'x>(document: &mut WriteBatch<'x>, header_name: RfcHeader, text: &str) {
+fn parse_text<'x>(document: &mut WriteBatch, header_name: RfcHeader, text: &str) {
     match header_name {
         RfcHeader::Keywords
         | RfcHeader::ContentLanguage
@@ -1197,14 +1196,14 @@ fn parse_text<'x>(document: &mut WriteBatch<'x>, header_name: RfcHeader, text: &
 }
 
 fn parse_content_type<'x>(
-    document: &mut WriteBatch<'x>,
+    document: &mut WriteBatch,
     header_name: RfcHeader,
     content_type: &ContentType<'x>,
 ) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
         document.text(
             header_name,
-            Text::Keyword(content_type.c_type.clone()),
+            Text::Keyword(content_type.c_type.to_string()),
             FieldOptions::None,
         );
     }
@@ -1212,7 +1211,7 @@ fn parse_content_type<'x>(
         if subtype.len() <= MAX_TOKEN_LENGTH {
             document.text(
                 header_name,
-                Text::Keyword(subtype.clone()),
+                Text::Keyword(subtype.to_string()),
                 FieldOptions::None,
             );
         }
@@ -1222,7 +1221,7 @@ fn parse_content_type<'x>(
             if key == "name" || key == "filename" {
                 document.text(
                     header_name,
-                    Text::Tokenized(value.clone()),
+                    Text::Tokenized(value.to_string()),
                     FieldOptions::None,
                 );
             } else if value.len() <= MAX_TOKEN_LENGTH {
@@ -1262,7 +1261,7 @@ fn parse_datetime(document: &mut WriteBatch, header_name: RfcHeader, date_time: 
 
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort<'x>(
-    document: &mut WriteBatch<'x>,
+    document: &mut WriteBatch,
     header_name: RfcHeader,
     header_value: &HeaderValue<'x>,
 ) {
@@ -1326,7 +1325,7 @@ fn add_addr_sort<'x>(
 }
 
 fn parse_header<'x>(
-    document: &mut WriteBatch<'x>,
+    document: &mut WriteBatch,
     header_name: RfcHeader,
     header_value: &HeaderValue<'x>,
 ) {

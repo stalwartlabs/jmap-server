@@ -77,7 +77,10 @@ mod tests {
 
     use nlp::{tokenizers::tokenize, Language};
 
-    use crate::term_index::{MatchTerm, TermIndex, TermIndexBuilder};
+    use crate::{
+        serialize::StoreDeserialize,
+        term_index::{MatchTerm, TermIndex, TermIndexBuilder},
+    };
 
     use super::*;
 
@@ -193,7 +196,7 @@ mod tests {
             }
 
             let compressed_term_index = builder.compress();
-            let term_index = TermIndex::try_from(&compressed_term_index[..]).unwrap();
+            let term_index = TermIndex::deserialize(&compressed_term_index[..]).unwrap();
 
             for (match_words, snippets) in tests {
                 let mut match_terms = Vec::new();

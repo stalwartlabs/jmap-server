@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use nlp::Language;
 
 use crate::{
@@ -12,13 +10,13 @@ pub const MAX_ID_LENGTH: usize = 80;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
-pub struct WriteBatch<'x> {
+pub struct WriteBatch {
     pub collection_id: CollectionId,
     pub default_language: Language,
     pub log_id: Option<ChangeLogId>,
     pub log_action: LogAction,
     pub action: WriteAction,
-    pub fields: Vec<UpdateField<'x>>,
+    pub fields: Vec<UpdateField>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,12 +34,12 @@ pub enum WriteAction {
     Delete(DocumentId),
 }
 
-impl<'x> WriteBatch<'x> {
+impl WriteBatch {
     pub fn insert(
         collection_id: CollectionId,
         document_id: DocumentId,
         full_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x> {
+    ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
@@ -56,7 +54,7 @@ impl<'x> WriteBatch<'x> {
         collection_id: CollectionId,
         document_id: DocumentId,
         full_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x> {
+    ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
@@ -71,7 +69,7 @@ impl<'x> WriteBatch<'x> {
         collection_id: CollectionId,
         document_id: DocumentId,
         full_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x> {
+    ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
@@ -87,7 +85,7 @@ impl<'x> WriteBatch<'x> {
         document_id: DocumentId,
         old_log_id: impl Into<ChangeLogId>,
         new_log_id: impl Into<ChangeLogId>,
-    ) -> WriteBatch<'x> {
+    ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
@@ -122,17 +120,12 @@ impl<'x> WriteBatch<'x> {
         self.default_language = language;
     }
 
-    pub fn text(&mut self, field: impl Into<FieldId>, value: Text<'x>, options: FieldOptions) {
+    pub fn text(&mut self, field: impl Into<FieldId>, value: Text, options: FieldOptions) {
         self.fields
             .push(UpdateField::Text(Field::new(field.into(), value, options)));
     }
 
-    pub fn binary(
-        &mut self,
-        field: impl Into<FieldId>,
-        value: Cow<'x, [u8]>,
-        options: FieldOptions,
-    ) {
+    pub fn binary(&mut self, field: impl Into<FieldId>, value: Vec<u8>, options: FieldOptions) {
         self.fields.push(UpdateField::Binary(Field::new(
             field.into(),
             value,
@@ -176,8 +169,8 @@ impl<'x> WriteBatch<'x> {
     }
 }
 
-impl<'x> IntoIterator for WriteBatch<'x> {
-    type Item = UpdateField<'x>;
+impl IntoIterator for WriteBatch {
+    type Item = UpdateField;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {

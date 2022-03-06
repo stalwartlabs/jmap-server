@@ -4,6 +4,49 @@ use store::{
     batch::WriteBatch, changelog::RaftId, field::FieldOptions, BlobEntry, Store, StoreBlobTest,
 };
 
+/*
+
+    #[cfg(test)]
+    fn get_all_blobs(&self) -> crate::Result<Vec<(std::path::PathBuf, i64)>> {
+        let cf_values = self.get_handle("values")?;
+        let mut result = Vec::new();
+
+        for (key, value) in self
+            .db
+            .iterator_cf(&cf_values, IteratorMode::From(BLOB_KEY, Direction::Forward))
+        {
+            if key.starts_with(BLOB_KEY) {
+                let value = i64::from_le_bytes(value.as_ref().try_into().map_err(|err| {
+                    StoreError::InternalError(format!(
+                        "Failed to convert blob key to i64: {:}",
+                        err
+                    ))
+                })?);
+
+                result.push((
+                    BlobFile::new(
+                        self.blob_path.clone(),
+                        &key[BLOB_KEY.len()..],
+                        &self.config.hash_levels,
+                        false,
+                    )
+                    .map_err(|err| {
+                        StoreError::InternalError(format!("Failed to create blob file: {:}", err))
+                    })?
+                    .path
+                    .clone(),
+                    value,
+                ));
+            } else {
+                break;
+            }
+        }
+
+        Ok(result)
+    }
+
+*/
+
 pub fn test_blobs<T>(db: T)
 where
     T: for<'x> Store<'x> + StoreBlobTest,
@@ -34,7 +77,7 @@ where
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
-                        document.binary(0, blob.into(), FieldOptions::StoreAsBlob(blob_index));
+                        document.binary(0, blob.to_vec(), FieldOptions::StoreAsBlob(blob_index));
                     }
                     db.update_document(account, RaftId::default(), document)
                         .unwrap();

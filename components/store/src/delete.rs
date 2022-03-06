@@ -1,27 +1,28 @@
 use std::ops::BitAndAssign;
 
-use rocksdb::{Direction, IteratorMode, WriteBatch};
-use store::{
+use crate::{
     serialize::{
         deserialize_document_id_from_leb128, deserialize_index_document_id, serialize_a_key_be,
         serialize_a_key_leb128, serialize_ac_key_be, serialize_ac_key_leb128, serialize_blob_key,
         serialize_bm_internal, BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
-    AccountId, CollectionId, DocumentId, StoreDelete, StoreError, StoreTombstone,
-};
-
-use crate::{
-    bitmaps::{clear_bits, into_bitmap, RocksDBDocumentSet},
-    blob::serialize_blob_keys_from_value,
-    document_id::IdCacheKey,
-    RocksDBStore,
+    AccountId, CollectionId, ColumnFamily, DocumentId, JMAPStore, Store, StoreError,
 };
 
 const DELETE_BATCH_SIZE: usize = 1000;
 
-impl StoreDelete for RocksDBStore {
+impl<'x, T> JMAPStore<T>
+where
+    T: Store<'x> + 'static,
+{
+    pub async fn delete(&self, cf: ColumnFamily, key: Vec<u8>) -> crate::Result<()> {
+        let db = self.db.clone();
+        self.spawn_blocking(move || db.delete(cf, key)).await
+    }
+
+    /*
     //TODO delete blobs
-    fn delete_account(&self, account: AccountId) -> store::Result<()> {
+    fn delete_account(&self, account: AccountId) -> crate::Result<()> {
         let mut batch = WriteBatch::default();
         let mut batch_size = 0;
 
@@ -60,7 +61,7 @@ impl StoreDelete for RocksDBStore {
         Ok(())
     }
 
-    fn delete_collection(&self, account: AccountId, collection: CollectionId) -> store::Result<()> {
+    fn delete_collection(&self, account: AccountId, collection: CollectionId) -> crate::Result<()> {
         let mut batch = WriteBatch::default();
         let mut batch_size = 0;
 
@@ -133,25 +134,8 @@ impl StoreDelete for RocksDBStore {
 
         Ok(())
     }
-}
 
-impl StoreTombstone for RocksDBStore {
-    fn get_tombstoned_ids(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> crate::Result<Option<RocksDBDocumentSet>> {
-        self.get_bitmap(
-            &self.get_handle("bitmaps")?,
-            &serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
-        )
-        .map(|bm| match bm {
-            Some(bm) if !bm.is_empty() => RocksDBDocumentSet::from_roaring(bm).into(),
-            _ => None,
-        })
-    }
-
-    fn purge_tombstoned(&self, account: AccountId, collection: CollectionId) -> store::Result<()> {
+    fn purge_tombstoned(&self, account: AccountId, collection: CollectionId) -> crate::Result<()> {
         let documents = if let Some(documents) = self.get_tombstoned_ids(account, collection)? {
             documents.bitmap
         } else {
@@ -269,5 +253,5 @@ impl StoreTombstone for RocksDBStore {
             .invalidate(&IdCacheKey::new(account, collection));
 
         Ok(())
-    }
+    }*/
 }

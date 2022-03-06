@@ -1,4 +1,4 @@
-pub mod cluster;
+/*pub mod cluster;
 pub mod config;
 pub mod error;
 pub mod jmap;
@@ -12,7 +12,6 @@ use actix_web::{middleware, web, App, HttpServer};
 use config::EnvSettings;
 use jmap_store::{local_store::JMAPLocalStore, JMAPStoreConfig};
 use store::Store;
-use store_rocksdb::RocksDBStore;
 use tracing::info;
 
 use crate::{cluster::main::start_cluster, jmap::jmap_request};
@@ -73,4 +72,10 @@ async fn main() -> std::io::Result<()> {
     .bind(http_addr)?
     .run()
     .await
+}
+*/
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    panic!("dodo")
 }

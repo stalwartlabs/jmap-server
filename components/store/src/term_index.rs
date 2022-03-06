@@ -5,7 +5,7 @@ use std::{
 
 use nlp::tokenizers::Token;
 
-use crate::{leb128::Leb128, BlobIndex, FieldId, TermId};
+use crate::{blob::BlobIndex, leb128::Leb128, serialize::StoreDeserialize, FieldId, TermId};
 
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
@@ -46,15 +46,15 @@ pub struct TermIndexBuilder {
     items: Vec<TermIndexBuilderItem>,
 }
 
-pub struct TermIndexItem<'x> {
+pub struct TermIndexItem {
     pub field_id: FieldId,
     pub blob_id: BlobIndex,
     pub terms_len: usize,
-    pub terms: &'x [u8],
+    pub terms: Vec<u8>,
 }
 
-pub struct TermIndex<'x> {
-    items: Vec<TermIndexItem<'x>>,
+pub struct TermIndex {
+    items: Vec<TermIndexItem>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -308,53 +308,40 @@ impl TermIndexBuilder {
     }
 }
 
-impl<'x> TryFrom<&'x [u8]> for TermIndex<'x> {
-    type Error = Error;
-
-    fn try_from(bytes: &'x [u8]) -> Result<Self> {
+impl StoreDeserialize for TermIndex {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
         let mut term_index = TermIndex { items: Vec::new() };
         let mut pos = 0;
 
         while pos < bytes.len() {
-            let item_len = u32::from_le_bytes(
-                bytes
-                    .get(pos..pos + LENGTH_SIZE)
-                    .ok_or(Error::DataCorruption)?
-                    .try_into()
-                    .map_err(|_| Error::DataCorruption)?,
-            ) as usize;
+            let item_len =
+                u32::from_le_bytes(bytes.get(pos..pos + LENGTH_SIZE)?.try_into().ok()?) as usize;
             pos += LENGTH_SIZE;
 
-            let field = bytes.get(pos).ok_or(Error::DataCorruption)?;
+            let field = bytes.get(pos)?;
             pos += 1;
 
-            let (blob_id, bytes_read) =
-                BlobIndex::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                    .ok_or(Error::Leb128DecodeError)?;
+            let (blob_id, bytes_read) = BlobIndex::from_leb128_bytes(bytes.get(pos..)?)?;
             pos += bytes_read;
 
-            let (terms_len, bytes_read) =
-                usize::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                    .ok_or(Error::Leb128DecodeError)?;
+            let (terms_len, bytes_read) = usize::from_leb128_bytes(bytes.get(pos..)?)?;
             pos += bytes_read;
 
             term_index.items.push(TermIndexItem {
                 field_id: *field,
                 blob_id,
                 terms_len,
-                terms: bytes
-                    .get(pos..pos + item_len)
-                    .ok_or(Error::DataCorruption)?,
+                terms: bytes.get(pos..pos + item_len)?.to_vec(),
             });
 
             pos += item_len;
         }
 
-        Ok(term_index)
+        Some(term_index)
     }
 }
 
-impl<'x> TermIndex<'x> {
+impl TermIndex {
     fn skip_items(&self, bytes: &[u8], mut remaining_items: usize) -> Result<usize> {
         let mut pos = 0;
         while remaining_items > 0 {
@@ -604,8 +591,9 @@ mod tests {
     };
 
     use crate::{
+        blob::BlobIndex,
+        serialize::StoreDeserialize,
         term_index::{MatchTerm, Term, TermIndexBuilder},
-        BlobIndex,
     };
 
     use super::TermIndex;
@@ -742,7 +730,7 @@ mod tests {
         }
 
         let compressed_term_index = builder.compress();
-        let term_index = TermIndex::try_from(&compressed_term_index[..]).unwrap();
+        let term_index = TermIndex::deserialize(&compressed_term_index[..]).unwrap();
 
         let tests = [
             (vec!["thomas", "clinton"], None, true, 4),
