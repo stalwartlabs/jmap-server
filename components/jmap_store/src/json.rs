@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use store::JMAPId;
 
 use crate::id::JMAPIdSerialize;
-use crate::JMAPId;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum JSONPointer {

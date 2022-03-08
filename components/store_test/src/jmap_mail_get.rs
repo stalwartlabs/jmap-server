@@ -1,16 +1,18 @@
 use jmap_mail::{
-    get::JMAPMailGetArguments, import::JMAPMailLocalStoreImport, JMAPMailBodyProperties,
-    JMAPMailGet, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailProperties,
+    get::{JMAPMailGet, JMAPMailGetArguments},
+    import::JMAPMailLocalStoreImport,
+    HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
+    JMAPMailProperties,
 };
-use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPGet};
-use mail_parser::{HeaderName, RfcHeader};
+use jmap_store::{json::JSONValue, JMAPGet};
+use mail_parser::RfcHeader;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
     path::PathBuf,
 };
-use store::{changelog::RaftId, Store, Tag};
+use store::{changelog::RaftId, JMAPStore, Store, Tag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -69,9 +71,9 @@ impl<'x> From<JSONValue> for SortedJSONValue {
     }
 }
 
-pub fn test_jmap_mail_get<T>(mail_store: JMAPLocalStore<T>)
+pub async fn jmap_mail_get<T>(mail_store: JMAPStore<T>)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
@@ -92,6 +94,7 @@ where
                 vec![Tag::Text("tag".into())],
                 Some((blob.len() * 1000000) as i64),
             )
+            .await
             .unwrap()
             .unwrap_object()
             .unwrap()
@@ -153,6 +156,7 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
+                .await
                 .unwrap()
                 .list
         } else {
@@ -372,6 +376,7 @@ where
                                 max_body_value_bytes: 100,
                             },
                         })
+                        .await
                         .unwrap()
                         .list
                         .unwrap_array()

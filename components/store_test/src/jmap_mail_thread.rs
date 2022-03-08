@@ -1,10 +1,10 @@
-use jmap_mail::{import::JMAPMailLocalStoreImport, JMAPMailThread};
-use jmap_store::{json::JSONValue, local_store::JMAPLocalStore, JMAPGet};
-use store::{changelog::RaftId, Store};
+use jmap_mail::{import::JMAPMailLocalStoreImport, thread::JMAPMailThread};
+use jmap_store::{json::JSONValue, JMAPGet};
+use store::{changelog::RaftId, JMAPStore, Store};
 
-pub fn test_jmap_mail_thread<T>(mail_store: JMAPLocalStore<T>)
+pub async fn jmap_mail_thread<T>(mail_store: JMAPStore<T>)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let mut expected_result = vec![JSONValue::Null; 5];
     let mut thread_id = 0;
@@ -19,6 +19,7 @@ where
                 vec![],
                 Some(10000i64 + num as i64),
             )
+            .await
             .unwrap()
             .unwrap_object()
             .unwrap();
@@ -34,6 +35,7 @@ where
                 properties: None,
                 arguments: ()
             })
+            .await
             .unwrap()
             .list
             .unwrap_array()

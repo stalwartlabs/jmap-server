@@ -5,11 +5,10 @@ edition = "2018"
 publish = false
 
 [dependencies]
-nlp = { path = "../nlp" }
 store = { path = "../store" }
 rocksdb = "0.18"
 
 #[dev-dependencies]
-#store_test = { path = "../store_test" }
-#jmap_store = { path = "../jmap_store" }
+store_test = { path = "../store_test" }
+
 

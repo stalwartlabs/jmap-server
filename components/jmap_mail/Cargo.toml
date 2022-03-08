@@ -8,9 +8,8 @@ publish = false
 nlp = { path = "../nlp" }
 jmap_store = { path = "../jmap_store" }
 store = { path = "../store" }
-#mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
-mail-parser = { path = "/home/vagrant/code/mail-parser" }
-mail-builder = { path = "/home/vagrant/code/mail-builder" }
+mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
+mail-builder = { git = "https://github.com/stalwartlabs/mail-builder" }
 chrono = "0.4"
 lz4_flex = "0.9.2"
 serde = { version = "1.0", features = ["derive"]}

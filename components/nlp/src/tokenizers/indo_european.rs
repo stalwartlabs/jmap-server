@@ -69,7 +69,7 @@ impl<'x> Iterator for IndoEuropeanTokenizer<'x> {
 pub fn new_tokenizer<'x>(
     text: &'x str,
     max_token_length: usize,
-) -> Box<dyn Iterator<Item = Token<'x>> + 'x> {
+) -> Box<dyn Iterator<Item = Token<'x>> + Send + 'x> {
     Box::new(IndoEuropeanTokenizer::new(text, max_token_length))
 }
 

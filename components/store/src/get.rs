@@ -1,10 +1,8 @@
-use std::ops::BitAndAssign;
-
 use roaring::RoaringBitmap;
 
 use crate::{
     serialize::{serialize_bm_tag_key, serialize_stored_key, StoreDeserialize},
-    AccountId, CollectionId, ColumnFamily, DocumentId, FieldId, JMAPStore, Store, StoreError, Tag,
+    AccountId, CollectionId, ColumnFamily, DocumentId, FieldId, JMAPStore, Store, Tag,
 };
 
 impl<T> JMAPStore<T>
@@ -16,7 +14,7 @@ where
         U: StoreDeserialize + 'static,
     {
         let db = self.db.clone();
-        self.spawn_blocking(move || db.get(cf, key)).await
+        self.spawn_worker(move || db.get(cf, key)).await
     }
 
     pub async fn multi_get<U>(
@@ -28,12 +26,12 @@ where
         U: StoreDeserialize + 'static,
     {
         let db = self.db.clone();
-        self.spawn_blocking(move || db.multi_get(cf, keys)).await
+        self.spawn_worker(move || db.multi_get(cf, keys)).await
     }
 
     pub async fn exists(&self, cf: ColumnFamily, key: Vec<u8>) -> crate::Result<bool> {
         let db = self.db.clone();
-        self.spawn_blocking(move || db.exists(cf, key)).await
+        self.spawn_worker(move || db.exists(cf, key)).await
     }
 
     pub async fn get_document_value<U>(

@@ -1,16 +1,15 @@
 use std::{
-    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     iter::FromIterator,
     vec,
 };
 
 use chrono::{FixedOffset, LocalResult, SecondsFormat, TimeZone, Utc};
+use jmap_store::blob::JMAPBlobStore;
 use jmap_store::{
-    blob::JMAPLocalBlobStore,
+    async_trait::async_trait,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
-    local_store::JMAPLocalStore,
     JMAPError,
 };
 use mail_parser::{
@@ -19,34 +18,35 @@ use mail_parser::{
         fields::thread::thread_name,
         preview::{preview_html, preview_text},
     },
-    Addr, ContentType, DateTime, Group, HeaderName, HeaderValue, Message, MessageAttachment,
-    MessagePart, RfcHeader, RfcHeaders,
+    Addr, ContentType, DateTime, Group, HeaderValue, Message, MessageAttachment, MessagePart,
+    RfcHeader, RfcHeaders,
 };
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
     batch::{WriteBatch, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    blob::BlobIndex,
     field::{FieldOptions, FullText, Text},
     leb128::Leb128,
-    AccountId, BlobIndex, Integer, LongInteger, Store, Tag,
+    serialize::StoreSerialize,
+    AccountId, Integer, JMAPStore, LongInteger, Store, StoreError, Tag,
 };
 
 use crate::{
     get::{
         add_body_parts, add_body_structure, add_body_value, add_raw_header,
         transform_json_emailaddress, transform_json_string, transform_json_stringlist,
-        transform_rfc_header,
+        transform_rfc_header, JMAPMailGetArguments,
     },
-    import::{bincode_serialize, messagepack_serialize},
-    JMAPMailBodyProperties, JMAPMailGetArguments, JMAPMailHeaderForm, JMAPMailHeaderProperty,
-    JMAPMailMimeHeaders, JMAPMailParse, JMAPMailProperties, MessageData, MessageField,
-    MessageOutline, MimePart, MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
+    HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
+    JMAPMailMimeHeaders, JMAPMailProperties, MessageData, MessageField, MessageOutline, MimePart,
+    MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
 };
 
-pub struct JMAPMailParseRequest<'x> {
+pub struct JMAPMailParseRequest {
     pub account_id: AccountId,
     pub blob_ids: Vec<BlobId>,
-    pub properties: Vec<JMAPMailProperties<'x>>,
-    pub arguments: JMAPMailGetArguments<'x>,
+    pub properties: Vec<JMAPMailProperties>,
+    pub arguments: JMAPMailGetArguments,
 }
 
 #[derive(Debug)]
@@ -66,19 +66,28 @@ impl From<JMAPMailParseResponse> for JSONValue {
     }
 }
 
-impl<'x, T> JMAPMailParse<'x> for JMAPLocalStore<T>
+#[async_trait]
+pub trait JMAPMailParse {
+    async fn mail_parse(
+        &self,
+        mut request: JMAPMailParseRequest,
+    ) -> jmap_store::Result<JMAPMailParseResponse>;
+}
+
+#[async_trait]
+impl<T> JMAPMailParse for JMAPStore<T>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
-    fn mail_parse(
-        &'x self,
-        mut request: JMAPMailParseRequest<'x>,
+    async fn mail_parse(
+        &self,
+        mut request: JMAPMailParseRequest,
     ) -> jmap_store::Result<JMAPMailParseResponse> {
         let mut parsed = HashMap::new();
         let mut not_parsable = Vec::new();
         let mut not_found = Vec::new();
 
-        if request.blob_ids.len() > self.mail_config.parse_max_items {
+        if request.blob_ids.len() > self.config.mail_parse_max_items {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -120,8 +129,9 @@ where
         }
 
         for blob_id in &request.blob_ids {
-            if let Some(raw_message) =
-                self.download_blob(request.account_id, blob_id, get_message_blob)?
+            if let Some(raw_message) = self
+                .download_blob(request.account_id, blob_id, get_message_blob)
+                .await?
             {
                 if let Some(message) = Message::parse(&raw_message) {
                     parsed.insert(
@@ -251,7 +261,14 @@ fn build_message_response(
         }
         mime_parts.push(MimePart::new_other(mime_headers, 0, false));
     }
-    message_outline.headers.push(message.headers_raw);
+
+    message_outline.headers.push(
+        message
+            .headers_raw
+            .into_iter()
+            .map(|(k, v)| (k.into(), v))
+            .collect(),
+    );
 
     let mut extra_mime_parts = Vec::new();
     let mut blobs = Vec::new();
@@ -279,7 +296,12 @@ fn build_message_response(
                     html.is_encoding_problem,
                 ));
                 blobs.push(html.body.into_owned().into_bytes());
-                message_outline.headers.push(html.headers_raw);
+                message_outline.headers.push(
+                    html.headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
             MessagePart::Text(text) => {
                 if let Some(pos) = html_body.iter().position(|&p| p == part_id) {
@@ -302,7 +324,12 @@ fn build_message_response(
                     text.is_encoding_problem,
                 ));
                 blobs.push(text.body.into_owned().into_bytes());
-                message_outline.headers.push(text.headers_raw);
+                message_outline.headers.push(
+                    text.headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
             MessagePart::Binary(binary) => {
                 if !has_attachments {
@@ -314,7 +341,13 @@ fn build_message_response(
                     binary.is_encoding_problem,
                 ));
                 blobs.push(binary.body.into_owned());
-                message_outline.headers.push(binary.headers_raw);
+                message_outline.headers.push(
+                    binary
+                        .headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
             MessagePart::InlineBinary(binary) => {
                 mime_parts.push(MimePart::new_other(
@@ -323,7 +356,13 @@ fn build_message_response(
                     binary.is_encoding_problem,
                 ));
                 blobs.push(binary.body.into_owned());
-                message_outline.headers.push(binary.headers_raw);
+                message_outline.headers.push(
+                    binary
+                        .headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
             MessagePart::Message(nested_message) => {
                 if !has_attachments {
@@ -349,7 +388,13 @@ fn build_message_response(
                     blob_index,
                     false,
                 ));
-                message_outline.headers.push(nested_message.headers_raw);
+                message_outline.headers.push(
+                    nested_message
+                        .headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
             MessagePart::Multipart(part) => {
                 mime_parts.push(MimePart::new_other(
@@ -357,7 +402,12 @@ fn build_message_response(
                     0,
                     false,
                 ));
-                message_outline.headers.push(part.headers_raw);
+                message_outline.headers.push(
+                    part.headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
         };
     }
@@ -633,11 +683,11 @@ fn build_message_response(
     JSONValue::Object(result)
 }
 
-pub fn build_message_document<'x>(
+pub fn build_message_document(
     document: &mut WriteBatch,
-    message: Message<'x>,
+    message: Message,
     received_at: Option<i64>,
-) -> store::Result<(Vec<Cow<'x, str>>, String)> {
+) -> store::Result<(Vec<String>, String)> {
     let mut total_parts = message.parts.len();
     let mut total_blobs = 0;
     let mut message_data = MessageData {
@@ -699,26 +749,32 @@ pub fn build_message_document<'x>(
                 // Build a list containing all IDs that appear in the header
                 match &header_value {
                     HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                        reference_ids.push(text.clone())
+                        reference_ids.push(text.to_string())
                     }
                     HeaderValue::TextList(list) => {
-                        reference_ids.extend(
-                            list.iter()
-                                .filter(|text| text.len() <= MAX_ID_LENGTH)
-                                .cloned(),
-                        );
+                        reference_ids.extend(list.iter().filter_map(|text| {
+                            if text.len() <= MAX_ID_LENGTH {
+                                Some(text.to_string())
+                            } else {
+                                None
+                            }
+                        }));
                     }
                     HeaderValue::Collection(col) => {
                         for item in col {
                             match item {
                                 HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                                    reference_ids.push(text.clone())
+                                    reference_ids.push(text.to_string())
                                 }
-                                HeaderValue::TextList(list) => reference_ids.extend(
-                                    list.iter()
-                                        .filter(|text| text.len() <= MAX_ID_LENGTH)
-                                        .cloned(),
-                                ),
+                                HeaderValue::TextList(list) => {
+                                    reference_ids.extend(list.iter().filter_map(|text| {
+                                        if text.len() <= MAX_ID_LENGTH {
+                                            Some(text.to_string())
+                                        } else {
+                                            None
+                                        }
+                                    }))
+                                }
                                 _ => (),
                             }
                         }
@@ -817,7 +873,7 @@ pub fn build_message_document<'x>(
 
                     document.text(
                         RfcHeader::Subject,
-                        Text::Full(FullText::new_lang(subject.to_string().into(), language)),
+                        Text::Full(FullText::new_lang(subject.to_string(), language)),
                         FieldOptions::None,
                     );
 
@@ -862,7 +918,13 @@ pub fn build_message_document<'x>(
     message_data
         .mime_parts
         .push(MimePart::new_other(mime_parts, 0, false));
-    message_outline.headers.push(message.headers_raw);
+    message_outline.headers.push(
+        message
+            .headers_raw
+            .into_iter()
+            .map(|(k, v)| (k.into(), v))
+            .collect(),
+    );
 
     let mut extra_mime_parts = Vec::new();
 
@@ -891,7 +953,7 @@ pub fn build_message_document<'x>(
 
                 document.text(
                     field.clone(),
-                    Text::Full(FullText::new(text.into(), &mut language_detector)),
+                    Text::Full(FullText::new(text, &mut language_detector)),
                     if field == MessageField::Body {
                         let blob_index = total_blobs;
                         total_blobs += 1;
@@ -912,7 +974,12 @@ pub fn build_message_document<'x>(
                     total_blobs,
                     html.is_encoding_problem,
                 ));
-                message_outline.headers.push(html.headers_raw);
+                message_outline.headers.push(
+                    html.headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
 
                 total_blobs += 1;
             }
@@ -924,7 +991,7 @@ pub fn build_message_document<'x>(
                         let html_len = html.len();
                         document.text(
                             MessageField::Body,
-                            Text::Default(html.into()),
+                            Text::Default(html),
                             FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                         );
                         extra_mime_parts.push(MimePart::new_html(
@@ -957,7 +1024,12 @@ pub fn build_message_document<'x>(
                     total_blobs,
                     text.is_encoding_problem,
                 ));
-                message_outline.headers.push(text.headers_raw);
+                message_outline.headers.push(
+                    text.headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
 
                 total_blobs += 1;
             }
@@ -970,7 +1042,13 @@ pub fn build_message_document<'x>(
                     total_blobs,
                     binary.is_encoding_problem,
                 ));
-                message_outline.headers.push(binary.headers_raw);
+                message_outline.headers.push(
+                    binary
+                        .headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
 
                 document.binary(
                     MessageField::Attachment,
@@ -985,7 +1063,13 @@ pub fn build_message_document<'x>(
                     total_blobs,
                     binary.is_encoding_problem,
                 ));
-                message_outline.headers.push(binary.headers_raw);
+                message_outline.headers.push(
+                    binary
+                        .headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
                 document.binary(
                     MessageField::Attachment,
                     binary.body.into_owned(),
@@ -1037,7 +1121,13 @@ pub fn build_message_document<'x>(
                     false,
                 ));
                 total_blobs += 1;
-                message_outline.headers.push(nested_message.headers_raw);
+                message_outline.headers.push(
+                    nested_message
+                        .headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
             MessagePart::Multipart(part) => {
                 message_data.mime_parts.push(MimePart::new_other(
@@ -1045,7 +1135,12 @@ pub fn build_message_document<'x>(
                     0,
                     false,
                 ));
-                message_outline.headers.push(part.headers_raw);
+                message_outline.headers.push(
+                    part.headers_raw
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v))
+                        .collect(),
+                );
             }
         };
     }
@@ -1069,8 +1164,12 @@ pub fn build_message_document<'x>(
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
 
-    let mut message_data = messagepack_serialize(&message_data)?;
-    let mut message_outline = bincode_serialize(&message_outline)?;
+    let mut message_data = message_data
+        .serialize()
+        .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
+    let mut message_outline = message_outline
+        .serialize()
+        .ok_or_else(|| StoreError::SerializeError("Failed to serialize message outline".into()))?;
     let mut buf = Vec::with_capacity(
         message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
     );
@@ -1080,7 +1179,7 @@ pub fn build_message_document<'x>(
 
     document.binary(
         MessageField::Internal,
-        buf.into(),
+        buf,
         FieldOptions::StoreAsBlob(MESSAGE_DATA),
     );
 
@@ -1098,7 +1197,7 @@ pub fn build_message_document<'x>(
     ))
 }
 
-fn parse_attached_message<'x>(
+fn parse_attached_message(
     document: &mut WriteBatch,
     message: &mut Message,
     language_detector: &mut LanguageDetector,
@@ -1106,10 +1205,7 @@ fn parse_attached_message<'x>(
     if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
         document.text(
             MessageField::Attachment,
-            Text::Full(FullText::new(
-                subject.into_owned().into(),
-                language_detector,
-            )),
+            Text::Full(FullText::new(subject.into_owned(), language_detector)),
             FieldOptions::None,
         );
     }
@@ -1118,20 +1214,14 @@ fn parse_attached_message<'x>(
             MessagePart::Text(text) => {
                 document.text(
                     MessageField::Attachment,
-                    Text::Full(FullText::new(
-                        text.body.into_owned().into(),
-                        language_detector,
-                    )),
+                    Text::Full(FullText::new(text.body.into_owned(), language_detector)),
                     FieldOptions::None,
                 );
             }
             MessagePart::Html(html) => {
                 document.text(
                     MessageField::Attachment,
-                    Text::Full(FullText::new(
-                        html_to_text(&html.body).into(),
-                        language_detector,
-                    )),
+                    Text::Full(FullText::new(html_to_text(&html.body), language_detector)),
                     FieldOptions::None,
                 );
             }
@@ -1140,7 +1230,7 @@ fn parse_attached_message<'x>(
     }
 }
 
-fn parse_address<'x>(document: &mut WriteBatch, header_name: RfcHeader, address: &Addr<'x>) {
+fn parse_address(document: &mut WriteBatch, header_name: RfcHeader, address: &Addr) {
     if let Some(name) = &address.name {
         parse_text(document, header_name, name);
     };
@@ -1148,14 +1238,14 @@ fn parse_address<'x>(document: &mut WriteBatch, header_name: RfcHeader, address:
         if addr.len() <= MAX_TOKEN_LENGTH {
             document.text(
                 header_name,
-                Text::Keyword(addr.to_lowercase().into()),
+                Text::Keyword(addr.to_lowercase()),
                 FieldOptions::None,
             );
         }
     };
 }
 
-fn parse_address_group<'x>(document: &mut WriteBatch, header_name: RfcHeader, group: &Group<'x>) {
+fn parse_address_group(document: &mut WriteBatch, header_name: RfcHeader, group: &Group) {
     if let Some(name) = &group.name {
         parse_text(document, header_name, name);
     };
@@ -1165,7 +1255,7 @@ fn parse_address_group<'x>(document: &mut WriteBatch, header_name: RfcHeader, gr
     }
 }
 
-fn parse_text<'x>(document: &mut WriteBatch, header_name: RfcHeader, text: &str) {
+fn parse_text(document: &mut WriteBatch, header_name: RfcHeader, text: &str) {
     match header_name {
         RfcHeader::Keywords
         | RfcHeader::ContentLanguage
@@ -1177,7 +1267,7 @@ fn parse_text<'x>(document: &mut WriteBatch, header_name: RfcHeader, text: &str)
             if text.len() <= MAX_TOKEN_LENGTH {
                 document.text(
                     header_name,
-                    Text::Keyword(text.to_lowercase().into()),
+                    Text::Keyword(text.to_lowercase()),
                     FieldOptions::None,
                 );
             }
@@ -1188,17 +1278,17 @@ fn parse_text<'x>(document: &mut WriteBatch, header_name: RfcHeader, text: &str)
         _ => {
             document.text(
                 header_name,
-                Text::Tokenized(text.to_string().into()),
+                Text::Tokenized(text.to_string()),
                 FieldOptions::None,
             );
         }
     }
 }
 
-fn parse_content_type<'x>(
+fn parse_content_type(
     document: &mut WriteBatch,
     header_name: RfcHeader,
-    content_type: &ContentType<'x>,
+    content_type: &ContentType,
 ) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
         document.text(
@@ -1227,7 +1317,7 @@ fn parse_content_type<'x>(
             } else if value.len() <= MAX_TOKEN_LENGTH {
                 document.text(
                     header_name,
-                    Text::Keyword(value.to_lowercase().into()),
+                    Text::Keyword(value.to_lowercase()),
                     FieldOptions::None,
                 );
             }
@@ -1260,11 +1350,7 @@ fn parse_datetime(document: &mut WriteBatch, header_name: RfcHeader, date_time: 
 }
 
 #[allow(clippy::manual_flatten)]
-fn add_addr_sort<'x>(
-    document: &mut WriteBatch,
-    header_name: RfcHeader,
-    header_value: &HeaderValue<'x>,
-) {
+fn add_addr_sort(document: &mut WriteBatch, header_name: RfcHeader, header_value: &HeaderValue) {
     let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
         col.first().unwrap_or(&HeaderValue::Empty)
     } else {
@@ -1316,19 +1402,11 @@ fn add_addr_sort<'x>(
                 }
             }
         }
-        document.text(
-            header_name,
-            Text::Tokenized(text.into()),
-            FieldOptions::Sort,
-        );
+        document.text(header_name, Text::Tokenized(text), FieldOptions::Sort);
     };
 }
 
-fn parse_header<'x>(
-    document: &mut WriteBatch,
-    header_name: RfcHeader,
-    header_value: &HeaderValue<'x>,
-) {
+fn parse_header(document: &mut WriteBatch, header_name: RfcHeader, header_value: &HeaderValue) {
     match header_value {
         HeaderValue::Address(address) => {
             parse_address(document, header_name, address);
@@ -1576,7 +1654,7 @@ pub fn header_to_jmap_address(
     }
 }
 
-fn empty_text_mime_headers<'x>(is_html: bool, size: usize) -> JMAPMailMimeHeaders<'x> {
+fn empty_text_mime_headers(is_html: bool, size: usize) -> JMAPMailMimeHeaders {
     let mut mime_parts = HashMap::with_capacity(2);
     mime_parts.insert(JMAPMailBodyProperties::Size, size.into());
     mime_parts.insert(
@@ -1608,10 +1686,10 @@ fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
     mime_parts
 }
 
-fn mime_header_to_jmap<'x>(
-    mime_parts: &mut JMAPMailMimeHeaders<'x>,
+fn mime_header_to_jmap(
+    mime_parts: &mut JMAPMailMimeHeaders,
     header: RfcHeader,
-    value: HeaderValue<'x>,
+    value: HeaderValue,
 ) {
     match header {
         RfcHeader::ContentType => {

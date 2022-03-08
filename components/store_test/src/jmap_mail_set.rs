@@ -1,17 +1,19 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
+use async_recursion::async_recursion;
 use jmap_mail::{
-    get::JMAPMailGetArguments, parse::get_message_blob, JMAPMailBodyProperties, JMAPMailGet,
-    JMAPMailProperties, JMAPMailSet,
+    get::{JMAPMailGet, JMAPMailGetArguments},
+    parse::get_message_blob,
+    set::JMAPMailSet,
+    JMAPMailBodyProperties, JMAPMailProperties,
 };
 use jmap_store::{
-    blob::JMAPLocalBlobStore,
+    blob::JMAPBlobStore,
     id::{BlobId, JMAPIdSerialize},
     json::{JSONNumber, JSONValue},
-    local_store::JMAPLocalStore,
-    JMAPGet, JMAPId, JMAPSet, JMAP_MAILBOX,
+    JMAPGet, JMAPSet, JMAP_MAILBOX,
 };
-use store::{batch::WriteBatch, changelog::RaftId, Store};
+use store::{batch::WriteBatch, changelog::RaftId, JMAPId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
@@ -34,9 +36,10 @@ impl<'x> From<SortedJSONValue> for JSONValue {
     }
 }
 
-fn store_blobs<'x, T>(mail_store: &JMAPLocalStore<T>, value: &mut JSONValue)
+#[async_recursion]
+async fn store_blobs<T>(mail_store: &JMAPStore<T>, value: &mut JSONValue)
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     match value {
         JSONValue::Object(o) => {
@@ -45,19 +48,20 @@ where
                     if let JSONValue::String(value) = v {
                         *value = mail_store
                             .upload_blob(0, value.as_bytes())
+                            .await
                             .unwrap()
                             .to_jmap_string();
                     } else {
                         panic!("blobId is not a string");
                     }
                 } else {
-                    store_blobs(mail_store, v);
+                    store_blobs(mail_store, v).await;
                 }
             }
         }
         JSONValue::Array(a) => {
             for v in a.iter_mut() {
-                store_blobs(mail_store, v);
+                store_blobs(mail_store, v).await;
             }
         }
         _ => {}
@@ -101,42 +105,42 @@ fn assert_diff(str1: &str, str2: &str, filename: &str) {
     assert_eq!(str1.len(), str2.len(), "{}", filename);
 }
 
-pub fn test_jmap_mail_set<T>(mail_store: JMAPLocalStore<T>)
+pub async fn jmap_mail_set<T>(mail_store: JMAPStore<T>)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     // TODO use mailbox create API
     let doc_id = mail_store
-        .store
         .assign_document_id(0, JMAP_MAILBOX)
+        .await
         .unwrap();
     mail_store
-        .store
         .update_document(
             0,
             RaftId::default(),
             WriteBatch::insert(JMAP_MAILBOX, doc_id, doc_id),
         )
+        .await
         .unwrap();
     let doc_id = mail_store
-        .store
         .assign_document_id(0, JMAP_MAILBOX)
+        .await
         .unwrap();
     mail_store
-        .store
         .update_document(
             0,
             RaftId::default(),
             WriteBatch::insert(JMAP_MAILBOX, doc_id, doc_id),
         )
+        .await
         .unwrap();
 
-    test_jmap_mail_update(&mail_store, test_jmap_mail_create(&mail_store));
+    jmap_mail_update(&mail_store, jmap_mail_create(&mail_store).await).await;
 }
 
-fn test_jmap_mail_create<'x, T>(mail_store: &'x JMAPLocalStore<T>) -> Vec<String>
+async fn jmap_mail_create<T>(mail_store: &JMAPStore<T>) -> Vec<String>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
@@ -154,9 +158,9 @@ where
                 account_id: 0,
                 if_in_state: None,
                 create: HashMap::from_iter(
-                    vec![(
-                        "1".to_string(),
-                        JSONValue::from(
+                    vec![("1".to_string(), {
+                        let mut result: HashMap<String, JSONValue> = HashMap::new();
+                        for (k, mut v) in JSONValue::from(
                             serde_json::from_slice::<SortedJSONValue>(
                                 &fs::read(&file_name).unwrap(),
                             )
@@ -164,14 +168,12 @@ where
                         )
                         .unwrap_object()
                         .unwrap()
-                        .into_iter()
-                        .map(|(k, mut v)| {
-                            store_blobs(mail_store, &mut v);
-                            (k, v)
-                        })
-                        .collect::<HashMap<String, JSONValue>>()
-                        .into(),
-                    )]
+                        {
+                            store_blobs(mail_store, &mut v).await;
+                            result.insert(k, v);
+                        }
+                        result.into()
+                    })]
                     .into_iter(),
                 )
                 .into(),
@@ -179,6 +181,7 @@ where
                 destroy: JSONValue::Null,
                 arguments: (),
             })
+            .await
             .unwrap();
 
         assert_eq!(result.not_created, JSONValue::Null);
@@ -199,6 +202,7 @@ where
                     .unwrap(),
                 get_message_blob,
             )
+            .await
             .unwrap()
             .unwrap();
 
@@ -258,6 +262,7 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
+                .await
                 .unwrap()
                 .list,
         );
@@ -307,12 +312,12 @@ fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
         .into()
 }
 
-fn get_mailboxes_and_keywords<'x, T>(
-    mail_store: &'x JMAPLocalStore<T>,
+async fn get_mailboxes_and_keywords<T>(
+    mail_store: &JMAPStore<T>,
     message_id: &str,
 ) -> (Vec<String>, Vec<String>)
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let mut result = mail_store
         .mail_get(JMAPGet {
@@ -327,6 +332,7 @@ where
                 max_body_value_bytes: 100,
             },
         })
+        .await
         .unwrap()
         .list
         .unwrap_array()
@@ -359,9 +365,9 @@ where
     (mailboxes, keywords)
 }
 
-fn test_jmap_mail_update<'x, T>(mail_store: &'x JMAPLocalStore<T>, mut message_ids: Vec<String>)
+async fn jmap_mail_update<T>(mail_store: &JMAPStore<T>, mut message_ids: Vec<String>)
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let message_id_1 = message_ids.pop().unwrap();
     let message_id_2 = message_ids.pop().unwrap();
@@ -383,13 +389,14 @@ where
                 destroy: JSONValue::Null,
                 arguments: (),
             })
+            .await
             .unwrap()
             .not_updated,
         JSONValue::Null
     );
 
     assert_eq!(
-        get_mailboxes_and_keywords(mail_store, &message_id_1),
+        get_mailboxes_and_keywords(mail_store, &message_id_1).await,
         (
             vec!["i00".to_string(), "i01".to_string()],
             vec!["test1".to_string(), "test2".to_string()]
@@ -414,13 +421,14 @@ where
                 destroy: JSONValue::Null,
                 arguments: (),
             })
+            .await
             .unwrap()
             .not_updated,
         JSONValue::Null
     );
 
     assert_eq!(
-        get_mailboxes_and_keywords(mail_store, &message_id_1),
+        get_mailboxes_and_keywords(mail_store, &message_id_1).await,
         (
             vec!["i01".to_string()],
             vec!["test1".to_string(), "test3".to_string()]
@@ -442,6 +450,7 @@ where
                 destroy: JSONValue::Null,
                 arguments: (),
             })
+            .await
             .unwrap()
             .not_updated
             .unwrap_object()
@@ -473,6 +482,7 @@ where
                 destroy: vec![message_id_1.into()].into(),
                 arguments: (),
             })
+            .await
             .unwrap()
             .not_updated
             .unwrap_object()
@@ -499,6 +509,7 @@ where
                 destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()].into(),
                 arguments: (),
             })
+            .await
             .unwrap()
             .not_destroyed,
         JSONValue::Null
@@ -527,6 +538,7 @@ where
                     max_body_value_bytes: 100,
                 }
             },)
+            .await
             .unwrap()
             .not_found
             .unwrap()

@@ -1,8 +1,6 @@
 use std::fmt::Write;
 
-use store::{leb128::Leb128, AccountId, BlobIndex, CollectionId, DocumentId};
-
-use crate::JMAPId;
+use store::{blob::BlobIndex, leb128::Leb128, AccountId, CollectionId, DocumentId, JMAPId};
 
 pub trait JMAPIdSerialize {
     fn from_jmap_string(id: &str) -> Option<Self>

@@ -1,53 +1,65 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse::get_message_blob, JMAPMailIdImpl, JMAPMailImport, MESSAGE_RAW};
+use crate::{parse::get_message_blob, MESSAGE_RAW};
+use jmap_store::blob::JMAPBlobStore;
 use jmap_store::{
-    blob::JMAPLocalBlobStore,
-    changes::{JMAPLocalChanges, JMAPState},
+    async_trait::async_trait,
+    changes::{JMAPChanges, JMAPState},
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
-    local_store::JMAPLocalStore,
-    JMAPError, JMAPId, JMAP_MAIL, JMAP_MAILBOX, JMAP_MAILBOX_CHANGES, JMAP_THREAD,
+    JMAPError, JMAP_MAIL, JMAP_MAILBOX, JMAP_MAILBOX_CHANGES, JMAP_THREAD,
 };
 use mail_parser::Message;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use store::query::JMAPStoreQuery;
+use store::serialize::{StoreDeserialize, StoreSerialize};
+use store::JMAPIdPrefix;
 use store::{
     batch::WriteBatch,
     bincode,
     changelog::RaftId,
     field::{FieldOptions, Text},
-    AccountId, Comparator, DocumentSet, FieldValue, Filter, Store, StoreError, Tag, ThreadId,
+    roaring::RoaringBitmap,
+    AccountId, Comparator, FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, ThreadId,
 };
 
 use crate::{parse::build_message_document, query::MailboxId, MessageField};
 
-pub fn bincode_serialize<T>(value: &T) -> store::Result<Vec<u8>>
+#[derive(Serialize, Deserialize)]
+pub struct Bincoded<T>
 where
-    T: Serialize,
+    T: Send + Sync,
 {
-    bincode::serialize(value).map_err(|e| StoreError::SerializeError(e.to_string()))
+    pub items: T,
 }
 
-pub fn bincode_deserialize<'x, T>(bytes: &'x [u8]) -> store::Result<T>
+impl<T> Bincoded<T>
 where
-    T: Deserialize<'x>,
+    T: Send + Sync,
 {
-    bincode::deserialize(bytes).map_err(|e| StoreError::DeserializeError(e.to_string()))
+    pub fn new(items: T) -> Self {
+        Self { items }
+    }
 }
 
-pub fn messagepack_serialize<T>(value: &T) -> store::Result<Vec<u8>>
+impl<T> StoreSerialize for Bincoded<T>
 where
-    T: Serialize,
+    T: Serialize + Send + Sync,
 {
-    rmp_serde::encode::to_vec(value).map_err(|e| StoreError::SerializeError(e.to_string()))
+    fn serialize(&self) -> Option<Vec<u8>> {
+        bincode::serialize(&self.items).ok()
+    }
 }
 
-pub fn messagepack_deserialize<'x, T>(bytes: &'x [u8]) -> store::Result<T>
+impl<T> StoreDeserialize for Bincoded<T>
 where
-    T: Deserialize<'x>,
+    T: DeserializeOwned + Send + Sync,
 {
-    rmp_serde::decode::from_slice(bytes).map_err(|e| StoreError::DeserializeError(e.to_string()))
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        bincode::deserialize_from(bytes).ok()?
+    }
 }
 
 pub struct JMAPMailImportRequest {
@@ -81,28 +93,38 @@ impl From<JMAPMailImportResponse> for JSONValue {
     }
 }
 
-impl<'x, T> JMAPMailImport<'x> for JMAPLocalStore<T>
+#[async_trait]
+pub trait JMAPMailImport {
+    async fn mail_import(
+        &self,
+        request: JMAPMailImportRequest,
+    ) -> jmap_store::Result<JMAPMailImportResponse>;
+}
+
+#[async_trait]
+impl<T> JMAPMailImport for JMAPStore<T>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
-    fn mail_import(
-        &'x self,
+    async fn mail_import(
+        &self,
         request: JMAPMailImportRequest,
     ) -> jmap_store::Result<JMAPMailImportResponse> {
-        let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
+        let old_state = self.get_state(request.account_id, JMAP_MAIL).await?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
                 return Err(JMAPError::StateMismatch);
             }
         }
 
-        if request.emails.len() > self.mail_config.import_max_items {
+        if request.emails.len() > self.config.mail_import_max_items {
             return Err(JMAPError::RequestTooLarge);
         }
 
         let mailbox_ids = self
-            .store
-            .get_document_ids(request.account_id, JMAP_MAILBOX)?;
+            .get_document_ids(request.account_id, JMAP_MAILBOX)
+            .await?
+            .unwrap_or_else(RoaringBitmap::new);
 
         let mut created = HashMap::with_capacity(request.emails.len());
         let mut not_created = HashMap::with_capacity(request.emails.len());
@@ -134,8 +156,9 @@ where
                 }
             }
 
-            if let Some(blob) =
-                self.download_blob(request.account_id, &item.blob_id, get_message_blob)?
+            if let Some(blob) = self
+                .download_blob(request.account_id, &item.blob_id, get_message_blob)
+                .await?
             {
                 created.insert(
                     item.id,
@@ -146,7 +169,8 @@ where
                         item.mailbox_ids,
                         item.keywords,
                         item.received_at,
-                    )?,
+                    )
+                    .await?,
                 );
             } else {
                 not_created.insert(
@@ -161,7 +185,7 @@ where
 
         Ok(JMAPMailImportResponse {
             new_state: if !created.is_empty() {
-                self.get_state(request.account_id, JMAP_MAIL)?
+                self.get_state(request.account_id, JMAP_MAIL).await?
             } else {
                 old_state.clone()
             },
@@ -180,9 +204,10 @@ where
     }
 }
 
-pub trait JMAPMailLocalStoreImport<'x> {
-    fn mail_import_blob(
-        &'x self,
+#[async_trait]
+pub trait JMAPMailLocalStoreImport {
+    async fn mail_import_blob(
+        &self,
         account_id: AccountId,
         raft_id: RaftId,
         blob: &[u8],
@@ -191,7 +216,7 @@ pub trait JMAPMailLocalStoreImport<'x> {
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue>;
 
-    fn mail_merge_threads(
+    async fn mail_merge_threads(
         &self,
         account_id: AccountId,
         documents: &mut Vec<WriteBatch>,
@@ -199,12 +224,13 @@ pub trait JMAPMailLocalStoreImport<'x> {
     ) -> store::Result<ThreadId>;
 }
 
-impl<'x, T> JMAPMailLocalStoreImport<'x> for JMAPLocalStore<T>
+#[async_trait]
+impl<T> JMAPMailLocalStoreImport for JMAPStore<T>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
-    fn mail_import_blob(
-        &'x self,
+    async fn mail_import_blob(
+        &self,
         account_id: AccountId,
         raft_id: RaftId,
         blob: &[u8],
@@ -213,7 +239,7 @@ where
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue> {
         // Build message document
-        let document_id = self.store.assign_document_id(account_id, JMAP_MAIL)?;
+        let document_id = self.assign_document_id(account_id, JMAP_MAIL).await?;
         let mut document = WriteBatch::insert(JMAP_MAIL, document_id, document_id);
         let (reference_ids, thread_name) = build_message_document(
             &mut document,
@@ -225,13 +251,16 @@ where
         // Add mailbox tags
         if !mailbox_ids.is_empty() {
             //TODO validate mailbox ids
+            let mailbox_ids = Bincoded::new(mailbox_ids);
             document.binary(
                 MessageField::Mailbox,
-                bincode_serialize(&mailbox_ids)?.into(),
+                store::serialize::StoreSerialize::serialize(&mailbox_ids).ok_or_else(|| {
+                    StoreError::SerializeError("Failed to serialize mailbox list.".into())
+                })?,
                 FieldOptions::Store,
             );
-            let change_id = self.store.assign_change_id(account_id, JMAP_MAILBOX)?;
-            for mailbox_id in mailbox_ids {
+            let change_id = self.assign_change_id(account_id, JMAP_MAILBOX).await?;
+            for mailbox_id in mailbox_ids.items {
                 document.tag(
                     MessageField::Mailbox,
                     Tag::Id(mailbox_id),
@@ -249,34 +278,36 @@ where
 
         // Add keyword tags
         if !keywords.is_empty() {
+            let keywords = Bincoded::new(keywords);
             document.binary(
                 MessageField::Keyword,
-                bincode_serialize(&keywords)?.into(),
+                store::serialize::StoreSerialize::serialize(&keywords).ok_or_else(|| {
+                    StoreError::SerializeError("Failed to serialize keywords.".into())
+                })?,
                 FieldOptions::Store,
             );
-            for keyword in keywords {
+            for keyword in keywords.items {
                 document.tag(MessageField::Keyword, keyword, FieldOptions::None);
             }
         }
 
         // Lock account
-        let _lock = self.lock_account(account_id, JMAP_MAIL);
+        let _lock = self.lock_account(account_id, JMAP_MAIL).await;
 
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
             // Obtain thread ids for all matching document ids
             let thread_ids = self
-                .store
                 .get_multi_document_value(
                     account_id,
                     JMAP_MAIL,
-                    self.store.query(
+                    self.query(JMAPStoreQuery::new(
                         account_id,
                         JMAP_MAIL,
                         Filter::and(vec![
                             Filter::eq(
                                 MessageField::ThreadName.into(),
-                                FieldValue::Keyword((&thread_name).into()),
+                                FieldValue::Keyword(thread_name.to_string()),
                             ),
                             Filter::or(
                                 reference_ids
@@ -284,16 +315,24 @@ where
                                     .map(|id| {
                                         Filter::eq(
                                             MessageField::MessageIdRef.into(),
-                                            FieldValue::Keyword(id.as_ref().into()),
+                                            FieldValue::Keyword(id.to_string()),
                                         )
                                     })
                                     .collect(),
                             ),
                         ]),
                         Comparator::None,
-                    )?,
+                        0,
+                    ))
+                    .await?
+                    .results
+                    .into_iter()
+                    .map(|id| id.get_document_id())
+                    .collect::<Vec<u32>>()
+                    .into_iter(),
                     MessageField::ThreadId.into(),
-                )?
+                )
+                .await?
                 .into_iter()
                 .flatten()
                 .collect::<HashSet<ThreadId>>();
@@ -306,11 +345,14 @@ where
                 0 => None,
                 _ => {
                     // Merge all matching threads
-                    Some(self.mail_merge_threads(
-                        account_id,
-                        &mut documents,
-                        thread_ids.into_iter().collect(),
-                    )?)
+                    Some(
+                        self.mail_merge_threads(
+                            account_id,
+                            &mut documents,
+                            thread_ids.into_iter().collect(),
+                        )
+                        .await?,
+                    )
                 }
             }
         } else {
@@ -320,7 +362,7 @@ where
         let thread_id = if let Some(thread_id) = thread_id {
             thread_id
         } else {
-            let thread_id = self.store.assign_document_id(account_id, JMAP_THREAD)?;
+            let thread_id = self.assign_document_id(account_id, JMAP_THREAD).await?;
             documents.push(WriteBatch::insert(JMAP_THREAD, thread_id, thread_id));
             thread_id
         };
@@ -328,7 +370,7 @@ where
         for reference_id in reference_ids {
             document.text(
                 MessageField::MessageIdRef,
-                Text::Keyword(reference_id.into_owned()),
+                Text::Keyword(reference_id),
                 FieldOptions::None,
             );
         }
@@ -346,13 +388,13 @@ where
             FieldOptions::Sort,
         );
 
-        let jmap_mail_id = JMAPId::from_email(thread_id, document_id);
-        document.update_full_id(jmap_mail_id);
+        let jmap_mail_id = JMAPId::from_parts(thread_id, document_id);
+        document.update_jmap_id(jmap_mail_id);
         documents.push(document);
 
         // Write documents to store
-        self.store
-            .update_documents(account_id, raft_id, documents)?;
+        self.update_documents(account_id, raft_id, documents)
+            .await?;
 
         // Generate JSON object
         let mut values = HashMap::with_capacity(4);
@@ -372,7 +414,7 @@ where
         Ok(values.into())
     }
 
-    fn mail_merge_threads(
+    async fn mail_merge_threads(
         &self,
         account_id: AccountId,
         documents: &mut Vec<WriteBatch>,
@@ -382,7 +424,6 @@ where
         let mut document_sets = Vec::with_capacity(thread_ids.len());
 
         for (pos, document_set) in self
-            .store
             .get_tags(
                 account_id,
                 JMAP_MAIL,
@@ -391,12 +432,13 @@ where
                     .iter()
                     .map(|id| Tag::Id(*id))
                     .collect::<Vec<Tag>>(),
-            )?
+            )
+            .await?
             .into_iter()
             .enumerate()
         {
             if let Some(document_set) = document_set {
-                debug_assert!(document_set.len() > 0);
+                debug_assert!(!document_set.is_empty());
                 document_sets.push((document_set, thread_ids[pos]));
             } else {
                 // TODO log this error instead
@@ -414,8 +456,8 @@ where
                 let mut document = WriteBatch::moved(
                     JMAP_MAIL,
                     document_id,
-                    JMAPId::from_email(delete_thread_id, document_id),
-                    JMAPId::from_email(thread_id, document_id),
+                    JMAPId::from_parts(delete_thread_id, document_id),
+                    JMAPId::from_parts(thread_id, document_id),
                 );
                 document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
                 document.tag(

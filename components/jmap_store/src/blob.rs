@@ -1,12 +1,14 @@
-use store::{AccountId, BlobEntry, Store};
+use async_trait::async_trait;
+use store::{AccountId, JMAPStore, Store};
 
-use crate::{id::BlobId, local_store::JMAPLocalStore};
+use crate::id::BlobId;
 
 pub type InnerBlobFnc = fn(&[u8], usize) -> Option<Vec<u8>>;
 
-pub trait JMAPLocalBlobStore<'x> {
-    fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<BlobId>;
-    fn download_blob(
+#[async_trait]
+pub trait JMAPBlobStore {
+    async fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<BlobId>;
+    async fn download_blob(
         &self,
         account: AccountId,
         blob_id: &BlobId,
@@ -14,18 +16,19 @@ pub trait JMAPLocalBlobStore<'x> {
     ) -> store::Result<Option<Vec<u8>>>;
 }
 
-impl<'x, T> JMAPLocalBlobStore<'x> for JMAPLocalStore<T>
+#[async_trait]
+impl<T> JMAPBlobStore for JMAPStore<T>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
-    fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<BlobId> {
+    async fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<BlobId> {
         // Insert temporary blob
-        let (timestamp, hash) = self.store.store_temporary_blob(account, bytes)?;
+        let (timestamp, hash) = self.store_temporary_blob(account, bytes).await?;
 
         Ok(BlobId::new_temporary(account, timestamp, hash))
     }
 
-    fn download_blob(
+    async fn download_blob(
         &self,
         account: AccountId,
         blob_id: &BlobId,
@@ -34,32 +37,34 @@ where
         Ok(match blob_id {
             BlobId::Owned(blob_id) => {
                 //TODO check ACL
-                self.store
-                    .get_blob(
-                        blob_id.account,
-                        blob_id.collection,
-                        blob_id.document,
-                        BlobEntry::new(blob_id.blob_index),
-                    )?
-                    .map(|entry| entry.value)
+                self.get_blob(
+                    blob_id.account,
+                    blob_id.collection,
+                    blob_id.document,
+                    blob_id.blob_index,
+                    0..u32::MAX,
+                )
+                .await?
+                .map(|entry| entry.1)
             }
             BlobId::Temporary(blob_id) => {
-                self.store
-                    .get_temporary_blob(account, blob_id.hash, blob_id.timestamp)?
+                self.get_temporary_blob(account, blob_id.hash, blob_id.timestamp)
+                    .await?
             }
             BlobId::InnerOwned(blob_id) => self
-                .store
                 .get_blob(
                     blob_id.blob_id.account,
                     blob_id.blob_id.collection,
                     blob_id.blob_id.document,
-                    BlobEntry::new(blob_id.blob_id.blob_index),
-                )?
-                .map(|entry| entry.value)
+                    blob_id.blob_id.blob_index,
+                    0..u32::MAX,
+                )
+                .await?
+                .map(|entry| entry.1)
                 .and_then(|v| blob_fnc(&v, blob_id.blob_index)),
             BlobId::InnerTemporary(blob_id) => self
-                .store
-                .get_temporary_blob(account, blob_id.blob_id.hash, blob_id.blob_id.timestamp)?
+                .get_temporary_blob(account, blob_id.blob_id.hash, blob_id.blob_id.timestamp)
+                .await?
                 .and_then(|v| blob_fnc(&v, blob_id.blob_index)),
         })
     }

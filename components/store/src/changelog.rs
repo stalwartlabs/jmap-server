@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-
-use tokio::sync::oneshot;
+use std::sync::atomic::Ordering;
 
 use crate::batch::LogAction;
 use crate::leb128::Leb128;
@@ -242,33 +241,11 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn get_last_raft_id(&self) -> crate::Result<Option<RaftId>> {
-        let db = self.db.clone();
-        self.spawn_blocking(move || {
-            let key = serialize_raftlog_key(ChangeLogId::MAX, ChangeLogId::MAX);
-            let key_len = key.len();
-
-            if let Some((key, _)) = db
-                .iterator(ColumnFamily::Logs, key, Direction::Backward)?
-                .next()
-            {
-                if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
-                    let term = key.as_ref().deserialize_be_u64(1).ok_or_else(|| {
-                        StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
-                    })?;
-                    let index = key
-                        .as_ref()
-                        .deserialize_be_u64(1 + std::mem::size_of::<ChangeLogId>())
-                        .ok_or_else(|| {
-                            StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
-                        })?;
-
-                    return Ok(Some(RaftId { term, index }));
-                }
-            }
-            Ok(None)
-        })
-        .await
+    pub fn next_raft_id(&self) -> RaftId {
+        RaftId {
+            term: self.raft_log_term.load(Ordering::Relaxed),
+            index: self.raft_log_index.fetch_add(1, Ordering::Relaxed),
+        }
     }
 
     pub async fn get_last_change_id(
@@ -277,7 +254,7 @@ where
         collection: CollectionId,
     ) -> crate::Result<Option<ChangeLogId>> {
         let db = self.db.clone();
-        self.spawn_blocking(move || {
+        self.spawn_worker(move || {
             let key = serialize_changelog_key(account, collection, ChangeLogId::MAX);
             let key_len = key.len();
 
@@ -311,7 +288,7 @@ where
         query: ChangeLogQuery,
     ) -> crate::Result<Option<ChangeLog>> {
         let db = self.db.clone();
-        self.spawn_blocking(move || {
+        self.spawn_worker(move || {
             let mut changelog = ChangeLog::default();
             /*let (is_inclusive, mut match_from_change_id, from_change_id, to_change_id) = match query {
                 ChangeLogQuery::All => (true, false, 0, 0),
@@ -390,4 +367,32 @@ where
         })
         .await
     }
+}
+
+pub fn get_last_raft_id<'y, T>(db: &'y T) -> crate::Result<Option<RaftId>>
+where
+    T: for<'x> Store<'x>,
+{
+    let key = serialize_raftlog_key(ChangeLogId::MAX, ChangeLogId::MAX);
+    let key_len = key.len();
+
+    if let Some((key, _)) = db
+        .iterator(ColumnFamily::Logs, key, Direction::Backward)?
+        .next()
+    {
+        if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
+            let term = key.as_ref().deserialize_be_u64(1).ok_or_else(|| {
+                StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+            })?;
+            let index = key
+                .as_ref()
+                .deserialize_be_u64(1 + std::mem::size_of::<ChangeLogId>())
+                .ok_or_else(|| {
+                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                })?;
+
+            return Ok(Some(RaftId { term, index }));
+        }
+    }
+    Ok(None)
 }

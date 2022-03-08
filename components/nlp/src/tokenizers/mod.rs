@@ -30,7 +30,7 @@ pub fn tokenize<'x>(
     text: &'x str,
     language: Language,
     max_token_length: usize,
-) -> Box<dyn Iterator<Item = Token<'x>> + 'x> {
+) -> Box<dyn Iterator<Item = Token<'x>> + Send + 'x> {
     TOKENIZER_MAP[language as usize](text, max_token_length)
 }
 
@@ -38,7 +38,7 @@ pub fn tokenize<'x>(
 static TOKENIZER_MAP: &[for<'x, 'y> fn(
     &'x str,
     usize,
-) -> Box<dyn Iterator<Item = Token<'x>> + 'x>] = &[
+) -> Box<dyn Iterator<Item = Token<'x>> + Send + 'x>] = &[
     indo_european::new_tokenizer, // Esperanto = 0,
     indo_european::new_tokenizer, // English = 1,
     indo_european::new_tokenizer, // Russian = 2,

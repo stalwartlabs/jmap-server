@@ -5,16 +5,16 @@ use nlp::Language;
 use crate::{
     batch::{WriteAction, WriteBatch},
     bitmap::set_clear_bits,
-    blob::{BlobEntries, BlobEntry},
+    blob::BlobEntries,
     changelog::{LogWriter, RaftId},
     field::{FieldOptions, Text, TokenIterator, UpdateField},
     serialize::{
         serialize_acd_key_leb128, serialize_blob_key, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
-        StoreSerialize, BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
+        StoreSerialize, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
     term_index::TermIndexBuilder,
-    AccountId, ColumnFamily, JMAPStore, Store, StoreError, WriteOperation,
+    AccountId, ColumnFamily, JMAPStore, Store, WriteOperation,
 };
 
 impl<T> JMAPStore<T>
@@ -23,17 +23,27 @@ where
 {
     pub async fn set(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> crate::Result<()> {
         let db = self.db.clone();
-        self.spawn_blocking(move || db.set(cf, key, value)).await
+        self.spawn_worker(move || db.set(cf, key, value)).await
     }
 
     pub async fn merge(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> crate::Result<()> {
         let db = self.db.clone();
-        self.spawn_blocking(move || db.merge(cf, key, value)).await
+        self.spawn_worker(move || db.merge(cf, key, value)).await
     }
 
     pub async fn write(&self, batch: Vec<WriteOperation>) -> crate::Result<()> {
         let db = self.db.clone();
-        self.spawn_blocking(move || db.write(batch)).await
+        self.spawn_worker(move || db.write(batch)).await
+    }
+
+    pub async fn update_document(
+        &self,
+        account_id: AccountId,
+        raft_id: RaftId,
+        batch: WriteBatch,
+    ) -> crate::Result<()> {
+        self.update_documents(account_id, raft_id, vec![batch])
+            .await
     }
 
     pub async fn update_documents(
@@ -76,7 +86,7 @@ where
                             write_batch.push(WriteOperation::merge(
                                 ColumnFamily::Values,
                                 key.as_key(),
-                                (-1i64).to_le_bytes().into(),
+                                (-1i64).serialize().unwrap(),
                             ));
                         });
                     }
@@ -155,6 +165,7 @@ where
                                             true,
                                         ))
                                         .await?;
+
                                     if !terms.is_empty() {
                                         for term in &terms {
                                             bitmap_list
@@ -282,7 +293,7 @@ where
                                             document_id,
                                             i.get_field(),
                                         ),
-                                        i.value.to_le_bytes().into(),
+                                        i.value.serialize().unwrap(),
                                     ));
                                 }
 
@@ -333,7 +344,7 @@ where
                                             document_id,
                                             i.get_field(),
                                         ),
-                                        i.value.to_le_bytes().into(),
+                                        i.value.serialize().unwrap(),
                                     ));
                                 }
 
@@ -384,7 +395,7 @@ where
                                             document_id,
                                             f.get_field(),
                                         ),
-                                        f.value.to_le_bytes().into(),
+                                        f.value.serialize().unwrap(),
                                     ));
                                 }
 
@@ -449,7 +460,7 @@ where
                         write_batch.push(WriteOperation::merge(
                             ColumnFamily::Values,
                             blob_entry.as_key(),
-                            (1i64).to_le_bytes().into(),
+                            (1i64).serialize().unwrap(),
                         ));
 
                         blob_entries.add(blob_entry);

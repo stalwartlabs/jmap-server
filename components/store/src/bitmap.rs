@@ -213,7 +213,7 @@ where
 {
     pub async fn get_bitmap(&self, key: Vec<u8>) -> crate::Result<Option<RoaringBitmap>> {
         let db = self.db.clone();
-        self.spawn_blocking(move || {
+        self.spawn_worker(move || {
             Ok(db
                 .get::<RoaringBitmap>(ColumnFamily::Bitmaps, key)?
                 .and_then(|bm| if !bm.is_empty() { Some(bm) } else { None }))
@@ -225,7 +225,7 @@ where
         keys: Vec<Vec<u8>>,
     ) -> crate::Result<Option<RoaringBitmap>> {
         let db = self.db.clone();
-        self.spawn_blocking(move || {
+        self.spawn_worker(move || {
             let mut result: Option<RoaringBitmap> = None;
             for bitmap in db.multi_get::<RoaringBitmap>(ColumnFamily::Bitmaps, keys)? {
                 if let Some(bitmap) = bitmap {
@@ -250,7 +250,7 @@ where
         keys: Vec<Vec<u8>>,
     ) -> crate::Result<Option<RoaringBitmap>> {
         let db = self.db.clone();
-        self.spawn_blocking(move || {
+        self.spawn_worker(move || {
             let mut result: Option<RoaringBitmap> = None;
             for bitmap in (db.multi_get::<RoaringBitmap>(ColumnFamily::Bitmaps, keys)?)
                 .into_iter()
@@ -273,7 +273,7 @@ where
         op: ComparisonOperator,
     ) -> crate::Result<Option<RoaringBitmap>> {
         let db = self.db.clone();
-        self.spawn_blocking(move || {
+        self.spawn_worker(move || {
             let mut bm = RoaringBitmap::new();
             let _match = match_key.clone();
             let match_prefix = &_match[0..FIELD_PREFIX_LEN];

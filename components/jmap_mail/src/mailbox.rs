@@ -2,15 +2,14 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
+use jmap_store::async_trait::async_trait;
 use jmap_store::changes::{
-    JMAPChangesRequest, JMAPChangesResponse, JMAPLocalChanges, JMAPLocalQueryChanges,
-    JMAPQueryChangesResponse,
+    query_changes, JMAPChanges, JMAPChangesRequest, JMAPChangesResponse, JMAPQueryChangesResponse,
 };
 use jmap_store::id::JMAPIdSerialize;
-use jmap_store::local_store::JMAPLocalStore;
 use jmap_store::query::{build_query, paginate_results};
 use jmap_store::{
-    json::JSONValue, JMAPError, JMAPId, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAILBOX,
+    json::JSONValue, JMAPError, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAILBOX,
 };
 use jmap_store::{
     JMAPGet, JMAPGetResponse, JMAPQueryChangesRequest, JMAPQueryRequest, JMAPQueryResponse,
@@ -19,15 +18,16 @@ use jmap_store::{
 
 use serde::{Deserialize, Serialize};
 use store::field::{FieldOptions, Text};
-use store::{batch::WriteBatch, DocumentSet, Store};
+use store::query::JMAPStoreQuery;
+use store::roaring::RoaringBitmap;
+use store::serialize::{StoreDeserialize, StoreSerialize};
+use store::{batch::WriteBatch, Store};
 use store::{
-    AccountId, Comparator, ComparisonOperator, DocumentId, DocumentSetBitOps, FieldComparator,
-    FieldId, FieldValue, Filter, LongInteger, StoreError, Tag,
+    bincode, AccountId, Comparator, ComparisonOperator, DocumentId, FieldComparator, FieldId,
+    FieldValue, Filter, JMAPId, JMAPIdPrefix, JMAPStore, LongInteger, StoreError, Tag,
 };
 
-use crate::import::{bincode_deserialize, bincode_serialize};
 use crate::MessageField;
-use crate::{JMAPMailIdImpl, JMAPMailMailbox};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct JMAPMailbox {
@@ -37,8 +37,20 @@ pub struct JMAPMailbox {
     pub sort_order: u32,
 }
 
+impl StoreSerialize for JMAPMailbox {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        bincode::serialize(self).ok()
+    }
+}
+
+impl StoreDeserialize for JMAPMailbox {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        bincode::deserialize(bytes).ok()
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct JMAPMailboxSet {
+pub struct JMAPMailboxSet {
     pub name: Option<String>,
     pub parent_id: Option<JMAPId>,
     pub role: Option<Option<String>>,
@@ -138,15 +150,82 @@ impl JMAPMailboxProperties {
     }
 }
 
-impl<'x, T> JMAPMailMailbox<'x> for JMAPLocalStore<T>
+#[async_trait]
+pub trait JMAPMailMailbox {
+    async fn mailbox_set(
+        &self,
+        request: JMAPSet<JMAPMailboxSetArguments>,
+    ) -> jmap_store::Result<JMAPSetResponse>;
+
+    async fn mailbox_get(
+        &self,
+        request: JMAPGet<JMAPMailboxProperties, ()>,
+    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
+
+    async fn mailbox_query(
+        &self,
+        request: JMAPQueryRequest<
+            JMAPMailboxFilterCondition,
+            JMAPMailboxComparator,
+            JMAPMailboxQueryArguments,
+        >,
+    ) -> jmap_store::Result<JMAPQueryResponse>;
+
+    async fn mailbox_changes(
+        &self,
+        request: JMAPChangesRequest,
+    ) -> jmap_store::Result<JMAPChangesResponse<JMAPMailboxChangesResponse>>;
+
+    async fn mailbox_query_changes(
+        &self,
+        request: JMAPQueryChangesRequest<
+            JMAPMailboxFilterCondition,
+            JMAPMailboxComparator,
+            JMAPMailboxQueryArguments,
+        >,
+    ) -> jmap_store::Result<JMAPQueryChangesResponse>;
+
+    async fn count_threads(
+        &self,
+        account_id: AccountId,
+        document_ids: Option<RoaringBitmap>,
+    ) -> store::Result<usize>;
+
+    async fn get_mailbox_tag(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<RoaringBitmap>>;
+
+    async fn get_mailbox_unread_tag(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<RoaringBitmap>>;
+
+    #[allow(clippy::too_many_arguments)]
+    async fn validate_properties(
+        &self,
+        account_id: AccountId,
+        mailbox_id: Option<JMAPId>,
+        mailbox_ids: &RoaringBitmap,
+        current_mailbox: Option<&JMAPMailbox>,
+        properties: JSONValue,
+        destroy_ids: &JSONValue,
+        max_nest_level: usize,
+    ) -> jmap_store::Result<Result<JMAPMailboxSet, JSONValue>>;
+}
+
+#[async_trait]
+impl<T> JMAPMailMailbox for JMAPStore<T>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
-    fn mailbox_set(
-        &'x self,
+    async fn mailbox_set(
+        &self,
         request: JMAPSet<JMAPMailboxSetArguments>,
     ) -> jmap_store::Result<JMAPSetResponse> {
-        let old_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
+        let old_state = self.get_state(request.account_id, JMAP_MAILBOX).await?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
                 return Err(JMAPError::StateMismatch);
@@ -155,7 +234,7 @@ where
         let total_changes = request.create.to_object().map_or(0, |c| c.len())
             + request.update.to_object().map_or(0, |c| c.len())
             + request.destroy.to_array().map_or(0, |c| c.len());
-        if total_changes > self.mail_config.mailbox_set_max_changes {
+        if total_changes > self.config.mailbox_set_max_changes {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -165,38 +244,38 @@ where
             ..Default::default()
         };
         let document_ids = self
-            .store
-            .get_document_ids(request.account_id, JMAP_MAILBOX)?;
+            .get_document_ids(request.account_id, JMAP_MAILBOX)
+            .await?
+            .unwrap_or_default();
 
         if let JSONValue::Object(create) = request.create {
             let mut created = HashMap::with_capacity(create.len());
             let mut not_created = HashMap::with_capacity(create.len());
 
             'create: for (pos, (create_id, properties)) in create.into_iter().enumerate() {
-                if document_ids.len() + pos + 1 > self.mail_config.mailbox_max_total {
+                if document_ids.len() as usize + pos + 1 > self.config.mailbox_max_total {
                     not_created.insert(
                         create_id,
                         JSONValue::new_error(
                             JMAPSetErrorType::Forbidden,
-                            format!(
-                                "Too many mailboxes (max {})",
-                                self.mail_config.mailbox_max_total
-                            ),
+                            format!("Too many mailboxes (max {})", self.config.mailbox_max_total),
                         ),
                     );
                     continue;
                 }
 
-                let mailbox = match validate_properties(
-                    self,
-                    request.account_id,
-                    None,
-                    &document_ids,
-                    None,
-                    properties,
-                    &request.destroy,
-                    self.mail_config.mailbox_max_depth,
-                )? {
+                let mailbox = match self
+                    .validate_properties(
+                        request.account_id,
+                        None,
+                        &document_ids,
+                        None,
+                        properties,
+                        &request.destroy,
+                        self.config.mailbox_max_depth,
+                    )
+                    .await?
+                {
                     Ok(mailbox) => mailbox,
                     Err(err) => {
                         not_created.insert(create_id, err);
@@ -212,21 +291,21 @@ where
                 };
 
                 let assigned_id = self
-                    .store
-                    .assign_document_id(request.account_id, JMAP_MAILBOX)?;
+                    .assign_document_id(request.account_id, JMAP_MAILBOX)
+                    .await?;
                 let jmap_id = assigned_id as JMAPId;
                 let mut document = WriteBatch::insert(JMAP_MAILBOX, assigned_id, jmap_id);
 
                 document.text(
                     JMAPMailboxProperties::Name,
-                    Text::Tokenized(mailbox.name.to_lowercase().into()),
+                    Text::Tokenized(mailbox.name.to_lowercase()),
                     FieldOptions::Sort,
                 );
 
                 if let Some(mailbox_role) = mailbox.role.as_ref() {
                     document.text(
                         JMAPMailboxProperties::Role,
-                        Text::Keyword(mailbox_role.clone().into()),
+                        Text::Keyword(mailbox_role.clone()),
                         FieldOptions::None,
                     );
                     document.tag(
@@ -247,7 +326,9 @@ where
                 );
                 document.binary(
                     JMAPMailboxProperties::Id,
-                    bincode_serialize(&mailbox)?.into(),
+                    store::serialize::StoreSerialize::serialize(&mailbox).ok_or_else(|| {
+                        StoreError::SerializeError("Failed to serialize mailbox.".to_string())
+                    })?,
                     FieldOptions::Store,
                 );
                 changes.push(document);
@@ -307,30 +388,30 @@ where
                     }
                 }
 
-                let mut mailbox: JMAPMailbox = bincode_deserialize(
-                    &self
-                        .store
-                        .get_document_value::<Vec<u8>>(
-                            request.account_id,
-                            JMAP_MAILBOX,
-                            document_id,
-                            JMAPMailboxProperties::Id.into(),
-                        )?
-                        .ok_or_else(|| {
-                            StoreError::InternalError("Mailbox data not found".to_string())
-                        })?,
-                )?;
+                let mut mailbox = self
+                    .get_document_value::<JMAPMailbox>(
+                        request.account_id,
+                        JMAP_MAILBOX,
+                        document_id,
+                        JMAPMailboxProperties::Id.into(),
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        StoreError::InternalError("Mailbox data not found".to_string())
+                    })?;
 
-                let mailbox_changes = match validate_properties(
-                    self,
-                    request.account_id,
-                    jmap_id.into(),
-                    &document_ids,
-                    (&mailbox).into(),
-                    properties,
-                    &request.destroy,
-                    self.mail_config.mailbox_max_depth,
-                )? {
+                let mailbox_changes = match self
+                    .validate_properties(
+                        request.account_id,
+                        jmap_id.into(),
+                        &document_ids,
+                        (&mailbox).into(),
+                        properties,
+                        &request.destroy,
+                        self.config.mailbox_max_depth,
+                    )
+                    .await?
+                {
                     Ok(mailbox) => mailbox,
                     Err(err) => {
                         not_updated.insert(jmap_id_str, err);
@@ -344,12 +425,12 @@ where
                     if new_name != mailbox.name {
                         document.text(
                             JMAPMailboxProperties::Name,
-                            Text::Tokenized(mailbox.name.to_lowercase().into()),
+                            Text::Tokenized(mailbox.name.to_lowercase()),
                             FieldOptions::Clear,
                         );
                         document.text(
                             JMAPMailboxProperties::Name,
-                            Text::Tokenized(new_name.to_lowercase().into()),
+                            Text::Tokenized(new_name.to_lowercase()),
                             FieldOptions::Sort,
                         );
                         mailbox.name = new_name;
@@ -377,7 +458,7 @@ where
                         let has_role = if let Some(role) = mailbox.role {
                             document.text(
                                 JMAPMailboxProperties::Role,
-                                Text::Keyword(role.into()),
+                                Text::Keyword(role),
                                 FieldOptions::Clear,
                             );
                             true
@@ -387,7 +468,7 @@ where
                         if let Some(new_role) = &new_role {
                             document.text(
                                 JMAPMailboxProperties::Role,
-                                Text::Keyword(new_role.clone().into()),
+                                Text::Keyword(new_role.clone()),
                                 FieldOptions::None,
                             );
                             if !has_role {
@@ -429,7 +510,9 @@ where
                 if !document.is_empty() {
                     document.binary(
                         JMAPMailboxProperties::Id,
-                        bincode_serialize(&mailbox)?.into(),
+                        store::serialize::StoreSerialize::serialize(&mailbox).ok_or_else(|| {
+                            StoreError::SerializeError("Failed to serialize mailbox.".to_string())
+                        })?,
                         FieldOptions::Store,
                     );
                     changes.push(document);
@@ -457,8 +540,7 @@ where
                         if document_ids.contains(document_id) {
                             // Verify that this mailbox does not have sub-mailboxes
                             if !self
-                                .store
-                                .query(
+                                .query(JMAPStoreQuery::new(
                                     request.account_id,
                                     JMAP_MAILBOX,
                                     Filter::new_condition(
@@ -467,7 +549,10 @@ where
                                         FieldValue::LongInteger(document_id as LongInteger),
                                     ),
                                     Comparator::None,
-                                )?
+                                    0,
+                                ))
+                                .await?
+                                .results
                                 .is_empty()
                             {
                                 not_destroyed.insert(
@@ -481,12 +566,15 @@ where
                             }
 
                             // Verify that the mailbox is empty
-                            if let Some(message_doc_ids) = self.store.get_tag(
-                                request.account_id,
-                                JMAP_MAIL,
-                                MessageField::Mailbox.into(),
-                                Tag::Id(document_id),
-                            )? {
+                            if let Some(message_doc_ids) = self
+                                .get_tag(
+                                    request.account_id,
+                                    JMAP_MAIL,
+                                    MessageField::Mailbox.into(),
+                                    Tag::Id(document_id),
+                                )
+                                .await?
+                            {
                                 if !request.arguments.remove_emails {
                                     not_destroyed.insert(
                                         destroy_id,
@@ -504,13 +592,13 @@ where
 
                                 // Obtain thread ids for all messages to be deleted
                                 for (thread_id, message_doc_id) in self
-                                    .store
                                     .get_multi_document_value(
                                         request.account_id,
                                         JMAP_MAIL,
                                         message_doc_ids.iter().copied(),
                                         MessageField::ThreadId.into(),
-                                    )?
+                                    )
+                                    .await?
                                     .into_iter()
                                     .zip(message_doc_ids)
                                 {
@@ -518,7 +606,7 @@ where
                                         changes.push(WriteBatch::delete(
                                             JMAP_MAIL,
                                             message_doc_id,
-                                            JMAPId::from_email(thread_id, message_doc_id),
+                                            JMAPId::from_parts(thread_id, message_doc_id),
                                         ));
                                     }
                                 }
@@ -547,9 +635,9 @@ where
         }
 
         if !changes.is_empty() {
-            self.store
-                .update_documents(request.account_id, self.next_raft_id(), changes)?;
-            response.new_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
+            self.update_documents(request.account_id, self.next_raft_id(), changes)
+                .await?;
+            response.new_state = self.get_state(request.account_id, JMAP_MAILBOX).await?;
         } else {
             response.new_state = response.old_state.clone();
         }
@@ -557,8 +645,8 @@ where
         Ok(response)
     }
 
-    fn mailbox_get(
-        &'x self,
+    async fn mailbox_get(
+        &self,
         request: JMAPGet<JMAPMailboxProperties, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
         let properties = request.properties.unwrap_or_else(|| {
@@ -578,23 +666,25 @@ where
         });
 
         let request_ids = if let Some(request_ids) = request.ids {
-            if request_ids.len() > self.mail_config.get_max_results {
+            if request_ids.len() > self.config.get_max_results {
                 return Err(JMAPError::RequestTooLarge);
             } else {
                 request_ids
             }
         } else {
-            self.store
-                .get_document_ids(request.account_id, JMAP_MAILBOX)?
+            self.get_document_ids(request.account_id, JMAP_MAILBOX)
+                .await?
+                .unwrap_or_default()
                 .into_iter()
-                .take(self.mail_config.get_max_results)
+                .take(self.config.get_max_results)
                 .map(|id| id as JMAPId)
                 .collect::<Vec<JMAPId>>()
         };
 
         let document_ids = self
-            .store
-            .get_document_ids(request.account_id, JMAP_MAILBOX)?;
+            .get_document_ids(request.account_id, JMAP_MAILBOX)
+            .await?
+            .unwrap_or_default();
         let mut not_found = Vec::new();
         let mut results = Vec::with_capacity(request_ids.len());
 
@@ -613,19 +703,18 @@ where
                         | JMAPMailboxProperties::SortOrder
                 )
             }) {
-                Some(bincode_deserialize::<JMAPMailbox>(
-                    &self
-                        .store
-                        .get_document_value::<Vec<u8>>(
-                            request.account_id,
-                            JMAP_MAILBOX,
-                            document_id,
-                            JMAPMailboxProperties::Id.into(),
-                        )?
-                        .ok_or_else(|| {
-                            StoreError::InternalError("Mailbox data not found".to_string())
-                        })?,
-                )?)
+                Some(
+                    self.get_document_value::<JMAPMailbox>(
+                        request.account_id,
+                        JMAP_MAILBOX,
+                        document_id,
+                        JMAPMailboxProperties::Id.into(),
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        StoreError::InternalError("Mailbox data not found".to_string())
+                    })?,
+                )
             } else {
                 None
             };
@@ -658,30 +747,34 @@ where
                         }
                         JMAPMailboxProperties::IsSubscribed => true.into(), //TODO implement
                         JMAPMailboxProperties::MyRights => JSONValue::Null, //TODO implement
-                        JMAPMailboxProperties::TotalEmails => {
-                            get_mailbox_tag(self, request.account_id, document_id)?
-                                .map(|v| v.len())
-                                .unwrap_or(0)
-                                .into()
-                        }
-                        JMAPMailboxProperties::UnreadEmails => {
-                            get_mailbox_unread_tag(self, request.account_id, document_id)?
-                                .map(|v| v.len())
-                                .unwrap_or(0)
-                                .into()
-                        }
-                        JMAPMailboxProperties::TotalThreads => count_threads(
-                            self,
-                            request.account_id,
-                            get_mailbox_tag(self, request.account_id, document_id)?,
-                        )?
-                        .into(),
-                        JMAPMailboxProperties::UnreadThreads => count_threads(
-                            self,
-                            request.account_id,
-                            get_mailbox_unread_tag(self, request.account_id, document_id)?,
-                        )?
-                        .into(),
+                        JMAPMailboxProperties::TotalEmails => self
+                            .get_mailbox_tag(request.account_id, document_id)
+                            .await?
+                            .map(|v| v.len())
+                            .unwrap_or(0)
+                            .into(),
+                        JMAPMailboxProperties::UnreadEmails => self
+                            .get_mailbox_unread_tag(request.account_id, document_id)
+                            .await?
+                            .map(|v| v.len())
+                            .unwrap_or(0)
+                            .into(),
+                        JMAPMailboxProperties::TotalThreads => self
+                            .count_threads(
+                                request.account_id,
+                                self.get_mailbox_tag(request.account_id, document_id)
+                                    .await?,
+                            )
+                            .await?
+                            .into(),
+                        JMAPMailboxProperties::UnreadThreads => self
+                            .count_threads(
+                                request.account_id,
+                                self.get_mailbox_unread_tag(request.account_id, document_id)
+                                    .await?,
+                            )
+                            .await?
+                            .into(),
                     };
 
                     entry.insert(value);
@@ -692,7 +785,7 @@ where
         }
 
         Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, JMAP_MAILBOX)?,
+            state: self.get_state(request.account_id, JMAP_MAILBOX).await?,
             list: if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
@@ -706,21 +799,18 @@ where
         })
     }
 
-    fn mailbox_query(
-        &'x self,
+    async fn mailbox_query(
+        &self,
         request: JMAPQueryRequest<
             JMAPMailboxFilterCondition,
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryResponse> {
-        let mut doc_ids = build_query(
-            &self.store,
-            request.account_id,
-            JMAP_MAILBOX,
+        let (filter, sort) = build_query(
             request.filter,
             request.sort,
-            |cond| {
+            |cond| async move {
                 Ok(match cond {
                     JMAPMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
                         JMAPMailboxProperties::ParentId.into(),
@@ -740,7 +830,7 @@ where
                     JMAPMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
                 })
             },
-            |comp| {
+            |comp| async move {
                 Ok(Comparator::Field(FieldComparator {
                     field: match comp.property {
                         JMAPMailboxComparator::Name => JMAPMailboxProperties::Name,
@@ -751,34 +841,44 @@ where
                     ascending: comp.is_ascending,
                 }))
             },
-        )?
-        .into_iter()
-        .collect::<Vec<DocumentId>>();
+        )
+        .await?;
 
-        let query_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
-        let num_results = doc_ids.len();
+        let query_state = self.get_state(request.account_id, JMAP_MAILBOX).await?;
+        let result = self
+            .query(JMAPStoreQuery::new(
+                request.account_id,
+                JMAP_MAILBOX,
+                filter,
+                sort,
+                0,
+            ))
+            .await?;
 
-        if num_results > 0 && (request.arguments.filter_as_tree || request.arguments.sort_as_tree) {
+        let mut results = result.results;
+
+        if result.total_results > 0
+            && (request.arguments.filter_as_tree || request.arguments.sort_as_tree)
+        {
             let mut hierarchy = HashMap::new();
             let mut tree = HashMap::new();
 
             for doc_id in self
-                .store
-                .get_document_ids(request.account_id, JMAP_MAILBOX)?
+                .get_document_ids(request.account_id, JMAP_MAILBOX)
+                .await?
+                .unwrap_or_default()
             {
-                let mailbox: JMAPMailbox = bincode_deserialize(
-                    &self
-                        .store
-                        .get_document_value::<Vec<u8>>(
-                            request.account_id,
-                            JMAP_MAILBOX,
-                            doc_id,
-                            JMAPMailboxProperties::Id.into(),
-                        )?
-                        .ok_or_else(|| {
-                            StoreError::InternalError("Mailbox data not found".to_string())
-                        })?,
-                )?;
+                let mailbox = self
+                    .get_document_value::<JMAPMailbox>(
+                        request.account_id,
+                        JMAP_MAILBOX,
+                        doc_id,
+                        JMAPMailboxProperties::Id.into(),
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        StoreError::InternalError("Mailbox data not found".to_string())
+                    })?;
                 hierarchy.insert((doc_id + 1) as JMAPId, mailbox.parent_id);
                 tree.entry(mailbox.parent_id)
                     .or_insert_with(HashSet::new)
@@ -786,18 +886,18 @@ where
             }
 
             if request.arguments.filter_as_tree {
-                let mut filtered_ids = Vec::with_capacity(doc_ids.len());
+                let mut filtered_ids = Vec::with_capacity(results.len());
 
-                for &doc_id in &doc_ids {
+                for &doc_id in &results {
                     let mut keep = false;
                     let mut jmap_id = (doc_id + 1) as JMAPId;
 
-                    for _ in 0..self.mail_config.mailbox_max_depth {
+                    for _ in 0..self.config.mailbox_max_depth {
                         if let Some(&parent_id) = hierarchy.get(&jmap_id) {
                             if parent_id == 0 {
                                 keep = true;
                                 break;
-                            } else if !doc_ids.contains(&((parent_id - 1) as DocumentId)) {
+                            } else if !results.contains(&(parent_id - 1)) {
                                 break;
                             } else {
                                 jmap_id = parent_id;
@@ -810,19 +910,19 @@ where
                         filtered_ids.push(doc_id);
                     }
                 }
-                if filtered_ids.len() != doc_ids.len() {
-                    doc_ids = filtered_ids;
+                if filtered_ids.len() != results.len() {
+                    results = filtered_ids;
                 }
             }
 
-            if request.arguments.sort_as_tree && doc_ids.len() > 1 {
+            if request.arguments.sort_as_tree && results.len() > 1 {
                 let mut stack = Vec::new();
-                let mut sorted_list = Vec::with_capacity(doc_ids.len());
+                let mut sorted_list = Vec::with_capacity(results.len());
                 let mut jmap_id = 0;
 
-                'outer: for _ in 0..(doc_ids.len() * 10 * self.mail_config.mailbox_max_depth) {
+                'outer: for _ in 0..(results.len() * 10 * self.config.mailbox_max_depth) {
                     let (mut children, mut it) = if let Some(children) = tree.remove(&jmap_id) {
-                        (children, doc_ids.iter())
+                        (children, results.iter())
                     } else if let Some(prev) = stack.pop() {
                         prev
                     } else {
@@ -833,7 +933,7 @@ where
                         jmap_id = (doc_id + 1) as JMAPId;
                         if children.remove(&jmap_id) {
                             sorted_list.push(doc_id);
-                            if sorted_list.len() == doc_ids.len() {
+                            if sorted_list.len() == results.len() {
                                 break 'outer;
                             } else {
                                 stack.push((children, it));
@@ -848,20 +948,17 @@ where
                         stack.push((children, it));
                     }
                 }
-                doc_ids = sorted_list;
+                results = sorted_list;
             }
         }
 
         let (results, start_position) = paginate_results(
-            doc_ids.into_iter(),
-            num_results,
+            results,
+            result.total_results,
             request.limit,
             request.position,
             request.anchor,
             request.anchor_offset,
-            false,
-            None::<fn(DocumentId) -> jmap_store::Result<Option<JMAPId>>>,
-            None::<fn(Vec<DocumentId>) -> jmap_store::Result<Vec<JMAPId>>>,
         )?;
 
         Ok(JMAPQueryResponse {
@@ -869,32 +966,36 @@ where
             include_total: request.calculate_total,
             query_state,
             position: start_position,
-            total: num_results,
+            total: result.total_results,
             limit: request.limit,
             ids: results,
             is_immutable: false,
         })
     }
 
-    fn mailbox_changes(
-        &'x self,
+    async fn mailbox_changes(
+        &self,
         request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse<JMAPMailboxChangesResponse>> {
-        let changes = self.get_jmap_changes(
-            request.account,
-            JMAP_MAILBOX,
-            request.since_state.clone(),
-            request.max_changes,
-        )?;
+        let changes = self
+            .get_jmap_changes(
+                request.account,
+                JMAP_MAILBOX,
+                request.since_state.clone(),
+                request.max_changes,
+            )
+            .await?;
 
         let mut updated_properties = None;
         if !changes.updated.is_empty() {
-            let message_changes = self.get_jmap_changes(
-                request.account,
-                JMAP_MAILBOX_CHANGES,
-                request.since_state,
-                request.max_changes,
-            )?;
+            let message_changes = self
+                .get_jmap_changes(
+                    request.account,
+                    JMAP_MAILBOX_CHANGES,
+                    request.since_state,
+                    request.max_changes,
+                )
+                .await?;
 
             if message_changes.updated == changes.updated {
                 updated_properties = vec![
@@ -921,324 +1022,346 @@ where
         })
     }
 
-    fn mailbox_query_changes(
-        &'x self,
+    async fn mailbox_query_changes(
+        &self,
         request: JMAPQueryChangesRequest<
             JMAPMailboxFilterCondition,
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryChangesResponse> {
-        self.query_changes(request, JMAPLocalStore::mailbox_query, JMAP_MAILBOX)
-    }
-}
+        let changes = self
+            .get_jmap_changes(
+                request.account_id,
+                JMAP_MAILBOX,
+                request.since_query_state,
+                request.max_changes,
+            )
+            .await?;
 
-fn count_threads<'x, T>(
-    store: &'x JMAPLocalStore<T>,
-    account_id: AccountId,
-    document_ids: Option<T::Set>,
-) -> store::Result<usize>
-where
-    T: Store<'x>,
-{
-    Ok(if let Some(document_ids) = document_ids {
-        let mut thread_ids = HashSet::new();
-        store
-            .store
-            .get_multi_document_value(
+        let query_results = if changes.total_changes > 0 || request.calculate_total {
+            Some(
+                self.mailbox_query(JMAPQueryRequest {
+                    account_id: request.account_id,
+                    filter: request.filter,
+                    sort: request.sort,
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 0,
+                    calculate_total: true,
+                    arguments: request.arguments,
+                })
+                .await?,
+            )
+        } else {
+            None
+        };
+
+        Ok(query_changes(changes, query_results, request.up_to_id))
+    }
+
+    async fn count_threads(
+        &self,
+        account_id: AccountId,
+        document_ids: Option<RoaringBitmap>,
+    ) -> store::Result<usize> {
+        Ok(if let Some(document_ids) = document_ids {
+            let mut thread_ids = HashSet::new();
+            self.get_multi_document_value(
                 account_id,
                 JMAP_MAIL,
                 document_ids.into_iter(),
                 MessageField::ThreadId.into(),
-            )?
+            )
+            .await?
             .into_iter()
             .for_each(|thread_id: Option<DocumentId>| {
                 if let Some(thread_id) = thread_id {
                     thread_ids.insert(thread_id);
                 }
             });
-        thread_ids.len()
-    } else {
-        0
-    })
-}
-
-fn get_mailbox_tag<'x, T>(
-    store: &'x JMAPLocalStore<T>,
-    account_id: AccountId,
-    document_id: DocumentId,
-) -> store::Result<Option<T::Set>>
-where
-    T: Store<'x>,
-{
-    store.store.get_tag(
-        account_id,
-        JMAP_MAIL,
-        MessageField::Mailbox.into(),
-        Tag::Id(document_id),
-    )
-}
-
-fn get_mailbox_unread_tag<'x, T>(
-    store: &'x JMAPLocalStore<T>,
-    account_id: AccountId,
-    document_id: DocumentId,
-) -> store::Result<Option<T::Set>>
-where
-    T: Store<'x>,
-{
-    match get_mailbox_tag(store, account_id, document_id) {
-        Ok(Some(mailbox)) => {
-            match store.store.get_tag(
-                account_id,
-                JMAP_MAIL,
-                MessageField::Keyword.into(),
-                Tag::Text("$unread".to_string()), //TODO use id keywords
-            ) {
-                Ok(Some(mut unread)) => {
-                    unread.intersection(&mailbox);
-                    if !unread.is_empty() {
-                        Ok(Some(unread))
-                    } else {
-                        Ok(None)
-                    }
-                }
-                Ok(None) => Ok(None),
-                Err(e) => Err(e),
-            }
-        }
-        other => other,
+            thread_ids.len()
+        } else {
+            0
+        })
     }
-}
 
-#[allow(clippy::blocks_in_if_conditions)]
-#[allow(clippy::too_many_arguments)]
-fn validate_properties<'x, T>(
-    store: &'x JMAPLocalStore<T>,
-    account_id: AccountId,
-    mailbox_id: Option<JMAPId>,
-    mailbox_ids: &impl DocumentSet<Item = DocumentId>,
-    current_mailbox: Option<&JMAPMailbox>,
-    properties: JSONValue,
-    destroy_ids: &JSONValue,
-    max_nest_level: usize,
-) -> jmap_store::Result<Result<JMAPMailboxSet, JSONValue>>
-where
-    T: Store<'x>,
-{
-    let mut mailbox = JMAPMailboxSet::default();
+    async fn get_mailbox_tag(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<RoaringBitmap>> {
+        self.get_tag(
+            account_id,
+            JMAP_MAIL,
+            MessageField::Mailbox.into(),
+            Tag::Id(document_id),
+        )
+        .await
+    }
 
-    for (property, value) in if let Some(properties) = properties.unwrap_object() {
-        properties
-    } else {
-        return Ok(Err(JSONValue::new_error(
-            JMAPSetErrorType::InvalidProperties,
-            "Failed to parse request, expected object.",
-        )));
-    } {
-        match JMAPMailboxProperties::parse(&property) {
-            Some(JMAPMailboxProperties::Name) => {
-                mailbox.name = value.unwrap_string();
-            }
-            Some(JMAPMailboxProperties::ParentId) => match value {
-                JSONValue::String(mailbox_parent_id_str) => {
-                    if let JSONValue::Array(destroy_ids) = &destroy_ids {
-                        if destroy_ids.iter().any(|x| {
-                            x.to_string()
-                                .map(|v| v == mailbox_parent_id_str)
-                                .unwrap_or(false)
-                        }) {
-                            return Ok(Err(JSONValue::new_error(
-                                JMAPSetErrorType::WillDestroy,
-                                "Parent ID will be destroyed.",
-                            )));
+    async fn get_mailbox_unread_tag(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<RoaringBitmap>> {
+        match self.get_mailbox_tag(account_id, document_id).await {
+            Ok(Some(mailbox)) => {
+                match self
+                    .get_tag(
+                        account_id,
+                        JMAP_MAIL,
+                        MessageField::Keyword.into(),
+                        Tag::Text("$unread".to_string()), //TODO use id keywords
+                    )
+                    .await
+                {
+                    Ok(Some(mut unread)) => {
+                        unread &= &mailbox;
+                        if !unread.is_empty() {
+                            Ok(Some(unread))
+                        } else {
+                            Ok(None)
                         }
                     }
-
-                    if let Some(mailbox_parent_id) =
-                        JMAPId::from_jmap_string(&mailbox_parent_id_str)
-                    {
-                        if !mailbox_ids.contains(mailbox_parent_id as DocumentId) {
-                            return Ok(Err(JSONValue::new_error(
-                                JMAPSetErrorType::InvalidProperties,
-                                "Parent ID does not exist.",
-                            )));
-                        }
-                        mailbox.parent_id = (mailbox_parent_id + 1).into();
-                    }
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(e),
                 }
-                JSONValue::Null => mailbox.parent_id = 0.into(),
+            }
+            other => other,
+        }
+    }
+
+    #[allow(clippy::blocks_in_if_conditions)]
+    #[allow(clippy::too_many_arguments)]
+    async fn validate_properties(
+        &self,
+        account_id: AccountId,
+        mailbox_id: Option<JMAPId>,
+        mailbox_ids: &RoaringBitmap,
+        current_mailbox: Option<&JMAPMailbox>,
+        properties: JSONValue,
+        destroy_ids: &JSONValue,
+        max_nest_level: usize,
+    ) -> jmap_store::Result<Result<JMAPMailboxSet, JSONValue>> {
+        let mut mailbox = JMAPMailboxSet::default();
+
+        for (property, value) in if let Some(properties) = properties.unwrap_object() {
+            properties
+        } else {
+            return Ok(Err(JSONValue::new_error(
+                JMAPSetErrorType::InvalidProperties,
+                "Failed to parse request, expected object.",
+            )));
+        } {
+            match JMAPMailboxProperties::parse(&property) {
+                Some(JMAPMailboxProperties::Name) => {
+                    mailbox.name = value.unwrap_string();
+                }
+                Some(JMAPMailboxProperties::ParentId) => match value {
+                    JSONValue::String(mailbox_parent_id_str) => {
+                        if let JSONValue::Array(destroy_ids) = &destroy_ids {
+                            if destroy_ids.iter().any(|x| {
+                                x.to_string()
+                                    .map(|v| v == mailbox_parent_id_str)
+                                    .unwrap_or(false)
+                            }) {
+                                return Ok(Err(JSONValue::new_error(
+                                    JMAPSetErrorType::WillDestroy,
+                                    "Parent ID will be destroyed.",
+                                )));
+                            }
+                        }
+
+                        if let Some(mailbox_parent_id) =
+                            JMAPId::from_jmap_string(&mailbox_parent_id_str)
+                        {
+                            if !mailbox_ids.contains(mailbox_parent_id as DocumentId) {
+                                return Ok(Err(JSONValue::new_error(
+                                    JMAPSetErrorType::InvalidProperties,
+                                    "Parent ID does not exist.",
+                                )));
+                            }
+                            mailbox.parent_id = (mailbox_parent_id + 1).into();
+                        }
+                    }
+                    JSONValue::Null => mailbox.parent_id = 0.into(),
+                    _ => {
+                        return Ok(Err(JSONValue::new_invalid_property(
+                            "parentId",
+                            "Expected Null or String.",
+                        )));
+                    }
+                },
+                Some(JMAPMailboxProperties::Role) => {
+                    mailbox.role = match value {
+                        JSONValue::Null => Some(None),
+                        JSONValue::String(s) => Some(Some(s.to_lowercase())),
+                        _ => None,
+                    };
+                }
+                Some(JMAPMailboxProperties::SortOrder) => {
+                    mailbox.sort_order = value.unwrap_unsigned_int().map(|x| x as u32);
+                }
+                Some(JMAPMailboxProperties::IsSubscribed) => {
+                    //TODO implement isSubscribed
+                    mailbox.is_subscribed = value.unwrap_bool();
+                }
                 _ => {
                     return Ok(Err(JSONValue::new_invalid_property(
-                        "parentId",
-                        "Expected Null or String.",
+                        property,
+                        "Unknown property",
                     )));
                 }
-            },
-            Some(JMAPMailboxProperties::Role) => {
-                mailbox.role = match value {
-                    JSONValue::Null => Some(None),
-                    JSONValue::String(s) => Some(Some(s.to_lowercase())),
-                    _ => None,
-                };
-            }
-            Some(JMAPMailboxProperties::SortOrder) => {
-                mailbox.sort_order = value.unwrap_unsigned_int().map(|x| x as u32);
-            }
-            Some(JMAPMailboxProperties::IsSubscribed) => {
-                //TODO implement isSubscribed
-                mailbox.is_subscribed = value.unwrap_bool();
-            }
-            _ => {
-                return Ok(Err(JSONValue::new_invalid_property(
-                    property,
-                    "Unknown property",
-                )));
-            }
-        }
-    }
-
-    if let Some(mailbox_id) = mailbox_id {
-        // Make sure this mailbox won't be destroyed later.
-        if let JSONValue::Array(destroy_ids) = &destroy_ids {
-            if destroy_ids
-                .iter()
-                .any(|x| x.to_jmap_id().map(|v| v == mailbox_id).unwrap_or(false))
-            {
-                return Ok(Err(JSONValue::new_error(
-                    JMAPSetErrorType::WillDestroy,
-                    "Mailbox will be destroyed.",
-                )));
             }
         }
 
-        if let Some(mut mailbox_parent_id) = mailbox.parent_id {
-            // Validate circular parent-child relationship
-            let mut success = false;
-            for _ in 0..max_nest_level {
-                if mailbox_parent_id == mailbox_id + 1 {
+        if let Some(mailbox_id) = mailbox_id {
+            // Make sure this mailbox won't be destroyed later.
+            if let JSONValue::Array(destroy_ids) = &destroy_ids {
+                if destroy_ids
+                    .iter()
+                    .any(|x| x.to_jmap_id().map(|v| v == mailbox_id).unwrap_or(false))
+                {
                     return Ok(Err(JSONValue::new_error(
-                        JMAPSetErrorType::InvalidProperties,
-                        "Mailbox cannot be a parent of itself.",
+                        JMAPSetErrorType::WillDestroy,
+                        "Mailbox will be destroyed.",
                     )));
-                } else if mailbox_parent_id == 0 {
-                    success = true;
-                    break;
                 }
+            }
 
-                mailbox_parent_id = bincode_deserialize::<JMAPMailbox>(
-                    &store
-                        .store
-                        .get_document_value::<Vec<u8>>(
+            if let Some(mut mailbox_parent_id) = mailbox.parent_id {
+                // Validate circular parent-child relationship
+                let mut success = false;
+                for _ in 0..max_nest_level {
+                    if mailbox_parent_id == mailbox_id + 1 {
+                        return Ok(Err(JSONValue::new_error(
+                            JMAPSetErrorType::InvalidProperties,
+                            "Mailbox cannot be a parent of itself.",
+                        )));
+                    } else if mailbox_parent_id == 0 {
+                        success = true;
+                        break;
+                    }
+
+                    mailbox_parent_id = self
+                        .get_document_value::<JMAPMailbox>(
                             account_id,
                             JMAP_MAILBOX,
                             (mailbox_parent_id - 1).get_document_id(),
                             JMAPMailboxProperties::Id.into(),
-                        )?
+                        )
+                        .await?
                         .ok_or_else(|| {
                             StoreError::InternalError("Mailbox data not found".to_string())
-                        })?,
-                )?
-                .parent_id;
-            }
+                        })?
+                        .parent_id;
+                }
 
-            if !success {
-                return Ok(Err(JSONValue::new_error(
-                    JMAPSetErrorType::InvalidProperties,
-                    "Mailbox parent-child relationship is too deep.",
-                )));
-            }
-        };
-    } else if mailbox.name.is_none() {
-        // New mailboxes need to specify a name
-        return Ok(Err(JSONValue::new_error(
-            JMAPSetErrorType::InvalidProperties,
-            "Mailbox must have a name.",
-        )));
-    }
-
-    // Verify that the mailbox role is unique.
-    if let Some(mailbox_role) = mailbox.role.as_ref().unwrap_or(&None) {
-        let do_check = if let Some(current_mailbox) = current_mailbox {
-            if let Some(current_role) = &current_mailbox.role {
-                mailbox_role != current_role
-            } else {
-                true
-            }
-        } else {
-            true
-        };
-
-        if do_check
-            && !store
-                .store
-                .query(
-                    account_id,
-                    JMAP_MAILBOX,
-                    Filter::new_condition(
-                        JMAPMailboxProperties::Role.into(),
-                        ComparisonOperator::Equal,
-                        FieldValue::Keyword(mailbox_role.into()),
-                    ),
-                    Comparator::None,
-                )?
-                .is_empty()
-        {
-            return Ok(Err(JSONValue::new_error(
-                JMAPSetErrorType::InvalidProperties,
-                format!("A mailbox with role '{}' already exists.", mailbox_role),
-            )));
-        }
-    }
-
-    // Verify that the mailbox name is unique.
-    if let Some(mailbox_name) = &mailbox.name {
-        // Obtain parent mailbox id
-        if let Some(parent_mailbox_id) = if let Some(mailbox_parent_id) = mailbox.parent_id {
-            mailbox_parent_id.into()
-        } else if let Some(current_mailbox) = current_mailbox {
-            if &current_mailbox.name != mailbox_name {
-                current_mailbox.parent_id.into()
-            } else {
-                None
-            }
-        } else {
-            0.into()
-        } {
-            for document_id in store.store.query(
-                account_id,
-                JMAP_MAILBOX,
-                Filter::new_condition(
-                    JMAPMailboxProperties::ParentId.into(),
-                    ComparisonOperator::Equal,
-                    FieldValue::LongInteger(parent_mailbox_id),
-                ),
-                Comparator::None,
-            )? {
-                if &bincode_deserialize::<JMAPMailbox>(
-                    &store
-                        .store
-                        .get_document_value::<Vec<u8>>(
-                            account_id,
-                            JMAP_MAILBOX,
-                            document_id,
-                            JMAPMailboxProperties::Id.into(),
-                        )?
-                        .ok_or_else(|| {
-                            StoreError::InternalError("Mailbox data not found".to_string())
-                        })?,
-                )?
-                .name
-                    == mailbox_name
-                {
+                if !success {
                     return Ok(Err(JSONValue::new_error(
                         JMAPSetErrorType::InvalidProperties,
-                        format!("A mailbox with name '{}' already exists.", mailbox_name),
+                        "Mailbox parent-child relationship is too deep.",
                     )));
+                }
+            };
+        } else if mailbox.name.is_none() {
+            // New mailboxes need to specify a name
+            return Ok(Err(JSONValue::new_error(
+                JMAPSetErrorType::InvalidProperties,
+                "Mailbox must have a name.",
+            )));
+        }
+
+        // Verify that the mailbox role is unique.
+        if let Some(mailbox_role) = mailbox.role.as_ref().unwrap_or(&None) {
+            let do_check = if let Some(current_mailbox) = current_mailbox {
+                if let Some(current_role) = &current_mailbox.role {
+                    mailbox_role != current_role
+                } else {
+                    true
+                }
+            } else {
+                true
+            };
+
+            if do_check
+                && !self
+                    .query(JMAPStoreQuery::new(
+                        account_id,
+                        JMAP_MAILBOX,
+                        Filter::new_condition(
+                            JMAPMailboxProperties::Role.into(),
+                            ComparisonOperator::Equal,
+                            FieldValue::Keyword(mailbox_role.into()),
+                        ),
+                        Comparator::None,
+                        0,
+                    ))
+                    .await?
+                    .results
+                    .is_empty()
+            {
+                return Ok(Err(JSONValue::new_error(
+                    JMAPSetErrorType::InvalidProperties,
+                    format!("A mailbox with role '{}' already exists.", mailbox_role),
+                )));
+            }
+        }
+
+        // Verify that the mailbox name is unique.
+        if let Some(mailbox_name) = &mailbox.name {
+            // Obtain parent mailbox id
+            if let Some(parent_mailbox_id) = if let Some(mailbox_parent_id) = mailbox.parent_id {
+                mailbox_parent_id.into()
+            } else if let Some(current_mailbox) = current_mailbox {
+                if &current_mailbox.name != mailbox_name {
+                    current_mailbox.parent_id.into()
+                } else {
+                    None
+                }
+            } else {
+                0.into()
+            } {
+                for jmap_id in self
+                    .query(JMAPStoreQuery::new(
+                        account_id,
+                        JMAP_MAILBOX,
+                        Filter::new_condition(
+                            JMAPMailboxProperties::ParentId.into(),
+                            ComparisonOperator::Equal,
+                            FieldValue::LongInteger(parent_mailbox_id),
+                        ),
+                        Comparator::None,
+                        0,
+                    ))
+                    .await?
+                    .results
+                {
+                    if &self
+                        .get_document_value::<JMAPMailbox>(
+                            account_id,
+                            JMAP_MAILBOX,
+                            jmap_id.get_document_id(),
+                            JMAPMailboxProperties::Id.into(),
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            StoreError::InternalError("Mailbox data not found".to_string())
+                        })?
+                        .name
+                        == mailbox_name
+                    {
+                        return Ok(Err(JSONValue::new_error(
+                            JMAPSetErrorType::InvalidProperties,
+                            format!("A mailbox with name '{}' already exists.", mailbox_name),
+                        )));
+                    }
                 }
             }
         }
-    }
 
-    Ok(Ok(mailbox))
+        Ok(Ok(mailbox))
+    }
 }

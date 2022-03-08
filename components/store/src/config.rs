@@ -106,4 +106,8 @@ impl EnvSettings {
             default.to_socket_addrs().unwrap().next().unwrap()
         }
     }
+
+    pub fn set_value(&mut self, name: String, value: String) {
+        self.args.insert(name, value);
+    }
 }

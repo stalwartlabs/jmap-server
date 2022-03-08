@@ -181,7 +181,7 @@ impl Text {
 }
 
 pub struct TokenIterator<'x> {
-    tokenizer: Box<dyn Iterator<Item = Token<'x>> + 'x>,
+    tokenizer: Box<dyn Iterator<Item = Token<'x>> + Send + 'x>,
     stemmer: Option<Stemmer>,
     pub stemmed_token: Option<Token<'x>>,
 }

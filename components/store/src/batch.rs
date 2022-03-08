@@ -2,7 +2,7 @@ use nlp::Language;
 
 use crate::{
     field::{Field, FieldOptions, Text, UpdateField},
-    ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
+    ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, JMAPId, LongInteger, Tag,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -38,12 +38,12 @@ impl WriteBatch {
     pub fn insert(
         collection_id: CollectionId,
         document_id: DocumentId,
-        full_id: impl Into<ChangeLogId>,
+        jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
-            log_action: LogAction::Insert(full_id.into()),
+            log_action: LogAction::Insert(jmap_id.into()),
             action: WriteAction::Insert(document_id),
             fields: Vec::new(),
             log_id: None,
@@ -53,12 +53,12 @@ impl WriteBatch {
     pub fn update(
         collection_id: CollectionId,
         document_id: DocumentId,
-        full_id: impl Into<ChangeLogId>,
+        jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
-            log_action: LogAction::Update(full_id.into()),
+            log_action: LogAction::Update(jmap_id.into()),
             action: WriteAction::Update(document_id),
             fields: Vec::new(),
             log_id: None,
@@ -68,12 +68,12 @@ impl WriteBatch {
     pub fn delete(
         collection_id: CollectionId,
         document_id: DocumentId,
-        full_id: impl Into<ChangeLogId>,
+        jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
-            log_action: LogAction::Delete(full_id.into()),
+            log_action: LogAction::Delete(jmap_id.into()),
             action: WriteAction::Delete(document_id),
             fields: Vec::new(),
             log_id: None,
@@ -83,29 +83,29 @@ impl WriteBatch {
     pub fn moved(
         collection_id: CollectionId,
         document_id: DocumentId,
-        old_log_id: impl Into<ChangeLogId>,
-        new_log_id: impl Into<ChangeLogId>,
+        old_jmap_id: impl Into<JMAPId>,
+        new_jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
             collection_id,
             default_language: Language::English,
-            log_action: LogAction::Move(old_log_id.into(), new_log_id.into()),
+            log_action: LogAction::Move(old_jmap_id.into(), new_jmap_id.into()),
             action: WriteAction::Update(document_id),
             fields: Vec::new(),
             log_id: None,
         }
     }
 
-    pub fn update_full_id(&mut self, full_id: impl Into<ChangeLogId>) {
+    pub fn update_jmap_id(&mut self, jmap_id: impl Into<JMAPId>) {
         match self.log_action {
             LogAction::Insert(ref mut id) => {
-                *id = full_id.into();
+                *id = jmap_id.into();
             }
             LogAction::Update(ref mut id) => {
-                *id = full_id.into();
+                *id = jmap_id.into();
             }
             LogAction::Delete(ref mut id) => {
-                *id = full_id.into();
+                *id = jmap_id.into();
             }
             _ => (),
         }

@@ -1,19 +1,19 @@
-use std::{
-    borrow::Borrow, convert::TryInto, marker::PhantomData, ops::BitOrAssign, path::PathBuf,
-    sync::Arc,
-};
+use std::{convert::TryInto, path::PathBuf, sync::Arc};
 
 use rocksdb::{
     BoundColumnFamily, ColumnFamilyDescriptor, DBIteratorWithThreadMode, DBWithThreadMode,
     MergeOperands, MultiThreaded, Options,
 };
 use store::{
-    bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITMAP},
+    bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITLIST, IS_BITMAP},
     config::EnvSettings,
     roaring::RoaringBitmap,
     serialize::{StoreDeserialize, LAST_TERM_ID_KEY},
-    JMAPStore, Result, Store, StoreError,
+    Result, Store, StoreError,
 };
+
+#[cfg(test)]
+pub mod tests;
 
 pub struct RocksDB {
     db: DBWithThreadMode<MultiThreaded>,
@@ -177,9 +177,13 @@ impl<'x> Store<'x> for RocksDB {
 }
 
 impl RocksDB {
-    pub fn open(path: &str) -> Result<Self> {
+    pub fn open(settings: &EnvSettings) -> Result<Self> {
         // Create the database directory if it doesn't exist
-        let path = PathBuf::from(&path);
+        let path = PathBuf::from(
+            &settings
+                .get("db-path")
+                .unwrap_or_else(|| "stalwart-jmap".to_string()),
+        );
         let mut blob_path = path.clone();
         let mut idx_path = path;
         blob_path.push("blobs");

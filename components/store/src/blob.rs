@@ -9,12 +9,13 @@ use std::{
     time::SystemTime,
 };
 
+use crate::leb128::Leb128;
 use crate::{
     serialize::{
         serialize_blob_key, serialize_temporary_blob_key, StoreDeserialize, StoreSerialize,
         BLOB_KEY, TEMP_BLOB_KEY,
     },
-    AccountId, CollectionId, ColumnFamily, DocumentId, JMAPStore, Store, StoreError,
+    AccountId, CollectionId, ColumnFamily, Direction, DocumentId, JMAPStore, Store, StoreError,
     WriteOperation,
 };
 use sha2::Digest;
@@ -146,14 +147,33 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
+    pub async fn get_blob(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+        document: DocumentId,
+        blob_index: BlobIndex,
+        blob_range: Range<u32>,
+    ) -> crate::Result<Option<(BlobIndex, Vec<u8>)>> {
+        Ok(self
+            .get_blobs(
+                account,
+                collection,
+                document,
+                vec![(blob_index, blob_range)],
+            )
+            .await?
+            .pop())
+    }
+
     pub async fn get_blobs(
         &self,
         account: AccountId,
         collection: CollectionId,
         document: DocumentId,
-        items: impl Iterator<Item = (BlobIndex, Range<u32>)>,
+        items: Vec<(BlobIndex, Range<u32>)>,
     ) -> crate::Result<Vec<(BlobIndex, Vec<u8>)>> {
-        let mut result = Vec::with_capacity(items.size_hint().0);
+        let mut result = Vec::with_capacity(items.len());
 
         let blob_entries = if let Some(blob_entries) = self
             .get::<BlobEntries>(
@@ -186,7 +206,7 @@ where
             })?;
             result.push((
                 item_idx,
-                if item_range.start != 0 && item_range.end != u32::MAX {
+                if item_range.start != 0 || item_range.end != u32::MAX {
                     let from_offset = if item_range.start < blob_entry.size() {
                         item_range.start
                     } else {
@@ -236,11 +256,13 @@ where
         Ok(result)
     }
 
-    // TODO
-    /*pub fn spawn_purge_blobs(&self) {
+    pub async fn purge_blobs(&self) -> crate::Result<()> {
         let db = self.db.clone();
+        let blob_temp_ttl = self.config.blob_temp_ttl;
+        let blob_base_path = self.config.blob_base_path.clone();
+        let blob_hash_levels = self.config.blob_hash_levels.clone();
 
-        self.worker_pool.spawn(|| {
+        self.spawn_worker(move || {
             let mut batch = Vec::new();
             let current_time = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -260,10 +282,8 @@ where
                                 key
                             ))
                         })?;
-                    if (current_time >= timestamp
-                        && current_time - timestamp > self.config.temp_blob_ttl)
-                        || (current_time < timestamp
-                            && timestamp - current_time > self.config.temp_blob_ttl)
+                    if (current_time >= timestamp && current_time - timestamp > blob_temp_ttl)
+                        || (current_time < timestamp && timestamp - current_time > blob_temp_ttl)
                     {
                         batch.push(WriteOperation::Delete {
                             cf: ColumnFamily::Values,
@@ -275,7 +295,7 @@ where
                         batch.push(WriteOperation::Merge {
                             cf: ColumnFamily::Values,
                             key: blob_key,
-                            value: (-1i64).to_le_bytes().into(),
+                            value: (-1i64).serialize().unwrap(),
                         });
                     }
                 } else {
@@ -284,44 +304,27 @@ where
             }
 
             if !batch.is_empty() {
-                db.write(batch).unwrap_or_else(|err| {
-                    debug!("Failed to write batch: {:}", err);
-                });
+                db.write(batch)?;
             }
 
-            for (key, value) in self
-                .db
-                .iterator_cf(&cf_values, IteratorMode::From(BLOB_KEY, Direction::Forward))
+            for (key, value) in
+                db.iterator(ColumnFamily::Values, BLOB_KEY.to_vec(), Direction::Forward)?
             {
                 if key.starts_with(BLOB_KEY) {
-                    let value = i64::from_le_bytes(value.as_ref().try_into().map_err(|err| {
-                        StoreError::InternalError(format!(
-                            "Failed to convert blob key to i64: {:}",
-                            err
-                        ))
-                    })?);
+                    let value = i64::deserialize(&value).ok_or_else(|| {
+                        StoreError::InternalError("Failed to convert blob key to i64".to_string())
+                    })?;
                     debug_assert!(value >= 0);
                     if value == 0 {
-                        self.db.delete_cf(&cf_values, &key).map_err(|err| {
-                            StoreError::InternalError(format!(
-                                "Failed to delete blob key: {:}",
-                                err
-                            ))
-                        })?;
-
-                        BlobFile::new(
-                            self.blob_path.clone(),
-                            &key[BLOB_KEY.len()..],
-                            &self.config.hash_levels,
-                            false,
+                        db.delete(ColumnFamily::Values, key.to_vec())?;
+                        std::fs::remove_file(
+                            &BlobEntries::deserialize(&key[BLOB_KEY.len()..])
+                                .ok_or(StoreError::DataCorruption)?
+                                .items
+                                .get(0)
+                                .ok_or(StoreError::DataCorruption)?
+                                .as_path(blob_base_path.clone(), &blob_hash_levels)?,
                         )
-                        .map_err(|err| {
-                            StoreError::InternalError(format!(
-                                "Failed to create blob file: {:}",
-                                err
-                            ))
-                        })?
-                        .delete()
                         .map_err(|err| {
                             StoreError::InternalError(format!(
                                 "Failed to delete blob file: {:}",
@@ -333,8 +336,10 @@ where
                     break;
                 }
             }
-        });
-    }*/
+            Ok(())
+        })
+        .await
+    }
 
     pub async fn store_temporary_blob(
         &self,
@@ -360,7 +365,7 @@ where
         batch.push(WriteOperation::Merge {
             cf: ColumnFamily::Values,
             key: blob_entry.as_key(),
-            value: (1i64).to_le_bytes().into(),
+            value: (1i64).serialize().unwrap(),
         });
         batch.push(WriteOperation::Set {
             cf: ColumnFamily::Values,
@@ -474,7 +479,7 @@ where
             self.set(
                 ColumnFamily::Values,
                 blob_entry.as_key(),
-                (0i64).to_le_bytes().into(),
+                (0i64).serialize().unwrap(),
             )
             .await?;
         }

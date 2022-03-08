@@ -1,8 +1,11 @@
 use std::collections::HashSet;
 
 use jmap_mail::{import::JMAPMailLocalStoreImport, MessageField};
-use jmap_store::{local_store::JMAPLocalStore, JMAP_MAIL};
-use store::{changelog::RaftId, Comparator, DocumentSet, Filter, Store, Tag, ThreadId};
+use jmap_store::JMAP_MAIL;
+use store::{
+    changelog::RaftId, query::JMAPStoreQuery, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store,
+    Tag, ThreadId,
+};
 
 pub enum ThreadTest {
     Message,
@@ -56,9 +59,9 @@ fn build_messages(
     messages_per_thread
 }
 
-pub fn test_jmap_mail_merge_threads<T>(mail_store: JMAPLocalStore<T>)
+pub async fn jmap_mail_merge_threads<T>(mail_store: JMAPStore<T>)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
         let base_test_num = (base_test_num * 6) as u32;
@@ -78,6 +81,7 @@ where
                     vec![],
                     None,
                 )
+                .await
                 .unwrap();
         }
 
@@ -91,6 +95,7 @@ where
                     vec![],
                     None,
                 )
+                .await
                 .unwrap();
         }
 
@@ -105,6 +110,7 @@ where
                         vec![],
                         None,
                     )
+                    .await
                     .unwrap();
             }
             for message in chunk.iter().rev() {
@@ -117,6 +123,7 @@ where
                         vec![],
                         None,
                     )
+                    .await
                     .unwrap();
             }
         }
@@ -132,6 +139,7 @@ where
                         vec![],
                         None,
                     )
+                    .await
                     .unwrap();
             }
             for message in chunk.iter().rev() {
@@ -144,20 +152,23 @@ where
                         vec![],
                         None,
                     )
+                    .await
                     .unwrap();
             }
         }
 
         for test_num in 0..=5 {
             let message_doc_ids = mail_store
-                .store
-                .query(
+                .query(JMAPStoreQuery::new(
                     base_test_num + test_num,
                     JMAP_MAIL,
                     Filter::None,
                     Comparator::None,
-                )
-                .unwrap();
+                    0,
+                ))
+                .await
+                .unwrap()
+                .results;
 
             assert_eq!(
                 message_doc_ids.len(),
@@ -172,13 +183,13 @@ where
             for message_doc_id in message_doc_ids {
                 thread_ids.insert(
                     mail_store
-                        .store
                         .get_document_value(
                             base_test_num + test_num,
                             JMAP_MAIL,
-                            message_doc_id,
+                            message_doc_id.get_document_id(),
                             MessageField::ThreadId.into(),
                         )
+                        .await
                         .unwrap()
                         .unwrap(),
                 );
@@ -196,16 +207,16 @@ where
             for thread_id in thread_ids {
                 messages_per_thread_db.push(
                     mail_store
-                        .store
                         .get_tag(
                             base_test_num + test_num,
                             JMAP_MAIL,
                             MessageField::ThreadId.into(),
                             Tag::Id(thread_id),
                         )
+                        .await
                         .unwrap()
                         .unwrap()
-                        .len(),
+                        .len() as usize,
                 );
             }
             messages_per_thread_db.sort_unstable();

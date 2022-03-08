@@ -17,29 +17,26 @@ pub mod term_index;
 pub mod update;
 
 use std::{
-    iter::FromIterator,
-    ops::Range,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
 
-use batch::WriteBatch;
-use changelog::{ChangeLog, ChangeLogId, ChangeLogQuery, RaftId};
+use changelog::{get_last_raft_id, ChangeLogId, RaftId};
 use config::EnvSettings;
 use id::{IdAssigner, IdCacheKey};
-use moka::future::Cache;
 use mutex_map::MutexMap;
 use nlp::Language;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
-use serialize::{StoreDeserialize, StoreSerialize, LAST_TERM_ID_KEY};
+use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
 
 pub use bincode;
+pub use futures;
 pub use parking_lot;
 pub use roaring;
 pub use tokio;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, MutexGuard};
 
 #[derive(Debug, Clone)]
 pub enum StoreError {
@@ -73,6 +70,26 @@ pub type LongInteger = u64;
 pub type Float = f64;
 pub type TermId = u64;
 pub type JMAPId = u64;
+
+pub trait JMAPIdPrefix {
+    fn from_parts(prefix_id: DocumentId, doc_id: DocumentId) -> JMAPId;
+    fn get_document_id(&self) -> DocumentId;
+    fn get_prefix_id(&self) -> DocumentId;
+}
+
+impl JMAPIdPrefix for JMAPId {
+    fn from_parts(prefix_id: DocumentId, doc_id: DocumentId) -> JMAPId {
+        (prefix_id as JMAPId) << 32 | doc_id as JMAPId
+    }
+
+    fn get_document_id(&self) -> DocumentId {
+        (self & 0xFFFFFFFF) as DocumentId
+    }
+
+    fn get_prefix_id(&self) -> DocumentId {
+        (self >> 32) as DocumentId
+    }
+}
 
 #[derive(Debug)]
 pub enum FieldValue {
@@ -224,16 +241,19 @@ pub struct FilterOperator {
     pub conditions: Vec<Filter>,
 }
 
+#[derive(Debug)]
 pub struct FieldComparator {
     pub field: FieldId,
     pub ascending: bool,
 }
 
+#[derive(Debug)]
 pub struct DocumentSetComparator {
     pub set: RoaringBitmap,
     pub ascending: bool,
 }
 
+#[derive(Debug)]
 pub enum Comparator {
     List(Vec<Comparator>),
     Field(FieldComparator),
@@ -263,7 +283,7 @@ impl Comparator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ColumnFamily {
     Bitmaps,
     Values,
@@ -340,33 +360,68 @@ pub struct JMAPStore<T> {
     pub worker_pool: rayon::ThreadPool,
     pub config: JMAPStoreConfig,
     pub blob_lock: MutexMap<()>,
-    pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
-    pub term_id_cache: Cache<String, TermId>,
+    pub doc_id_cache: moka::future::Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
+    pub term_id_cache: moka::sync::Cache<String, TermId>,
     pub term_id_lock: MutexMap<()>,
     pub term_id_last: AtomicU64,
+
+    pub raft_log_term: AtomicU64,
+    pub raft_log_index: AtomicU64,
+    pub account_lock: MutexMap<()>,
 }
 
 pub struct JMAPStoreConfig {
     pub blob_base_path: PathBuf,
     pub blob_hash_levels: Vec<usize>,
     pub blob_temp_ttl: u64,
+
+    pub default_language: Language,
+    pub get_max_results: usize,
+    pub set_max_changes: usize,
+    pub mailbox_set_max_changes: usize,
+    pub mailbox_max_total: usize,
+    pub mailbox_max_depth: usize,
+    pub mail_thread_max_results: usize,
+    pub mail_import_max_items: usize,
+    pub mail_parse_max_items: usize,
 }
 
-impl JMAPStoreConfig {
-    pub fn default_config(path: &str) -> JMAPStoreConfig {
+impl From<&EnvSettings> for JMAPStoreConfig {
+    fn from(settings: &EnvSettings) -> Self {
         JMAPStoreConfig {
-            blob_base_path: PathBuf::from(path),
+            blob_base_path: PathBuf::from(
+                settings
+                    .get("db-path")
+                    .unwrap_or_else(|| "stalwart-jmap".to_string()),
+            ),
             blob_hash_levels: vec![1],
             blob_temp_ttl: 3600,
+            get_max_results: 100,
+            set_max_changes: 100,
+            mailbox_set_max_changes: 100,
+            mailbox_max_total: 1000,
+            mailbox_max_depth: 10,
+            mail_thread_max_results: 100,
+            mail_import_max_items: 2,
+            mail_parse_max_items: 5,
+            default_language: Language::English,
         }
     }
 }
 
-impl<'x, T> JMAPStore<T>
+impl<T> JMAPStore<T>
 where
-    T: Store<'x> + 'static,
+    T: for<'x> Store<'x> + 'static,
 {
     pub fn new(db: T, settings: &EnvSettings) -> Self {
+        let raft_id = get_last_raft_id(&db)
+            .unwrap()
+            .map(|mut id| {
+                id.index += 1;
+                id
+            })
+            .unwrap_or(RaftId { term: 0, index: 0 });
+
         Self {
             worker_pool: rayon::ThreadPoolBuilder::new()
                 .num_threads(
@@ -377,13 +432,13 @@ where
                 )
                 .build()
                 .unwrap(),
-            config: JMAPStoreConfig::default_config("/tmp/jmap"),
+            config: settings.into(),
             term_id_last: db
-                .get::<TermId>(ColumnFamily::Terms, LAST_TERM_ID_KEY.to_vec())
+                .get::<TermId>(ColumnFamily::Values, LAST_TERM_ID_KEY.to_vec())
                 .unwrap()
-                .unwrap()
+                .unwrap_or(0)
                 .into(),
-            term_id_cache: Cache::builder()
+            term_id_cache: moka::sync::Cache::builder()
                 .initial_capacity(1024)
                 .max_capacity(
                     settings
@@ -394,13 +449,16 @@ where
                     settings.parse("term-cache-ttl").unwrap_or(10 * 60 * 1000),
                 ))
                 .build(),
-            doc_id_cache: Cache::builder()
+            term_id_lock: MutexMap::with_capacity(1024),
+            doc_id_cache: moka::future::Cache::builder()
                 .initial_capacity(128)
                 .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
                 .time_to_idle(Duration::from_secs(60 * 60))
                 .build(),
-            term_id_lock: MutexMap::with_capacity(1024),
             blob_lock: MutexMap::with_capacity(1024),
+            account_lock: MutexMap::with_capacity(1024),
+            raft_log_index: raft_id.index.into(),
+            raft_log_term: raft_id.term.into(),
             db: Arc::new(db),
         }
     }
@@ -421,7 +479,15 @@ where
         })?
     }
 
-    pub async fn spawn_blocking<U, V>(&self, f: U) -> Result<V>
+    pub async fn lock_account(
+        &self,
+        account: AccountId,
+        collection: CollectionId,
+    ) -> MutexGuard<'_, ()> {
+        self.account_lock.lock_hash((account, collection)).await
+    }
+
+    /*pub async fn spawn_blocking<U, V>(&self, f: U) -> Result<V>
     where
         U: FnOnce() -> Result<V> + Send + 'static,
         V: Sync + Send + 'static,
@@ -435,5 +501,5 @@ where
         rx.await.map_err(|e| {
             StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
         })?
-    }
+    }*/
 }

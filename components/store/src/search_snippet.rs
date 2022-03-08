@@ -73,7 +73,7 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, convert::TryFrom};
+    use std::collections::HashMap;
 
     use nlp::{tokenizers::tokenize, Language};
 

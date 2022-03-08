@@ -303,6 +303,18 @@ pub trait StoreSerialize: Sized {
     fn serialize(&self) -> Option<Vec<u8>>;
 }
 
+impl StoreDeserialize for Vec<u8> {
+    fn deserialize(bytes: &[u8]) -> Option<Vec<u8>> {
+        bytes.to_vec().into()
+    }
+}
+
+impl StoreDeserialize for String {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        String::from_utf8(bytes.to_vec()).ok()
+    }
+}
+
 impl StoreDeserialize for Float {
     fn deserialize(bytes: &[u8]) -> Option<Float> {
         Float::from_le_bytes(bytes.try_into().ok()?).into()
@@ -321,6 +333,12 @@ impl StoreDeserialize for Integer {
     }
 }
 
+impl StoreDeserialize for i64 {
+    fn deserialize(bytes: &[u8]) -> Option<i64> {
+        i64::from_le_bytes(bytes.try_into().ok()?).into()
+    }
+}
+
 impl StoreSerialize for LongInteger {
     fn serialize(&self) -> Option<Vec<u8>> {
         Some(self.to_le_bytes().to_vec())
@@ -328,6 +346,18 @@ impl StoreSerialize for LongInteger {
 }
 
 impl StoreSerialize for Integer {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        Some(self.to_le_bytes().to_vec())
+    }
+}
+
+impl StoreSerialize for i64 {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        Some(self.to_le_bytes().to_vec())
+    }
+}
+
+impl StoreSerialize for f64 {
     fn serialize(&self) -> Option<Vec<u8>> {
         Some(self.to_le_bytes().to_vec())
     }

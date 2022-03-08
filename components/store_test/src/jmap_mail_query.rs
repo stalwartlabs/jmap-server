@@ -1,26 +1,29 @@
+use jmap_mail::{
+    get::{JMAPMailGet, JMAPMailGetArguments},
+    import::JMAPMailLocalStoreImport,
+    query::{
+        JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQuery, JMAPMailQueryArguments,
+        MailboxId,
+    },
+    JMAPMailProperties, MessageField,
+};
+use jmap_store::{JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest, JMAP_MAIL};
+use mail_parser::RfcHeader;
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::Instant,
 };
-
-use jmap_mail::{
-    get::JMAPMailGetArguments,
-    import::JMAPMailLocalStoreImport,
-    query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments, MailboxId},
-    JMAPMailGet, JMAPMailIdImpl, JMAPMailProperties, JMAPMailQuery, MessageField,
+use store::{
+    changelog::RaftId, futures::future::join_all, Comparator, FieldValue, Filter, Integer, JMAPId,
+    JMAPStore, Store, Tag,
 };
-use jmap_store::{
-    local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPGet, JMAPId, JMAPQueryRequest,
-    JMAP_MAIL,
-};
-use mail_parser::RfcHeader;
-use store::{changelog::RaftId, Comparator, FieldValue, Filter, Integer, Store, Tag};
+use store::{query::JMAPStoreQuery, JMAPIdPrefix};
 
-use crate::{deflate_artwork_data, insert_filter_sort::FIELDS};
+use crate::{db_insert_filter_sort::FIELDS, deflate_artwork_data};
 
-pub fn test_jmap_mail_query<T>(mail_store: JMAPLocalStore<T>, do_insert: bool)
+pub async fn jmap_mail_query<T>(mail_store: JMAPStore<T>, do_insert: bool)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     const MAX_THREADS: usize = 100;
     const MAX_MESSAGES: usize = 1000;
@@ -138,6 +141,7 @@ where
                     ],
                     Some(values_int["year"] as i64),
                 )
+                .await
                 .unwrap();
 
             if total_messages == MAX_MESSAGES {
@@ -154,13 +158,13 @@ where
     for thread_id in 0..MAX_THREADS {
         assert!(
             mail_store
-                .store
                 .get_tag(
                     0,
                     JMAP_MAIL,
                     MessageField::ThreadId.into(),
                     Tag::Id(thread_id as Integer)
                 )
+                .await
                 .unwrap()
                 .is_some(),
             "thread {} not found",
@@ -170,13 +174,13 @@ where
 
     assert!(
         mail_store
-            .store
             .get_tag(
                 0,
                 JMAP_MAIL,
                 MessageField::ThreadId.into(),
                 Tag::Id(MAX_THREADS as Integer)
             )
+            .await
             .unwrap()
             .is_none(),
         "thread {} found",
@@ -184,15 +188,15 @@ where
     );
 
     println!("Running JMAP Mail query tests...");
-    test_query(&mail_store);
+    test_query(&mail_store).await;
 
     println!("Running JMAP Mail query options tests...");
-    test_query_options(&mail_store);
+    test_query_options(&mail_store).await;
 }
 
-fn test_query<'x, T>(mail_store: &'x JMAPLocalStore<T>)
+async fn test_query<T>(mail_store: &JMAPStore<T>)
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     for (filter, sort, expected_results) in [
         (
@@ -419,33 +423,36 @@ where
         ),
     ] {
         assert_eq!(
-            mail_store
-                .mail_query(JMAPQueryRequest {
-                    account_id: 0,
-                    filter,
-                    sort,
-                    position: 0,
-                    anchor: None,
-                    anchor_offset: 0,
-                    limit: 0,
-                    calculate_total: true,
-                    arguments: JMAPMailQueryArguments {
-                        collapse_threads: false
-                    }
-                },)
-                .unwrap()
-                .ids
-                .into_iter()
-                .map(|id| { get_message_id(mail_store, id) })
-                .collect::<Vec<String>>(),
+            join_all(
+                mail_store
+                    .mail_query(JMAPQueryRequest {
+                        account_id: 0,
+                        filter,
+                        sort,
+                        position: 0,
+                        anchor: None,
+                        anchor_offset: 0,
+                        limit: 0,
+                        calculate_total: true,
+                        arguments: JMAPMailQueryArguments {
+                            collapse_threads: false
+                        }
+                    })
+                    .await
+                    .unwrap()
+                    .ids
+                    .into_iter()
+                    .map(|id| get_message_id(mail_store, id))
+            )
+            .await,
             expected_results
         );
     }
 }
 
-fn test_query_options<'x, T>(mail_store: &'x JMAPLocalStore<T>)
+async fn test_query_options<T>(mail_store: &JMAPStore<T>)
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     for (mut query, expected_results, expected_results_collapsed) in [
         (
@@ -601,7 +608,7 @@ where
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01205"),
+                anchor: get_anchor(mail_store, "N01205").await,
                 anchor_offset: 0,
                 limit: 10,
                 calculate_total: true,
@@ -627,7 +634,7 @@ where
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01205"),
+                anchor: get_anchor(mail_store, "N01205").await,
                 anchor_offset: 10,
                 limit: 10,
                 calculate_total: true,
@@ -653,7 +660,7 @@ where
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01205"),
+                anchor: get_anchor(mail_store, "N01205").await,
                 anchor_offset: -10,
                 limit: 10,
                 calculate_total: true,
@@ -679,7 +686,7 @@ where
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01496"),
+                anchor: get_anchor(mail_store, "N01496").await,
                 anchor_offset: -10,
                 limit: 10,
                 calculate_total: true,
@@ -699,7 +706,7 @@ where
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "AR00164"),
+                anchor: get_anchor(mail_store, "AR00164").await,
                 anchor_offset: 10,
                 limit: 10,
                 calculate_total: true,
@@ -719,7 +726,7 @@ where
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "AR00164"),
+                anchor: get_anchor(mail_store, "AR00164").await,
                 anchor_offset: 0,
                 limit: 0,
                 calculate_total: true,
@@ -732,36 +739,41 @@ where
         ),
     ] {
         assert_eq!(
-            mail_store
-                .mail_query(query.clone())
-                .unwrap()
-                .ids
-                .into_iter()
-                .map(|id| { get_message_id(mail_store, id) })
-                .collect::<Vec<String>>(),
+            join_all(
+                mail_store
+                    .mail_query(query.clone())
+                    .await
+                    .unwrap()
+                    .ids
+                    .into_iter()
+                    .map(|id| { get_message_id(mail_store, id) })
+            )
+            .await,
             expected_results
         );
         query.arguments.collapse_threads = true;
         assert_eq!(
-            mail_store
-                .mail_query(query)
-                .unwrap()
-                .ids
-                .into_iter()
-                .map(|id| { get_message_id(mail_store, id) })
-                .collect::<Vec<String>>(),
+            join_all(
+                mail_store
+                    .mail_query(query)
+                    .await
+                    .unwrap()
+                    .ids
+                    .into_iter()
+                    .map(|id| { get_message_id(mail_store, id) })
+            )
+            .await,
             expected_results_collapsed
         );
     }
 }
 
-fn get_anchor<'x, T>(mail_store: &'x JMAPLocalStore<T>, anchor: &'x str) -> Option<JMAPId>
+async fn get_anchor<T>(mail_store: &JMAPStore<T>, anchor: &str) -> Option<JMAPId>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let doc_id = mail_store
-        .store
-        .query(
+        .query(JMAPStoreQuery::new(
             0,
             JMAP_MAIL,
             Filter::eq(
@@ -769,23 +781,27 @@ where
                 FieldValue::Keyword(anchor.into()),
             ),
             Comparator::None,
-        )
+            0,
+        ))
+        .await
         .unwrap()
-        .next()
-        .unwrap();
+        .results
+        .first()
+        .unwrap()
+        .get_document_id();
 
     let thread_id = mail_store
-        .store
         .get_document_value(0, JMAP_MAIL, doc_id, MessageField::ThreadId.into())
+        .await
         .unwrap()
         .unwrap();
 
-    JMAPId::from_email(thread_id, doc_id).into()
+    JMAPId::from_parts(thread_id, doc_id).into()
 }
 
-fn get_message_id<'x, T>(mail_store: &'x JMAPLocalStore<T>, jmap_id: JMAPId) -> String
+async fn get_message_id<T>(mail_store: &JMAPStore<T>, jmap_id: JMAPId) -> String
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     mail_store
         .mail_get(JMAPGet {
@@ -794,6 +810,7 @@ where
             properties: vec![JMAPMailProperties::MessageId].into(),
             arguments: JMAPMailGetArguments::default(),
         })
+        .await
         .unwrap()
         .list
         .unwrap_array()

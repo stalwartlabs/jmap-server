@@ -14,9 +14,7 @@ use nlp::Language;
 use roaring::RoaringBitmap;
 use std::{
     collections::HashSet,
-    convert::TryFrom,
     ops::{BitAndAssign, BitXorAssign},
-    sync::Arc,
     vec::IntoIter,
 };
 
@@ -33,21 +31,44 @@ pub struct JMAPPrefix {
 }
 
 pub struct JMAPStoreQuery {
-    account_id: AccountId,
-    collection_id: CollectionId,
-    jmap_prefix: Option<JMAPPrefix>,
-    limit: usize,
-    position: i32,
-    anchor: Option<JMAPId>,
-    anchor_offset: i32,
-    filter: Filter,
-    sort: Comparator,
+    pub account_id: AccountId,
+    pub collection_id: CollectionId,
+    pub jmap_prefix: Option<JMAPPrefix>,
+    pub limit: usize,
+    pub position: i32,
+    pub anchor: Option<JMAPId>,
+    pub anchor_offset: i32,
+    pub filter: Filter,
+    pub sort: Comparator,
+}
+
+impl JMAPStoreQuery {
+    pub fn new(
+        account_id: AccountId,
+        collection_id: CollectionId,
+        filter: Filter,
+        sort: Comparator,
+        limit: usize,
+    ) -> Self {
+        Self {
+            account_id,
+            collection_id,
+            jmap_prefix: None,
+            limit,
+            position: 0,
+            anchor: None,
+            anchor_offset: 0,
+            filter,
+            sort,
+        }
+    }
 }
 
 #[derive(Default)]
 pub struct JMAPStoreResult {
-    start_position: usize,
-    results: Vec<JMAPId>,
+    pub start_position: usize,
+    pub total_results: usize,
+    pub results: Vec<JMAPId>,
 }
 
 struct DocumentSetIndex {
@@ -105,11 +126,16 @@ where
                 if let Some(tombstoned_ids) = tombstoned_ids {
                     document_ids.bitxor_assign(tombstoned_ids)
                 }
-                return self.filter_results(document_ids, request).await;
+                return self
+                    .process_results(document_ids.clone(), document_ids, request)
+                    .await;
             }
             Filter::DocumentSet(set) => {
+                if let Some(tombstoned_ids) = tombstoned_ids {
+                    document_ids.bitxor_assign(tombstoned_ids)
+                }
                 request.filter = Filter::None;
-                return self.filter_results(set, request).await;
+                return self.process_results(set, document_ids, request).await;
             }
             _ => FilterOperator {
                 operator: LogicalOperator::And,
@@ -386,39 +412,32 @@ where
             }
         }
 
-        self.filter_results(
-            match (state.bm, tombstoned_ids) {
-                (Some(mut results), Some(tombstoned_ids)) => {
-                    document_ids.bitxor_assign(tombstoned_ids);
-                    results.bitand_assign(document_ids);
-                    results
-                }
-                (Some(results), None) => results,
-                _ => RoaringBitmap::new(),
-            },
-            request,
-        )
-        .await
+        let mut results = state.bm.unwrap_or_else(RoaringBitmap::new);
+        if let Some(tombstoned_ids) = tombstoned_ids {
+            document_ids.bitxor_assign(tombstoned_ids);
+            if !results.is_empty() {
+                results.bitand_assign(&document_ids);
+            }
+        }
+
+        self.process_results(results, document_ids, request).await
     }
 
     #[allow(clippy::while_let_on_iterator)]
-    pub async fn filter_results(
+    pub async fn process_results(
         &self,
         mut results: RoaringBitmap,
+        document_ids: RoaringBitmap,
         mut request: JMAPStoreQuery,
     ) -> crate::Result<JMAPStoreResult> {
-        let num_results = results.len() as usize;
-        if num_results == 0 {
+        let total_results = results.len() as usize;
+        if total_results == 0 {
             return Ok(JMAPStoreResult::default());
         }
-
-        let all_doc_ids = self
-            .get_document_ids(request.account_id, request.collection_id)
-            .await?
-            .unwrap_or_else(RoaringBitmap::new);
         let db = self.db.clone();
 
-        self.spawn_blocking(move || {
+        // Sort results on a worker thread
+        self.spawn_worker(move || {
             let mut iterators: Vec<IndexIterator<T>> = Vec::new();
             for comp in (if let Comparator::List(list) = request.sort {
                 list
@@ -466,10 +485,10 @@ where
                             IndexType::DocumentSet(DocumentSetIndex {
                                 set: if !comp.ascending {
                                     if !comp.set.is_empty() {
-                                        comp.set.bitxor_assign(&all_doc_ids);
+                                        comp.set.bitxor_assign(&document_ids);
                                         comp.set
                                     } else {
-                                        all_doc_ids.clone()
+                                        document_ids.clone()
                                     }
                                 } else {
                                     comp.set
@@ -493,7 +512,7 @@ where
             let mut results = Vec::with_capacity(if request.limit > 0 {
                 request.limit
             } else {
-                num_results as usize
+                total_results as usize
             });
             let has_anchor = request.anchor.is_some();
             let mut anchor_found = false;
@@ -797,205 +816,9 @@ where
             Ok(JMAPStoreResult {
                 start_position,
                 results,
+                total_results,
             })
         })
         .await
     }
 }
-
-/*
-
-impl<'x, T> StoreIterator<'x, T>
-where
-    T: Store<'x>,
-{
-    #[allow(clippy::while_let_on_iterator)]
-    pub fn get_next<'y>(&'y mut self) -> Option<DocumentId> {
-        loop {
-            let (it_opts, mut next_it_opts) = if self.current < self.iterators.len() - 1 {
-                let (iterators_first, iterators_last) =
-                    self.iterators.split_at_mut(self.current + 1);
-                (
-                    iterators_first.last_mut().unwrap(),
-                    iterators_last.first_mut(),
-                )
-            } else {
-                (&mut self.iterators[self.current], None)
-            };
-
-            if it_opts.remaining.is_empty() {
-                if self.current > 0 {
-                    self.current -= 1;
-                    continue;
-                } else {
-                    return None;
-                }
-            } else if it_opts.remaining.len() == 1 || it_opts.eof {
-                let next = it_opts.remaining.min().unwrap();
-                it_opts.remaining.remove(next);
-                return Some(next);
-            }
-
-            match &mut it_opts.index {
-                IndexType::DB(index) => {
-                    let it = if let Some(it) = &mut index.it {
-                        it
-                    } else {
-                        index.it = Some(
-                            self.db
-                                .iterator(
-                                    ColumnFamily::Indexes,
-                                    index.start_key.clone(),
-                                    if index.ascending {
-                                        Direction::Forward
-                                    } else {
-                                        Direction::Backward
-                                    },
-                                )
-                                .ok()?,
-                        );
-                        index.it.as_mut().unwrap()
-                    };
-
-                    let mut prev_key_prefix = if let Some(prev_key) = &index.prev_key {
-                        prev_key.get(..prev_key.len() - std::mem::size_of::<DocumentId>())?
-                    } else {
-                        &[][..]
-                    };
-
-                    if let Some(prev_item) = index.prev_item {
-                        index.prev_item = None;
-                        if let Some(next_it_opts) = &mut next_it_opts {
-                            next_it_opts.remaining.insert(prev_item);
-                        } else {
-                            return Some(prev_item);
-                        }
-                    }
-
-                    while let Some((key, _)) = it.next() {
-                        if !key.starts_with(&index.prefix) {
-                            index.prev_key = None;
-                            break;
-                        }
-
-                        let doc_id = deserialize_index_document_id(&key)?;
-                        if it_opts.remaining.contains(doc_id) {
-                            it_opts.remaining.remove(doc_id);
-
-                            if let Some(next_it_opts) = &mut next_it_opts {
-                                if let Some(prev_key) = &index.prev_key {
-                                    if key.len() != prev_key.len()
-                                        || !key.starts_with(prev_key_prefix)
-                                    {
-                                        index.prev_item = Some(doc_id);
-                                        index.prev_key = Some(key);
-                                        break;
-                                    }
-                                } else {
-                                    index.prev_key = Some(key);
-                                    prev_key_prefix = index.prev_key.as_ref().and_then(|key| {
-                                        key.get(..key.len() - std::mem::size_of::<DocumentId>())
-                                    })?;
-                                }
-
-                                next_it_opts.remaining.insert(doc_id);
-                            } else {
-                                return Some(doc_id);
-                            }
-                        }
-                    }
-                }
-                IndexType::DocumentSet(index) => {
-                    if let Some(it) = &mut index.it {
-                        if let Some(doc_id) = it.next() {
-                            return Some(doc_id);
-                        }
-                    } else {
-                        let mut set = index.set.clone();
-                        set.bitand_assign(&it_opts.remaining);
-                        let set_len = set.len();
-                        if set_len > 0 {
-                            it_opts.remaining.bitxor_assign(&set);
-
-                            match &mut next_it_opts {
-                                Some(next_it_opts) if set_len > 1 => {
-                                    next_it_opts.remaining = set;
-                                }
-                                _ if set_len == 1 => {
-                                    return set.min();
-                                }
-                                _ => {
-                                    let mut it = set.into_iter();
-                                    let doc_id = it.next();
-                                    index.it = Some(it);
-                                    return doc_id;
-                                }
-                            }
-                        } else if !it_opts.remaining.is_empty() {
-                            if let Some(ref mut next_it_opts) = next_it_opts {
-                                next_it_opts.remaining = std::mem::take(&mut it_opts.remaining);
-                            }
-                        }
-                    };
-                }
-                IndexType::None => (),
-            };
-
-            if let Some(next_it_opts) = next_it_opts {
-                if !next_it_opts.remaining.is_empty() {
-                    if next_it_opts.remaining.len() == 1 {
-                        let next = next_it_opts.remaining.min().unwrap();
-                        next_it_opts.remaining.remove(next);
-                        return Some(next);
-                    } else {
-                        match &mut next_it_opts.index {
-                            IndexType::DB(index) => {
-                                if let Some(it) = &mut index.it {
-                                    *it = self
-                                        .db
-                                        .iterator(
-                                            ColumnFamily::Indexes,
-                                            index.start_key.clone(),
-                                            if index.ascending {
-                                                Direction::Forward
-                                            } else {
-                                                Direction::Backward
-                                            },
-                                        )
-                                        .ok()?;
-                                }
-                                index.prev_item = None;
-                                index.prev_key = None;
-                            }
-                            IndexType::DocumentSet(index) => {
-                                index.it = None;
-                            }
-                            IndexType::None => (),
-                        }
-
-                        self.current += 1;
-                        next_it_opts.eof = false;
-                        continue;
-                    }
-                }
-            }
-
-            it_opts.eof = true;
-
-            if it_opts.remaining.is_empty() {
-                if self.current > 0 {
-                    self.current -= 1;
-                } else {
-                    return None;
-                }
-            } /*else {
-                  debug_assert!(
-                      false,
-                      "Index has missing documents: {:?}",
-                      it_opts.remaining
-                  );
-              }*/
-        }
-    }
-}
-*/

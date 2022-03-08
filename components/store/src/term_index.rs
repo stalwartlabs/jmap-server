@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    convert::{TryFrom, TryInto},
-};
+use std::{collections::HashSet, convert::TryInto};
 
 use nlp::tokenizers::Token;
 
@@ -579,10 +576,7 @@ impl TermIndex {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{HashMap, HashSet},
-        convert::TryFrom,
-    };
+    use std::collections::{HashMap, HashSet};
 
     use nlp::{
         stemmer::Stemmer,

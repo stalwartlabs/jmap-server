@@ -1,27 +1,26 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap_mail::{
-    get::JMAPMailGetArguments,
+    get::{JMAPMailGet, JMAPMailGetArguments},
     import::JMAPMailLocalStoreImport,
-    parse::{get_message_blob, JMAPMailParseRequest},
-    JMAPMailBodyProperties, JMAPMailGet, JMAPMailHeaderForm, JMAPMailHeaderProperty, JMAPMailParse,
+    parse::{get_message_blob, JMAPMailParse, JMAPMailParseRequest},
+    HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailProperties,
 };
 use jmap_store::{
-    blob::JMAPLocalBlobStore,
+    blob::JMAPBlobStore,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
-    local_store::JMAPLocalStore,
     JMAPGet,
 };
-use mail_parser::{HeaderName, RfcHeader};
-use store::{changelog::RaftId, Store};
+use mail_parser::RfcHeader;
+use store::{changelog::RaftId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
-pub fn test_jmap_mail_parse<T>(mail_store: JMAPLocalStore<T>)
+pub async fn jmap_mail_parse<T>(mail_store: JMAPStore<T>)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("resources");
@@ -45,6 +44,7 @@ where
                             vec![],
                             None,
                         )
+                        .await
                         .unwrap()
                         .unwrap_object()
                         .unwrap()
@@ -62,6 +62,7 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
+                .await
                 .unwrap()
                 .list
                 .unwrap_array()
@@ -136,6 +137,7 @@ where
                     max_body_value_bytes: 100,
                 },
             })
+            .await
             .unwrap();
 
         assert_eq!(result.not_found, JSONValue::Null);
@@ -166,6 +168,7 @@ where
                             .unwrap(),
                         get_message_blob,
                     )
+                    .await
                     .unwrap()
                     .unwrap();
 
@@ -199,6 +202,7 @@ where
     test_file.push("headers.eml");
     let blob_id = mail_store
         .upload_blob(0, &fs::read(&test_file).unwrap())
+        .await
         .unwrap();
 
     let mut properties = vec![
@@ -413,6 +417,7 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
+                .await
                 .unwrap()
                 .parsed
                 .unwrap_object()

@@ -1,24 +1,23 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap_mail::{
+    changes::JMAPMailChanges,
     import::JMAPMailLocalStoreImport,
     query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments},
-    JMAPMailChanges, JMAPMailIdImpl, MessageField,
+    MessageField,
 };
-use jmap_store::{
-    changes::JMAPState, local_store::JMAPLocalStore, JMAPComparator, JMAPFilter, JMAPId,
-    JMAPQueryChangesRequest,
-};
+use jmap_store::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPQueryChangesRequest};
+use store::JMAPIdPrefix;
 use store::{
     batch::{LogAction, WriteBatch},
     changelog::RaftId,
     field::FieldOptions,
-    Store, Tag,
+    JMAPId, JMAPStore, Store, Tag,
 };
 
-pub fn test_jmap_mail_query_changes<T>(mail_store: JMAPLocalStore<T>)
+pub async fn jmap_mail_query_changes<T>(mail_store: JMAPStore<T>)
 where
-    T: for<'x> Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
     let mut states = vec![JMAPState::Initial];
     let mut id_map = HashMap::new();
@@ -82,6 +81,7 @@ where
                         })],
                         Some(*id as i64),
                     )
+                    .await
                     .unwrap()
                     .unwrap_object()
                     .unwrap()
@@ -99,30 +99,30 @@ where
                 let id = *id_map.get(id).unwrap();
 
                 mail_store
-                    .store
                     .update_document(
                         0,
                         RaftId::default(),
                         WriteBatch::update(0, id.get_document_id(), id),
                     )
+                    .await
                     .unwrap();
                 updated_ids.insert(id);
             }
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
                 mail_store
-                    .store
                     .update_document(
                         0,
                         RaftId::default(),
                         WriteBatch::delete(0, id.get_document_id(), id),
                     )
+                    .await
                     .unwrap();
                 removed_ids.insert(id);
             }
             LogAction::Move(from, to) => {
                 let id = *id_map.get(from).unwrap();
-                let new_id = JMAPId::from_email(thread_id, id.get_document_id());
+                let new_id = JMAPId::from_parts(thread_id, id.get_document_id());
 
                 let mut batch = WriteBatch::moved(0, id.get_document_id(), id, new_id);
                 batch.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
@@ -132,8 +132,8 @@ where
                     FieldOptions::None,
                 );
                 mail_store
-                    .store
                     .update_document(0, RaftId::default(), batch)
+                    .await
                     .unwrap();
 
                 id_map.insert(*to, new_id);
@@ -203,7 +203,7 @@ where
                 if test_num == 3 && query.up_to_id.is_none() {
                     continue;
                 }
-                let changes = mail_store.mail_query_changes(query.clone()).unwrap();
+                let changes = mail_store.mail_query_changes(query.clone()).await.unwrap();
 
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.

@@ -5,18 +5,14 @@ edition = "2018"
 
 [dependencies]
 nlp = { path = "components/nlp" }
-#jmap_store = { path = "components/jmap_store" }
-#jmap_mail = { path = "components/jmap_mail" }
+jmap_store = { path = "components/jmap_store" }
+jmap_mail = { path = "components/jmap_mail" }
 store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
-rayon = "1.5.1"
-num_cpus = "1.13.1"
 actix-web = "4"
 openssl = "0.10"
-tokio = { version = "1.16.1", features = ["full"] }
 tokio-util = "0.7.0"
 futures = "0.3"
-tracing = "0.1"
 tracing-subscriber = "0.2"
 serde = { version = "1.0", features = ["derive"]}
 gethostname = "0.2.2"
@@ -28,9 +24,9 @@ members = [
     "components/nlp",
     "components/store",
     "components/store_rocksdb",
+    "components/jmap_store",
+    "components/jmap_mail",
 ]
-#"components/jmap_store",
-#"components/jmap_mail",
 
 [profile.dev]
 opt-level = 0

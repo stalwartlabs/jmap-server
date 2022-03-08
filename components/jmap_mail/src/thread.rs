@@ -1,27 +1,44 @@
 use std::collections::HashMap;
 
 use jmap_store::{
-    changes::{JMAPChangesRequest, JMAPChangesResponse, JMAPLocalChanges},
+    async_trait::async_trait,
+    changes::{JMAPChanges, JMAPChangesRequest, JMAPChangesResponse},
     id::JMAPIdSerialize,
     json::JSONValue,
-    local_store::JMAPLocalStore,
-    JMAPError, JMAPGet, JMAPGetResponse, JMAPId, JMAP_MAIL, JMAP_THREAD,
+    JMAPError, JMAPGet, JMAPGetResponse, JMAP_MAIL, JMAP_THREAD,
 };
-use store::{Comparator, DocumentSet, FieldComparator, Filter, Store, Tag};
+use store::{
+    query::JMAPStoreQuery, Comparator, FieldComparator, Filter, JMAPId, JMAPIdPrefix, JMAPStore,
+    Store, Tag,
+};
 
-use crate::{JMAPMailIdImpl, JMAPMailProperties, JMAPMailThread, MessageField};
+use crate::{JMAPMailProperties, MessageField};
 
-impl<'x, T> JMAPMailThread<'x> for JMAPLocalStore<T>
+#[async_trait]
+pub trait JMAPMailThread {
+    async fn thread_get(
+        &self,
+        request: JMAPGet<JMAPMailProperties, ()>,
+    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
+
+    async fn thread_changes(
+        &self,
+        request: JMAPChangesRequest,
+    ) -> jmap_store::Result<JMAPChangesResponse<()>>;
+}
+
+#[async_trait]
+impl<T> JMAPMailThread for JMAPStore<T>
 where
-    T: Store<'x>,
+    T: for<'x> Store<'x> + 'static,
 {
-    fn thread_get(
-        &'x self,
-        request: JMAPGet<JMAPMailProperties<'x>, ()>,
+    async fn thread_get(
+        &self,
+        request: JMAPGet<JMAPMailProperties, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
         let thread_ids = request.ids.unwrap_or_default();
 
-        if thread_ids.len() > self.mail_config.thread_max_results {
+        if thread_ids.len() > self.config.mail_thread_max_results {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -30,31 +47,38 @@ where
 
         for jmap_thread_id in thread_ids {
             let thread_id = jmap_thread_id.get_document_id();
-            if let Some(doc_ids) = self.store.get_tag(
-                request.account_id,
-                JMAP_MAIL,
-                MessageField::ThreadId.into(),
-                Tag::Id(thread_id),
-            )? {
-                let mut thread_obj = HashMap::with_capacity(2);
-                thread_obj.insert("id".to_string(), jmap_thread_id.to_jmap_string().into());
-                let doc_ids = self.store.query(
+            if let Some(doc_ids) = self
+                .get_tag(
                     request.account_id,
                     JMAP_MAIL,
-                    Filter::DocumentSet(doc_ids),
-                    Comparator::Field(FieldComparator {
-                        field: MessageField::ReceivedAt.into(),
-                        ascending: true,
-                    }),
-                )?;
-                let mut email_ids = Vec::with_capacity(doc_ids.len());
-                for doc_id in doc_ids {
-                    email_ids.push(
-                        JMAPId::from_email(thread_id, doc_id)
+                    MessageField::ThreadId.into(),
+                    Tag::Id(thread_id),
+                )
+                .await?
+            {
+                let mut thread_obj = HashMap::with_capacity(2);
+                thread_obj.insert("id".to_string(), jmap_thread_id.to_jmap_string().into());
+                let email_ids: Vec<JSONValue> = self
+                    .query(JMAPStoreQuery::new(
+                        request.account_id,
+                        JMAP_MAIL,
+                        Filter::DocumentSet(doc_ids),
+                        Comparator::Field(FieldComparator {
+                            field: MessageField::ReceivedAt.into(),
+                            ascending: true,
+                        }),
+                        0,
+                    ))
+                    .await?
+                    .results
+                    .into_iter()
+                    .map(|doc_id| {
+                        JMAPId::from_parts(thread_id, doc_id.get_document_id())
                             .to_jmap_string()
-                            .into(),
-                    );
-                }
+                            .into()
+                    })
+                    .collect();
+
                 thread_obj.insert("emailIds".to_string(), email_ids.into());
                 results.push(thread_obj.into());
             } else {
@@ -63,7 +87,7 @@ where
         }
 
         Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, JMAP_THREAD)?,
+            state: self.get_state(request.account_id, JMAP_THREAD).await?,
             list: if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
@@ -77,8 +101,8 @@ where
         })
     }
 
-    fn thread_changes(
-        &'x self,
+    async fn thread_changes(
+        &self,
         request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse<()>> {
         self.get_jmap_changes(
@@ -87,6 +111,7 @@ where
             request.since_state,
             request.max_changes,
         )
+        .await
         .map_err(|e| e.into())
     }
 }
