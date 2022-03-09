@@ -1,5 +1,4 @@
 use chrono::DateTime;
-use jmap_store::async_trait::async_trait;
 use jmap_store::blob::JMAPBlobStore;
 use jmap_store::changes::JMAPChanges;
 use jmap_store::id::{BlobId, JMAPIdSerialize};
@@ -39,22 +38,21 @@ pub struct MessageItem {
     pub received_at: Option<i64>,
 }
 
-#[async_trait]
 pub trait JMAPMailSet {
-    async fn mail_set(&self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse>;
-    async fn build_message(
+    fn mail_set(&self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse>;
+    fn build_message(
         &self,
         account: AccountId,
         fields: JSONValue,
         existing_mailboxes: &RoaringBitmap,
     ) -> Result<MessageItem, JSONValue>;
-    async fn import_body_structure<'x: 'y, 'y>(
+    fn import_body_structure<'x: 'y, 'y>(
         &'y self,
         account: AccountId,
         part: &'x JSONValue,
         body_values: Option<&'x HashMap<String, JSONValue>>,
     ) -> Result<MimePart, JSONValue>;
-    async fn import_body_part<'x: 'y, 'y>(
+    fn import_body_part<'x: 'y, 'y>(
         &'y self,
         account: AccountId,
         part: &'x JSONValue,
@@ -62,7 +60,7 @@ pub trait JMAPMailSet {
         implicit_type: Option<&'x str>,
         strict_implicit_type: bool,
     ) -> Result<(MimePart, Option<&'x Vec<JSONValue>>), JSONValue>;
-    async fn import_body_parts<'x: 'y, 'y>(
+    fn import_body_parts<'x: 'y, 'y>(
         &'y self,
         account: AccountId,
         parts: &'x JSONValue,
@@ -72,13 +70,12 @@ pub trait JMAPMailSet {
     ) -> Result<Vec<MimePart>, JSONValue>;
 }
 
-#[async_trait]
 impl<T> JMAPMailSet for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn mail_set(&self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse> {
-        let old_state = self.get_state(request.account_id, JMAP_MAIL).await?;
+    fn mail_set(&self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse> {
+        let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
                 return Err(JMAPError::StateMismatch);
@@ -98,8 +95,7 @@ where
             ..Default::default()
         };
         let document_ids = self
-            .get_document_ids(request.account_id, JMAP_MAIL)
-            .await?
+            .get_document_ids(request.account_id, JMAP_MAIL)?
             .unwrap_or_else(RoaringBitmap::new);
         let mut mailbox_ids = None;
 
@@ -112,17 +108,13 @@ where
                     mailbox_ids
                 } else {
                     mailbox_ids = self
-                        .get_document_ids(request.account_id, JMAP_MAILBOX)
-                        .await?
+                        .get_document_ids(request.account_id, JMAP_MAILBOX)?
                         .unwrap_or_default()
                         .into();
                     mailbox_ids.as_ref().unwrap()
                 };
 
-                match self
-                    .build_message(request.account_id, message_fields, mailbox_ids)
-                    .await
-                {
+                match self.build_message(request.account_id, message_fields, mailbox_ids) {
                     Ok(import_item) => {
                         created.insert(
                             create_id,
@@ -133,8 +125,7 @@ where
                                 import_item.mailbox_ids,
                                 import_item.keywords,
                                 import_item.received_at,
-                            )
-                            .await?,
+                            )?,
                         );
                     }
                     Err(err) => {
@@ -363,8 +354,7 @@ where
                         mailbox_ids
                     } else {
                         mailbox_ids = self
-                            .get_document_ids(request.account_id, JMAP_MAILBOX)
-                            .await?
+                            .get_document_ids(request.account_id, JMAP_MAILBOX)?
                             .unwrap_or_default()
                             .into();
                         mailbox_ids.as_ref().unwrap()
@@ -377,8 +367,7 @@ where
                             JMAP_MAIL,
                             document_id,
                             MessageField::Mailbox.into(),
-                        )
-                        .await?
+                        )?
                         .map(|current_mailboxes| current_mailboxes.items)
                         .unwrap_or_default();
 
@@ -469,8 +458,7 @@ where
                             JMAP_MAIL,
                             document_id,
                             MessageField::Keyword.into(),
-                        )
-                        .await?
+                        )?
                         .map(|tags| tags.items)
                         .unwrap_or_default();
 
@@ -544,8 +532,7 @@ where
                                 JMAP_MAIL,
                                 document_id,
                                 MessageField::Mailbox.into(),
-                            )
-                            .await?
+                            )?
                         {
                             for mailbox_id in current_mailboxes.items {
                                 changed_mailboxes.insert(mailbox_id);
@@ -565,9 +552,7 @@ where
 
                 // Log mailbox changes
                 if !changed_mailboxes.is_empty() {
-                    let change_id = self
-                        .assign_change_id(request.account_id, JMAP_MAILBOX)
-                        .await?;
+                    let change_id = self.assign_change_id(request.account_id, JMAP_MAILBOX)?;
                     for changed_mailbox_id in changed_mailboxes {
                         changes.push(
                             WriteBatch::update(
@@ -641,9 +626,8 @@ where
         }
 
         if !changes.is_empty() {
-            self.update_documents(request.account_id, self.next_raft_id(), changes)
-                .await?;
-            response.new_state = self.get_state(request.account_id, JMAP_MAIL).await?;
+            self.update_documents(request.account_id, self.next_raft_id(), changes)?;
+            response.new_state = self.get_state(request.account_id, JMAP_MAIL)?;
         } else {
             response.new_state = response.old_state.clone();
         }
@@ -652,7 +636,7 @@ where
     }
 
     #[allow(clippy::blocks_in_if_conditions)]
-    async fn build_message(
+    fn build_message(
         &self,
         account: AccountId,
         fields: JSONValue,
@@ -771,8 +755,7 @@ where
                 }
                 JMAPMailProperties::TextBody => {
                     builder.text_body = self
-                        .import_body_parts(account, value, body_values, "text/plain".into(), true)
-                        .await?
+                        .import_body_parts(account, value, body_values, "text/plain".into(), true)?
                         .pop()
                         .ok_or_else(|| {
                             JSONValue::new_error(
@@ -784,8 +767,7 @@ where
                 }
                 JMAPMailProperties::HtmlBody => {
                     builder.html_body = self
-                        .import_body_parts(account, value, body_values, "text/html".into(), true)
-                        .await?
+                        .import_body_parts(account, value, body_values, "text/html".into(), true)?
                         .pop()
                         .ok_or_else(|| {
                             JSONValue::new_error(
@@ -797,14 +779,12 @@ where
                 }
                 JMAPMailProperties::Attachments => {
                     builder.attachments = self
-                        .import_body_parts(account, value, body_values, None, false)
-                        .await?
+                        .import_body_parts(account, value, body_values, None, false)?
                         .into();
                 }
                 JMAPMailProperties::BodyStructure => {
                     builder.body = self
-                        .import_body_structure(account, value, body_values)
-                        .await?
+                        .import_body_structure(account, value, body_values)?
                         .into();
                 }
                 JMAPMailProperties::Header(JMAPMailHeaderProperty { form, header, all }) => {
@@ -865,15 +845,14 @@ where
         })
     }
 
-    async fn import_body_structure<'x: 'y, 'y>(
+    fn import_body_structure<'x: 'y, 'y>(
         &'y self,
         account: AccountId,
         part: &'x JSONValue,
         body_values: Option<&'x HashMap<String, JSONValue>>,
     ) -> Result<MimePart, JSONValue> {
-        let (mut mime_part, sub_parts) = self
-            .import_body_part(account, part, body_values, None, false)
-            .await?;
+        let (mut mime_part, sub_parts) =
+            self.import_body_part(account, part, body_values, None, false)?;
 
         if let Some(sub_parts) = sub_parts {
             let mut stack = Vec::new();
@@ -881,9 +860,8 @@ where
 
             loop {
                 while let Some(part) = it.next() {
-                    let (sub_mime_part, sub_parts) = self
-                        .import_body_part(account, part, body_values, None, false)
-                        .await?;
+                    let (sub_mime_part, sub_parts) =
+                        self.import_body_part(account, part, body_values, None, false)?;
                     if let Some(sub_parts) = sub_parts {
                         stack.push((mime_part, it));
                         mime_part = sub_mime_part;
@@ -905,7 +883,7 @@ where
         Ok(mime_part)
     }
 
-    async fn import_body_part<'x: 'y, 'y>(
+    fn import_body_part<'x: 'y, 'y>(
         &'y self,
         account: AccountId,
         part: &'x JSONValue,
@@ -988,7 +966,6 @@ where
                         })?,
                         get_message_blob,
                     )
-                    .await
                     .map_err(|_| {
                         JSONValue::new_error(
                             JMAPSetErrorType::BlobNotFound,
@@ -1157,7 +1134,7 @@ where
         ))
     }
 
-    async fn import_body_parts<'x: 'y, 'y>(
+    fn import_body_parts<'x: 'y, 'y>(
         &'y self,
         account: AccountId,
         parts: &'x JSONValue,
@@ -1181,8 +1158,7 @@ where
                     body_values,
                     implicit_type,
                     strict_implicit_type,
-                )
-                .await?
+                )?
                 .0,
             );
         }

@@ -13,10 +13,13 @@ use store::{
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
+use store::{
+    config::EnvSettings,
+    tracing::{debug, error, info},
+};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info};
 
-use crate::{config::EnvSettings, JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
+use crate::{JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
 
 use self::{
     gossip::PeerInfo,
@@ -156,7 +159,7 @@ where
         self.peers.iter().find(|p| p.peer_id == peer_id)
     }
 
-    fn init(
+    async fn init(
         settings: &EnvSettings,
         core: web::Data<JMAPServer<T>>,
         tx: mpsc::Sender<Event>,
@@ -174,7 +177,7 @@ where
         );
 
         // Obtain peer id from disk or generate a new one.
-        let peer_id = if let Some(peer_id) = core.jmap_store.store.get_key("peer_id").unwrap() {
+        let peer_id = if let Some(peer_id) = core.get_key("peer_id").await.unwrap() {
             peer_id
         } else {
             // Generate peerId for this node.
@@ -188,16 +191,16 @@ where
                 .hash(&mut s);
 
             let peer_id = s.finish();
-            core.jmap_store.store.set_key("peer_id", peer_id).unwrap();
+            core.set_key("peer_id", peer_id).await.unwrap();
             peer_id
         };
 
         // Obtain shard id from disk or generate a new one.
-        let shard_id = if let Some(shard_id) = core.jmap_store.store.get_key("shard_id").unwrap() {
+        let shard_id = if let Some(shard_id) = core.get_key("shard_id").await.unwrap() {
             shard_id
         } else {
             let shard_id = settings.parse("shard-id").unwrap_or(0);
-            core.jmap_store.store.set_key("shard_id", shard_id).unwrap();
+            core.set_key("shard_id", shard_id).await.unwrap();
             shard_id
         };
         info!(
@@ -243,13 +246,7 @@ where
         };
 
         // Add previously discovered peers
-        if let Some(peer_list) = cluster
-            .core
-            .jmap_store
-            .store
-            .get_key::<PeerList>("peer_list")
-            .unwrap()
-        {
+        if let Some(peer_list) = cluster.core.get_key::<PeerList>("peer_list").await.unwrap() {
             for peer in peer_list.peers {
                 debug!("Deserialized {:?}", peer);
                 cluster
@@ -393,7 +390,7 @@ impl StoreSerialize for PeerList {
 }
 
 impl StoreDeserialize for PeerList {
-    fn deserialize(bytes: Vec<u8>) -> Option<Self> {
-        bincode::deserialize(&bytes).ok()
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        bincode::deserialize(bytes).ok()
     }
 }

@@ -21,11 +21,6 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn delete(&self, cf: ColumnFamily, key: Vec<u8>) -> crate::Result<()> {
-        let db = self.db.clone();
-        self.spawn_worker(move || db.delete(cf, key)).await
-    }
-
     /*
     //TODO delete blobs
     fn delete_account(&self, account: AccountId) -> crate::Result<()> {
@@ -141,125 +136,118 @@ where
         Ok(())
     }*/
 
-    pub async fn purge_tombstoned(
+    pub fn purge_tombstoned(
         &self,
         account: AccountId,
         collection: CollectionId,
     ) -> crate::Result<()> {
-        let documents =
-            if let Some(documents) = self.get_tombstoned_ids(account, collection).await? {
-                documents
-            } else {
-                return Ok(());
-            };
+        let documents = if let Some(documents) = self.get_tombstoned_ids(account, collection)? {
+            documents
+        } else {
+            return Ok(());
+        };
 
-        let db = self.db.clone();
+        let mut batch = vec![];
 
-        self.spawn_worker(move || {
-            let mut batch = vec![];
-
-            for (cf, prefix, deserialize_fnc, delete_blobs) in [
-                (
-                    ColumnFamily::Values,
-                    serialize_ac_key_leb128(account, collection),
-                    deserialize_document_id_from_leb128 as fn(&[u8]) -> Option<DocumentId>,
-                    true,
-                ),
-                (
-                    ColumnFamily::Indexes,
-                    serialize_ac_key_be(account, collection),
-                    deserialize_index_document_id as fn(&[u8]) -> Option<DocumentId>,
-                    false,
-                ),
-            ] {
-                for (key, value) in db.iterator(cf, prefix.clone(), Direction::Forward)? {
-                    if !key.starts_with(&prefix) {
-                        break;
-                    }
-                    if key.len() > prefix.len() {
-                        if let Some(doc_id) = deserialize_fnc(&key[prefix.len()..]) {
-                            if documents.contains(doc_id) {
-                                if delete_blobs
-                                    && key.ends_with(BLOB_KEY)
-                                    && serialize_blob_key(account, collection, doc_id)[..]
-                                        == key[..]
-                                {
-                                    BlobEntries::deserialize(&value)
-                                        .ok_or(StoreError::DataCorruption)?
-                                        .items
-                                        .into_iter()
-                                        .for_each(|key| {
-                                            batch.push(WriteOperation::merge(
-                                                cf,
-                                                key.hash,
-                                                (-1i64).serialize().unwrap(),
-                                            ));
-                                        });
-                                }
-                                batch.push(WriteOperation::delete(cf, key.to_vec()));
-
-                                if batch.len() >= DELETE_BATCH_SIZE {
-                                    db.write(batch)?;
-                                    batch = vec![];
-                                }
-                            }
-                        } else {
-                            return Err(StoreError::InternalError(
-                                "Failed to deserialize document id".into(),
-                            ));
-                        }
-                    }
-                }
-            }
-
-            let prefix = serialize_a_key_leb128(account);
-
-            // TODO delete files using a separate process
-            // TODO delete empty bitmaps
-
-            for (key, value) in
-                db.iterator(ColumnFamily::Bitmaps, prefix.clone(), Direction::Forward)?
-            {
+        for (cf, prefix, deserialize_fnc, delete_blobs) in [
+            (
+                ColumnFamily::Values,
+                serialize_ac_key_leb128(account, collection),
+                deserialize_document_id_from_leb128 as fn(&[u8]) -> Option<DocumentId>,
+                true,
+            ),
+            (
+                ColumnFamily::Indexes,
+                serialize_ac_key_be(account, collection),
+                deserialize_index_document_id as fn(&[u8]) -> Option<DocumentId>,
+                false,
+            ),
+        ] {
+            for (key, value) in self.db.iterator(cf, &prefix, Direction::Forward)? {
                 if !key.starts_with(&prefix) {
                     break;
-                } else if key.len() > 3 && key[key.len() - 3] == collection {
-                    let mut bm =
-                        RoaringBitmap::deserialize(&value).ok_or(StoreError::DataCorruption)?;
-                    bm.bitand_assign(&documents);
+                }
+                if key.len() > prefix.len() {
+                    if let Some(doc_id) = deserialize_fnc(&key[prefix.len()..]) {
+                        if documents.contains(doc_id) {
+                            if delete_blobs
+                                && key.ends_with(BLOB_KEY)
+                                && serialize_blob_key(account, collection, doc_id)[..] == key[..]
+                            {
+                                BlobEntries::deserialize(&value)
+                                    .ok_or(StoreError::DataCorruption)?
+                                    .items
+                                    .into_iter()
+                                    .for_each(|key| {
+                                        batch.push(WriteOperation::merge(
+                                            cf,
+                                            key.hash,
+                                            (-1i64).serialize().unwrap(),
+                                        ));
+                                    });
+                            }
+                            batch.push(WriteOperation::delete(cf, key.to_vec()));
 
-                    if !bm.is_empty() {
-                        batch.push(WriteOperation::merge(
-                            ColumnFamily::Bitmaps,
-                            key.to_vec(),
-                            clear_bits(bm.iter()),
-                        ));
-
-                        if batch.len() == DELETE_BATCH_SIZE {
-                            db.write(batch)?;
-                            batch = vec![];
+                            if batch.len() >= DELETE_BATCH_SIZE {
+                                self.db.write(batch)?;
+                                batch = vec![];
+                            }
                         }
+                    } else {
+                        return Err(StoreError::InternalError(
+                            "Failed to deserialize document id".into(),
+                        ));
                     }
                 }
             }
+        }
 
-            batch.push(WriteOperation::merge(
-                ColumnFamily::Bitmaps,
-                serialize_bm_internal(account, collection, BM_USED_IDS),
-                clear_bits(documents.iter()),
-            ));
-            batch.push(WriteOperation::merge(
-                ColumnFamily::Bitmaps,
-                serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
-                clear_bits(documents.iter()),
-            ));
+        let prefix = serialize_a_key_leb128(account);
 
-            db.write(batch)
-        })
-        .await?;
+        // TODO delete files using a separate process
+        // TODO delete empty bitmaps
+
+        for (key, value) in self
+            .db
+            .iterator(ColumnFamily::Bitmaps, &prefix, Direction::Forward)?
+        {
+            if !key.starts_with(&prefix) {
+                break;
+            } else if key.len() > 3 && key[key.len() - 3] == collection {
+                let mut bm =
+                    RoaringBitmap::deserialize(&value).ok_or(StoreError::DataCorruption)?;
+                bm.bitand_assign(&documents);
+
+                if !bm.is_empty() {
+                    batch.push(WriteOperation::merge(
+                        ColumnFamily::Bitmaps,
+                        key.to_vec(),
+                        clear_bits(bm.iter()),
+                    ));
+
+                    if batch.len() == DELETE_BATCH_SIZE {
+                        self.db.write(batch)?;
+                        batch = vec![];
+                    }
+                }
+            }
+        }
+
+        batch.push(WriteOperation::merge(
+            ColumnFamily::Bitmaps,
+            serialize_bm_internal(account, collection, BM_USED_IDS),
+            clear_bits(documents.iter()),
+        ));
+        batch.push(WriteOperation::merge(
+            ColumnFamily::Bitmaps,
+            serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
+            clear_bits(documents.iter()),
+        ));
+
+        self.db.write(batch)?;
 
         self.doc_id_cache
-            .invalidate(&IdCacheKey::new(account, collection))
-            .await;
+            .invalidate(&IdCacheKey::new(account, collection));
 
         Ok(())
     }

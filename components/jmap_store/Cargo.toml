@@ -8,4 +8,3 @@ publish = false
 nlp = { path = "../nlp" }
 store = { path = "../store" }
 serde = { version = "1.0", features = ["derive"]}
-async-trait = "0.1.52"

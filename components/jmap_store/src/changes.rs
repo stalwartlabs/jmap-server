@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use async_trait::async_trait;
 use store::{
     changelog::{ChangeLogEntry, ChangeLogId, ChangeLogQuery},
     leb128::Leb128,
@@ -182,14 +181,9 @@ impl From<JMAPState> for JSONValue {
     }
 }
 
-#[async_trait]
 pub trait JMAPChanges {
-    async fn get_state(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<JMAPState>;
-    async fn get_jmap_changes(
+    fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState>;
+    fn get_jmap_changes(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -198,24 +192,18 @@ pub trait JMAPChanges {
     ) -> store::Result<JMAPChangesResponse<()>>;
 }
 
-#[async_trait]
 impl<T> JMAPChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn get_state(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> store::Result<JMAPState> {
+    fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState> {
         Ok(self
-            .get_last_change_id(account, collection)
-            .await?
+            .get_last_change_id(account, collection)?
             .map(JMAPState::Exact)
             .unwrap_or(JMAPState::Initial))
     }
 
-    async fn get_jmap_changes(
+    fn get_jmap_changes(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -225,8 +213,7 @@ where
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self
-                    .get_changes(account, collection, ChangeLogQuery::All)
-                    .await?
+                    .get_changes(account, collection, ChangeLogQuery::All)?
                     .unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
                     return Ok(JMAPChangesResponse {
@@ -245,8 +232,7 @@ where
             }
             JMAPState::Exact(change_id) => (
                 0,
-                self.get_changes(account, collection, ChangeLogQuery::Since(*change_id))
-                    .await?
+                self.get_changes(account, collection, ChangeLogQuery::Since(*change_id))?
                     .ok_or(StoreError::NotFound)?,
             ),
             JMAPState::Intermediate(intermediate_state) => {
@@ -258,8 +244,7 @@ where
                             intermediate_state.from_id,
                             intermediate_state.to_id,
                         ),
-                    )
-                    .await?
+                    )?
                     .ok_or(StoreError::NotFound)?;
                 if intermediate_state.items_sent >= changelog.changes.len() {
                     (
@@ -268,8 +253,7 @@ where
                             account,
                             collection,
                             ChangeLogQuery::Since(intermediate_state.to_id),
-                        )
-                        .await?
+                        )?
                         .ok_or(StoreError::NotFound)?,
                     )
                 } else {

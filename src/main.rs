@@ -1,5 +1,4 @@
-/*pub mod cluster;
-pub mod config;
+pub mod cluster;
 pub mod error;
 pub mod jmap;
 
@@ -9,15 +8,13 @@ use std::{
 };
 
 use actix_web::{middleware, web, App, HttpServer};
-use config::EnvSettings;
-use jmap_store::{local_store::JMAPLocalStore, JMAPStoreConfig};
-use store::Store;
-use tracing::info;
+use store::{config::EnvSettings, tracing::info, JMAPStore};
+use store_rocksdb::RocksDB;
 
 use crate::{cluster::main::start_cluster, jmap::jmap_request};
 
 pub struct JMAPServer<T> {
-    pub jmap_store: Arc<JMAPLocalStore<T>>,
+    pub jmap_store: Arc<JMAPStore<T>>,
     pub is_raft_leader: AtomicBool,
     pub worker_pool: rayon::ThreadPool,
 }
@@ -34,12 +31,7 @@ async fn main() -> std::io::Result<()> {
 
     // Build the JMAP store
     let jmap_server = web::Data::new(JMAPServer {
-        jmap_store: JMAPLocalStore::open(
-            RocksDBStore::open((&settings).into()).unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap()
-        .into(),
+        jmap_store: JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings).into(),
         worker_pool: rayon::ThreadPoolBuilder::new()
             .num_threads(
                 settings
@@ -72,10 +64,4 @@ async fn main() -> std::io::Result<()> {
     .bind(http_addr)?
     .run()
     .await
-}
-*/
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    panic!("dodo")
 }

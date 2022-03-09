@@ -7,7 +7,6 @@ use std::{
 use chrono::{FixedOffset, LocalResult, SecondsFormat, TimeZone, Utc};
 use jmap_store::blob::JMAPBlobStore;
 use jmap_store::{
-    async_trait::async_trait,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
     JMAPError,
@@ -66,20 +65,18 @@ impl From<JMAPMailParseResponse> for JSONValue {
     }
 }
 
-#[async_trait]
 pub trait JMAPMailParse {
-    async fn mail_parse(
+    fn mail_parse(
         &self,
-        mut request: JMAPMailParseRequest,
+        request: JMAPMailParseRequest,
     ) -> jmap_store::Result<JMAPMailParseResponse>;
 }
 
-#[async_trait]
 impl<T> JMAPMailParse for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn mail_parse(
+    fn mail_parse(
         &self,
         mut request: JMAPMailParseRequest,
     ) -> jmap_store::Result<JMAPMailParseResponse> {
@@ -129,9 +126,8 @@ where
         }
 
         for blob_id in &request.blob_ids {
-            if let Some(raw_message) = self
-                .download_blob(request.account_id, blob_id, get_message_blob)
-                .await?
+            if let Some(raw_message) =
+                self.download_blob(request.account_id, blob_id, get_message_blob)?
             {
                 if let Some(message) = Message::parse(&raw_message) {
                     parsed.insert(

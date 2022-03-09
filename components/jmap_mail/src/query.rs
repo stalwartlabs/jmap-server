@@ -1,17 +1,16 @@
-use std::sync::Arc;
+use std::collections::HashSet;
 
+use jmap_store::query::paginate_results;
 use jmap_store::{
-    async_trait::async_trait, changes::JMAPChanges, query::build_query, JMAPQueryRequest,
-    JMAPQueryResponse, JMAP_MAIL,
+    changes::JMAPChanges, query::build_query, JMAPQueryRequest, JMAPQueryResponse, JMAP_MAIL,
 };
 use mail_parser::RfcHeader;
 use nlp::Language;
+use store::JMAPIdPrefix;
 use store::{
-    parking_lot::Mutex,
-    query::{JMAPPrefix, JMAPStoreQuery},
-    roaring::RoaringBitmap,
-    AccountId, Comparator, DocumentSetComparator, FieldComparator, FieldValue, Filter, JMAPStore,
-    Store, StoreError, Tag, TextQuery,
+    query::JMAPStoreQuery, roaring::RoaringBitmap, AccountId, Comparator, DocumentSetComparator,
+    FieldComparator, FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, TextQuery,
+    ThreadId,
 };
 
 use crate::MessageField;
@@ -60,9 +59,8 @@ pub struct JMAPMailQueryArguments {
     pub collapse_threads: bool,
 }
 
-#[async_trait]
 pub trait JMAPMailQuery {
-    async fn mail_query(
+    fn mail_query(
         &self,
         request: JMAPQueryRequest<
             JMAPMailFilterCondition,
@@ -71,7 +69,7 @@ pub trait JMAPMailQuery {
         >,
     ) -> jmap_store::Result<JMAPQueryResponse>;
 
-    async fn get_thread_keywords(
+    fn get_thread_keywords(
         &self,
         account: AccountId,
         keyword: String,
@@ -79,12 +77,11 @@ pub trait JMAPMailQuery {
     ) -> store::Result<RoaringBitmap>;
 }
 
-#[async_trait]
 impl<T> JMAPMailQuery for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn mail_query(
+    fn mail_query(
         &self,
         request: JMAPQueryRequest<
             JMAPMailFilterCondition,
@@ -92,28 +89,28 @@ where
             JMAPMailQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryResponse> {
-        //TODO improve this
-        let mut _is_immutable_filter = Arc::new(Mutex::new(false));
-        let mut _is_immutable_sort = Arc::new(Mutex::new(false));
+        let mut is_immutable_filter = true;
+        let mut is_immutable_sort = true;
         let account_id = request.account_id;
-
-        let is_immutable_filter = _is_immutable_filter.clone();
-        let is_immutable_sort = _is_immutable_sort.clone();
 
         let (filter, sort) = build_query(
             request.filter,
             request.sort,
-            |cond| async {
+            |cond| {
                 Ok(match cond {
                     JMAPMailFilterCondition::InMailbox(mailbox) => {
-                        *is_immutable_filter.lock() = false;
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
                         Filter::eq(
                             MessageField::Mailbox.into(),
                             FieldValue::Tag(Tag::Id(mailbox)),
                         )
                     }
                     JMAPMailFilterCondition::InMailboxOtherThan(mailboxes) => {
-                        *is_immutable_filter.lock() = false;
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
                         Filter::not(
                             mailboxes
                                 .into_iter()
@@ -204,7 +201,9 @@ where
                         )
                     }
                     JMAPMailFilterCondition::HasKeyword(keyword) => {
-                        *is_immutable_filter.lock() = false;
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
                         // TODO text to id conversion
                         Filter::eq(
                             MessageField::Keyword.into(),
@@ -212,33 +211,37 @@ where
                         )
                     }
                     JMAPMailFilterCondition::NotKeyword(keyword) => {
-                        *is_immutable_filter.lock() = false;
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
                         Filter::not(vec![Filter::eq(
                             MessageField::Keyword.into(),
                             FieldValue::Tag(Tag::Text(keyword)),
                         )])
                     }
                     JMAPMailFilterCondition::AllInThreadHaveKeyword(keyword) => {
-                        *is_immutable_filter.lock() = false;
-                        Filter::DocumentSet(
-                            self.get_thread_keywords(account_id, keyword, true).await?,
-                        )
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
+                        Filter::DocumentSet(self.get_thread_keywords(account_id, keyword, true)?)
                     }
                     JMAPMailFilterCondition::SomeInThreadHaveKeyword(keyword) => {
-                        *is_immutable_filter.lock() = false;
-                        Filter::DocumentSet(
-                            self.get_thread_keywords(account_id, keyword, false).await?,
-                        )
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
+                        Filter::DocumentSet(self.get_thread_keywords(account_id, keyword, false)?)
                     }
                     JMAPMailFilterCondition::NoneInThreadHaveKeyword(keyword) => {
-                        *is_immutable_filter.lock() = false;
+                        if is_immutable_filter {
+                            is_immutable_filter = false;
+                        }
                         Filter::not(vec![Filter::DocumentSet(
-                            self.get_thread_keywords(account_id, keyword, false).await?,
+                            self.get_thread_keywords(account_id, keyword, false)?,
                         )])
                     }
                 })
             },
-            |comp| async {
+            |comp| {
                 Ok(match comp.property {
                     JMAPMailComparator::ReceivedAt => Comparator::Field(FieldComparator {
                         field: MessageField::ReceivedAt.into(),
@@ -265,8 +268,9 @@ where
                         ascending: comp.is_ascending,
                     }),
                     JMAPMailComparator::HasKeyword(keyword) => {
-                        *is_immutable_sort.lock() = false;
-
+                        if is_immutable_sort {
+                            is_immutable_sort = false;
+                        }
                         Comparator::DocumentSet(DocumentSetComparator {
                             set: self
                                 .get_tag(
@@ -274,81 +278,97 @@ where
                                     JMAP_MAIL,
                                     MessageField::Keyword.into(),
                                     Tag::Text(keyword),
-                                )
-                                .await?
+                                )?
                                 .unwrap_or_else(RoaringBitmap::new),
                             ascending: comp.is_ascending,
                         })
                     }
                     JMAPMailComparator::AllInThreadHaveKeyword(keyword) => {
-                        *is_immutable_sort.lock() = false;
+                        if is_immutable_sort {
+                            is_immutable_sort = false;
+                        }
                         Comparator::DocumentSet(DocumentSetComparator {
-                            set: self.get_thread_keywords(account_id, keyword, true).await?,
+                            set: self.get_thread_keywords(account_id, keyword, true)?,
                             ascending: comp.is_ascending,
                         })
                     }
                     JMAPMailComparator::SomeInThreadHaveKeyword(keyword) => {
-                        *is_immutable_sort.lock() = false;
+                        if is_immutable_sort {
+                            is_immutable_sort = false;
+                        }
                         Comparator::DocumentSet(DocumentSetComparator {
-                            set: self.get_thread_keywords(account_id, keyword, false).await?,
+                            set: self.get_thread_keywords(account_id, keyword, false)?,
                             ascending: comp.is_ascending,
                         })
                     }
                 })
             },
-        )
-        .await?;
+        )?;
 
-        let query_state = self.get_state(request.account_id, JMAP_MAIL).await?;
-        let result = self
-            .query(JMAPStoreQuery {
-                account_id,
-                collection_id: JMAP_MAIL,
-                jmap_prefix: JMAPPrefix {
-                    collection_id: JMAP_MAIL,
-                    field_id: MessageField::ThreadId.into(),
-                    unique: request.arguments.collapse_threads,
-                }
-                .into(),
-                limit: request.limit,
-                position: request.position,
-                anchor: request.anchor,
-                anchor_offset: request.anchor_offset,
-                filter,
-                sort,
-            })
-            .await?;
+        let mut seen_threads = HashSet::new();
+        let collapse_threads = request.arguments.collapse_threads;
+        let filter_map_fnc = Some(|document_id| {
+            Ok(
+                if let Some(thread_id) = self.get_document_value::<ThreadId>(
+                    account_id,
+                    JMAP_MAIL,
+                    document_id,
+                    MessageField::ThreadId.into(),
+                )? {
+                    if collapse_threads && !seen_threads.insert(thread_id) {
+                        None
+                    } else {
+                        Some(JMAPId::from_parts(thread_id, document_id))
+                    }
+                } else {
+                    None
+                },
+            )
+        });
 
-        let filter_lock = _is_immutable_filter.lock();
-        let sort_lock = _is_immutable_sort.lock();
+        let query_state = self.get_state(request.account_id, JMAP_MAIL)?;
+        let results = self.query(JMAPStoreQuery {
+            account_id,
+            collection_id: JMAP_MAIL,
+            filter_map_fnc,
+            filter,
+            sort,
+        })?;
+        let total_results = results.len();
+
+        let (results, start_position) = paginate_results(
+            results,
+            total_results,
+            request.limit,
+            request.position,
+            request.anchor,
+            request.anchor_offset,
+        )?;
 
         Ok(JMAPQueryResponse {
             account_id: request.account_id,
             include_total: request.calculate_total,
             query_state,
-            position: result.start_position,
-            total: result.total_results,
+            position: start_position,
+            total: total_results,
             limit: request.limit,
-            ids: result.results,
-            is_immutable: *filter_lock && *sort_lock,
+            ids: results,
+            is_immutable: is_immutable_filter && is_immutable_sort,
         })
     }
 
-    async fn get_thread_keywords(
+    fn get_thread_keywords(
         &self,
         account: AccountId,
         keyword: String,
         match_all: bool,
     ) -> store::Result<RoaringBitmap> {
-        if let Some(tagged_doc_ids) = self
-            .get_tag(
-                account,
-                JMAP_MAIL,
-                MessageField::Keyword.into(),
-                Tag::Text(keyword),
-            )
-            .await?
-        {
+        if let Some(tagged_doc_ids) = self.get_tag(
+            account,
+            JMAP_MAIL,
+            MessageField::Keyword.into(),
+            Tag::Text(keyword),
+        )? {
             let mut not_matched_ids = RoaringBitmap::new();
             let mut matched_ids = RoaringBitmap::new();
 
@@ -357,29 +377,25 @@ where
                     continue;
                 }
 
-                if let Some(thread_doc_ids) = self
-                    .get_tag(
-                        account,
-                        JMAP_MAIL,
-                        MessageField::ThreadId.into(),
-                        Tag::Id(
-                            self.get_document_value(
-                                account,
-                                JMAP_MAIL,
-                                tagged_doc_id,
-                                MessageField::ThreadId.into(),
-                            )
-                            .await?
-                            .ok_or_else(|| {
-                                StoreError::InternalError(format!(
-                                    "Thread id for document {} not found.",
-                                    tagged_doc_id
-                                ))
-                            })?,
-                        ),
-                    )
-                    .await?
-                {
+                if let Some(thread_doc_ids) = self.get_tag(
+                    account,
+                    JMAP_MAIL,
+                    MessageField::ThreadId.into(),
+                    Tag::Id(
+                        self.get_document_value(
+                            account,
+                            JMAP_MAIL,
+                            tagged_doc_id,
+                            MessageField::ThreadId.into(),
+                        )?
+                        .ok_or_else(|| {
+                            StoreError::InternalError(format!(
+                                "Thread id for document {} not found.",
+                                tagged_doc_id
+                            ))
+                        })?,
+                    ),
+                )? {
                     let mut thread_tag_intersection = thread_doc_ids.clone();
                     thread_tag_intersection &= &tagged_doc_ids;
 

@@ -22,19 +22,22 @@ pub struct RocksDB {
 impl<'x> Store<'x> for RocksDB {
     type Iterator = DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>;
 
-    fn delete(&self, cf: store::ColumnFamily, key: Vec<u8>) -> Result<()> {
+    #[inline(always)]
+    fn delete(&self, cf: store::ColumnFamily, key: &[u8]) -> Result<()> {
         self.db
             .delete_cf(&self.cf_handle(cf)?, key)
             .map_err(|err| StoreError::InternalError(format!("delete_cf failed: {}", err)))
     }
 
-    fn set(&self, cf: store::ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    #[inline(always)]
+    fn set(&self, cf: store::ColumnFamily, key: &[u8], value: &[u8]) -> Result<()> {
         self.db
             .put_cf(&self.cf_handle(cf)?, key, value)
             .map_err(|err| StoreError::InternalError(format!("put_cf failed: {}", err)))
     }
 
-    fn get<U>(&self, cf: store::ColumnFamily, key: Vec<u8>) -> Result<Option<U>>
+    #[inline(always)]
+    fn get<U>(&self, cf: store::ColumnFamily, key: &[u8]) -> Result<Option<U>>
     where
         U: StoreDeserialize,
     {
@@ -51,12 +54,14 @@ impl<'x> Store<'x> for RocksDB {
         }
     }
 
-    fn merge(&self, cf: store::ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    #[inline(always)]
+    fn merge(&self, cf: store::ColumnFamily, key: &[u8], value: &[u8]) -> Result<()> {
         self.db
             .merge_cf(&self.cf_handle(cf)?, key, value)
             .map_err(|err| StoreError::InternalError(format!("merge_cf failed: {}", err)))
     }
 
+    #[inline(always)]
     fn write(&self, batch: Vec<store::WriteOperation>) -> Result<()> {
         let mut rocks_batch = rocksdb::WriteBatch::default();
         let cf_bitmaps = self.cf_handle(store::ColumnFamily::Bitmaps)?;
@@ -112,7 +117,8 @@ impl<'x> Store<'x> for RocksDB {
             .map_err(|err| StoreError::InternalError(format!("batch write failed: {}", err)))
     }
 
-    fn exists(&self, cf: store::ColumnFamily, key: Vec<u8>) -> Result<bool> {
+    #[inline(always)]
+    fn exists(&self, cf: store::ColumnFamily, key: &[u8]) -> Result<bool> {
         Ok(self
             .db
             .get_pinned_cf(&self.cf_handle(cf)?, &key)
@@ -120,9 +126,11 @@ impl<'x> Store<'x> for RocksDB {
             .is_some())
     }
 
-    fn multi_get<U>(&self, cf: store::ColumnFamily, keys: Vec<Vec<u8>>) -> Result<Vec<Option<U>>>
+    #[inline(always)]
+    fn multi_get<T, U>(&self, cf: store::ColumnFamily, keys: Vec<U>) -> Result<Vec<Option<T>>>
     where
-        U: StoreDeserialize,
+        T: StoreDeserialize,
+        U: AsRef<[u8]>,
     {
         let cf_handle = self.cf_handle(cf)?;
         let mut results = Vec::with_capacity(keys.len());
@@ -134,12 +142,9 @@ impl<'x> Store<'x> for RocksDB {
                 if let Some(bytes) = value.map_err(|err| {
                     StoreError::InternalError(format!("multi_get_cf failed: {}", err))
                 })? {
-                    U::deserialize(&bytes)
+                    T::deserialize(&bytes)
                         .ok_or_else(|| {
-                            StoreError::DeserializeError(format!(
-                                "Failed to deserialize keys: {:?}",
-                                keys
-                            ))
+                            StoreError::DeserializeError("Failed to deserialize keys.".to_string())
                         })?
                         .into()
                 } else {
@@ -151,16 +156,17 @@ impl<'x> Store<'x> for RocksDB {
         Ok(results)
     }
 
+    #[inline(always)]
     fn iterator<'y: 'x>(
         &'y self,
         cf: store::ColumnFamily,
-        start: Vec<u8>,
+        start: &[u8],
         direction: store::Direction,
     ) -> Result<DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>> {
         Ok(self.db.iterator_cf(
             &self.cf_handle(cf)?,
             rocksdb::IteratorMode::From(
-                &start,
+                start,
                 match direction {
                     store::Direction::Forward => rocksdb::Direction::Forward,
                     store::Direction::Backward => rocksdb::Direction::Reverse,

@@ -2,7 +2,7 @@ use jmap_mail::{import::JMAPMailLocalStoreImport, thread::JMAPMailThread};
 use jmap_store::{json::JSONValue, JMAPGet};
 use store::{changelog::RaftId, JMAPStore, Store};
 
-pub async fn jmap_mail_thread<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_thread<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -19,7 +19,6 @@ where
                 vec![],
                 Some(10000i64 + num as i64),
             )
-            .await
             .unwrap()
             .unwrap_object()
             .unwrap();
@@ -35,7 +34,6 @@ where
                 properties: None,
                 arguments: ()
             })
-            .await
             .unwrap()
             .list
             .unwrap_array()

@@ -1,9 +1,9 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 use serde::{Deserialize, Serialize};
+use store::tracing::{debug, error, info};
 use store::{leb128::Leb128, Store};
 use tokio::{net::UdpSocket, sync::mpsc};
-use tracing::{debug, error, info};
 
 use crate::cluster::rpc::start_peer_rpc;
 

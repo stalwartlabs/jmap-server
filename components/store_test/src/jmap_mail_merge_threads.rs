@@ -3,8 +3,9 @@ use std::collections::HashSet;
 use jmap_mail::{import::JMAPMailLocalStoreImport, MessageField};
 use jmap_store::JMAP_MAIL;
 use store::{
-    changelog::RaftId, query::JMAPStoreQuery, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store,
-    Tag, ThreadId,
+    changelog::RaftId,
+    query::{JMAPIdMapFnc, JMAPStoreQuery},
+    Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
 };
 
 pub enum ThreadTest {
@@ -59,7 +60,7 @@ fn build_messages(
     messages_per_thread
 }
 
-pub async fn jmap_mail_merge_threads<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_merge_threads<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -81,7 +82,6 @@ where
                     vec![],
                     None,
                 )
-                .await
                 .unwrap();
         }
 
@@ -95,7 +95,6 @@ where
                     vec![],
                     None,
                 )
-                .await
                 .unwrap();
         }
 
@@ -110,7 +109,6 @@ where
                         vec![],
                         None,
                     )
-                    .await
                     .unwrap();
             }
             for message in chunk.iter().rev() {
@@ -123,7 +121,6 @@ where
                         vec![],
                         None,
                     )
-                    .await
                     .unwrap();
             }
         }
@@ -139,7 +136,6 @@ where
                         vec![],
                         None,
                     )
-                    .await
                     .unwrap();
             }
             for message in chunk.iter().rev() {
@@ -152,23 +148,20 @@ where
                         vec![],
                         None,
                     )
-                    .await
                     .unwrap();
             }
         }
 
         for test_num in 0..=5 {
             let message_doc_ids = mail_store
-                .query(JMAPStoreQuery::new(
+                .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                     base_test_num + test_num,
                     JMAP_MAIL,
                     Filter::None,
                     Comparator::None,
-                    0,
                 ))
-                .await
                 .unwrap()
-                .results;
+                .collect::<Vec<u64>>();
 
             assert_eq!(
                 message_doc_ids.len(),
@@ -189,7 +182,6 @@ where
                             message_doc_id.get_document_id(),
                             MessageField::ThreadId.into(),
                         )
-                        .await
                         .unwrap()
                         .unwrap(),
                 );
@@ -213,7 +205,6 @@ where
                             MessageField::ThreadId.into(),
                             Tag::Id(thread_id),
                         )
-                        .await
                         .unwrap()
                         .unwrap()
                         .len() as usize,

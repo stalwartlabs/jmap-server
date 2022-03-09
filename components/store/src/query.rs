@@ -4,7 +4,7 @@ use crate::{
     serialize::{
         deserialize_index_document_id, serialize_acd_key_leb128, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key_base,
-        serialize_index_key_prefix, serialize_stored_key,
+        serialize_index_key_prefix,
     },
     term_index::TermIndex,
     AccountId, CollectionId, ColumnFamily, Comparator, Direction, DocumentId, FieldId, FieldValue,
@@ -24,51 +24,48 @@ struct State {
     bm: Option<RoaringBitmap>,
 }
 
-pub struct JMAPPrefix {
-    pub collection_id: CollectionId,
-    pub field_id: FieldId,
-    pub unique: bool,
-}
+pub type JMAPIdMapFnc = fn(DocumentId) -> crate::Result<Option<JMAPId>>;
 
-pub struct JMAPStoreQuery {
+pub struct JMAPStoreQuery<T>
+where
+    T: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+{
     pub account_id: AccountId,
     pub collection_id: CollectionId,
-    pub jmap_prefix: Option<JMAPPrefix>,
-    pub limit: usize,
-    pub position: i32,
-    pub anchor: Option<JMAPId>,
-    pub anchor_offset: i32,
+    pub filter_map_fnc: Option<T>,
     pub filter: Filter,
     pub sort: Comparator,
 }
 
-impl JMAPStoreQuery {
+impl<T> JMAPStoreQuery<T>
+where
+    T: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+{
     pub fn new(
         account_id: AccountId,
         collection_id: CollectionId,
         filter: Filter,
         sort: Comparator,
-        limit: usize,
     ) -> Self {
         Self {
             account_id,
             collection_id,
-            jmap_prefix: None,
-            limit,
-            position: 0,
-            anchor: None,
-            anchor_offset: 0,
+            filter_map_fnc: None,
             filter,
             sort,
         }
     }
 }
 
-#[derive(Default)]
-pub struct JMAPStoreResult {
-    pub start_position: usize,
-    pub total_results: usize,
-    pub results: Vec<JMAPId>,
+pub struct StoreIterator<'x, T, U>
+where
+    T: Store<'x>,
+    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+{
+    store: &'x JMAPStore<T>,
+    iterators: Vec<IndexIterator<'x, T>>,
+    filter_map_fnc: Option<U>,
+    current: usize,
 }
 
 struct DocumentSetIndex {
@@ -111,14 +108,17 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     #[allow(clippy::blocks_in_if_conditions)]
-    pub async fn query(&self, mut request: JMAPStoreQuery) -> crate::Result<JMAPStoreResult> {
+    pub fn query<'y: 'x, 'x, U>(
+        &'y self,
+        mut request: JMAPStoreQuery<U>,
+    ) -> crate::Result<StoreIterator<'x, T, U>>
+    where
+        U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+    {
         let mut document_ids = self
-            .get_document_ids_used(request.account_id, request.collection_id)
-            .await?
+            .get_document_ids_used(request.account_id, request.collection_id)?
             .unwrap_or_else(RoaringBitmap::new);
-        let tombstoned_ids = self
-            .get_tombstoned_ids(request.account_id, request.collection_id)
-            .await?;
+        let tombstoned_ids = self.get_tombstoned_ids(request.account_id, request.collection_id)?;
 
         let filter = match request.filter {
             Filter::Operator(filter) => filter,
@@ -126,16 +126,19 @@ where
                 if let Some(tombstoned_ids) = tombstoned_ids {
                     document_ids.bitxor_assign(tombstoned_ids)
                 }
-                return self
-                    .process_results(document_ids.clone(), document_ids, request)
-                    .await;
+                return Ok(StoreIterator::new(
+                    self,
+                    document_ids.clone(),
+                    document_ids,
+                    request,
+                ));
             }
             Filter::DocumentSet(set) => {
                 if let Some(tombstoned_ids) = tombstoned_ids {
                     document_ids.bitxor_assign(tombstoned_ids)
                 }
                 request.filter = Filter::None;
-                return self.process_results(set, document_ids, request).await;
+                return Ok(StoreIterator::new(self, set, document_ids, request));
             }
             _ => FilterOperator {
                 operator: LogicalOperator::And,
@@ -161,13 +164,12 @@ where
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
-                                    self.get_bitmap(serialize_bm_text_key(
+                                    self.get_bitmap(&serialize_bm_text_key(
                                         request.account_id,
                                         request.collection_id,
                                         filter_cond.field,
                                         &keyword,
-                                    ))
-                                    .await?,
+                                    ))?,
                                     &document_ids,
                                 );
                             }
@@ -187,19 +189,17 @@ where
                                                 )
                                             })
                                             .collect(),
-                                    )
-                                    .await?,
+                                    )?,
                                     &document_ids,
                                 );
                             }
                             FieldValue::FullText(query) => {
-                                if let Some(match_terms) = self
-                                    .get_match_terms(TokenIterator::new(
+                                if let Some(match_terms) =
+                                    self.get_match_terms(TokenIterator::new(
                                         query.text.as_ref(),
                                         query.language,
                                         !query.match_phrase,
-                                    ))
-                                    .await?
+                                    ))?
                                 {
                                     if query.match_phrase {
                                         let mut requested_ids = HashSet::new();
@@ -218,22 +218,20 @@ where
                                         }
 
                                         // Retrieve the Term Index for each candidate and match the exact phrase
-                                        let mut candidates =
-                                            self.get_bitmaps_intersection(keys).await?;
+                                        let mut candidates = self.get_bitmaps_intersection(keys)?;
                                         if let Some(candidates) = &mut candidates {
                                             if match_terms.len() > 1 {
                                                 let mut results = RoaringBitmap::new();
                                                 for document_id in candidates.iter() {
-                                                    if let Some(term_index) = self
-                                                        .get::<TermIndex>(
+                                                    if let Some(term_index) =
+                                                        self.db.get::<TermIndex>(
                                                             ColumnFamily::Values,
-                                                            serialize_acd_key_leb128(
+                                                            &serialize_acd_key_leb128(
                                                                 request.account_id,
                                                                 request.collection_id,
                                                                 document_id,
                                                             ),
-                                                        )
-                                                        .await?
+                                                        )?
                                                     {
                                                         if term_index
                                                             .match_terms(
@@ -299,7 +297,7 @@ where
                                             bitmap_op(
                                                 LogicalOperator::And,
                                                 &mut text_bitmap,
-                                                self.get_bitmaps_union(keys).await?,
+                                                self.get_bitmaps_union(keys)?,
                                                 &document_ids,
                                             );
 
@@ -323,15 +321,14 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.range_to_bitmap(
-                                        serialize_index_key_base(
+                                        &serialize_index_key_base(
                                             request.account_id,
                                             request.collection_id,
                                             filter_cond.field,
                                             &i.to_be_bytes(),
                                         ),
                                         filter_cond.op,
-                                    )
-                                    .await?,
+                                    )?,
                                     &document_ids,
                                 );
                             }
@@ -340,15 +337,14 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.range_to_bitmap(
-                                        serialize_index_key_base(
+                                        &serialize_index_key_base(
                                             request.account_id,
                                             request.collection_id,
                                             filter_cond.field,
                                             &i.to_be_bytes(),
                                         ),
                                         filter_cond.op,
-                                    )
-                                    .await?,
+                                    )?,
                                     &document_ids,
                                 );
                             }
@@ -357,15 +353,14 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.range_to_bitmap(
-                                        serialize_index_key_base(
+                                        &serialize_index_key_base(
                                             request.account_id,
                                             request.collection_id,
                                             filter_cond.field,
                                             &f.to_be_bytes(),
                                         ),
                                         filter_cond.op,
-                                    )
-                                    .await?,
+                                    )?,
                                     &document_ids,
                                 );
                             }
@@ -373,13 +368,12 @@ where
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
-                                    self.get_bitmap(serialize_bm_tag_key(
+                                    self.get_bitmap(&serialize_bm_tag_key(
                                         request.account_id,
                                         request.collection_id,
                                         filter_cond.field,
                                         &tag,
-                                    ))
-                                    .await?,
+                                    ))?,
                                     &document_ids,
                                 );
                             }
@@ -420,405 +414,325 @@ where
             }
         }
 
-        self.process_results(results, document_ids, request).await
+        Ok(StoreIterator::new(self, results, document_ids, request))
     }
+}
 
-    #[allow(clippy::while_let_on_iterator)]
-    pub async fn process_results(
-        &self,
+impl<'x, T, U> StoreIterator<'x, T, U>
+where
+    T: Store<'x>,
+    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+{
+    pub fn new(
+        store: &'x JMAPStore<T>,
         mut results: RoaringBitmap,
         document_ids: RoaringBitmap,
-        mut request: JMAPStoreQuery,
-    ) -> crate::Result<JMAPStoreResult> {
-        let total_results = results.len() as usize;
-        if total_results == 0 {
-            return Ok(JMAPStoreResult::default());
-        }
-        let db = self.db.clone();
-
-        // Sort results on a worker thread
-        self.spawn_worker(move || {
-            let mut iterators: Vec<IndexIterator<T>> = Vec::new();
-            for comp in (if let Comparator::List(list) = request.sort {
-                list
-            } else {
-                vec![request.sort]
-            })
-            .into_iter()
-            {
-                iterators.push(IndexIterator {
-                    index: match comp {
-                        Comparator::Field(comp) => {
-                            let prefix = serialize_index_key_prefix(
-                                request.account_id,
-                                request.collection_id,
-                                comp.field,
-                            );
-                            IndexType::DB(DBIndex {
-                                it: None,
-                                start_key: if !comp.ascending {
-                                    let (key_account_id, key_collection_id, key_field) = if comp
-                                        .field
-                                        < FieldId::MAX
-                                    {
+        request: JMAPStoreQuery<U>,
+    ) -> Self {
+        let mut iterators: Vec<IndexIterator<T>> = Vec::new();
+        for comp in (if let Comparator::List(list) = request.sort {
+            list
+        } else {
+            vec![request.sort]
+        })
+        .into_iter()
+        {
+            iterators.push(IndexIterator {
+                index: match comp {
+                    Comparator::Field(comp) => {
+                        let prefix = serialize_index_key_prefix(
+                            request.account_id,
+                            request.collection_id,
+                            comp.field,
+                        );
+                        IndexType::DB(DBIndex {
+                            it: None,
+                            start_key: if !comp.ascending {
+                                let (key_account_id, key_collection_id, key_field) =
+                                    if comp.field < FieldId::MAX {
                                         (request.account_id, request.collection_id, comp.field + 1)
                                     } else if request.collection_id < CollectionId::MAX {
                                         (request.account_id, request.collection_id + 1, comp.field)
                                     } else {
                                         (request.account_id + 1, request.collection_id, comp.field)
                                     };
-                                    serialize_index_key_prefix(
-                                        key_account_id,
-                                        key_collection_id,
-                                        key_field,
-                                    )
-                                } else {
-                                    prefix.clone()
-                                },
-                                prefix,
-                                ascending: comp.ascending,
-                                prev_item: None,
-                                prev_key: None,
-                            })
-                        }
-                        Comparator::DocumentSet(mut comp) => {
-                            IndexType::DocumentSet(DocumentSetIndex {
-                                set: if !comp.ascending {
-                                    if !comp.set.is_empty() {
-                                        comp.set.bitxor_assign(&document_ids);
-                                        comp.set
-                                    } else {
-                                        document_ids.clone()
-                                    }
-                                } else {
-                                    comp.set
-                                },
-                                it: None,
-                            })
-                        }
-                        _ => IndexType::None,
-                    },
-                    eof: false,
-                    remaining: results,
-                });
-
-                results = RoaringBitmap::new();
-            }
-
-            let start_position;
-            let mut current = 0;
-            let mut seen_prefixes = HashSet::new();
-
-            let mut results = Vec::with_capacity(if request.limit > 0 {
-                request.limit
-            } else {
-                total_results as usize
-            });
-            let has_anchor = request.anchor.is_some();
-            let mut anchor_found = false;
-
-            'outer: loop {
-                let mut doc_id;
-
-                'inner: loop {
-                    let (it_opts, mut next_it_opts) = if current < iterators.len() - 1 {
-                        let (iterators_first, iterators_last) = iterators.split_at_mut(current + 1);
-                        (
-                            iterators_first.last_mut().unwrap(),
-                            iterators_last.first_mut(),
-                        )
-                    } else {
-                        (&mut iterators[current], None)
-                    };
-
-                    if it_opts.remaining.is_empty() {
-                        if current > 0 {
-                            current -= 1;
-                            continue 'inner;
-                        } else {
-                            break 'outer;
-                        }
-                    } else if it_opts.remaining.len() == 1 || it_opts.eof {
-                        doc_id = it_opts.remaining.min().unwrap();
-                        it_opts.remaining.remove(doc_id);
-                        break 'inner;
+                                serialize_index_key_prefix(
+                                    key_account_id,
+                                    key_collection_id,
+                                    key_field,
+                                )
+                            } else {
+                                prefix.clone()
+                            },
+                            prefix,
+                            ascending: comp.ascending,
+                            prev_item: None,
+                            prev_key: None,
+                        })
                     }
-
-                    match &mut it_opts.index {
-                        IndexType::DB(index) => {
-                            let it = if let Some(it) = &mut index.it {
-                                it
+                    Comparator::DocumentSet(mut comp) => IndexType::DocumentSet(DocumentSetIndex {
+                        set: if !comp.ascending {
+                            if !comp.set.is_empty() {
+                                comp.set.bitxor_assign(&document_ids);
+                                comp.set
                             } else {
-                                index.it = Some(db.iterator(
-                                    ColumnFamily::Indexes,
-                                    index.start_key.clone(),
-                                    if index.ascending {
-                                        Direction::Forward
-                                    } else {
-                                        Direction::Backward
-                                    },
-                                )?);
-                                index.it.as_mut().unwrap()
-                            };
+                                document_ids.clone()
+                            }
+                        } else {
+                            comp.set
+                        },
+                        it: None,
+                    }),
+                    _ => IndexType::None,
+                },
+                eof: false,
+                remaining: results,
+            });
 
-                            let mut prev_key_prefix = if let Some(prev_key) = &index.prev_key {
-                                prev_key
-                                    .get(..prev_key.len() - std::mem::size_of::<DocumentId>())
-                                    .ok_or_else(|| {
-                                        StoreError::InternalError(format!(
-                                            "prev_key {:?} is too short",
-                                            prev_key
-                                        ))
-                                    })?
+            results = RoaringBitmap::new();
+        }
+
+        StoreIterator {
+            store,
+            iterators,
+            filter_map_fnc: request.filter_map_fnc,
+            current: 0,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.iterators[0].remaining.len() as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.iterators[0].remaining.is_empty()
+    }
+}
+
+impl<'x, T, U> Iterator for StoreIterator<'x, T, U>
+where
+    T: Store<'x>,
+    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+{
+    type Item = JMAPId;
+
+    #[allow(clippy::while_let_on_iterator)]
+    fn next(&mut self) -> Option<Self::Item> {
+        'outer: loop {
+            let mut doc_id;
+
+            'inner: loop {
+                let (it_opts, mut next_it_opts) = if self.current < self.iterators.len() - 1 {
+                    let (iterators_first, iterators_last) =
+                        self.iterators.split_at_mut(self.current + 1);
+                    (
+                        iterators_first.last_mut().unwrap(),
+                        iterators_last.first_mut(),
+                    )
+                } else {
+                    (&mut self.iterators[self.current], None)
+                };
+
+                if it_opts.remaining.is_empty() {
+                    if self.current > 0 {
+                        self.current -= 1;
+                        continue 'inner;
+                    } else {
+                        return None;
+                    }
+                } else if it_opts.remaining.len() == 1 || it_opts.eof {
+                    doc_id = it_opts.remaining.min().unwrap();
+                    it_opts.remaining.remove(doc_id);
+                    break 'inner;
+                }
+
+                match &mut it_opts.index {
+                    IndexType::DB(index) => {
+                        let it = if let Some(it) = &mut index.it {
+                            it
+                        } else {
+                            index.it = Some(
+                                self.store
+                                    .db
+                                    .iterator(
+                                        ColumnFamily::Indexes,
+                                        &index.start_key,
+                                        if index.ascending {
+                                            Direction::Forward
+                                        } else {
+                                            Direction::Backward
+                                        },
+                                    )
+                                    .ok()?,
+                            );
+                            index.it.as_mut().unwrap()
+                        };
+
+                        let mut prev_key_prefix = if let Some(prev_key) = &index.prev_key {
+                            prev_key.get(..prev_key.len() - std::mem::size_of::<DocumentId>())?
+                        } else {
+                            &[][..]
+                        };
+
+                        if let Some(prev_item) = index.prev_item {
+                            index.prev_item = None;
+                            if let Some(next_it_opts) = &mut next_it_opts {
+                                next_it_opts.remaining.insert(prev_item);
                             } else {
-                                &[][..]
-                            };
+                                doc_id = prev_item;
+                                break 'inner;
+                            }
+                        }
 
-                            if let Some(prev_item) = index.prev_item {
-                                index.prev_item = None;
+                        while let Some((key, _)) = it.next() {
+                            if !key.starts_with(&index.prefix) {
+                                index.prev_key = None;
+                                break;
+                            }
+
+                            doc_id = deserialize_index_document_id(&key)?;
+                            if it_opts.remaining.contains(doc_id) {
+                                it_opts.remaining.remove(doc_id);
+
                                 if let Some(next_it_opts) = &mut next_it_opts {
-                                    next_it_opts.remaining.insert(prev_item);
+                                    if let Some(prev_key) = &index.prev_key {
+                                        if key.len() != prev_key.len()
+                                            || !key.starts_with(prev_key_prefix)
+                                        {
+                                            index.prev_item = Some(doc_id);
+                                            index.prev_key = Some(key);
+                                            break;
+                                        }
+                                    } else {
+                                        index.prev_key = Some(key);
+                                        prev_key_prefix =
+                                            index.prev_key.as_ref().and_then(|key| {
+                                                key.get(
+                                                    ..key.len() - std::mem::size_of::<DocumentId>(),
+                                                )
+                                            })?;
+                                    }
+
+                                    next_it_opts.remaining.insert(doc_id);
                                 } else {
-                                    doc_id = prev_item;
+                                    // doc id found
                                     break 'inner;
                                 }
                             }
+                        }
+                    }
+                    IndexType::DocumentSet(index) => {
+                        if let Some(it) = &mut index.it {
+                            if let Some(_doc_id) = it.next() {
+                                doc_id = _doc_id;
+                                break 'inner;
+                            }
+                        } else {
+                            let mut set = index.set.clone();
+                            set.bitand_assign(&it_opts.remaining);
+                            let set_len = set.len();
+                            if set_len > 0 {
+                                it_opts.remaining.bitxor_assign(&set);
 
-                            while let Some((key, _)) = it.next() {
-                                if !key.starts_with(&index.prefix) {
-                                    index.prev_key = None;
-                                    break;
-                                }
-
-                                doc_id = deserialize_index_document_id(&key).ok_or_else(|| {
-                                    StoreError::InternalError(format!(
-                                        "invalid index key {:?}",
-                                        key
-                                    ))
-                                })?;
-                                if it_opts.remaining.contains(doc_id) {
-                                    it_opts.remaining.remove(doc_id);
-
-                                    if let Some(next_it_opts) = &mut next_it_opts {
-                                        if let Some(prev_key) = &index.prev_key {
-                                            if key.len() != prev_key.len()
-                                                || !key.starts_with(prev_key_prefix)
-                                            {
-                                                index.prev_item = Some(doc_id);
-                                                index.prev_key = Some(key);
-                                                break;
-                                            }
-                                        } else {
-                                            index.prev_key = Some(key);
-                                            prev_key_prefix = index
-                                                .prev_key
-                                                .as_ref()
-                                                .and_then(|key| {
-                                                    key.get(
-                                                        ..key.len()
-                                                            - std::mem::size_of::<DocumentId>(),
-                                                    )
-                                                })
-                                                .ok_or_else(|| {
-                                                    StoreError::InternalError(
-                                                        "prev_key is too short".to_string(),
-                                                    )
-                                                })?;
-                                        }
-
-                                        next_it_opts.remaining.insert(doc_id);
-                                    } else {
-                                        // doc id found
+                                match &mut next_it_opts {
+                                    Some(next_it_opts) if set_len > 1 => {
+                                        next_it_opts.remaining = set;
+                                    }
+                                    _ if set_len == 1 => {
+                                        doc_id = set.min().unwrap();
                                         break 'inner;
                                     }
+                                    _ => {
+                                        let mut it = set.into_iter();
+                                        let result = it.next();
+                                        index.it = Some(it);
+                                        if let Some(result) = result {
+                                            doc_id = result;
+                                            break 'inner;
+                                        } else {
+                                            return None;
+                                        }
+                                    }
+                                }
+                            } else if !it_opts.remaining.is_empty() {
+                                if let Some(ref mut next_it_opts) = next_it_opts {
+                                    next_it_opts.remaining = std::mem::take(&mut it_opts.remaining);
                                 }
                             }
-                        }
-                        IndexType::DocumentSet(index) => {
-                            if let Some(it) = &mut index.it {
-                                if let Some(_doc_id) = it.next() {
-                                    doc_id = _doc_id;
-                                    break 'inner;
-                                }
-                            } else {
-                                let mut set = index.set.clone();
-                                set.bitand_assign(&it_opts.remaining);
-                                let set_len = set.len();
-                                if set_len > 0 {
-                                    it_opts.remaining.bitxor_assign(&set);
+                        };
+                    }
+                    IndexType::None => (),
+                };
 
-                                    match &mut next_it_opts {
-                                        Some(next_it_opts) if set_len > 1 => {
-                                            next_it_opts.remaining = set;
-                                        }
-                                        _ if set_len == 1 => {
-                                            doc_id = set.min().unwrap();
-                                            break 'inner;
-                                        }
-                                        _ => {
-                                            let mut it = set.into_iter();
-                                            let result = it.next();
-                                            index.it = Some(it);
-                                            if let Some(result) = result {
-                                                doc_id = result;
-                                                break 'inner;
-                                            } else {
-                                                break 'outer;
-                                            }
-                                        }
-                                    }
-                                } else if !it_opts.remaining.is_empty() {
-                                    if let Some(ref mut next_it_opts) = next_it_opts {
-                                        next_it_opts.remaining =
-                                            std::mem::take(&mut it_opts.remaining);
-                                    }
-                                }
-                            };
-                        }
-                        IndexType::None => (),
-                    };
-
-                    if let Some(next_it_opts) = next_it_opts {
-                        if !next_it_opts.remaining.is_empty() {
-                            if next_it_opts.remaining.len() == 1 {
-                                doc_id = next_it_opts.remaining.min().unwrap();
-                                next_it_opts.remaining.remove(doc_id);
-                                break 'inner;
-                            } else {
-                                match &mut next_it_opts.index {
-                                    IndexType::DB(index) => {
-                                        if let Some(it) = &mut index.it {
-                                            *it = db.iterator(
+                if let Some(next_it_opts) = next_it_opts {
+                    if !next_it_opts.remaining.is_empty() {
+                        if next_it_opts.remaining.len() == 1 {
+                            doc_id = next_it_opts.remaining.min().unwrap();
+                            next_it_opts.remaining.remove(doc_id);
+                            break 'inner;
+                        } else {
+                            match &mut next_it_opts.index {
+                                IndexType::DB(index) => {
+                                    if let Some(it) = &mut index.it {
+                                        *it = self
+                                            .store
+                                            .db
+                                            .iterator(
                                                 ColumnFamily::Indexes,
-                                                index.start_key.clone(),
+                                                &index.start_key,
                                                 if index.ascending {
                                                     Direction::Forward
                                                 } else {
                                                     Direction::Backward
                                                 },
-                                            )?;
-                                        }
-                                        index.prev_item = None;
-                                        index.prev_key = None;
+                                            )
+                                            .ok()?;
                                     }
-                                    IndexType::DocumentSet(index) => {
-                                        index.it = None;
-                                    }
-                                    IndexType::None => (),
+                                    index.prev_item = None;
+                                    index.prev_key = None;
                                 }
-
-                                current += 1;
-                                next_it_opts.eof = false;
-                                continue 'inner;
+                                IndexType::DocumentSet(index) => {
+                                    index.it = None;
+                                }
+                                IndexType::None => (),
                             }
-                        }
-                    }
 
-                    it_opts.eof = true;
-
-                    if it_opts.remaining.is_empty() {
-                        if current > 0 {
-                            current -= 1;
-                        } else {
-                            break 'outer;
+                            self.current += 1;
+                            next_it_opts.eof = false;
+                            continue 'inner;
                         }
                     }
                 }
 
-                let result = if let Some(jmap_prefix) = &request.jmap_prefix {
-                    if let Some(prefix_id) = db.get::<DocumentId>(
-                        ColumnFamily::Values,
-                        serialize_stored_key(
-                            request.account_id,
-                            jmap_prefix.collection_id,
-                            doc_id,
-                            jmap_prefix.field_id,
-                        ),
-                    )? {
-                        if jmap_prefix.unique && !seen_prefixes.insert(prefix_id) {
-                            continue;
-                        }
-                        (prefix_id as JMAPId) << 32 | doc_id as JMAPId
+                it_opts.eof = true;
+
+                if it_opts.remaining.is_empty() {
+                    if self.current > 0 {
+                        self.current -= 1;
                     } else {
-                        continue;
+                        return None;
                     }
-                } else {
-                    doc_id as JMAPId
-                };
-
-                if !has_anchor {
-                    if request.position >= 0 {
-                        if request.position > 0 {
-                            request.position -= 1;
-                        } else {
-                            results.push(result);
-                            if request.limit > 0 && results.len() == request.limit {
-                                break;
-                            }
-                        }
-                    } else {
-                        results.push(result);
-                    }
-                } else if request.anchor_offset >= 0 {
-                    if !anchor_found {
-                        if &result != request.anchor.as_ref().unwrap() {
-                            continue;
-                        }
-                        anchor_found = true;
-                    }
-
-                    if request.anchor_offset > 0 {
-                        request.anchor_offset -= 1;
-                    } else {
-                        results.push(result);
-                        if request.limit > 0 && results.len() == request.limit {
-                            break;
-                        }
-                    }
-                } else {
-                    anchor_found = &result == request.anchor.as_ref().unwrap();
-                    results.push(result);
-
-                    if !anchor_found {
-                        continue;
-                    }
-
-                    request.position = request.anchor_offset;
-
-                    break;
                 }
             }
 
-            let results = if !has_anchor || anchor_found {
-                if request.position >= 0 {
-                    start_position = request.position as usize;
-                    results
+            if let Some(filter_map_fnc) = &mut self.filter_map_fnc {
+                if let Some(jmap_id) = filter_map_fnc(doc_id).ok()? {
+                    return Some(jmap_id);
                 } else {
-                    let position = request.position.abs() as usize;
-                    let start_offset = if position < results.len() {
-                        results.len() - position
-                    } else {
-                        0
-                    };
-                    start_position = start_offset;
-                    let end_offset = if request.limit > 0 {
-                        std::cmp::min(start_offset + request.limit, results.len())
-                    } else {
-                        results.len()
-                    };
-
-                    results[start_offset..end_offset].to_vec()
+                    continue 'outer;
                 }
             } else {
-                return Err(StoreError::AnchorNotFound);
+                return Some(doc_id as JMAPId);
             };
+        }
+    }
 
-            Ok(JMAPStoreResult {
-                start_position,
-                results,
-                total_results,
-            })
-        })
-        .await
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let it = &self.iterators[0];
+
+        (
+            it.remaining.len() as usize,
+            Some(it.remaining.len() as usize),
+        )
     }
 }

@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse::get_message_blob, MESSAGE_RAW};
 use jmap_store::blob::JMAPBlobStore;
 use jmap_store::{
-    async_trait::async_trait,
     changes::{JMAPChanges, JMAPState},
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
@@ -13,7 +12,7 @@ use mail_parser::Message;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use store::query::JMAPStoreQuery;
+use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::JMAPIdPrefix;
 use store::{
@@ -49,7 +48,7 @@ where
     T: Serialize + Send + Sync,
 {
     fn serialize(&self) -> Option<Vec<u8>> {
-        bincode::serialize(&self.items).ok()
+        bincode::serialize(&self).ok()
     }
 }
 
@@ -58,7 +57,7 @@ where
     T: DeserializeOwned + Send + Sync,
 {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        bincode::deserialize_from(bytes).ok()?
+        bincode::deserialize_from(bytes).ok()
     }
 }
 
@@ -93,24 +92,22 @@ impl From<JMAPMailImportResponse> for JSONValue {
     }
 }
 
-#[async_trait]
 pub trait JMAPMailImport {
-    async fn mail_import(
+    fn mail_import(
         &self,
         request: JMAPMailImportRequest,
     ) -> jmap_store::Result<JMAPMailImportResponse>;
 }
 
-#[async_trait]
 impl<T> JMAPMailImport for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn mail_import(
+    fn mail_import(
         &self,
         request: JMAPMailImportRequest,
     ) -> jmap_store::Result<JMAPMailImportResponse> {
-        let old_state = self.get_state(request.account_id, JMAP_MAIL).await?;
+        let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
                 return Err(JMAPError::StateMismatch);
@@ -122,8 +119,7 @@ where
         }
 
         let mailbox_ids = self
-            .get_document_ids(request.account_id, JMAP_MAILBOX)
-            .await?
+            .get_document_ids(request.account_id, JMAP_MAILBOX)?
             .unwrap_or_else(RoaringBitmap::new);
 
         let mut created = HashMap::with_capacity(request.emails.len());
@@ -156,9 +152,8 @@ where
                 }
             }
 
-            if let Some(blob) = self
-                .download_blob(request.account_id, &item.blob_id, get_message_blob)
-                .await?
+            if let Some(blob) =
+                self.download_blob(request.account_id, &item.blob_id, get_message_blob)?
             {
                 created.insert(
                     item.id,
@@ -169,8 +164,7 @@ where
                         item.mailbox_ids,
                         item.keywords,
                         item.received_at,
-                    )
-                    .await?,
+                    )?,
                 );
             } else {
                 not_created.insert(
@@ -185,7 +179,7 @@ where
 
         Ok(JMAPMailImportResponse {
             new_state: if !created.is_empty() {
-                self.get_state(request.account_id, JMAP_MAIL).await?
+                self.get_state(request.account_id, JMAP_MAIL)?
             } else {
                 old_state.clone()
             },
@@ -204,9 +198,8 @@ where
     }
 }
 
-#[async_trait]
 pub trait JMAPMailLocalStoreImport {
-    async fn mail_import_blob(
+    fn mail_import_blob(
         &self,
         account_id: AccountId,
         raft_id: RaftId,
@@ -216,7 +209,7 @@ pub trait JMAPMailLocalStoreImport {
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue>;
 
-    async fn mail_merge_threads(
+    fn mail_merge_threads(
         &self,
         account_id: AccountId,
         documents: &mut Vec<WriteBatch>,
@@ -224,12 +217,11 @@ pub trait JMAPMailLocalStoreImport {
     ) -> store::Result<ThreadId>;
 }
 
-#[async_trait]
 impl<T> JMAPMailLocalStoreImport for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn mail_import_blob(
+    fn mail_import_blob(
         &self,
         account_id: AccountId,
         raft_id: RaftId,
@@ -239,7 +231,7 @@ where
         received_at: Option<i64>,
     ) -> jmap_store::Result<JSONValue> {
         // Build message document
-        let document_id = self.assign_document_id(account_id, JMAP_MAIL).await?;
+        let document_id = self.assign_document_id(account_id, JMAP_MAIL)?;
         let mut document = WriteBatch::insert(JMAP_MAIL, document_id, document_id);
         let (reference_ids, thread_name) = build_message_document(
             &mut document,
@@ -259,7 +251,7 @@ where
                 })?,
                 FieldOptions::Store,
             );
-            let change_id = self.assign_change_id(account_id, JMAP_MAILBOX).await?;
+            let change_id = self.assign_change_id(account_id, JMAP_MAILBOX)?;
             for mailbox_id in mailbox_ids.items {
                 document.tag(
                     MessageField::Mailbox,
@@ -292,7 +284,7 @@ where
         }
 
         // Lock account
-        let _lock = self.lock_account(account_id, JMAP_MAIL).await;
+        let _lock = self.lock_account(account_id, JMAP_MAIL);
 
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
@@ -301,7 +293,7 @@ where
                 .get_multi_document_value(
                     account_id,
                     JMAP_MAIL,
-                    self.query(JMAPStoreQuery::new(
+                    self.query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                         account_id,
                         JMAP_MAIL,
                         Filter::and(vec![
@@ -322,17 +314,13 @@ where
                             ),
                         ]),
                         Comparator::None,
-                        0,
-                    ))
-                    .await?
-                    .results
+                    ))?
                     .into_iter()
                     .map(|id| id.get_document_id())
                     .collect::<Vec<u32>>()
                     .into_iter(),
                     MessageField::ThreadId.into(),
-                )
-                .await?
+                )?
                 .into_iter()
                 .flatten()
                 .collect::<HashSet<ThreadId>>();
@@ -345,14 +333,11 @@ where
                 0 => None,
                 _ => {
                     // Merge all matching threads
-                    Some(
-                        self.mail_merge_threads(
-                            account_id,
-                            &mut documents,
-                            thread_ids.into_iter().collect(),
-                        )
-                        .await?,
-                    )
+                    Some(self.mail_merge_threads(
+                        account_id,
+                        &mut documents,
+                        thread_ids.into_iter().collect(),
+                    )?)
                 }
             }
         } else {
@@ -362,7 +347,7 @@ where
         let thread_id = if let Some(thread_id) = thread_id {
             thread_id
         } else {
-            let thread_id = self.assign_document_id(account_id, JMAP_THREAD).await?;
+            let thread_id = self.assign_document_id(account_id, JMAP_THREAD)?;
             documents.push(WriteBatch::insert(JMAP_THREAD, thread_id, thread_id));
             thread_id
         };
@@ -393,8 +378,7 @@ where
         documents.push(document);
 
         // Write documents to store
-        self.update_documents(account_id, raft_id, documents)
-            .await?;
+        self.update_documents(account_id, raft_id, documents)?;
 
         // Generate JSON object
         let mut values = HashMap::with_capacity(4);
@@ -414,7 +398,7 @@ where
         Ok(values.into())
     }
 
-    async fn mail_merge_threads(
+    fn mail_merge_threads(
         &self,
         account_id: AccountId,
         documents: &mut Vec<WriteBatch>,
@@ -432,8 +416,7 @@ where
                     .iter()
                     .map(|id| Tag::Id(*id))
                     .collect::<Vec<Tag>>(),
-            )
-            .await?
+            )?
             .into_iter()
             .enumerate()
         {

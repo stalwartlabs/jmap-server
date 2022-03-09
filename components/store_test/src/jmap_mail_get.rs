@@ -71,7 +71,7 @@ impl<'x> From<JSONValue> for SortedJSONValue {
     }
 }
 
-pub async fn jmap_mail_get<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_get<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -94,7 +94,6 @@ where
                 vec![Tag::Text("tag".into())],
                 Some((blob.len() * 1000000) as i64),
             )
-            .await
             .unwrap()
             .unwrap_object()
             .unwrap()
@@ -156,7 +155,6 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
-                .await
                 .unwrap()
                 .list
         } else {
@@ -376,7 +374,6 @@ where
                                 max_body_value_bytes: 100,
                             },
                         })
-                        .await
                         .unwrap()
                         .list
                         .unwrap_array()

@@ -25,18 +25,17 @@ use std::{
 use changelog::{get_last_raft_id, ChangeLogId, RaftId};
 use config::EnvSettings;
 use id::{IdAssigner, IdCacheKey};
+use moka::sync::Cache;
 use mutex_map::MutexMap;
 use nlp::Language;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use roaring::RoaringBitmap;
 use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
 
 pub use bincode;
-pub use futures;
 pub use parking_lot;
 pub use roaring;
-pub use tokio;
-use tokio::sync::{oneshot, MutexGuard};
+pub use tracing;
 
 #[derive(Debug, Clone)]
 pub enum StoreError {
@@ -334,34 +333,34 @@ where
 {
     type Iterator: Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'x;
 
-    fn delete(&self, cf: ColumnFamily, key: Vec<u8>) -> Result<()>;
-    fn set(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()>;
-    fn get<U>(&self, cf: ColumnFamily, key: Vec<u8>) -> Result<Option<U>>
+    fn delete(&self, cf: ColumnFamily, key: &[u8]) -> Result<()>;
+    fn set(&self, cf: ColumnFamily, key: &[u8], value: &[u8]) -> Result<()>;
+    fn get<U>(&self, cf: ColumnFamily, key: &[u8]) -> Result<Option<U>>
     where
         U: StoreDeserialize;
-    fn exists(&self, cf: ColumnFamily, key: Vec<u8>) -> Result<bool>;
+    fn exists(&self, cf: ColumnFamily, key: &[u8]) -> Result<bool>;
 
-    fn merge(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> Result<()>;
+    fn merge(&self, cf: ColumnFamily, key: &[u8], value: &[u8]) -> Result<()>;
     fn write(&self, batch: Vec<WriteOperation>) -> Result<()>;
-    fn multi_get<U>(&self, cf: ColumnFamily, keys: Vec<Vec<u8>>) -> Result<Vec<Option<U>>>
+    fn multi_get<T, U>(&self, cf: ColumnFamily, keys: Vec<U>) -> Result<Vec<Option<T>>>
     where
-        U: StoreDeserialize;
+        T: StoreDeserialize,
+        U: AsRef<[u8]>;
     fn iterator<'y: 'x>(
         &'y self,
         cf: ColumnFamily,
-        start: Vec<u8>,
+        start: &[u8],
         direction: Direction,
     ) -> Result<Self::Iterator>;
     fn compact(&self, cf: ColumnFamily) -> Result<()>;
 }
 
 pub struct JMAPStore<T> {
-    pub db: Arc<T>,
-    pub worker_pool: rayon::ThreadPool,
+    pub db: T,
     pub config: JMAPStoreConfig,
     pub blob_lock: MutexMap<()>,
-    pub doc_id_cache: moka::future::Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
-    pub term_id_cache: moka::sync::Cache<String, TermId>,
+    pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
+    pub term_id_cache: Cache<String, TermId>,
     pub term_id_lock: MutexMap<()>,
     pub term_id_last: AtomicU64,
 
@@ -423,22 +422,13 @@ where
             .unwrap_or(RaftId { term: 0, index: 0 });
 
         Self {
-            worker_pool: rayon::ThreadPoolBuilder::new()
-                .num_threads(
-                    settings
-                        .parse("worker-pool-size")
-                        .filter(|v| *v > 0)
-                        .unwrap_or_else(num_cpus::get),
-                )
-                .build()
-                .unwrap(),
             config: settings.into(),
             term_id_last: db
-                .get::<TermId>(ColumnFamily::Values, LAST_TERM_ID_KEY.to_vec())
+                .get::<TermId>(ColumnFamily::Values, LAST_TERM_ID_KEY)
                 .unwrap()
                 .unwrap_or(0)
                 .into(),
-            term_id_cache: moka::sync::Cache::builder()
+            term_id_cache: Cache::builder()
                 .initial_capacity(1024)
                 .max_capacity(
                     settings
@@ -450,7 +440,7 @@ where
                 ))
                 .build(),
             term_id_lock: MutexMap::with_capacity(1024),
-            doc_id_cache: moka::future::Cache::builder()
+            doc_id_cache: Cache::builder()
                 .initial_capacity(128)
                 .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
                 .time_to_idle(Duration::from_secs(60 * 60))
@@ -459,35 +449,15 @@ where
             account_lock: MutexMap::with_capacity(1024),
             raft_log_index: raft_id.index.into(),
             raft_log_term: raft_id.term.into(),
-            db: Arc::new(db),
+            db,
         }
     }
 
-    pub async fn spawn_worker<U, V>(&self, f: U) -> Result<V>
-    where
-        U: FnOnce() -> Result<V> + Send + 'static,
-        V: Sync + Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-
-        self.worker_pool.spawn(move || {
-            tx.send(f()).ok();
-        });
-
-        rx.await.map_err(|e| {
-            StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
-        })?
+    pub fn lock_account(&self, account: AccountId, collection: CollectionId) -> MutexGuard<'_, ()> {
+        self.account_lock.lock_hash((account, collection))
     }
 
-    pub async fn lock_account(
-        &self,
-        account: AccountId,
-        collection: CollectionId,
-    ) -> MutexGuard<'_, ()> {
-        self.account_lock.lock_hash((account, collection)).await
-    }
-
-    /*pub async fn spawn_blocking<U, V>(&self, f: U) -> Result<V>
+    /*pub fn spawn_blocking<U, V>(&self, f: U) -> Result<V>
     where
         U: FnOnce() -> Result<V> + Send + 'static,
         V: Sync + Send + 'static,
@@ -498,7 +468,7 @@ where
             tx.send(f()).ok();
         });
 
-        rx.await.map_err(|e| {
+        rx.map_err(|e| {
             StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
         })?
     }*/

@@ -15,7 +15,7 @@ use store::{
     JMAPId, JMAPStore, Store, Tag,
 };
 
-pub async fn jmap_mail_query_changes<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_query_changes<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -81,7 +81,6 @@ where
                         })],
                         Some(*id as i64),
                     )
-                    .await
                     .unwrap()
                     .unwrap_object()
                     .unwrap()
@@ -104,7 +103,6 @@ where
                         RaftId::default(),
                         WriteBatch::update(0, id.get_document_id(), id),
                     )
-                    .await
                     .unwrap();
                 updated_ids.insert(id);
             }
@@ -116,7 +114,6 @@ where
                         RaftId::default(),
                         WriteBatch::delete(0, id.get_document_id(), id),
                     )
-                    .await
                     .unwrap();
                 removed_ids.insert(id);
             }
@@ -133,7 +130,6 @@ where
                 );
                 mail_store
                     .update_document(0, RaftId::default(), batch)
-                    .await
                     .unwrap();
 
                 id_map.insert(*to, new_id);
@@ -203,7 +199,7 @@ where
                 if test_num == 3 && query.up_to_id.is_none() {
                     continue;
                 }
-                let changes = mail_store.mail_query_changes(query.clone()).await.unwrap();
+                let changes = mail_store.mail_query_changes(query.clone()).unwrap();
 
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.

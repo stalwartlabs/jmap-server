@@ -18,7 +18,7 @@ use store::{changelog::RaftId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
-pub async fn jmap_mail_parse<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_parse<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -44,7 +44,6 @@ where
                             vec![],
                             None,
                         )
-                        .await
                         .unwrap()
                         .unwrap_object()
                         .unwrap()
@@ -62,7 +61,6 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
-                .await
                 .unwrap()
                 .list
                 .unwrap_array()
@@ -137,7 +135,6 @@ where
                     max_body_value_bytes: 100,
                 },
             })
-            .await
             .unwrap();
 
         assert_eq!(result.not_found, JSONValue::Null);
@@ -168,7 +165,6 @@ where
                             .unwrap(),
                         get_message_blob,
                     )
-                    .await
                     .unwrap()
                     .unwrap();
 
@@ -202,7 +198,6 @@ where
     test_file.push("headers.eml");
     let blob_id = mail_store
         .upload_blob(0, &fs::read(&test_file).unwrap())
-        .await
         .unwrap();
 
     let mut properties = vec![
@@ -417,7 +412,6 @@ where
                         max_body_value_bytes: 100,
                     },
                 })
-                .await
                 .unwrap()
                 .parsed
                 .unwrap_object()

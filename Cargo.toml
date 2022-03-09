@@ -11,12 +11,15 @@ store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
 actix-web = "4"
 openssl = "0.10"
-tokio-util = "0.7.0"
-futures = "0.3"
 tracing-subscriber = "0.2"
 serde = { version = "1.0", features = ["derive"]}
 gethostname = "0.2.2"
 rand = "0.8.5"
+tokio = { version = "1.16.1", features = ["full"] }
+tokio-util = "0.7.0"
+num_cpus = "1.13.1"
+futures = "0.3"
+rayon = "1.5.1"
 
 [workspace]
 resolver = "2"

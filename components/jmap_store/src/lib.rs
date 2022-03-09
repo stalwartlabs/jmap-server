@@ -6,7 +6,6 @@ pub mod query;
 
 use std::collections::HashMap;
 
-pub use async_trait;
 use changes::JMAPState;
 use id::JMAPIdSerialize;
 use json::JSONValue;

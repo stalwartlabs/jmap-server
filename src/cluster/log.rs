@@ -1,11 +1,11 @@
 use std::time::Duration;
 
+use store::tracing::{debug, error};
 use store::Store;
 use tokio::{
     sync::{mpsc, oneshot, watch},
     time,
 };
-use tracing::{debug, error};
 
 use super::{
     raft::LogIndex,

@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use rand::Rng;
+use store::tracing::{debug, error, info};
 use store::Store;
 use tokio::sync::watch;
-use tracing::{debug, error, info};
 
 use crate::cluster::log::start_log_sync;
 

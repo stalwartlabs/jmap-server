@@ -4,7 +4,6 @@ use std::{
 };
 
 use jmap_store::{
-    async_trait::async_trait,
     changes::JMAPChanges,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
@@ -73,20 +72,18 @@ impl BlobIdClone for BlobId {
     }
 }
 
-#[async_trait]
 pub trait JMAPMailGet {
-    async fn mail_get(
+    fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties, JMAPMailGetArguments>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
 }
 
-#[async_trait]
 impl<T> JMAPMailGet for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn mail_get(
+    fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties, JMAPMailGetArguments>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
@@ -166,8 +163,7 @@ where
         };
 
         let document_ids = self
-            .get_document_ids(request.account_id, JMAP_MAIL)
-            .await?
+            .get_document_ids(request.account_id, JMAP_MAIL)?
             .unwrap_or_else(RoaringBitmap::new);
 
         let request_ids: Vec<u64> = if let Some(request_ids) = request.ids {
@@ -186,8 +182,7 @@ where
                 JMAP_MAIL,
                 document_ids.iter().copied(),
                 MessageField::ThreadId.into(),
-            )
-            .await?
+            )?
             .into_iter()
             .zip(document_ids)
             .filter_map(|(thread_id, document_id)| {
@@ -215,8 +210,7 @@ where
                     document_id,
                     MESSAGE_DATA,
                     0..u32::MAX,
-                )
-                .await?
+                )?
                 .ok_or(StoreError::DataCorruption)?
                 .1;
 
@@ -236,8 +230,7 @@ where
                             document_id,
                             MESSAGE_RAW,
                             0..u32::MAX,
-                        )
-                        .await?
+                        )?
                         .ok_or(StoreError::DataCorruption)?
                         .1,
                     ),
@@ -261,8 +254,7 @@ where
                                 document_id,
                                 MESSAGE_RAW,
                                 0..message_outline.body_offset as u32,
-                            )
-                            .await?
+                            )?
                             .ok_or(StoreError::DataCorruption)?
                             .1,
                         ),
@@ -402,8 +394,7 @@ where
                                     JMAP_MAIL,
                                     document_id,
                                     MessageField::Mailbox.into(),
-                                )
-                                .await?
+                                )?
                             {
                                 JSONValue::Object(
                                     mailboxes
@@ -422,15 +413,12 @@ where
                             }
                         }
                         JMAPMailProperties::Keywords => {
-                            if let Some(tags) = self
-                                .get_document_value::<Bincoded<Vec<Tag>>>(
-                                    request.account_id,
-                                    JMAP_MAIL,
-                                    document_id,
-                                    MessageField::Keyword.into(),
-                                )
-                                .await?
-                            {
+                            if let Some(tags) = self.get_document_value::<Bincoded<Vec<Tag>>>(
+                                request.account_id,
+                                JMAP_MAIL,
+                                document_id,
+                                MessageField::Keyword.into(),
+                            )? {
                                 JSONValue::Object(
                                     tags.items
                                         .into_iter()
@@ -501,8 +489,7 @@ where
                                                         .ok_or(StoreError::DataCorruption)?
                                                         .blob_index,
                                                 0..260,
-                                            )
-                                            .await?
+                                            )?
                                             .ok_or(StoreError::DataCorruption)?
                                             .1,
                                         )
@@ -535,8 +522,7 @@ where
                                                         .ok_or(StoreError::DataCorruption)?
                                                         .blob_index,
                                                 0..u32::MAX,
-                                            )
-                                            .await?
+                                            )?
                                             .ok_or(StoreError::DataCorruption)?
                                             .1,
                                         )
@@ -607,8 +593,7 @@ where
                                         JMAP_MAIL,
                                         document_id,
                                         blobs,
-                                    )
-                                    .await?
+                                    )?
                                     .into_iter()
                                     .map(|blob_entry| {
                                         let (mime_part, part_id) =
@@ -660,7 +645,7 @@ where
         }
 
         Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, JMAP_MAIL).await?,
+            state: self.get_state(request.account_id, JMAP_MAIL)?,
             list: if !results.is_empty() {
                 JSONValue::Array(results)
             } else {

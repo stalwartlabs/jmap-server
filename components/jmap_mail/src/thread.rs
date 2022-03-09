@@ -1,38 +1,35 @@
 use std::collections::HashMap;
 
 use jmap_store::{
-    async_trait::async_trait,
     changes::{JMAPChanges, JMAPChangesRequest, JMAPChangesResponse},
     id::JMAPIdSerialize,
     json::JSONValue,
     JMAPError, JMAPGet, JMAPGetResponse, JMAP_MAIL, JMAP_THREAD,
 };
 use store::{
-    query::JMAPStoreQuery, Comparator, FieldComparator, Filter, JMAPId, JMAPIdPrefix, JMAPStore,
-    Store, Tag,
+    query::{JMAPIdMapFnc, JMAPStoreQuery},
+    Comparator, FieldComparator, Filter, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag,
 };
 
 use crate::{JMAPMailProperties, MessageField};
 
-#[async_trait]
 pub trait JMAPMailThread {
-    async fn thread_get(
+    fn thread_get(
         &self,
         request: JMAPGet<JMAPMailProperties, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
 
-    async fn thread_changes(
+    fn thread_changes(
         &self,
         request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse<()>>;
 }
 
-#[async_trait]
 impl<T> JMAPMailThread for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn thread_get(
+    fn thread_get(
         &self,
         request: JMAPGet<JMAPMailProperties, ()>,
     ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
@@ -47,19 +44,16 @@ where
 
         for jmap_thread_id in thread_ids {
             let thread_id = jmap_thread_id.get_document_id();
-            if let Some(doc_ids) = self
-                .get_tag(
-                    request.account_id,
-                    JMAP_MAIL,
-                    MessageField::ThreadId.into(),
-                    Tag::Id(thread_id),
-                )
-                .await?
-            {
+            if let Some(doc_ids) = self.get_tag(
+                request.account_id,
+                JMAP_MAIL,
+                MessageField::ThreadId.into(),
+                Tag::Id(thread_id),
+            )? {
                 let mut thread_obj = HashMap::with_capacity(2);
                 thread_obj.insert("id".to_string(), jmap_thread_id.to_jmap_string().into());
                 let email_ids: Vec<JSONValue> = self
-                    .query(JMAPStoreQuery::new(
+                    .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                         request.account_id,
                         JMAP_MAIL,
                         Filter::DocumentSet(doc_ids),
@@ -67,10 +61,7 @@ where
                             field: MessageField::ReceivedAt.into(),
                             ascending: true,
                         }),
-                        0,
-                    ))
-                    .await?
-                    .results
+                    ))?
                     .into_iter()
                     .map(|doc_id| {
                         JMAPId::from_parts(thread_id, doc_id.get_document_id())
@@ -87,7 +78,7 @@ where
         }
 
         Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, JMAP_THREAD).await?,
+            state: self.get_state(request.account_id, JMAP_THREAD)?,
             list: if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
@@ -101,7 +92,7 @@ where
         })
     }
 
-    async fn thread_changes(
+    fn thread_changes(
         &self,
         request: JMAPChangesRequest,
     ) -> jmap_store::Result<JMAPChangesResponse<()>> {
@@ -111,7 +102,6 @@ where
             request.since_state,
             request.max_changes,
         )
-        .await
         .map_err(|e| e.into())
     }
 }

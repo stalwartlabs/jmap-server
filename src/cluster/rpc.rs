@@ -7,6 +7,7 @@ use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use store::tracing::{debug, error};
 use store::{bincode, leb128::Leb128};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -14,7 +15,6 @@ use tokio::{
     time,
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
-use tracing::{debug, error};
 
 use super::{
     gossip::PeerInfo,

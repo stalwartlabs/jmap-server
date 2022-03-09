@@ -21,32 +21,16 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn set(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> crate::Result<()> {
-        let db = self.db.clone();
-        self.spawn_worker(move || db.set(cf, key, value)).await
-    }
-
-    pub async fn merge(&self, cf: ColumnFamily, key: Vec<u8>, value: Vec<u8>) -> crate::Result<()> {
-        let db = self.db.clone();
-        self.spawn_worker(move || db.merge(cf, key, value)).await
-    }
-
-    pub async fn write(&self, batch: Vec<WriteOperation>) -> crate::Result<()> {
-        let db = self.db.clone();
-        self.spawn_worker(move || db.write(batch)).await
-    }
-
-    pub async fn update_document(
+    pub fn update_document(
         &self,
         account_id: AccountId,
         raft_id: RaftId,
         batch: WriteBatch,
     ) -> crate::Result<()> {
         self.update_documents(account_id, raft_id, vec![batch])
-            .await
     }
 
-    pub async fn update_documents(
+    pub fn update_documents(
         &self,
         account_id: AccountId,
         raft_id: RaftId,
@@ -74,13 +58,10 @@ where
                 WriteAction::Update(document_id) => Some(document_id),
                 WriteAction::Delete(document_id) => {
                     // Remove any external blobs
-                    if let Some(blob) = self
-                        .get::<BlobEntries>(
-                            ColumnFamily::Values,
-                            serialize_blob_key(account_id, batch.collection_id, document_id),
-                        )
-                        .await?
-                    {
+                    if let Some(blob) = self.db.get::<BlobEntries>(
+                        ColumnFamily::Values,
+                        &serialize_blob_key(account_id, batch.collection_id, document_id),
+                    )? {
                         // Decrement blob count
                         blob.items.into_iter().for_each(|key| {
                             write_batch.push(WriteOperation::merge(
@@ -154,17 +135,15 @@ where
                                     text
                                 }
                                 Text::Full(ft) => {
-                                    let terms = self
-                                        .get_terms(TokenIterator::new(
-                                            &ft.text,
-                                            if ft.language == Language::Unknown {
-                                                batch.default_language
-                                            } else {
-                                                ft.language
-                                            },
-                                            true,
-                                        ))
-                                        .await?;
+                                    let terms = self.get_terms(TokenIterator::new(
+                                        &ft.text,
+                                        if ft.language == Language::Unknown {
+                                            batch.default_language
+                                        } else {
+                                            ft.language
+                                        },
+                                        true,
+                                    ))?;
 
                                     if !terms.is_empty() {
                                         for term in &terms {
@@ -454,7 +433,7 @@ where
                     blob_fields.sort_unstable_by_key(|(blob_index, _)| *blob_index);
 
                     for (_, blob) in blob_fields {
-                        let blob_entry = self.store_blob(&blob).await?;
+                        let blob_entry = self.store_blob(&blob)?;
 
                         // Increment blob count
                         write_batch.push(WriteOperation::merge(
@@ -479,8 +458,7 @@ where
                 if let Some(change_id) = batch.log_id {
                     change_id
                 } else {
-                    self.assign_change_id(account_id, batch.collection_id)
-                        .await?
+                    self.assign_change_id(account_id, batch.collection_id)?
                 },
                 batch.log_action,
             );
@@ -501,6 +479,6 @@ where
         }
 
         // Submit write batch
-        self.write(write_batch).await
+        self.db.write(write_batch)
     }
 }

@@ -1,5 +1,3 @@
-use std::future::Future;
-
 use store::{Comparator, Filter, FilterOperator, JMAPId, LogicalOperator};
 
 use crate::{JMAPComparator, JMAPError, JMAPFilter, JMAPLogicalOperator};
@@ -10,17 +8,15 @@ struct QueryState<T> {
     it: std::vec::IntoIter<JMAPFilter<T>>,
 }
 
-pub async fn build_query<U, V, W, X, Y, Z>(
+pub fn build_query<U, V, W, X>(
     filter: JMAPFilter<U>,
     sort: Vec<JMAPComparator<V>>,
-    cond_fnc: W,
-    sort_fnc: X,
+    mut cond_fnc: W,
+    mut sort_fnc: X,
 ) -> crate::Result<(Filter, Comparator)>
 where
-    W: Fn(U) -> Y,
-    X: Fn(JMAPComparator<V>) -> Z,
-    Y: Future<Output = crate::Result<Filter>>,
-    Z: Future<Output = crate::Result<Comparator>>,
+    W: FnMut(U) -> crate::Result<Filter>,
+    X: FnMut(JMAPComparator<V>) -> crate::Result<Comparator>,
 {
     let state: Option<QueryState<U>> = match filter {
         JMAPFilter::Operator(op) => Some(QueryState {
@@ -45,7 +41,7 @@ where
                 while let Some(term) = state.it.next() {
                     match term {
                         JMAPFilter::Condition(cond) => {
-                            state.terms.push(cond_fnc(cond).await?);
+                            state.terms.push(cond_fnc(cond)?);
                         }
                         JMAPFilter::Operator(op) => {
                             let new_state = QueryState {
@@ -84,7 +80,7 @@ where
         if !sort.is_empty() {
             let mut terms: Vec<Comparator> = Vec::with_capacity(sort.len());
             for comp in sort {
-                terms.push(sort_fnc(comp).await?);
+                terms.push(sort_fnc(comp)?);
             }
             Comparator::List(terms)
         } else {
@@ -94,44 +90,22 @@ where
 }
 
 pub fn paginate_results(
-    jmap_ids: Vec<JMAPId>,
+    jmap_ids: impl Iterator<Item = JMAPId>,
     num_results: usize,
     limit: usize,
     mut position: i32,
     anchor: Option<u64>,
     mut anchor_offset: i32,
 ) -> crate::Result<(Vec<JMAPId>, usize)> {
-    let mut start_position: usize = 0;
+    let has_anchor = anchor.is_some();
+    let mut results = Vec::with_capacity(if limit > 0 { limit } else { num_results });
+    let mut anchor_found = false;
 
-    let results = if anchor.is_some() {
-        let has_anchor = anchor.is_some();
-        let mut results = Vec::with_capacity(if limit > 0 { limit } else { num_results });
-        let mut anchor_found = false;
-
-        for jmap_id in jmap_ids {
-            if !has_anchor {
-                if position >= 0 {
-                    if position > 0 {
-                        position -= 1;
-                    } else {
-                        results.push(jmap_id);
-                        if limit > 0 && results.len() == limit {
-                            break;
-                        }
-                    }
-                } else {
-                    results.push(jmap_id);
-                }
-            } else if anchor_offset >= 0 {
-                if !anchor_found {
-                    if &jmap_id != anchor.as_ref().unwrap() {
-                        continue;
-                    }
-                    anchor_found = true;
-                }
-
-                if anchor_offset > 0 {
-                    anchor_offset -= 1;
+    for jmap_id in jmap_ids {
+        if !has_anchor {
+            if position >= 0 {
+                if position > 0 {
+                    position -= 1;
                 } else {
                     results.push(jmap_id);
                     if limit > 0 && results.len() == limit {
@@ -139,74 +113,61 @@ pub fn paginate_results(
                     }
                 }
             } else {
-                anchor_found = &jmap_id == anchor.as_ref().unwrap();
                 results.push(jmap_id);
-
-                if !anchor_found {
+            }
+        } else if anchor_offset >= 0 {
+            if !anchor_found {
+                if &jmap_id != anchor.as_ref().unwrap() {
                     continue;
                 }
-
-                position = anchor_offset;
-
-                break;
+                anchor_found = true;
             }
-        }
 
-        if !has_anchor || anchor_found {
-            if position >= 0 {
-                start_position = position as usize;
-                results
+            if anchor_offset > 0 {
+                anchor_offset -= 1;
             } else {
-                let position = position.abs() as usize;
-                let start_offset = if position < results.len() {
-                    results.len() - position
-                } else {
-                    0
-                };
-                start_position = start_offset;
-                let end_offset = if limit > 0 {
-                    std::cmp::min(start_offset + limit, results.len())
-                } else {
-                    results.len()
-                };
-
-                results[start_offset..end_offset].to_vec()
+                results.push(jmap_id);
+                if limit > 0 && results.len() == limit {
+                    break;
+                }
             }
         } else {
-            return Err(JMAPError::AnchorNotFound);
+            anchor_found = &jmap_id == anchor.as_ref().unwrap();
+            results.push(jmap_id);
+
+            if !anchor_found {
+                continue;
+            }
+
+            position = anchor_offset;
+
+            break;
         }
-    } else if position != 0 && limit > 0 {
-        start_position = if position > 0 {
-            position as usize
+    }
+
+    let start_position;
+    let results = if !has_anchor || anchor_found {
+        if position >= 0 {
+            start_position = position as usize;
+            results
         } else {
-            let position = position.abs();
-            if num_results > position as usize {
-                num_results - position as usize
+            let position = position.abs() as usize;
+            let start_offset = if position < results.len() {
+                results.len() - position
             } else {
                 0
-            }
-        };
-        jmap_ids
-            .into_iter()
-            .skip(start_position)
-            .take(limit)
-            .collect()
-    } else if limit > 0 {
-        jmap_ids.into_iter().take(limit).collect()
-    } else if position != 0 {
-        start_position = if position > 0 {
-            position as usize
-        } else {
-            let position = position.abs();
-            if num_results > position as usize {
-                num_results - position as usize
+            };
+            start_position = start_offset;
+            let end_offset = if limit > 0 {
+                std::cmp::min(start_offset + limit, results.len())
             } else {
-                0
-            }
-        };
-        jmap_ids.into_iter().skip(start_position).collect()
+                results.len()
+            };
+
+            results[start_offset..end_offset].to_vec()
+        }
     } else {
-        jmap_ids
+        return Err(JMAPError::AnchorNotFound);
     };
 
     Ok((results, start_position))

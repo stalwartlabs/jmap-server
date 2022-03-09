@@ -5,10 +5,13 @@ use std::{
 
 use actix_web::web;
 use store::Store;
+use store::{
+    config::EnvSettings,
+    tracing::{debug, error, info},
+};
 use tokio::{sync::mpsc, time};
-use tracing::{debug, error, info};
 
-use crate::{cluster::IPC_CHANNEL_BUFFER, config::EnvSettings, JMAPServer, DEFAULT_RPC_PORT};
+use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer, DEFAULT_RPC_PORT};
 
 use super::{
     gossip::{self, start_gossip, PING_INTERVAL},
@@ -23,7 +26,7 @@ where
     let (tx, mut rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
     let (gossip_tx, gossip_rx) = mpsc::channel::<(SocketAddr, gossip::Request)>(IPC_CHANNEL_BUFFER);
 
-    let mut cluster = Cluster::init(settings, core.clone(), tx.clone(), gossip_tx)?;
+    let mut cluster = Cluster::init(settings, core.clone(), tx.clone(), gossip_tx).await?;
 
     let bind_addr = SocketAddr::from((
         settings.parse_ipaddr("bind-addr", "127.0.0.1"),

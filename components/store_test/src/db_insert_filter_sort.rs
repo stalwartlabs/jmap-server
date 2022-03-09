@@ -9,10 +9,8 @@ use store::{
     batch::WriteBatch,
     changelog::RaftId,
     field::{FieldOptions, FullText, Text},
-    futures::future::join_all,
-    query::JMAPStoreQuery,
-    tokio, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
-    TextQuery,
+    query::{JMAPIdMapFnc, JMAPStoreQuery},
+    Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store, TextQuery,
 };
 
 use crate::deflate_artwork_data;
@@ -71,126 +69,120 @@ const FIELDS_OPTIONS: [FieldType; 20] = [
 ];
 
 #[allow(clippy::mutex_atomic)]
-pub async fn insert_filter_sort<T>(db: JMAPStore<T>, do_insert: bool)
+pub fn insert_filter_sort<T>(db: JMAPStore<T>, do_insert: bool)
 where
     T: for<'x> Store<'x> + 'static,
 {
     let db = Arc::new(db);
 
-    if do_insert {
-        let now = Instant::now();
-        let documents = Arc::new(Mutex::new(Vec::new()));
-        let mut futures = Vec::new();
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap()
+        .scope_fifo(|s| {
+            if do_insert {
+                let db = Arc::new(&db);
+                let now = Instant::now();
+                let documents = Arc::new(Mutex::new(Vec::new()));
 
-        for record in csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_reader(&deflate_artwork_data()[..])
-            .records()
-        {
-            let record = record.unwrap();
-            let documents = documents.clone();
-            let record_id = db.assign_document_id(0, 0).await.unwrap();
+                for record in csv::ReaderBuilder::new()
+                    .has_headers(true)
+                    .from_reader(&deflate_artwork_data()[..])
+                    .records()
+                {
+                    let record = record.unwrap();
+                    let documents = documents.clone();
+                    let record_id = db.assign_document_id(0, 0).unwrap();
 
-            futures.push(tokio::task::spawn_blocking(move || {
-                let mut builder = WriteBatch::insert(0, record_id, record_id);
-                for (pos, field) in record.iter().enumerate() {
-                    match FIELDS_OPTIONS[pos] {
-                        FieldType::Text => {
-                            if !field.is_empty() {
-                                builder.text(
-                                    pos as u8,
-                                    Text::Tokenized(field.to_lowercase()),
-                                    FieldOptions::Sort,
-                                );
+                    s.spawn_fifo(move |_| {
+                        let mut builder = WriteBatch::insert(0, record_id, record_id);
+                        for (pos, field) in record.iter().enumerate() {
+                            match FIELDS_OPTIONS[pos] {
+                                FieldType::Text => {
+                                    if !field.is_empty() {
+                                        builder.text(
+                                            pos as u8,
+                                            Text::Tokenized(field.to_lowercase()),
+                                            FieldOptions::Sort,
+                                        );
+                                    }
+                                }
+                                FieldType::FullText => {
+                                    if !field.is_empty() {
+                                        builder.text(
+                                            pos as u8,
+                                            Text::Full(FullText::new_lang(
+                                                field.to_lowercase(),
+                                                Language::English,
+                                            )),
+                                            FieldOptions::Sort,
+                                        );
+                                    }
+                                }
+                                FieldType::Integer => {
+                                    builder.integer(
+                                        pos as u8,
+                                        field.parse::<u32>().unwrap_or(0),
+                                        FieldOptions::StoreAndSort,
+                                    );
+                                }
+                                FieldType::Keyword => {
+                                    if !field.is_empty() {
+                                        builder.text(
+                                            pos as u8,
+                                            Text::Keyword(field.to_lowercase()),
+                                            FieldOptions::StoreAndSort,
+                                        );
+                                    }
+                                }
                             }
                         }
-                        FieldType::FullText => {
-                            if !field.is_empty() {
-                                builder.text(
-                                    pos as u8,
-                                    Text::Full(FullText::new_lang(
-                                        field.to_lowercase(),
-                                        Language::English,
-                                    )),
-                                    FieldOptions::Sort,
-                                );
-                            }
-                        }
-                        FieldType::Integer => {
-                            builder.integer(
-                                pos as u8,
-                                field.parse::<u32>().unwrap_or(0),
-                                FieldOptions::StoreAndSort,
+                        documents.lock().unwrap().push(builder);
+                    });
+                }
+
+                let mut documents = documents.lock().unwrap();
+                let documents_len = documents.len();
+                let mut document_chunk = Vec::new();
+
+                println!(
+                    "Parsed {} entries in {} ms.",
+                    documents_len,
+                    now.elapsed().as_millis()
+                );
+
+                for (pos, document) in documents.drain(..).enumerate() {
+                    document_chunk.push(document);
+                    if document_chunk.len() == 1000 || pos == documents_len - 1 {
+                        let db = db.clone();
+                        let chunk = document_chunk;
+                        document_chunk = Vec::new();
+
+                        s.spawn_fifo(move |_| {
+                            let now = Instant::now();
+                            let num_docs = chunk.len();
+                            db.update_documents(0, RaftId::default(), chunk).unwrap();
+                            println!(
+                                "Inserted {} entries in {} ms (Thread {}/{}).",
+                                num_docs,
+                                now.elapsed().as_millis(),
+                                rayon::current_thread_index().unwrap(),
+                                rayon::current_num_threads()
                             );
-                        }
-                        FieldType::Keyword => {
-                            if !field.is_empty() {
-                                builder.text(
-                                    pos as u8,
-                                    Text::Keyword(field.to_lowercase()),
-                                    FieldOptions::StoreAndSort,
-                                );
-                            }
-                        }
+                        });
                     }
                 }
-                documents.lock().unwrap().push(builder);
-            }));
-        }
-
-        join_all(futures.drain(..)).await;
-
-        let mut documents = documents.lock().unwrap();
-        let documents_len = documents.len();
-        let mut document_chunk = Vec::new();
-
-        println!(
-            "Parsed {} entries in {} ms.",
-            documents_len,
-            now.elapsed().as_millis()
-        );
-
-        for (pos, document) in documents.drain(..).enumerate() {
-            document_chunk.push(document);
-            if document_chunk.len() == 1000 || pos == documents_len - 1 {
-                let db = db.clone();
-                let chunk = document_chunk;
-                let chunk_len = chunk.len();
-
-                document_chunk = Vec::new();
-
-                futures.push(tokio::spawn(async move {
-                    let now = Instant::now();
-
-                    db.update_documents(0, RaftId::default(), chunk)
-                        .await
-                        .unwrap();
-
-                    println!(
-                        "Inserted {} entries in {} ms.",
-                        chunk_len,
-                        now.elapsed().as_millis(),
-                    );
-                }));
-
-                if futures.len() == 4 {
-                    join_all(futures.drain(..)).await;
-                }
             }
-        }
-        if !futures.is_empty() {
-            join_all(futures).await;
-        }
-    }
+        });
 
-    /*println!("Running filter tests...");
-    test_filter(db.clone()).await;
+    println!("Running filter tests...");
+    test_filter(db.clone());
 
     println!("Running sort tests...");
-    test_sort(db).await;*/
+    test_sort(db);
 }
 
-pub async fn test_filter<T>(db: Arc<JMAPStore<T>>)
+pub fn test_filter<T>(db: Arc<JMAPStore<T>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -424,20 +416,16 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query(JMAPStoreQuery::new(
+            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                 0,
                 0,
                 filter,
                 Comparator::ascending(fields["accession_number"]),
-                0,
             ))
-            .await
             .unwrap()
-            .results
         {
             results.push(
                 db.get_document_value(0, 0, jmap_id.get_document_id(), fields["accession_number"])
-                    .await
                     .unwrap()
                     .unwrap(),
             );
@@ -446,7 +434,7 @@ where
     }
 }
 
-pub async fn test_sort<T>(db: Arc<JMAPStore<T>>)
+pub fn test_sort<T>(db: Arc<JMAPStore<T>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -512,23 +500,18 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query(JMAPStoreQuery::new(
-                0,
-                0,
-                filter,
-                Comparator::List(sort),
-                expected_results.len(),
-            ))
-            .await
+            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(0, 0, filter, Comparator::List(sort)))
             .unwrap()
-            .results
         {
             results.push(
                 db.get_document_value(0, 0, jmap_id.get_document_id(), fields["accession_number"])
-                    .await
                     .unwrap()
                     .unwrap(),
             );
+
+            if results.len() == expected_results.len() {
+                break;
+            }
         }
         assert_eq!(results, expected_results);
     }

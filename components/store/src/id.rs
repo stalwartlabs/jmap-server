@@ -82,7 +82,7 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn get_id_assigner(
+    pub fn get_id_assigner(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
@@ -90,83 +90,71 @@ where
         self.doc_id_cache
             .get_or_try_insert_with::<_, StoreError>(
                 IdCacheKey::new(account_id, collection_id),
-                async {
+                || {
                     Ok(Arc::new(Mutex::new(IdAssigner::new(
-                        self.get_document_ids_used(account_id, collection_id)
-                            .await?,
-                        self.get_last_change_id(account_id, collection_id)
-                            .await?
+                        self.get_document_ids_used(account_id, collection_id)?,
+                        self.get_last_change_id(account_id, collection_id)?
                             .map(|id| id + 1)
                             .unwrap_or(0),
                     ))))
                 },
             )
-            .await
             .map_err(|e| e.as_ref().clone())
     }
 
-    pub async fn assign_change_id(
+    pub fn assign_change_id(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
     ) -> crate::Result<ChangeLogId> {
         Ok(self
-            .get_id_assigner(account_id, collection_id)
-            .await?
+            .get_id_assigner(account_id, collection_id)?
             .lock()
             .assign_change_id())
     }
 
-    pub async fn assign_document_id(
+    pub fn assign_document_id(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
     ) -> crate::Result<DocumentId> {
         Ok(self
-            .get_id_assigner(account_id, collection_id)
-            .await?
+            .get_id_assigner(account_id, collection_id)?
             .lock()
             .assign_document_id())
     }
 
-    pub async fn get_document_ids_used(
+    pub fn get_document_ids_used(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(serialize_bm_internal(
+        self.get_bitmap(&serialize_bm_internal(
             account_id,
             collection_id,
             BM_USED_IDS,
         ))
-        .await
     }
 
-    pub async fn get_tombstoned_ids(
+    pub fn get_tombstoned_ids(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(serialize_bm_internal(
+        self.get_bitmap(&serialize_bm_internal(
             account_id,
             collection_id,
             BM_TOMBSTONED_IDS,
         ))
-        .await
     }
 
-    pub async fn get_document_ids(
+    pub fn get_document_ids(
         &self,
         account_id: AccountId,
         collection_id: CollectionId,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(mut docs) = self
-            .get_document_ids_used(account_id, collection_id)
-            .await?
-        {
-            if let Some(tombstoned_docs) =
-                self.get_tombstoned_ids(account_id, collection_id).await?
-            {
+        if let Some(mut docs) = self.get_document_ids_used(account_id, collection_id)? {
+            if let Some(tombstoned_docs) = self.get_tombstoned_ids(account_id, collection_id)? {
                 docs ^= tombstoned_docs;
             }
             Ok(Some(docs))

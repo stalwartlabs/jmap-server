@@ -7,7 +7,7 @@ use store::{
     JMAPStore, Store,
 };
 
-pub async fn jmap_changes<T>(mail_store: JMAPStore<T>)
+pub fn jmap_changes<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -127,21 +127,21 @@ where
 
         for change in changes {
             let mut batch =
-                WriteBatch::insert(0, mail_store.assign_document_id(0, 0).await.unwrap(), 0u64);
+                WriteBatch::insert(0, mail_store.assign_document_id(0, 0).unwrap(), 0u64);
             batch.log_action = change;
             documents.push(batch);
         }
 
         mail_store
             .update_documents(0, RaftId::default(), documents)
-            .await
+            
             .unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
             let changes = mail_store
                 .get_jmap_changes(0, 0, state.clone(), 0)
-                .await
+                
                 .unwrap();
 
             assert_eq!(
@@ -182,7 +182,7 @@ where
                 for _ in 0..100 {
                     let changes = mail_store
                         .get_jmap_changes(0, 0, int_state, max_changes)
-                        .await
+                        
                         .unwrap();
 
                     assert!(

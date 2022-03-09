@@ -1,42 +1,17 @@
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    sync::{atomic::Ordering, Arc},
-    time::Instant,
-};
-
-use tokio::sync::watch;
+use std::sync::atomic::Ordering;
 
 use crate::{
     field::TokenIterator,
     serialize::{StoreSerialize, LAST_TERM_ID_KEY},
     term_index::{MatchTerm, Term},
-    ColumnFamily, JMAPStore, Store, TermId, WriteOperation,
+    ColumnFamily, JMAPStore, Store, WriteOperation,
 };
-
-#[derive(Debug, Clone)]
-pub enum CachedTerm {
-    Term(TermId),
-    InFlight(watch::Receiver<TermId>),
-}
-
-enum CacheRxTx {
-    Rx(watch::Receiver<TermId>),
-    Tx(watch::Sender<TermId>),
-    None,
-}
-
-impl CacheRxTx {
-    pub fn is_none(&self) -> bool {
-        matches!(self, CacheRxTx::None)
-    }
-}
 
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn get_match_terms(
+    pub fn get_match_terms(
         &self,
         tokens: TokenIterator<'_>,
     ) -> crate::Result<Option<Vec<MatchTerm>>> {
@@ -49,10 +24,7 @@ where
                 term_id
             } else {
                 // Retrieve the ID from the KV store
-                if let Some(term_id) = self
-                    .get(ColumnFamily::Terms, token_word.as_bytes().to_vec())
-                    .await?
-                {
+                if let Some(term_id) = self.db.get(ColumnFamily::Terms, token_word.as_bytes())? {
                     // Add term to the cache
                     self.term_id_cache.insert(token_word, term_id);
                     term_id
@@ -79,7 +51,7 @@ where
         })
     }
 
-    pub async fn get_terms(&self, tokens: TokenIterator<'_>) -> crate::Result<Vec<Term>> {
+    pub fn get_terms(&self, tokens: TokenIterator<'_>) -> crate::Result<Vec<Term>> {
         let mut result = Vec::with_capacity(10);
 
         for token in tokens {
@@ -89,19 +61,18 @@ where
                 term_id
             } else {
                 // Lock the term
-                let _term_lock = self.term_id_lock.lock_hash(&token_word).await;
+                let _term_lock = self.term_id_lock.lock_hash(&token_word);
 
                 // Retrieve the ID from the KV store
-                let term_id = if let Some(term_id) = self
-                    .get(ColumnFamily::Terms, token_word.as_bytes().to_vec())
-                    .await?
+                let term_id = if let Some(term_id) =
+                    self.db.get(ColumnFamily::Terms, token_word.as_bytes())?
                 {
                     term_id
                 } else {
                     // Term does not exist, create it.
                     let term_id = self.term_id_last.fetch_add(1, Ordering::Relaxed);
                     //TODO on unclean exists retrieve last id manually
-                    self.write(vec![
+                    self.db.write(vec![
                         WriteOperation::Merge {
                             cf: ColumnFamily::Values,
                             key: LAST_TERM_ID_KEY.to_vec(),
@@ -112,8 +83,7 @@ where
                             key: token_word.as_bytes().to_vec(),
                             value: term_id.serialize().unwrap(),
                         },
-                    ])
-                    .await?;
+                    ])?;
                     term_id
                 };
 
@@ -133,7 +103,7 @@ where
     }
 
     /*
-    pub async fn get_match_terms(
+    pub fn get_match_terms(
         &self,
         tokens: TokenIterator<'_>,
     ) -> crate::Result<Option<Vec<MatchTerm>>> {
@@ -147,7 +117,7 @@ where
                 match cached_term {
                     CachedTerm::Term(term_id) => term_id,
                     CachedTerm::InFlight(mut rx) => {
-                        if let Err(err) = rx.changed().await {
+                        if let Err(err) = rx.changed() {
                             debug!("Error waiting for term ID: {}", err);
                         }
                         let term_id = *rx.borrow();
@@ -182,7 +152,7 @@ where
                         .map(|(word, _, _)| word.as_bytes().to_vec())
                         .collect(),
                 )
-                .await?
+                ?
                 .into_iter()
                 .zip(cache_misses)
             {
@@ -208,7 +178,7 @@ where
         })
     }
 
-    pub async fn get_terms(&self, tokens: TokenIterator<'_>) -> crate::Result<Vec<Term>> {
+    pub fn get_terms(&self, tokens: TokenIterator<'_>) -> crate::Result<Vec<Term>> {
         let mut results = Vec::with_capacity(10);
         let mut cache_misses = Vec::with_capacity(10);
         let mut await_terms = Vec::with_capacity(10);
@@ -261,7 +231,7 @@ where
                         .map(|(word, _, _, _)| word.as_bytes().to_vec())
                         .collect(),
                 )
-                .await?
+                ?
                 .into_iter()
                 .zip(cache_misses)
             {
@@ -302,7 +272,7 @@ where
                     term_ids.push(term_id);
                 }
 
-                if let Err(err) = self.write(write_batch).await {
+                if let Err(err) = self.write(write_batch) {
                     for (word, _, _, tx) in insert_terms {
                         tx.send(TermId::MAX).ok();
                         self_id_cache.invalidate(&word);
@@ -332,7 +302,7 @@ where
 
         if !await_terms.is_empty() {
             for (is_exact, pos, mut rx) in await_terms {
-                if let Err(err) = rx.changed().await {
+                if let Err(err) = rx.changed() {
                     debug!("Error waiting for term ID: {}", err);
                 }
                 let term_id = *rx.borrow();

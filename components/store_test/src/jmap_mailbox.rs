@@ -3,7 +3,6 @@ use std::{
     iter::FromIterator,
 };
 
-use async_recursion::async_recursion;
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
     import::JMAPMailLocalStoreImport,
@@ -125,7 +124,7 @@ const TEST_MAILBOXES: &[u8] = br#"
 ]
 "#;
 
-pub async fn jmap_mailbox<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mailbox<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -135,8 +134,7 @@ where
         None,
         serde_json::from_slice(TEST_MAILBOXES).unwrap(),
         &mut id_map,
-    )
-    .await;
+    );
 
     // Sort by name
     assert_eq!(
@@ -155,7 +153,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -198,7 +195,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -242,7 +238,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -278,7 +273,6 @@ where
                     filter_as_tree: true,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -302,7 +296,6 @@ where
                 filter_as_tree: true,
             },
         })
-        .await
         .unwrap()
         .ids
         .is_empty());
@@ -326,7 +319,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -351,7 +343,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -376,7 +367,6 @@ where
                 remove_emails: false,
             },
         })
-        .await
         .unwrap()
         .not_updated
         .unwrap_object()
@@ -400,7 +390,6 @@ where
                 remove_emails: false,
             },
         })
-        .await
         .unwrap()
         .not_updated
         .unwrap_object()
@@ -428,7 +417,6 @@ where
                 remove_emails: false,
             },
         })
-        .await
         .unwrap()
         .not_updated
         .unwrap_object()
@@ -452,7 +440,6 @@ where
                 remove_emails: false,
             },
         })
-        .await
         .unwrap()
         .not_updated
         .unwrap_object()
@@ -477,7 +464,6 @@ where
                 remove_emails: false,
             },
         })
-        .await
         .unwrap()
         .not_updated
         .unwrap_object()
@@ -492,7 +478,6 @@ where
             since_state: JMAPState::Initial,
             max_changes: 0,
         })
-        .await
         .unwrap()
         .new_state;
 
@@ -517,7 +502,6 @@ where
                     remove_emails: false,
                 },
             })
-            .await
             .unwrap()
             .not_updated,
         JSONValue::Null
@@ -530,7 +514,6 @@ where
             since_state: state,
             max_changes: 0,
         })
-        .await
         .unwrap();
     assert_eq!(state.total_changes, 1);
     assert!(state.updated.len() == 1);
@@ -553,7 +536,6 @@ where
             vec![],
             None,
         )
-        .await
         .unwrap()
         .unwrap_object()
         .unwrap()
@@ -569,7 +551,6 @@ where
             since_state: state,
             max_changes: 0,
         })
-        .await
         .unwrap();
     assert_eq!(state.total_changes, 1);
     assert_eq!(
@@ -607,7 +588,6 @@ where
                 destroy: JSONValue::Null,
                 arguments: (),
             })
-            .await
             .unwrap()
             .not_updated,
         JSONValue::Null
@@ -620,7 +600,6 @@ where
             since_state: state,
             max_changes: 0,
         })
-        .await
         .unwrap();
     assert_eq!(state.total_changes, 2);
     assert_eq!(
@@ -653,7 +632,6 @@ where
                     remove_emails: false,
                 },
             })
-            .await
             .unwrap()
             .destroyed,
         JSONValue::Null,
@@ -672,7 +650,6 @@ where
                     remove_emails: false,
                 },
             })
-            .await
             .unwrap()
             .destroyed,
         JSONValue::Null,
@@ -691,7 +668,6 @@ where
                     remove_emails: true,
                 },
             })
-            .await
             .unwrap()
             .not_destroyed,
         JSONValue::Null,
@@ -707,7 +683,6 @@ where
                 properties: None,
                 arguments: (),
             })
-            .await
             .unwrap()
             .not_found,
         vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "trash")).unwrap()].into()
@@ -720,7 +695,6 @@ where
                 properties: None,
                 arguments: JMAPMailGetArguments::default(),
             })
-            .await
             .unwrap()
             .not_found,
         vec![JMAPId::from_jmap_string(&message_id).unwrap()].into()
@@ -749,7 +723,6 @@ where
                     remove_emails: false,
                 },
             })
-            .await
             .unwrap()
             .not_updated,
         JSONValue::Null
@@ -781,7 +754,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -805,7 +777,6 @@ where
                 filter_as_tree: false,
             },
         })
-        .await
         .unwrap()
         .ids
         .is_empty());
@@ -825,7 +796,6 @@ where
                 filter_as_tree: false,
             },
         })
-        .await
         .unwrap()
         .ids
         .is_empty());
@@ -846,7 +816,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -871,7 +840,6 @@ where
                     filter_as_tree: false,
                 },
             })
-            .await
             .unwrap()
             .ids
             .into_iter()
@@ -890,8 +858,7 @@ fn get_mailbox_id(id_map: &HashMap<JMAPId, String>, local_id: &str) -> String {
         .to_jmap_string()
 }
 
-#[async_recursion]
-async fn create_nested_mailboxes<T>(
+fn create_nested_mailboxes<T>(
     mail_store: &JMAPStore<T>,
     parent_id: Option<JMAPId>,
     mailboxes: Vec<JSONValue>,
@@ -923,7 +890,6 @@ async fn create_nested_mailboxes<T>(
                     remove_emails: false,
                 },
             })
-            .await
             .unwrap();
 
         assert_eq!(result.not_created, JSONValue::Null);
@@ -950,8 +916,7 @@ async fn create_nested_mailboxes<T>(
                 mailbox_id.into(),
                 children.unwrap_array().unwrap(),
                 id_map,
-            )
-            .await;
+            );
         }
 
         assert!(id_map.insert(mailbox_id, local_id.unwrap()).is_none());

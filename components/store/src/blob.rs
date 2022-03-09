@@ -1,8 +1,9 @@
 use std::{
     collections::hash_map::DefaultHasher,
     convert::TryInto,
+    fs::{self, File},
     hash::{Hash, Hasher},
-    io::SeekFrom,
+    io::{Read, Seek, SeekFrom, Write},
     ops::Range,
     path::PathBuf,
     thread,
@@ -20,10 +21,6 @@ use crate::{
 };
 use sha2::Digest;
 use sha2::Sha256;
-use tokio::{
-    fs::{self, File},
-    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
-};
 
 #[derive(Default)]
 pub struct BlobEntries {
@@ -147,7 +144,7 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn get_blob(
+    pub fn get_blob(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -161,12 +158,11 @@ where
                 collection,
                 document,
                 vec![(blob_index, blob_range)],
-            )
-            .await?
+            )?
             .pop())
     }
 
-    pub async fn get_blobs(
+    pub fn get_blobs(
         &self,
         account: AccountId,
         collection: CollectionId,
@@ -175,13 +171,10 @@ where
     ) -> crate::Result<Vec<(BlobIndex, Vec<u8>)>> {
         let mut result = Vec::with_capacity(items.len());
 
-        let blob_entries = if let Some(blob_entries) = self
-            .get::<BlobEntries>(
-                ColumnFamily::Values,
-                serialize_blob_key(account, collection, document),
-            )
-            .await?
-        {
+        let blob_entries = if let Some(blob_entries) = self.db.get::<BlobEntries>(
+            ColumnFamily::Values,
+            &serialize_blob_key(account, collection, document),
+        )? {
             blob_entries
         } else {
             return Ok(result);
@@ -197,7 +190,7 @@ where
                 &self.config.blob_hash_levels,
             )?;
 
-            let mut blob = File::open(&blob_path).await.map_err(|err| {
+            let mut blob = File::open(&blob_path).map_err(|err| {
                 StoreError::InternalError(format!(
                     "Failed to open blob file {}: {:}",
                     blob_path.display(),
@@ -220,7 +213,6 @@ where
 
                     if from_offset > 0 {
                         blob.seek(SeekFrom::Start(from_offset as u64))
-                            .await
                             .map_err(|err| {
                                 StoreError::InternalError(format!(
                                     "Failed to seek blob file {} to offset {}: {:}",
@@ -230,7 +222,7 @@ where
                                 ))
                             })?;
                     }
-                    blob.read_exact(&mut buf).await.map_err(|err| {
+                    blob.read_exact(&mut buf).map_err(|err| {
                         StoreError::InternalError(format!(
                             "Failed to read blob file {} at offset {}: {:}",
                             blob_path.display(),
@@ -241,7 +233,7 @@ where
                     buf
                 } else {
                     let mut buf = Vec::with_capacity(blob_entry.size() as usize);
-                    blob.read_to_end(&mut buf).await.map_err(|err| {
+                    blob.read_to_end(&mut buf).map_err(|err| {
                         StoreError::InternalError(format!(
                             "Failed to read blob file {}: {:}",
                             blob_path.display(),
@@ -256,97 +248,91 @@ where
         Ok(result)
     }
 
-    pub async fn purge_blobs(&self) -> crate::Result<()> {
-        let db = self.db.clone();
-        let blob_temp_ttl = self.config.blob_temp_ttl;
-        let blob_base_path = self.config.blob_base_path.clone();
-        let blob_hash_levels = self.config.blob_hash_levels.clone();
+    pub fn purge_blobs(&self) -> crate::Result<()> {
+        let mut batch = Vec::new();
+        let current_time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| StoreError::InternalError("Failed to get current timestamp".into()))?
+            .as_secs();
 
-        self.spawn_worker(move || {
-            let mut batch = Vec::new();
-            let current_time = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| StoreError::InternalError("Failed to get current timestamp".into()))?
-                .as_secs();
-
-            for (key, value) in db.iterator(
-                ColumnFamily::Values,
-                TEMP_BLOB_KEY.to_vec(),
-                Direction::Forward,
-            )? {
-                if key.starts_with(TEMP_BLOB_KEY) {
-                    let (timestamp, _) = u64::from_leb128_bytes(&value[TEMP_BLOB_KEY.len()..])
-                        .ok_or_else(|| {
-                            StoreError::InternalError(format!(
-                                "Failed to deserialize timestamp from key {:?}",
-                                key
-                            ))
-                        })?;
-                    if (current_time >= timestamp && current_time - timestamp > blob_temp_ttl)
-                        || (current_time < timestamp && timestamp - current_time > blob_temp_ttl)
-                    {
-                        batch.push(WriteOperation::Delete {
-                            cf: ColumnFamily::Values,
-                            key: key.into(),
-                        });
-                        let mut blob_key = Vec::with_capacity(value.len() + BLOB_KEY.len());
-                        blob_key.extend_from_slice(BLOB_KEY);
-                        blob_key.extend_from_slice(&value);
-                        batch.push(WriteOperation::Merge {
-                            cf: ColumnFamily::Values,
-                            key: blob_key,
-                            value: (-1i64).serialize().unwrap(),
-                        });
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            if !batch.is_empty() {
-                db.write(batch)?;
-            }
-
-            for (key, value) in
-                db.iterator(ColumnFamily::Values, BLOB_KEY.to_vec(), Direction::Forward)?
-            {
-                if key.starts_with(BLOB_KEY) {
-                    let value = i64::deserialize(&value).ok_or_else(|| {
-                        StoreError::InternalError("Failed to convert blob key to i64".to_string())
+        for (key, value) in
+            self.db
+                .iterator(ColumnFamily::Values, TEMP_BLOB_KEY, Direction::Forward)?
+        {
+            if key.starts_with(TEMP_BLOB_KEY) {
+                let (timestamp, _) = u64::from_leb128_bytes(&value[TEMP_BLOB_KEY.len()..])
+                    .ok_or_else(|| {
+                        StoreError::InternalError(format!(
+                            "Failed to deserialize timestamp from key {:?}",
+                            key
+                        ))
                     })?;
-                    debug_assert!(value >= 0);
-                    if value == 0 {
-                        db.delete(ColumnFamily::Values, key.to_vec())?;
-                        std::fs::remove_file(
-                            &BlobEntries::deserialize(&key[BLOB_KEY.len()..])
-                                .ok_or(StoreError::DataCorruption)?
-                                .items
-                                .get(0)
-                                .ok_or(StoreError::DataCorruption)?
-                                .as_path(blob_base_path.clone(), &blob_hash_levels)?,
-                        )
-                        .map_err(|err| {
-                            StoreError::InternalError(format!(
-                                "Failed to delete blob file: {:}",
-                                err
-                            ))
-                        })?;
-                    }
-                } else {
-                    break;
+                if (current_time >= timestamp
+                    && current_time - timestamp > self.config.blob_temp_ttl)
+                    || (current_time < timestamp
+                        && timestamp - current_time > self.config.blob_temp_ttl)
+                {
+                    batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Values,
+                        key: key.into(),
+                    });
+                    let mut blob_key = Vec::with_capacity(value.len() + BLOB_KEY.len());
+                    blob_key.extend_from_slice(BLOB_KEY);
+                    blob_key.extend_from_slice(&value);
+                    batch.push(WriteOperation::Merge {
+                        cf: ColumnFamily::Values,
+                        key: blob_key,
+                        value: (-1i64).serialize().unwrap(),
+                    });
                 }
+            } else {
+                break;
             }
-            Ok(())
-        })
-        .await
+        }
+
+        if !batch.is_empty() {
+            self.db.write(batch)?;
+        }
+
+        for (key, value) in self
+            .db
+            .iterator(ColumnFamily::Values, BLOB_KEY, Direction::Forward)?
+        {
+            if key.starts_with(BLOB_KEY) {
+                let value = i64::deserialize(&value).ok_or_else(|| {
+                    StoreError::InternalError("Failed to convert blob key to i64".to_string())
+                })?;
+                debug_assert!(value >= 0);
+                if value == 0 {
+                    self.db.delete(ColumnFamily::Values, &key)?;
+                    std::fs::remove_file(
+                        &BlobEntries::deserialize(&key[BLOB_KEY.len()..])
+                            .ok_or(StoreError::DataCorruption)?
+                            .items
+                            .get(0)
+                            .ok_or(StoreError::DataCorruption)?
+                            .as_path(
+                                self.config.blob_base_path.clone(),
+                                &self.config.blob_hash_levels,
+                            )?,
+                    )
+                    .map_err(|err| {
+                        StoreError::InternalError(format!("Failed to delete blob file: {:}", err))
+                    })?;
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(())
     }
 
-    pub async fn store_temporary_blob(
+    pub fn store_temporary_blob(
         &self,
         account: AccountId,
         bytes: &[u8],
     ) -> crate::Result<(u64, u64)> {
-        let blob_entry = self.store_blob(bytes).await?;
+        let blob_entry = self.store_blob(bytes)?;
         let mut batch = Vec::with_capacity(2);
 
         // Obtain second from Unix epoch
@@ -373,24 +359,21 @@ where
             value: blob_entry.hash,
         });
 
-        self.write(batch).await?;
+        self.db.write(batch)?;
 
         Ok((timestamp, hash))
     }
 
-    pub async fn get_temporary_blob(
+    pub fn get_temporary_blob(
         &self,
         account: AccountId,
         hash: u64,
         timestamp: u64,
     ) -> crate::Result<Option<Vec<u8>>> {
-        if let Some(blob_entries) = self
-            .get::<BlobEntries>(
-                ColumnFamily::Values,
-                serialize_temporary_blob_key(account, hash, timestamp),
-            )
-            .await?
-        {
+        if let Some(blob_entries) = self.db.get::<BlobEntries>(
+            ColumnFamily::Values,
+            &serialize_temporary_blob_key(account, hash, timestamp),
+        )? {
             let blob_entry = blob_entries.items.get(0).ok_or_else(|| {
                 StoreError::InternalError(format!(
                     "Failed to get blob entry for account {} and hash {}",
@@ -404,7 +387,6 @@ where
 
             let mut buf = Vec::with_capacity(blob_entry.size() as usize);
             File::open(&blob_path)
-                .await
                 .map_err(|err| {
                     StoreError::InternalError(format!(
                         "Failed to open blob file {}: {:}",
@@ -413,7 +395,6 @@ where
                     ))
                 })?
                 .read_to_end(&mut buf)
-                .await
                 .map_err(|err| {
                     StoreError::InternalError(format!(
                         "Failed to read blob file {}: {:}",
@@ -428,46 +409,42 @@ where
         }
     }
 
-    pub async fn store_blob(&self, bytes: &[u8]) -> crate::Result<BlobEntry> {
+    pub fn store_blob(&self, bytes: &[u8]) -> crate::Result<BlobEntry> {
         let blob_entry: BlobEntry = bytes.into();
 
         // Lock blob key
-        let _blob_lock = self.blob_lock.lock_hash(&blob_entry.hash).await;
+        let _blob_lock = self.blob_lock.lock_hash(&blob_entry.hash);
 
         // Check whether the blob is already stored
-        if !self
-            .exists(ColumnFamily::Values, blob_entry.as_key())
-            .await?
-        {
+        let blob_key = blob_entry.as_key();
+        if !self.db.exists(ColumnFamily::Values, &blob_key)? {
             let blob_path = blob_entry.as_path(
                 self.config.blob_base_path.clone(),
                 &self.config.blob_hash_levels,
             )?;
 
-            fs::create_dir_all(blob_path.parent().unwrap())
-                .await
-                .map_err(|err| {
-                    StoreError::InternalError(format!(
-                        "Failed to create blob directory {}: {:}",
-                        blob_path.display(),
-                        err
-                    ))
-                })?;
-            let mut blob_file = File::create(&blob_path).await.map_err(|err| {
+            fs::create_dir_all(blob_path.parent().unwrap()).map_err(|err| {
+                StoreError::InternalError(format!(
+                    "Failed to create blob directory {}: {:}",
+                    blob_path.display(),
+                    err
+                ))
+            })?;
+            let mut blob_file = File::create(&blob_path).map_err(|err| {
                 StoreError::InternalError(format!(
                     "Failed to create blob file {:?}: {:?}",
                     blob_path.display(),
                     err
                 ))
             })?;
-            blob_file.write_all(bytes).await.map_err(|err| {
+            blob_file.write_all(bytes).map_err(|err| {
                 StoreError::InternalError(format!(
                     "Failed to write blob file {:?}: {:?}",
                     blob_path.display(),
                     err
                 ))
             })?;
-            blob_file.flush().await.map_err(|err| {
+            blob_file.flush().map_err(|err| {
                 StoreError::InternalError(format!(
                     "Failed to flush blob file {:?}: {:?}",
                     blob_path.display(),
@@ -476,12 +453,11 @@ where
             })?;
 
             // Create blob key
-            self.set(
+            self.db.set(
                 ColumnFamily::Values,
-                blob_entry.as_key(),
-                (0i64).serialize().unwrap(),
-            )
-            .await?;
+                &blob_key,
+                &(0i64).serialize().unwrap(),
+            )?;
         }
 
         Ok(blob_entry)

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use store::{tokio, JMAPStore};
+use store::JMAPStore;
 use store_test::{destroy_temp_dir, init_temp_dir};
 
 use crate::RocksDB;
@@ -14,240 +14,119 @@ fn init_db(name: &str, delete_if_exists: bool) -> (JMAPStore<RocksDB>, PathBuf) 
     )
 }
 
-#[tokio::test]
-async fn insert_filter_sort() {
+#[test]
+fn insert_filter_sort() {
     let (db, temp_dir) = init_db("strdb_filter_test", true);
 
-    store_test::db_insert_filter_sort::insert_filter_sort(db, true).await;
+    store_test::db_insert_filter_sort::insert_filter_sort(db, true);
 
     destroy_temp_dir(temp_dir);
 }
 
-#[tokio::test]
-async fn term_id() {
+#[test]
+fn term_id() {
     let (db, temp_dir) = init_db("strdb_term_id", true);
 
-    store_test::db_term_id::term_id(db).await;
+    store_test::db_term_id::term_id(db);
 
     destroy_temp_dir(temp_dir);
 }
 
-#[tokio::test]
-async fn tombstones() {
+#[test]
+fn tombstones() {
     let (db, temp_dir) = init_db("strdb_tombstones", true);
 
-    store_test::db_tombstones::tombstones(db).await;
+    store_test::db_tombstones::tombstones(db);
 
     destroy_temp_dir(temp_dir);
 }
 
-#[tokio::test]
-async fn blobs() {
+#[test]
+fn blobs() {
     let (db, temp_dir) = init_db("strdb_blobs", true);
 
-    store_test::db_blobs::blobs(db).await;
+    store_test::db_blobs::blobs(db);
 
     destroy_temp_dir(temp_dir);
 }
 
-/*
-
 #[test]
-fn test_jmap_mail_merge_threads() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_threads_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_merge_threads() {
+    let (db, temp_dir) = init_db("strdb_threads_test", true);
 
-    store_test::jmap_mail_merge_threads::test_jmap_mail_merge_threads(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mail_merge_threads::jmap_mail_merge_threads(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mail_query() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_mail_query_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_query() {
+    let (db, temp_dir) = init_db("strdb_mail_query_test", true);
 
-    store_test::jmap_mail_query::test_jmap_mail_query(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-        true,
-    );
+    store_test::jmap_mail_query::jmap_mail_query(db, true);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_changes() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_changes_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_changes() {
+    let (db, temp_dir) = init_db("strdb_changes_test", true);
 
-    store_test::jmap_changes::test_jmap_changes(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_changes::jmap_changes(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mail_query_changes() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_query_changes_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_query_changes() {
+    let (db, temp_dir) = init_db("strdb_query_changes_test", true);
 
-    store_test::jmap_mail_query_changes::test_jmap_mail_query_changes(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mail_query_changes::jmap_mail_query_changes(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mail_get() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_mail_get_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_get() {
+    let (db, temp_dir) = init_db("strdb_mail_get_test", true);
 
-    store_test::jmap_mail_get::test_jmap_mail_get(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mail_get::jmap_mail_get(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mail_set() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_mail_set_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_set() {
+    let (db, temp_dir) = init_db("strdb_mail_set_test", true);
 
-    store_test::jmap_mail_set::test_jmap_mail_set(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mail_set::jmap_mail_set(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mail_parse() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_mail_parse_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_parse() {
+    let (db, temp_dir) = init_db("strdb_mail_parse_test", true);
 
-    store_test::jmap_mail_parse::test_jmap_mail_parse(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mail_parse::jmap_mail_parse(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mail_thread() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_mail_thread_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mail_thread() {
+    let (db, temp_dir) = init_db("strdb_mail_thread_test", true);
 
-    store_test::jmap_mail_thread::test_jmap_mail_thread(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mail_thread::jmap_mail_thread(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn test_jmap_mailbox() {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push("strdb_mailbox_test");
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).unwrap();
-    }
+fn jmap_mailbox() {
+    let (db, temp_dir) = init_db("strdb_mailbox_test", true);
 
-    store_test::jmap_mailbox::test_jmap_mailbox(
-        JMAPLocalStore::open(
-            RocksDBStore::open(RocksDBStoreConfig::default_config(
-                temp_dir.to_str().unwrap(),
-            ))
-            .unwrap(),
-            JMAPStoreConfig::new(),
-        )
-        .unwrap(),
-    );
+    store_test::jmap_mailbox::jmap_mailbox(db);
 
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+    destroy_temp_dir(temp_dir);
 }
-*/
