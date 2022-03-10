@@ -12,7 +12,7 @@ use std::{
     fs,
     path::PathBuf,
 };
-use store::{changelog::RaftId, JMAPStore, Store, Tag};
+use store::{raft::RaftId, JMAPStore, Store, Tag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]

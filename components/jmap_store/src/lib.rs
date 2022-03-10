@@ -153,6 +153,12 @@ pub enum JMAPFilter<T> {
     None,
 }
 
+impl<T> Default for JMAPFilter<T> {
+    fn default() -> Self {
+        JMAPFilter::None
+    }
+}
+
 impl<T> JMAPFilter<T> {
     pub fn condition(cond: T) -> Self {
         JMAPFilter::Condition(cond)

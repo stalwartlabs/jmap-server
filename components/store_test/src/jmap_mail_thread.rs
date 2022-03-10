@@ -1,6 +1,6 @@
 use jmap_mail::{import::JMAPMailLocalStoreImport, thread::JMAPMailThread};
 use jmap_store::{json::JSONValue, JMAPGet};
-use store::{changelog::RaftId, JMAPStore, Store};
+use store::{raft::RaftId, JMAPStore, Store};
 
 pub fn jmap_mail_thread<T>(mail_store: JMAPStore<T>)
 where

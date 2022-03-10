@@ -1,21 +1,14 @@
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 
 use crate::batch::LogAction;
 use crate::leb128::Leb128;
-use crate::serialize::{
-    serialize_changelog_key, serialize_raftlog_key, DeserializeBigEndian, COLLECTION_PREFIX_LEN,
-    INTERNAL_KEY_PREFIX,
+use crate::raft::RaftId;
+use crate::serialize::{serialize_changelog_key, DeserializeBigEndian, COLLECTION_PREFIX_LEN};
+use crate::{
+    AccountId, CollectionId, ColumnFamily, Direction, JMAPStore, Store, StoreError, WriteOperation,
 };
-use crate::{AccountId, CollectionId, ColumnFamily, Direction, JMAPStore, Store, StoreError};
 
 pub type ChangeLogId = u64;
-
-#[derive(Default)]
-pub struct RaftId {
-    pub term: ChangeLogId,
-    pub index: ChangeLogId,
-}
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ChangeLogEntry {
@@ -57,8 +50,10 @@ impl ChangeLog {
 
         if total_inserts > 0 {
             for _ in 0..total_inserts {
-                let id = ChangeLogId::from_leb128_it(&mut bytes_it)?;
-                self.changes.push(ChangeLogEntry::Insert(id));
+                self.changes
+                    .push(ChangeLogEntry::Insert(ChangeLogId::from_leb128_it(
+                        &mut bytes_it,
+                    )?));
             }
         }
 
@@ -211,29 +206,33 @@ impl LogWriter {
         }
     }
 
-    pub fn serialize(self) -> Vec<(Vec<u8>, Vec<u8>)> {
-        let mut entries = Vec::with_capacity(self.changes.len() + 1);
-        let mut bytes = Vec::with_capacity(self.changes.len() * 256);
+    pub fn serialize(self, batch: &mut Vec<WriteOperation>) {
+        let mut raft_bytes = Vec::with_capacity(
+            std::mem::size_of::<AccountId>()
+                + std::mem::size_of::<usize>()
+                + (self.changes.len()
+                    * (std::mem::size_of::<ChangeLogId>() + std::mem::size_of::<CollectionId>())),
+        );
 
-        self.changes.len().to_leb128_bytes(&mut bytes);
+        self.account_id.to_leb128_bytes(&mut raft_bytes);
+        self.changes.len().to_leb128_bytes(&mut raft_bytes);
 
         for ((collection_id, change_id), log_entry) in self.changes {
-            let entry_bytes = log_entry.serialize();
-            self.account_id.to_leb128_bytes(&mut bytes);
-            collection_id.to_leb128_bytes(&mut bytes);
-            change_id.to_leb128_bytes(&mut bytes);
-            bytes.extend_from_slice(&entry_bytes);
-            entries.push((
+            collection_id.to_leb128_bytes(&mut raft_bytes);
+            change_id.to_leb128_bytes(&mut raft_bytes);
+
+            batch.push(WriteOperation::set(
+                ColumnFamily::Logs,
                 serialize_changelog_key(self.account_id, collection_id, change_id),
-                entry_bytes,
+                log_entry.serialize(),
             ));
         }
-        entries.push((
-            serialize_raftlog_key(self.raft_id.term, self.raft_id.index),
-            bytes,
-        ));
 
-        entries
+        batch.push(WriteOperation::set(
+            ColumnFamily::Logs,
+            self.raft_id.serialize_key(),
+            raft_bytes,
+        ));
     }
 }
 
@@ -241,13 +240,6 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn next_raft_id(&self) -> RaftId {
-        RaftId {
-            term: self.raft_log_term.load(Ordering::Relaxed),
-            index: self.raft_log_index.fetch_add(1, Ordering::Relaxed),
-        }
-    }
-
     pub fn get_last_change_id(
         &self,
         account: AccountId,
@@ -363,32 +355,4 @@ where
 
         Ok(Some(changelog))
     }
-}
-
-pub fn get_last_raft_id<'y, T>(db: &'y T) -> crate::Result<Option<RaftId>>
-where
-    T: for<'x> Store<'x>,
-{
-    let key = serialize_raftlog_key(ChangeLogId::MAX, ChangeLogId::MAX);
-    let key_len = key.len();
-
-    if let Some((key, _)) = db
-        .iterator(ColumnFamily::Logs, &key, Direction::Backward)?
-        .next()
-    {
-        if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
-            let term = key.as_ref().deserialize_be_u64(1).ok_or_else(|| {
-                StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
-            })?;
-            let index = key
-                .as_ref()
-                .deserialize_be_u64(1 + std::mem::size_of::<ChangeLogId>())
-                .ok_or_else(|| {
-                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
-                })?;
-
-            return Ok(Some(RaftId { term, index }));
-        }
-    }
-    Ok(None)
 }

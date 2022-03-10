@@ -7,8 +7,11 @@ use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use store::tracing::{debug, error};
-use store::{bincode, leb128::Leb128};
+use store::{bincode, leb128::Leb128, raft::RaftId};
+use store::{
+    raft::TermId,
+    tracing::{debug, error},
+};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
@@ -16,11 +19,7 @@ use tokio::{
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-use super::{
-    gossip::PeerInfo,
-    raft::{LogIndex, TermId},
-    Event, Peer, PeerId, IPC_CHANNEL_BUFFER,
-};
+use super::{gossip::PeerInfo, log, Event, Peer, PeerId, IPC_CHANNEL_BUFFER};
 
 const RPC_TIMEOUT_MS: u64 = 1000;
 const RPC_MAX_BACKOFF_MS: u64 = 30000; // 30 seconds
@@ -30,19 +29,28 @@ const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024; //TODO configure
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Request {
     Synchronize(Vec<PeerInfo>),
-    Auth {
-        peer_id: PeerId,
-        key: String,
-    },
+    Auth { peer_id: PeerId, key: String },
+    Vote { term: TermId, last: RaftId },
+    MatchLog { term: TermId, last: RaftId },
+    AppendEntries(Vec<log::Entry>),
+    None,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Response {
+    Synchronize(Vec<PeerInfo>),
     Vote {
         term: TermId,
-        last_log_index: LogIndex,
-        last_log_term: TermId,
+        vote_granted: bool,
     },
-    FollowLeader {
+    MatchLog {
         term: TermId,
-        last_log_index: LogIndex,
-        last_log_term: TermId,
+        success: bool,
+        matched: RaftId,
+    },
+    AppendEntries {
+        commited: RaftId,
+        success: bool,
     },
     None,
 }
@@ -56,17 +64,8 @@ pub enum RpcEvent {
         response_tx: oneshot::Sender<Response>,
     },
 }
-
 #[derive(Default)]
 pub struct RpcEncoder {}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum Response {
-    Synchronize(Vec<PeerInfo>),
-    Vote { term: TermId, vote_granted: bool },
-    FollowLeader { term: TermId, success: bool },
-    None,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Protocol {
@@ -150,7 +149,7 @@ impl Encoder<Protocol> for RpcEncoder {
     }
 }
 
-pub async fn start_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Event>, key: String) {
+pub async fn spawn_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Event>, key: String) {
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
         panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
@@ -184,7 +183,7 @@ impl RpcEvent {
     }
 }
 
-pub fn start_peer_rpc(
+pub fn spawn_peer_rpc(
     main_tx: mpsc::Sender<Event>,
     local_peer_id: PeerId,
     key: String,

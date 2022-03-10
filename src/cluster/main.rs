@@ -14,8 +14,8 @@ use tokio::{sync::mpsc, time};
 use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer, DEFAULT_RPC_PORT};
 
 use super::{
-    gossip::{self, start_gossip, PING_INTERVAL},
-    rpc::{self, start_rpc},
+    gossip::{self, spawn_quidnunc, PING_INTERVAL},
+    rpc::{self, spawn_rpc},
     Cluster, Event,
 };
 
@@ -34,8 +34,8 @@ where
     ));
     info!("Starting RPC server at {} (UDP/TCP)...", bind_addr);
 
-    start_rpc(bind_addr, tx.clone(), cluster.key.clone()).await;
-    start_gossip(bind_addr, gossip_rx, tx).await;
+    spawn_rpc(bind_addr, tx.clone(), cluster.key.clone()).await;
+    spawn_quidnunc(bind_addr, gossip_rx, tx).await;
 
     tokio::spawn(async move {
         let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
@@ -114,21 +114,12 @@ where
                             self.sync_peer_info(peers).await;
                             rpc::Response::Synchronize(self.build_peer_info())
                         }
-                        rpc::Request::Vote {
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        } => self.handle_vote_request(peer_id, term, last_log_index, last_log_term),
-                        rpc::Request::FollowLeader {
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        } => self.handle_follow_leader_request(
-                            peer_id,
-                            term,
-                            last_log_index,
-                            last_log_term,
-                        ),
+                        rpc::Request::Vote { term, last } => {
+                            self.handle_vote_request(peer_id, term, last)
+                        }
+                        rpc::Request::MatchLog { term, last } => {
+                            self.handle_match_log_request(peer_id, term, last).await
+                        }
                         _ => rpc::Response::None,
                     })
                     .ok()

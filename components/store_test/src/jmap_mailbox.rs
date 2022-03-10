@@ -19,7 +19,7 @@ use jmap_store::{
     JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest, JMAPSet,
 };
 
-use store::{changelog::RaftId, JMAPId, JMAPIdPrefix, JMAPStore, Store};
+use store::{raft::RaftId, JMAPId, JMAPIdPrefix, JMAPStore, Store};
 
 const TEST_MAILBOXES: &[u8] = br#"
 [

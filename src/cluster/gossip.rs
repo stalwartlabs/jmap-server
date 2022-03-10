@@ -1,14 +1,14 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 use serde::{Deserialize, Serialize};
+use store::raft::{LogIndex, TermId};
 use store::tracing::{debug, error, info};
 use store::{leb128::Leb128, Store};
 use tokio::{net::UdpSocket, sync::mpsc};
 
-use crate::cluster::rpc::start_peer_rpc;
+use crate::cluster::rpc::spawn_peer_rpc;
 
 use super::{
-    raft::{LogIndex, TermId},
     rpc, Cluster, EpochId, Event, GenerationId, Peer, PeerId, PeerList, ShardId, HEARTBEAT_WINDOW,
     HEARTBEAT_WINDOW_MASK,
 };
@@ -202,7 +202,11 @@ impl Request {
     }
 }
 
-pub async fn start_gossip(
+/*
+  Quidnunc: an inquisitive and gossipy person, from Latin quid nunc? 'what now?'.
+  Spawns the gossip process in charge of discovering peers and detecting failures.
+*/
+pub async fn spawn_quidnunc(
     bind_addr: SocketAddr,
     mut rx: mpsc::Receiver<(SocketAddr, Request)>,
     tx: mpsc::Sender<Event>,
@@ -314,7 +318,7 @@ where
             }
         } else {
             debug!(
-                "Received peers sync packet from unknown peer: {}",
+                "Received peers sync packet from unknown peer id: {}",
                 peers.first().unwrap().peer_id
             );
         }
@@ -363,7 +367,7 @@ where
                                 if local_peer.addr != peer.addr {
                                     // Peer changed its address, reconnect.
                                     local_peer.addr = peer.addr;
-                                    local_peer.tx = start_peer_rpc(
+                                    local_peer.tx = spawn_peer_rpc(
                                         self.tx.clone(),
                                         self.peer_id,
                                         self.key.clone(),

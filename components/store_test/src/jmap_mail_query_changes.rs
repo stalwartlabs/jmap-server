@@ -10,8 +10,8 @@ use jmap_store::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPQueryChange
 use store::JMAPIdPrefix;
 use store::{
     batch::{LogAction, WriteBatch},
-    changelog::RaftId,
     field::FieldOptions,
+    raft::RaftId,
     JMAPId, JMAPStore, Store, Tag,
 };
 

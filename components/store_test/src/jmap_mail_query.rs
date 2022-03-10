@@ -14,8 +14,8 @@ use std::{
     time::Instant,
 };
 use store::{
-    changelog::RaftId, query::JMAPIdMapFnc, Comparator, FieldValue, Filter, Integer, JMAPId,
-    JMAPStore, Store, Tag,
+    query::JMAPIdMapFnc, raft::RaftId, Comparator, FieldValue, Filter, Integer, JMAPId, JMAPStore,
+    Store, Tag,
 };
 use store::{query::JMAPStoreQuery, JMAPIdPrefix};
 

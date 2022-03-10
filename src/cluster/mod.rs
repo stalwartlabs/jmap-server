@@ -1,5 +1,6 @@
 use std::{
     collections::hash_map::DefaultHasher,
+    fmt::Display,
     hash::{Hash, Hasher},
     net::{SocketAddr, ToSocketAddrs},
     thread,
@@ -10,6 +11,7 @@ use actix_web::web;
 use serde::{Deserialize, Serialize};
 use store::{
     bincode,
+    raft::{LogIndex, TermId},
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
@@ -21,11 +23,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
 
-use self::{
-    gossip::PeerInfo,
-    raft::{LogIndex, TermId},
-    rpc::start_peer_rpc,
-};
+use self::{gossip::PeerInfo, rpc::spawn_peer_rpc};
 
 pub mod gossip;
 pub mod log;
@@ -125,6 +123,12 @@ pub struct Peer {
     pub last_log_index: LogIndex,
     pub last_log_term: TermId,
     pub vote_granted: bool,
+}
+
+impl Display for Peer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.addr)
+    }
 }
 
 impl<T> Cluster<T>
@@ -296,7 +300,7 @@ impl Peer {
         Peer {
             peer_id,
             shard_id: 0,
-            tx: start_peer_rpc(
+            tx: spawn_peer_rpc(
                 cluster.tx.clone(),
                 cluster.peer_id,
                 cluster.key.clone(),
@@ -327,7 +331,7 @@ impl Peer {
         Peer {
             peer_id: peer.peer_id,
             shard_id: peer.shard_id,
-            tx: start_peer_rpc(
+            tx: spawn_peer_rpc(
                 cluster.tx.clone(),
                 cluster.peer_id,
                 cluster.key.clone(),

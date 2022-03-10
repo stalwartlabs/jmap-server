@@ -246,14 +246,6 @@ pub fn serialize_changelog_key(
     bytes
 }
 
-pub fn serialize_raftlog_key(term: ChangeLogId, log_index: ChangeLogId) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity((std::mem::size_of::<ChangeLogId>() * 2) + 1);
-    bytes.push(INTERNAL_KEY_PREFIX);
-    bytes.extend_from_slice(&term.to_be_bytes());
-    bytes.extend_from_slice(&log_index.to_be_bytes());
-    bytes
-}
-
 #[inline(always)]
 pub fn deserialize_index_document_id(bytes: &[u8]) -> Option<DocumentId> {
     DocumentId::from_be_bytes(

@@ -2,7 +2,7 @@ use std::iter::FromIterator;
 
 use nlp::Language;
 use store::batch::WriteBatch;
-use store::changelog::RaftId;
+use store::raft::RaftId;
 use store::field::{FieldOptions, FullText, Text};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
 use store::{

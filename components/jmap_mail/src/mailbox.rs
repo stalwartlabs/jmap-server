@@ -6,13 +6,12 @@ use jmap_store::changes::{
     query_changes, JMAPChanges, JMAPChangesRequest, JMAPChangesResponse, JMAPQueryChangesResponse,
 };
 use jmap_store::id::JMAPIdSerialize;
-use jmap_store::query::{build_query, paginate_results};
 use jmap_store::{
     json::JSONValue, JMAPError, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAILBOX,
 };
 use jmap_store::{
-    JMAPGet, JMAPGetResponse, JMAPQueryChangesRequest, JMAPQueryRequest, JMAPQueryResponse,
-    JMAP_MAIL, JMAP_MAILBOX_CHANGES,
+    JMAPComparator, JMAPGet, JMAPGetResponse, JMAPQueryChangesRequest, JMAPQueryRequest,
+    JMAPQueryResponse, JMAP_MAIL, JMAP_MAILBOX_CHANGES,
 };
 
 use serde::{Deserialize, Serialize};
@@ -615,7 +614,7 @@ where
         }
 
         if !changes.is_empty() {
-            self.update_documents(request.account_id, self.next_raft_id(), changes)?;
+            self.update_documents(request.account_id, self.assign_raft_id(), changes)?;
             response.new_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
         } else {
             response.new_state = response.old_state.clone();
@@ -771,62 +770,53 @@ where
 
     fn mailbox_query(
         &self,
-        request: JMAPQueryRequest<
+        mut request: JMAPQueryRequest<
             JMAPMailboxFilterCondition,
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
     ) -> jmap_store::Result<JMAPQueryResponse> {
-        let (filter, sort) = build_query(
-            request.filter,
-            request.sort,
-            |cond| {
-                Ok(match cond {
-                    JMAPMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
-                        JMAPMailboxProperties::ParentId.into(),
-                        FieldValue::LongInteger(parent_id),
-                    ),
-                    JMAPMailboxFilterCondition::Name(text) => Filter::eq(
-                        JMAPMailboxProperties::Name.into(),
-                        FieldValue::Text(text.to_lowercase()),
-                    ),
-                    JMAPMailboxFilterCondition::Role(text) => {
-                        Filter::eq(JMAPMailboxProperties::Role.into(), FieldValue::Text(text))
-                    }
-                    JMAPMailboxFilterCondition::HasAnyRole => Filter::eq(
-                        JMAPMailboxProperties::Role.into(),
-                        FieldValue::Tag(Tag::Static(0)),
-                    ),
-                    JMAPMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
-                })
-            },
-            |comp| {
-                Ok(Comparator::Field(FieldComparator {
-                    field: match comp.property {
-                        JMAPMailboxComparator::Name => JMAPMailboxProperties::Name,
-                        JMAPMailboxComparator::Role => JMAPMailboxProperties::Role,
-                        JMAPMailboxComparator::ParentId => JMAPMailboxProperties::ParentId,
-                    }
-                    .into(),
-                    ascending: comp.is_ascending,
-                }))
-            },
-        )?;
+        let cond_fnc = |cond| {
+            Ok(match cond {
+                JMAPMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
+                    JMAPMailboxProperties::ParentId.into(),
+                    FieldValue::LongInteger(parent_id),
+                ),
+                JMAPMailboxFilterCondition::Name(text) => Filter::eq(
+                    JMAPMailboxProperties::Name.into(),
+                    FieldValue::Text(text.to_lowercase()),
+                ),
+                JMAPMailboxFilterCondition::Role(text) => {
+                    Filter::eq(JMAPMailboxProperties::Role.into(), FieldValue::Text(text))
+                }
+                JMAPMailboxFilterCondition::HasAnyRole => Filter::eq(
+                    JMAPMailboxProperties::Role.into(),
+                    FieldValue::Tag(Tag::Static(0)),
+                ),
+                JMAPMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
+            })
+        };
 
-        let query_state = self.get_state(request.account_id, JMAP_MAILBOX)?;
+        let sort_fnc = |comp: JMAPComparator<JMAPMailboxComparator>| {
+            Ok(Comparator::Field(FieldComparator {
+                field: match comp.property {
+                    JMAPMailboxComparator::Name => JMAPMailboxProperties::Name,
+                    JMAPMailboxComparator::Role => JMAPMailboxProperties::Role,
+                    JMAPMailboxComparator::ParentId => JMAPMailboxProperties::ParentId,
+                }
+                .into(),
+                ascending: comp.is_ascending,
+            }))
+        };
+
+        let account_id = request.account_id;
         let mut results = self
-            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
-                request.account_id,
-                JMAP_MAILBOX,
-                filter,
-                sort,
-            ))?
+            .query::<JMAPIdMapFnc>(request.build_query(JMAP_MAILBOX, cond_fnc, sort_fnc, None)?)?
             .into_iter()
             .collect::<Vec<JMAPId>>();
 
-        let total_results = results.len();
-
-        if total_results > 0 && (request.arguments.filter_as_tree || request.arguments.sort_as_tree)
+        if !results.is_empty()
+            && (request.arguments.filter_as_tree || request.arguments.sort_as_tree)
         {
             let mut hierarchy = HashMap::new();
             let mut tree = HashMap::new();
@@ -918,25 +908,15 @@ where
             }
         }
 
-        let (results, start_position) = paginate_results(
-            results.into_iter(),
-            total_results,
-            request.limit,
-            request.position,
-            request.anchor,
-            request.anchor_offset,
-        )?;
+        if request.limit == 0 || request.limit > self.config.query_max_results {
+            request.limit = self.config.query_max_results;
+        }
 
-        Ok(JMAPQueryResponse {
-            account_id: request.account_id,
-            include_total: request.calculate_total,
-            query_state,
-            position: start_position,
-            total: total_results,
-            limit: request.limit,
-            ids: results,
-            is_immutable: false,
-        })
+        request.into_response(
+            results.into_iter(),
+            self.get_state(account_id, JMAP_MAILBOX)?,
+            false,
+        )
     }
 
     fn mailbox_changes(

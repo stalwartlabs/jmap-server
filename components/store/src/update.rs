@@ -6,8 +6,9 @@ use crate::{
     batch::{WriteAction, WriteBatch},
     bitmap::set_clear_bits,
     blob::BlobEntries,
-    changelog::{LogWriter, RaftId},
+    changelog::LogWriter,
     field::{FieldOptions, Text, TokenIterator, UpdateField},
+    raft::RaftId,
     serialize::{
         serialize_acd_key_leb128, serialize_blob_key, serialize_bm_internal, serialize_bm_tag_key,
         serialize_bm_term_key, serialize_bm_text_key, serialize_index_key, serialize_stored_key,
@@ -465,9 +466,7 @@ where
         }
 
         // Write Raft and change log
-        for (key, value) in change_log.serialize() {
-            write_batch.push(WriteOperation::set(ColumnFamily::Logs, key, value));
-        }
+        change_log.serialize(&mut write_batch);
 
         // Update bitmaps
         for (key, doc_id_list) in bitmap_list {

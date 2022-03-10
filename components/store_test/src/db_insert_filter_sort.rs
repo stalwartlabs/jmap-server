@@ -7,7 +7,7 @@ use std::{
 use nlp::Language;
 use store::{
     batch::WriteBatch,
-    changelog::RaftId,
+    raft::RaftId,
     field::{FieldOptions, FullText, Text},
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store, TextQuery,

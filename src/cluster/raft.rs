@@ -1,19 +1,19 @@
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
+use store::raft::{LogIndex, RaftId, TermId};
 use store::tracing::{debug, error, info};
 use store::Store;
 use tokio::sync::watch;
 
-use crate::cluster::log::start_log_sync;
+use crate::cluster::log::spawn_append_entries;
+use crate::JMAPServer;
 
 use super::{
     rpc::{Request, Response},
     Cluster, Peer, PeerId,
 };
-
-pub type TermId = u64;
-pub type LogIndex = u64;
 
 pub const ELECTION_TIMEOUT: u64 = 1000;
 pub const ELECTION_TIMEOUT_RAND_FROM: u64 = 150;
@@ -158,20 +158,28 @@ where
         };
         self.core.set_raft_follower(self.term);
         self.reset();
-        debug!("Voted for peer {} for term {}.", peer_id, self.term);
+        debug!(
+            "Voted for peer {} for term {}.",
+            self.get_peer(peer_id).unwrap(),
+            self.term
+        );
     }
 
     pub fn follow_leader(&mut self, peer_id: PeerId) {
         self.state = State::Follower { peer_id };
         self.core.set_raft_follower(self.term);
         self.reset();
-        debug!("Following peer {} for term {}.", peer_id, self.term);
+        debug!(
+            "Following peer {} for term {}.",
+            self.get_peer(peer_id).unwrap(),
+            self.term
+        );
     }
 
     pub fn send_append_entries(&self) {
         if let State::Leader { tx, .. } = &self.state {
             if let Err(err) = tx.send(self.last_log_index) {
-                error!("Failed to send append entries: {}", err);
+                error!("Failed to broadcast append entries: {}", err);
             }
         }
     }
@@ -192,7 +200,7 @@ where
         self.peers
             .iter()
             .filter(|p| p.is_in_shard(self.shard_id))
-            .for_each(|p| start_log_sync(self, p.tx.clone(), rx.clone()));
+            .for_each(|p| spawn_append_entries(self, p, rx.clone()));
         self.state = State::Leader { tx, rx };
         self.core.set_raft_leader(self.term);
         self.reset();
@@ -200,7 +208,7 @@ where
 
     pub fn add_follower(&self, peer_id: PeerId) {
         if let State::Leader { rx, .. } = &self.state {
-            start_log_sync(self, self.get_peer(peer_id).unwrap().tx.clone(), rx.clone())
+            spawn_append_entries(self, self.get_peer(peer_id).unwrap(), rx.clone())
         }
     }
 
@@ -260,13 +268,7 @@ where
         }
     }
 
-    pub fn handle_vote_request(
-        &mut self,
-        peer_id: PeerId,
-        term: TermId,
-        last_log_index: LogIndex,
-        last_log_term: TermId,
-    ) -> Response {
+    pub fn handle_vote_request(&mut self, peer_id: PeerId, term: TermId, last: RaftId) -> Response {
         if self.term < term {
             self.step_down(term);
         }
@@ -275,7 +277,7 @@ where
             term: self.term,
             vote_granted: if self.term == term
                 && self.can_grant_vote(peer_id)
-                && self.log_is_behind_or_eq(last_log_term, last_log_index)
+                && self.log_is_behind_or_eq(last.term, last.index)
             {
                 self.vote_for(peer_id);
                 true
@@ -303,26 +305,35 @@ where
         }
     }
 
-    pub fn handle_follow_leader_request(
+    pub async fn handle_match_log_request(
         &mut self,
         peer_id: PeerId,
         term: TermId,
-        last_log_index: LogIndex,
-        last_log_term: TermId,
+        last: RaftId,
     ) -> Response {
         if self.term < term {
             self.term = term;
         }
 
-        Response::FollowLeader {
-            term: self.term,
-            success: if self.term == term && self.log_is_behind_or_eq(last_log_term, last_log_index)
-            {
+        let (success, matched) =
+            if self.term == term && self.log_is_behind_or_eq(last.term, last.index) {
                 self.follow_leader(peer_id);
-                true
+                match self.core.get_prev_raft_id(last).await {
+                    Ok(Some(matched)) => (true, matched),
+                    Ok(None) => (true, RaftId::null()),
+                    Err(err) => {
+                        debug!("Failed to get prev raft id: {:?}", err);
+                        (false, RaftId::null())
+                    }
+                }
             } else {
-                false
-            },
+                (false, RaftId::null())
+            };
+
+        Response::MatchLog {
+            term: self.term,
+            success,
+            matched,
         }
     }
 }
@@ -331,8 +342,7 @@ impl Peer {
     pub async fn vote_for_me(&self, term: TermId, last_log_index: LogIndex, last_log_term: TermId) {
         self.dispatch_request(Request::Vote {
             term,
-            last_log_index,
-            last_log_term,
+            last: RaftId::new(last_log_term, last_log_index),
         })
         .await;
     }
@@ -345,4 +355,43 @@ pub fn election_timeout(now: bool) -> Instant {
                 + rand::thread_rng()
                     .gen_range(ELECTION_TIMEOUT_RAND_FROM..ELECTION_TIMEOUT_RAND_TO),
         )
+}
+
+impl<T> JMAPServer<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub fn set_raft_leader(&self, term: TermId) {
+        self.is_raft_leader.store(true, Ordering::Relaxed);
+        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
+    }
+
+    pub fn set_raft_follower(&self, term: TermId) {
+        self.is_raft_leader.store(false, Ordering::Relaxed);
+        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
+    }
+
+    pub fn last_log_index(&self) -> LogIndex {
+        self.jmap_store.raft_log_index.load(Ordering::Relaxed)
+    }
+
+    pub fn last_log_term(&self) -> TermId {
+        self.jmap_store.raft_log_term.load(Ordering::Relaxed)
+    }
+
+    pub fn is_leader(&self) -> bool {
+        self.is_raft_leader.load(Ordering::Relaxed)
+    }
+
+    pub async fn get_prev_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
+        let jmap_store = self.jmap_store.clone();
+        self.spawn_worker(move || jmap_store.get_prev_raft_id(key))
+            .await
+    }
+
+    pub async fn get_next_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
+        let jmap_store = self.jmap_store.clone();
+        self.spawn_worker(move || jmap_store.get_next_raft_id(key))
+            .await
+    }
 }

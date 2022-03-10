@@ -14,7 +14,7 @@ use jmap_store::{
     JMAPGet,
 };
 use mail_parser::RfcHeader;
-use store::{changelog::RaftId, JMAPStore, Store};
+use store::{raft::RaftId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 

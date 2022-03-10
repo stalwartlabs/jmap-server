@@ -10,6 +10,7 @@ pub mod id;
 pub mod leb128;
 pub mod mutex_map;
 pub mod query;
+pub mod raft;
 pub mod search_snippet;
 pub mod serialize;
 pub mod term;
@@ -22,13 +23,14 @@ use std::{
     time::Duration,
 };
 
-use changelog::{get_last_raft_id, ChangeLogId, RaftId};
+use changelog::ChangeLogId;
 use config::EnvSettings;
 use id::{IdAssigner, IdCacheKey};
 use moka::sync::Cache;
 use mutex_map::MutexMap;
 use nlp::Language;
 use parking_lot::{Mutex, MutexGuard};
+use raft::{LogIndex, RaftId};
 use roaring::RoaringBitmap;
 use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
 
@@ -375,6 +377,7 @@ pub struct JMAPStoreConfig {
     pub blob_temp_ttl: u64,
 
     pub default_language: Language,
+    pub query_max_results: usize,
     pub get_max_results: usize,
     pub set_max_changes: usize,
     pub mailbox_set_max_changes: usize,
@@ -394,9 +397,10 @@ impl From<&EnvSettings> for JMAPStoreConfig {
                     .unwrap_or_else(|| "stalwart-jmap".to_string()),
             ),
             blob_hash_levels: vec![1],
-            blob_temp_ttl: 3600,
+            blob_temp_ttl: 3600, //TODO configure all params
             get_max_results: 100,
             set_max_changes: 100,
+            query_max_results: 1000,
             mailbox_set_max_changes: 100,
             mailbox_max_total: 1000,
             mailbox_max_depth: 10,
@@ -413,15 +417,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     pub fn new(db: T, settings: &EnvSettings) -> Self {
-        let raft_id = get_last_raft_id(&db)
-            .unwrap()
-            .map(|mut id| {
-                id.index += 1;
-                id
-            })
-            .unwrap_or(RaftId { term: 0, index: 0 });
-
-        Self {
+        let mut store = Self {
             config: settings.into(),
             term_id_last: db
                 .get::<TermId>(ColumnFamily::Values, LAST_TERM_ID_KEY)
@@ -447,29 +443,26 @@ where
                 .build(),
             blob_lock: MutexMap::with_capacity(1024),
             account_lock: MutexMap::with_capacity(1024),
-            raft_log_index: raft_id.index.into(),
-            raft_log_term: raft_id.term.into(),
+            raft_log_index: 0.into(),
+            raft_log_term: 0.into(),
             db,
-        }
+        };
+
+        // Obtain last Raft ID
+        let raft_id = store
+            .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))
+            .unwrap()
+            .map(|mut id| {
+                id.index += 1;
+                id
+            })
+            .unwrap_or(RaftId { term: 0, index: 0 });
+        store.raft_log_index = raft_id.index.into();
+        store.raft_log_term = raft_id.term.into();
+        store
     }
 
     pub fn lock_account(&self, account: AccountId, collection: CollectionId) -> MutexGuard<'_, ()> {
         self.account_lock.lock_hash((account, collection))
     }
-
-    /*pub fn spawn_blocking<U, V>(&self, f: U) -> Result<V>
-    where
-        U: FnOnce() -> Result<V> + Send + 'static,
-        V: Sync + Send + 'static,
-    {
-        let (tx, rx) = oneshot::channel();
-
-        tokio::task::spawn_blocking(move || {
-            tx.send(f()).ok();
-        });
-
-        rx.map_err(|e| {
-            StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
-        })?
-    }*/
 }

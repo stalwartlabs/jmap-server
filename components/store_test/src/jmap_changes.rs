@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use jmap_store::changes::{JMAPChanges, JMAPState};
 use store::{
     batch::{LogAction, WriteBatch},
-    changelog::RaftId,
+    raft::RaftId,
     JMAPStore, Store,
 };
 

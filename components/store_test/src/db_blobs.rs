@@ -3,8 +3,8 @@ use std::sync::Arc;
 use store::{
     batch::WriteBatch,
     blob::BlobEntries,
-    changelog::RaftId,
     field::FieldOptions,
+    raft::RaftId,
     serialize::{StoreDeserialize, BLOB_KEY},
     ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };

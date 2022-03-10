@@ -69,28 +69,6 @@ where
         });
     }
 
-    pub fn set_raft_leader(&self, term: ChangeLogId) {
-        self.is_raft_leader.store(true, Ordering::Relaxed);
-        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
-    }
-
-    pub fn set_raft_follower(&self, term: ChangeLogId) {
-        self.is_raft_leader.store(false, Ordering::Relaxed);
-        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
-    }
-
-    pub fn last_log_index(&self) -> ChangeLogId {
-        self.jmap_store.raft_log_index.load(Ordering::Relaxed)
-    }
-
-    pub fn last_log_term(&self) -> ChangeLogId {
-        self.jmap_store.raft_log_term.load(Ordering::Relaxed)
-    }
-
-    pub fn is_leader(&self) -> bool {
-        self.is_raft_leader.load(Ordering::Relaxed)
-    }
-
     pub async fn spawn_worker<U, V>(&self, f: U) -> store::Result<V>
     where
         U: FnOnce() -> store::Result<V> + Send + 'static,

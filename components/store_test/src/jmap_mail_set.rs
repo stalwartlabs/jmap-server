@@ -12,7 +12,7 @@ use jmap_store::{
     json::{JSONNumber, JSONValue},
     JMAPGet, JMAPSet, JMAP_MAILBOX,
 };
-use store::{batch::WriteBatch, changelog::RaftId, JMAPId, JMAPStore, Store};
+use store::{batch::WriteBatch, raft::RaftId, JMAPId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 

@@ -13,12 +13,12 @@ use mail_parser::Message;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
+use store::raft::RaftId;
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::JMAPIdPrefix;
 use store::{
     batch::WriteBatch,
     bincode,
-    changelog::RaftId,
     field::{FieldOptions, Text},
     roaring::RoaringBitmap,
     AccountId, Comparator, FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, ThreadId,
@@ -159,7 +159,7 @@ where
                     item.id,
                     self.mail_import_blob(
                         request.account_id,
-                        self.next_raft_id(),
+                        self.assign_raft_id(),
                         &blob,
                         item.mailbox_ids,
                         item.keywords,

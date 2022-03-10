@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use jmap_mail::{import::JMAPMailLocalStoreImport, MessageField};
 use jmap_store::JMAP_MAIL;
 use store::{
-    changelog::RaftId,
     query::{JMAPIdMapFnc, JMAPStoreQuery},
+    raft::RaftId,
     Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
 };
 
