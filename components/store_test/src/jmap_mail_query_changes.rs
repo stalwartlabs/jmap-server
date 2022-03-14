@@ -1,19 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
+use jmap::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPQueryChangesRequest};
 use jmap_mail::{
     changes::JMAPMailChanges,
-    import::JMAPMailLocalStoreImport,
+    import::JMAPMailImport,
     query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments},
     MessageField,
 };
-use jmap_store::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPQueryChangesRequest};
-use store::JMAPIdPrefix;
 use store::{
     batch::{LogAction, WriteBatch},
     field::FieldOptions,
     raft::RaftId,
     JMAPId, JMAPStore, Store, Tag,
 };
+use store::{Collection, JMAPIdPrefix};
 
 pub fn jmap_mail_query_changes<T>(mail_store: JMAPStore<T>)
 where
@@ -72,7 +72,8 @@ where
                             if change_num % 2 == 0 { 1 } else { 2 },
                             *id
                         )
-                        .as_bytes(),
+                        .as_bytes()
+                        .to_vec(),
                         vec![if change_num % 2 == 0 { 1 } else { 2 }],
                         vec![Tag::Text(if change_num % 2 == 0 {
                             "1".into()
@@ -101,7 +102,7 @@ where
                     .update_document(
                         0,
                         RaftId::default(),
-                        WriteBatch::update(0, id.get_document_id(), id),
+                        WriteBatch::update(Collection::Mail, id.get_document_id(), id),
                     )
                     .unwrap();
                 updated_ids.insert(id);
@@ -112,7 +113,7 @@ where
                     .update_document(
                         0,
                         RaftId::default(),
-                        WriteBatch::delete(0, id.get_document_id(), id),
+                        WriteBatch::delete(Collection::Mail, id.get_document_id(), id),
                     )
                     .unwrap();
                 removed_ids.insert(id);
@@ -121,7 +122,8 @@ where
                 let id = *id_map.get(from).unwrap();
                 let new_id = JMAPId::from_parts(thread_id, id.get_document_id());
 
-                let mut batch = WriteBatch::moved(0, id.get_document_id(), id, new_id);
+                let mut batch =
+                    WriteBatch::moved(Collection::Mail, id.get_document_id(), id, new_id);
                 batch.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
                 batch.tag(
                     MessageField::ThreadId,

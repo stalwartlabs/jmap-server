@@ -7,10 +7,11 @@ use std::{
 use nlp::Language;
 use store::{
     batch::WriteBatch,
-    raft::RaftId,
     field::{FieldOptions, FullText, Text},
     query::{JMAPIdMapFnc, JMAPStoreQuery},
-    Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store, TextQuery,
+    raft::RaftId,
+    Comparator, ComparisonOperator, FieldValue, Filter, Collection, JMAPIdPrefix, JMAPStore,
+    Store, TextQuery,
 };
 
 use crate::deflate_artwork_data;
@@ -92,10 +93,11 @@ where
                 {
                     let record = record.unwrap();
                     let documents = documents.clone();
-                    let record_id = db.assign_document_id(0, 0).unwrap();
+                    let record_id = db.assign_document_id(0, Collection::Mail).unwrap();
 
                     s.spawn_fifo(move |_| {
-                        let mut builder = WriteBatch::insert(0, record_id, record_id);
+                        let mut builder =
+                            WriteBatch::insert(Collection::Mail, record_id, record_id);
                         for (pos, field) in record.iter().enumerate() {
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {
@@ -418,16 +420,21 @@ where
         for jmap_id in db
             .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                 0,
-                0,
+                Collection::Mail,
                 filter,
                 Comparator::ascending(fields["accession_number"]),
             ))
             .unwrap()
         {
             results.push(
-                db.get_document_value(0, 0, jmap_id.get_document_id(), fields["accession_number"])
-                    .unwrap()
-                    .unwrap(),
+                db.get_document_value(
+                    0,
+                    Collection::Mail,
+                    jmap_id.get_document_id(),
+                    fields["accession_number"],
+                )
+                .unwrap()
+                .unwrap(),
             );
         }
         assert_eq!(results, expected_results);
@@ -500,13 +507,23 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(0, 0, filter, Comparator::List(sort)))
+            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+                0,
+                Collection::Mail,
+                filter,
+                Comparator::List(sort),
+            ))
             .unwrap()
         {
             results.push(
-                db.get_document_value(0, 0, jmap_id.get_document_id(), fields["accession_number"])
-                    .unwrap()
-                    .unwrap(),
+                db.get_document_value(
+                    0,
+                    Collection::Mail,
+                    jmap_id.get_document_id(),
+                    fields["accession_number"],
+                )
+                .unwrap()
+                .unwrap(),
             );
 
             if results.len() == expected_results.len() {

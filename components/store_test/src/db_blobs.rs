@@ -6,7 +6,7 @@ use store::{
     field::FieldOptions,
     raft::RaftId,
     serialize::{StoreDeserialize, BLOB_KEY},
-    ColumnFamily, Direction, JMAPStore, Store, StoreError,
+    ColumnFamily, Direction, Collection, JMAPStore, Store, StoreError,
 };
 
 trait GetAllBlobs {
@@ -75,8 +75,12 @@ where
                 let db = db.clone();
                 let blobs = blobs.clone();
                 s.spawn_fifo(move |_| {
-                    let mut document =
-                        WriteBatch::insert(0, db.assign_document_id(account, 0).unwrap(), 0u64);
+                    let mut document = WriteBatch::insert(
+                        Collection::Mail,
+                        db.assign_document_id(account, Collection::Mail)
+                            .unwrap(),
+                        0u64,
+                    );
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
@@ -91,7 +95,7 @@ where
     for account in 0..100 {
         db.get_blobs(
             account,
-            0,
+            Collection::Mail,
             0,
             (0..10).into_iter().map(|v| (v, 0..u32::MAX)).collect(),
         )
@@ -103,7 +107,7 @@ where
 
         db.get_blobs(
             account,
-            0,
+            Collection::Mail,
             0,
             (0..10).into_iter().map(|idx| (idx, 0..1)).collect(),
         )
@@ -118,8 +122,12 @@ where
     assert_eq!(blobs.len(), 40);
 
     for account in 0..100 {
-        db.update_document(account, RaftId::default(), WriteBatch::delete(0, 0, 0u64))
-            .unwrap();
+        db.update_document(
+            account,
+            RaftId::default(),
+            WriteBatch::delete(Collection::Mail, 0, 0u64),
+        )
+        .unwrap();
     }
 
     for (_, ref_count) in db.get_all_blobs().unwrap() {

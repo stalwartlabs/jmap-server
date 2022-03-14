@@ -39,9 +39,7 @@ where
                     blob_id.collection,
                     blob_id.document,
                     blob_id.blob_index,
-                    0..u32::MAX,
                 )?
-                .map(|entry| entry.1)
             }
             BlobId::Temporary(blob_id) => {
                 self.get_temporary_blob(account, blob_id.hash, blob_id.timestamp)?
@@ -52,9 +50,7 @@ where
                     blob_id.blob_id.collection,
                     blob_id.blob_id.document,
                     blob_id.blob_id.blob_index,
-                    0..u32::MAX,
                 )?
-                .map(|entry| entry.1)
                 .and_then(|v| blob_fnc(&v, blob_id.blob_index)),
             BlobId::InnerTemporary(blob_id) => self
                 .get_temporary_blob(account, blob_id.blob_id.hash, blob_id.blob_id.timestamp)?

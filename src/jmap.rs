@@ -1,12 +1,9 @@
-use std::sync::atomic::Ordering;
-
 use actix_web::{web, HttpResponse};
 
-use jmap_store::json::JSONValue;
+use jmap::json::JSONValue;
 use store::tracing::error;
 use store::ColumnFamily;
 use store::{
-    changelog::ChangeLogId,
     serialize::{StoreDeserialize, StoreSerialize},
     Store, StoreError,
 };
@@ -23,8 +20,8 @@ where
     where
         U: StoreDeserialize + Send + Sync + 'static,
     {
-        let jmap_store = self.jmap_store.clone();
-        self.spawn_worker(move || jmap_store.db.get(ColumnFamily::Values, key.as_bytes()))
+        let store = self.store.clone();
+        self.spawn_worker(move || store.db.get(ColumnFamily::Values, key.as_bytes()))
             .await
     }
 
@@ -32,9 +29,9 @@ where
     where
         U: StoreSerialize + Send + Sync + 'static,
     {
-        let jmap_store = self.jmap_store.clone();
+        let store = self.store.clone();
         self.spawn_worker(move || {
-            jmap_store.db.set(
+            store.db.set(
                 ColumnFamily::Values,
                 key.as_bytes(),
                 &value.serialize().ok_or_else(|| {
@@ -49,7 +46,7 @@ where
     where
         U: StoreSerialize + Send + Sync + 'static,
     {
-        let jmap_store = self.jmap_store.clone();
+        let store = self.store.clone();
 
         self.worker_pool.spawn(move || {
             let bytes = match value.serialize() {
@@ -60,10 +57,7 @@ where
                 }
             };
 
-            if let Err(err) = jmap_store
-                .db
-                .set(ColumnFamily::Values, key.as_bytes(), &bytes)
-            {
+            if let Err(err) = store.db.set(ColumnFamily::Values, key.as_bytes(), &bytes) {
                 error!("Failed to set key: {:?}", err);
             }
         });

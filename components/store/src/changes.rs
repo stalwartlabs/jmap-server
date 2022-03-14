@@ -3,27 +3,28 @@ use std::collections::HashMap;
 use crate::batch::LogAction;
 use crate::leb128::Leb128;
 use crate::raft::RaftId;
-use crate::serialize::{serialize_changelog_key, DeserializeBigEndian, COLLECTION_PREFIX_LEN};
+use crate::serialize::{DeserializeBigEndian, COLLECTION_PREFIX_LEN, FIELD_PREFIX_LEN};
 use crate::{
-    AccountId, CollectionId, ColumnFamily, Direction, JMAPStore, Store, StoreError, WriteOperation,
+    AccountId, ColumnFamily, Direction, Collection, JMAPId, JMAPStore, Store, StoreError,
+    WriteOperation,
 };
 
-pub type ChangeLogId = u64;
+pub type ChangeId = u64;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ChangeLogEntry {
-    Insert(ChangeLogId),
-    Update(ChangeLogId),
-    Delete(ChangeLogId),
+pub enum Change {
+    Insert(JMAPId),
+    Update(JMAPId),
+    Delete(JMAPId),
 }
 
-pub struct ChangeLog {
-    pub changes: Vec<ChangeLogEntry>,
-    pub from_change_id: ChangeLogId,
-    pub to_change_id: ChangeLogId,
+pub struct Changes {
+    pub changes: Vec<Change>,
+    pub from_change_id: ChangeId,
+    pub to_change_id: ChangeId,
 }
 
-impl Default for ChangeLog {
+impl Default for Changes {
     fn default() -> Self {
         Self {
             changes: Vec::with_capacity(10),
@@ -34,14 +35,14 @@ impl Default for ChangeLog {
 }
 
 #[derive(Debug)]
-pub enum ChangeLogQuery {
+pub enum Query {
     All,
-    Since(ChangeLogId),
-    SinceInclusive(ChangeLogId),
-    RangeInclusive(ChangeLogId, ChangeLogId),
+    Since(ChangeId),
+    SinceInclusive(ChangeId),
+    RangeInclusive(ChangeId, ChangeId),
 }
 
-impl ChangeLog {
+impl Changes {
     pub fn deserialize(&mut self, bytes: &[u8]) -> Option<()> {
         let mut bytes_it = bytes.iter();
         let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
@@ -51,27 +52,25 @@ impl ChangeLog {
         if total_inserts > 0 {
             for _ in 0..total_inserts {
                 self.changes
-                    .push(ChangeLogEntry::Insert(ChangeLogId::from_leb128_it(
-                        &mut bytes_it,
-                    )?));
+                    .push(Change::Insert(ChangeId::from_leb128_it(&mut bytes_it)?));
             }
         }
 
         if total_updates > 0 {
             'update_outer: for _ in 0..total_updates {
-                let id = ChangeLogId::from_leb128_it(&mut bytes_it)?;
+                let id = ChangeId::from_leb128_it(&mut bytes_it)?;
 
                 if !self.changes.is_empty() {
                     let mut update_idx = None;
                     for (idx, change) in self.changes.iter().enumerate() {
                         match change {
-                            ChangeLogEntry::Insert(insert_id) => {
+                            Change::Insert(insert_id) => {
                                 if *insert_id == id {
                                     // Item updated after inserted, no need to count this change.
                                     continue 'update_outer;
                                 }
                             }
-                            ChangeLogEntry::Update(update_id) => {
+                            Change::Update(update_id) => {
                                 if *update_id == id {
                                     update_idx = Some(idx);
                                     break;
@@ -87,39 +86,40 @@ impl ChangeLog {
                     }
                 }
 
-                self.changes.push(ChangeLogEntry::Update(id));
+                self.changes.push(Change::Update(id));
             }
         }
 
         if total_deletes > 0 {
             'delete_outer: for _ in 0..total_deletes {
-                let id = ChangeLogId::from_leb128_it(&mut bytes_it)?;
+                let id = ChangeId::from_leb128_it(&mut bytes_it)?;
 
                 if !self.changes.is_empty() {
-                    let mut update_idx = None;
-                    for (idx, change) in self.changes.iter().enumerate() {
+                    //let mut update_idx = None;
+                    'delete_inner: for (idx, change) in self.changes.iter().enumerate() {
                         match change {
-                            ChangeLogEntry::Insert(insert_id) => {
+                            Change::Insert(insert_id) => {
                                 if *insert_id == id {
                                     self.changes.remove(idx);
                                     continue 'delete_outer;
                                 }
                             }
-                            ChangeLogEntry::Update(update_id) => {
+                            Change::Update(update_id) => {
                                 if *update_id == id {
-                                    update_idx = Some(idx);
-                                    break;
+                                    self.changes.remove(idx);
+                                    //update_idx = Some(idx);
+                                    break 'delete_inner;
                                 }
                             }
                             _ => (),
                         }
                     }
-                    if let Some(idx) = update_idx {
+                    /*if let Some(idx) = update_idx {
                         self.changes.remove(idx);
-                    }
+                    }*/
                 }
 
-                self.changes.push(ChangeLogEntry::Delete(id));
+                self.changes.push(Change::Delete(id));
             }
         }
 
@@ -128,22 +128,22 @@ impl ChangeLog {
 }
 
 #[derive(Default)]
-pub struct LogEntry {
-    pub inserts: Vec<ChangeLogId>,
-    pub updates: Vec<ChangeLogId>,
-    pub deletes: Vec<ChangeLogId>,
+pub struct Entry {
+    pub inserts: Vec<JMAPId>,
+    pub updates: Vec<JMAPId>,
+    pub deletes: Vec<JMAPId>,
 }
 
-impl From<LogEntry> for Vec<u8> {
-    fn from(writer: LogEntry) -> Self {
+impl From<Entry> for Vec<u8> {
+    fn from(writer: Entry) -> Self {
         writer.serialize()
     }
 }
 
 //TODO delete old changelog entries
-impl LogEntry {
+impl Entry {
     pub fn new() -> Self {
-        LogEntry::default()
+        Entry::default()
     }
 
     pub fn serialize(self) -> Vec<u8> {
@@ -161,12 +161,28 @@ impl LogEntry {
         }
         buf
     }
+
+    pub fn serialize_key(
+        account: AccountId,
+        collection: Collection,
+        change_id: ChangeId,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(FIELD_PREFIX_LEN + std::mem::size_of::<ChangeId>());
+        bytes.extend_from_slice(&account.to_be_bytes());
+        bytes.push(collection.into());
+        bytes.extend_from_slice(&change_id.to_be_bytes());
+        bytes
+    }
+
+    pub fn deserialize_change_id(bytes: &[u8]) -> Option<ChangeId> {
+        bytes.deserialize_be_u64(COLLECTION_PREFIX_LEN)
+    }
 }
 
 pub struct LogWriter {
     pub account_id: AccountId,
     pub raft_id: RaftId,
-    pub changes: HashMap<(CollectionId, ChangeLogId), LogEntry>,
+    pub changes: HashMap<(Collection, ChangeId), Entry>,
 }
 
 impl LogWriter {
@@ -180,14 +196,14 @@ impl LogWriter {
 
     pub fn add_change(
         &mut self,
-        collection_id: CollectionId,
-        change_id: ChangeLogId,
+        collection: Collection,
+        change_id: ChangeId,
         action: LogAction,
     ) {
         let log_entry = self
             .changes
-            .entry((collection_id, change_id))
-            .or_insert_with(LogEntry::new);
+            .entry((collection, change_id))
+            .or_insert_with(Entry::new);
 
         match action {
             LogAction::Insert(id) => {
@@ -211,19 +227,19 @@ impl LogWriter {
             std::mem::size_of::<AccountId>()
                 + std::mem::size_of::<usize>()
                 + (self.changes.len()
-                    * (std::mem::size_of::<ChangeLogId>() + std::mem::size_of::<CollectionId>())),
+                    * (std::mem::size_of::<ChangeId>() + std::mem::size_of::<Collection>())),
         );
 
         self.account_id.to_leb128_bytes(&mut raft_bytes);
         self.changes.len().to_leb128_bytes(&mut raft_bytes);
 
-        for ((collection_id, change_id), log_entry) in self.changes {
-            collection_id.to_leb128_bytes(&mut raft_bytes);
+        for ((collection, change_id), log_entry) in self.changes {
+            raft_bytes.push(collection.into());
             change_id.to_leb128_bytes(&mut raft_bytes);
 
             batch.push(WriteOperation::set(
                 ColumnFamily::Logs,
-                serialize_changelog_key(self.account_id, collection_id, change_id),
+                Entry::serialize_key(self.account_id, collection, change_id),
                 log_entry.serialize(),
             ));
         }
@@ -243,9 +259,9 @@ where
     pub fn get_last_change_id(
         &self,
         account: AccountId,
-        collection: CollectionId,
-    ) -> crate::Result<Option<ChangeLogId>> {
-        let key = serialize_changelog_key(account, collection, ChangeLogId::MAX);
+        collection: Collection,
+    ) -> crate::Result<Option<ChangeId>> {
+        let key = Entry::serialize_key(account, collection, ChangeId::MAX);
         let key_len = key.len();
 
         if let Some((key, _)) = self
@@ -255,16 +271,14 @@ where
             .next()
         {
             if key.starts_with(&key[0..COLLECTION_PREFIX_LEN]) && key.len() == key_len {
-                return Ok(Some(
-                    key.as_ref()
-                        .deserialize_be_u64(COLLECTION_PREFIX_LEN)
-                        .ok_or_else(|| {
-                            StoreError::InternalError(format!(
-                                "Corrupted changelog key for [{}/{}]: [{:?}]",
-                                account, collection, key
-                            ))
-                        })?,
-                ));
+                return Ok(Some(Entry::deserialize_change_id(&key).ok_or_else(
+                    || {
+                        StoreError::InternalError(format!(
+                            "Failed to deserialize changelog key for [{}/{:?}]: [{:?}]",
+                            account, collection, key
+                        ))
+                    },
+                )?));
             }
         }
         Ok(None)
@@ -273,27 +287,27 @@ where
     pub fn get_changes(
         &self,
         account: AccountId,
-        collection: CollectionId,
-        query: ChangeLogQuery,
-    ) -> crate::Result<Option<ChangeLog>> {
-        let mut changelog = ChangeLog::default();
+        collection: Collection,
+        query: Query,
+    ) -> crate::Result<Option<Changes>> {
+        let mut changelog = Changes::default();
         /*let (is_inclusive, mut match_from_change_id, from_change_id, to_change_id) = match query {
-            ChangeLogQuery::All => (true, false, 0, 0),
-            ChangeLogQuery::Since(change_id) => (false, true, change_id, 0),
-            ChangeLogQuery::SinceInclusive(change_id) => (true, true, change_id, 0),
-            ChangeLogQuery::RangeInclusive(from_change_id, to_change_id) => {
+            Query::All => (true, false, 0, 0),
+            Query::Since(change_id) => (false, true, change_id, 0),
+            Query::SinceInclusive(change_id) => (true, true, change_id, 0),
+            Query::RangeInclusive(from_change_id, to_change_id) => {
                 (true, true, from_change_id, to_change_id)
             }
         };*/
         let (is_inclusive, from_change_id, to_change_id) = match query {
-            ChangeLogQuery::All => (true, 0, 0),
-            ChangeLogQuery::Since(change_id) => (false, change_id, 0),
-            ChangeLogQuery::SinceInclusive(change_id) => (true, change_id, 0),
-            ChangeLogQuery::RangeInclusive(from_change_id, to_change_id) => {
+            Query::All => (true, 0, 0),
+            Query::Since(change_id) => (false, change_id, 0),
+            Query::SinceInclusive(change_id) => (true, change_id, 0),
+            Query::RangeInclusive(from_change_id, to_change_id) => {
                 (true, from_change_id, to_change_id)
             }
         };
-        let key = serialize_changelog_key(account, collection, from_change_id);
+        let key = Entry::serialize_key(account, collection, from_change_id);
         let key_len = key.len();
         let prefix = &key[0..COLLECTION_PREFIX_LEN];
         let mut is_first = true;
@@ -308,15 +322,12 @@ where
                 //TODO avoid collisions with Raft keys
                 continue;
             }
-            let change_id = key
-                .as_ref()
-                .deserialize_be_u64(COLLECTION_PREFIX_LEN)
-                .ok_or_else(|| {
-                    StoreError::InternalError(format!(
-                        "Failed to deserialize changelog key for [{}/{}]: [{:?}]",
-                        account, collection, key
-                    ))
-                })?;
+            let change_id = Entry::deserialize_change_id(&key).ok_or_else(|| {
+                StoreError::InternalError(format!(
+                    "Failed to deserialize changelog key for [{}/{:?}]: [{:?}]",
+                    account, collection, key
+                ))
+            })?;
 
             /*if match_from_change_id {
                 if change_id != from_change_id {
@@ -337,7 +348,7 @@ where
                 changelog.to_change_id = change_id;
                 changelog.deserialize(&value).ok_or_else(|| {
                     StoreError::InternalError(format!(
-                        "Failed to deserialize changelog for [{}/{}]: [{:?}]",
+                        "Failed to deserialize changelog for [{}/{:?}]: [{:?}]",
                         account, collection, query
                     ))
                 })?;

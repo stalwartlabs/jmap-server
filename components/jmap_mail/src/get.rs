@@ -3,11 +3,11 @@ use std::{
     iter::FromIterator,
 };
 
-use jmap_store::{
+use jmap::{
     changes::JMAPChanges,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
-    JMAPError, JMAPGet, JMAPGetResponse, JMAP_MAIL,
+    JMAPError, JMAPGet, JMAPGetResponse,
 };
 
 use crate::{
@@ -32,7 +32,7 @@ use mail_parser::{
     },
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{leb128::Leb128, roaring::RoaringBitmap, JMAPId, JMAPStore};
+use store::{leb128::Leb128, roaring::RoaringBitmap, Collection, JMAPId, JMAPStore};
 use store::{serialize::StoreDeserialize, JMAPIdPrefix};
 use store::{DocumentId, Store, StoreError, Tag};
 
@@ -76,7 +76,7 @@ pub trait JMAPMailGet {
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties, JMAPMailGetArguments>,
-    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
+    ) -> jmap::Result<jmap::JMAPGetResponse>;
 }
 
 impl<T> JMAPMailGet for JMAPStore<T>
@@ -86,7 +86,7 @@ where
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties, JMAPMailGetArguments>,
-    ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
+    ) -> jmap::Result<jmap::JMAPGetResponse> {
         let properties = request.properties.unwrap_or_else(|| {
             vec![
                 JMAPMailProperties::Id,
@@ -163,7 +163,7 @@ where
         };
 
         let document_ids = self
-            .get_document_ids(request.account_id, JMAP_MAIL)?
+            .get_document_ids(request.account_id, Collection::Mail)?
             .unwrap_or_else(RoaringBitmap::new);
 
         let request_ids: Vec<u64> = if let Some(request_ids) = request.ids {
@@ -179,7 +179,7 @@ where
                 .collect::<Vec<DocumentId>>();
             self.get_multi_document_value(
                 request.account_id,
-                JMAP_MAIL,
+                Collection::Mail,
                 document_ids.iter().copied(),
                 MessageField::ThreadId.into(),
             )?
@@ -206,13 +206,11 @@ where
             let message_data_bytes = self
                 .get_blob(
                     request.account_id,
-                    JMAP_MAIL,
+                    Collection::Mail,
                     document_id,
                     MESSAGE_DATA,
-                    0..u32::MAX,
                 )?
-                .ok_or(StoreError::DataCorruption)?
-                .1;
+                .ok_or(StoreError::DataCorruption)?;
 
             let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
                 .ok_or(StoreError::DataCorruption)?;
@@ -226,13 +224,11 @@ where
                     Some(
                         self.get_blob(
                             request.account_id,
-                            JMAP_MAIL,
+                            Collection::Mail,
                             document_id,
                             MESSAGE_RAW,
-                            0..u32::MAX,
                         )?
-                        .ok_or(StoreError::DataCorruption)?
-                        .1,
+                        .ok_or(StoreError::DataCorruption)?,
                     ),
                     Some(
                         MessageOutline::deserialize(
@@ -248,15 +244,14 @@ where
                     .ok_or(StoreError::DataCorruption)?;
                     (
                         Some(
-                            self.get_blob(
+                            self.get_blob_range(
                                 request.account_id,
-                                JMAP_MAIL,
+                                Collection::Mail,
                                 document_id,
                                 MESSAGE_RAW,
                                 0..message_outline.body_offset as u32,
                             )?
-                            .ok_or(StoreError::DataCorruption)?
-                            .1,
+                            .ok_or(StoreError::DataCorruption)?,
                         ),
                         Some(message_outline),
                     )
@@ -265,7 +260,8 @@ where
             };
 
             let message_raw_ref = message_raw.as_ref().map(|raw| raw.as_ref());
-            let base_blob_id = BlobId::new_owned(request.account_id, JMAP_MAIL, document_id, 0);
+            let base_blob_id =
+                BlobId::new_owned(request.account_id, Collection::Mail, document_id, 0);
             let mut result: HashMap<String, JSONValue> = HashMap::new();
 
             for property in &properties {
@@ -378,7 +374,7 @@ where
                         JMAPMailProperties::BlobId => JSONValue::String(
                             BlobId::new_owned(
                                 request.account_id,
-                                JMAP_MAIL,
+                                Collection::Mail,
                                 document_id,
                                 MESSAGE_RAW,
                             )
@@ -391,7 +387,7 @@ where
                             if let Some(mailboxes) = self
                                 .get_document_value::<Bincoded<Vec<MailboxId>>>(
                                     request.account_id,
-                                    JMAP_MAIL,
+                                    Collection::Mail,
                                     document_id,
                                     MessageField::Mailbox.into(),
                                 )?
@@ -415,7 +411,7 @@ where
                         JMAPMailProperties::Keywords => {
                             if let Some(tags) = self.get_document_value::<Bincoded<Vec<Tag>>>(
                                 request.account_id,
-                                JMAP_MAIL,
+                                Collection::Mail,
                                 document_id,
                                 MessageField::Keyword.into(),
                             )? {
@@ -475,9 +471,9 @@ where
                                 JSONValue::String(
                                     preview_text(
                                         String::from_utf8(
-                                            self.get_blob(
+                                            self.get_blob_range(
                                                 request.account_id,
-                                                JMAP_MAIL,
+                                                Collection::Mail,
                                                 document_id,
                                                 MESSAGE_PARTS
                                                     + message_data
@@ -490,8 +486,7 @@ where
                                                         .blob_index,
                                                 0..260,
                                             )?
-                                            .ok_or(StoreError::DataCorruption)?
-                                            .1,
+                                            .ok_or(StoreError::DataCorruption)?,
                                         )
                                         .map_or_else(
                                             |err| {
@@ -510,7 +505,7 @@ where
                                         String::from_utf8(
                                             self.get_blob(
                                                 request.account_id,
-                                                JMAP_MAIL,
+                                                Collection::Mail,
                                                 document_id,
                                                 MESSAGE_PARTS
                                                     + message_data
@@ -521,10 +516,8 @@ where
                                                         })
                                                         .ok_or(StoreError::DataCorruption)?
                                                         .blob_index,
-                                                0..u32::MAX,
                                             )?
-                                            .ok_or(StoreError::DataCorruption)?
-                                            .1,
+                                            .ok_or(StoreError::DataCorruption)?,
                                         )
                                         .map_or_else(
                                             |err| {
@@ -590,7 +583,7 @@ where
                                 JSONValue::Object(HashMap::from_iter(
                                     self.get_blobs(
                                         request.account_id,
-                                        JMAP_MAIL,
+                                        Collection::Mail,
                                         document_id,
                                         blobs,
                                     )?
@@ -645,7 +638,7 @@ where
         }
 
         Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, JMAP_MAIL)?,
+            state: self.get_state(request.account_id, Collection::Mail)?,
             list: if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
@@ -937,7 +930,7 @@ fn add_rfc_header(
     header: RfcHeader,
     form: JMAPMailHeaderForm,
     all: bool,
-) -> jmap_store::Result<JSONValue> {
+) -> jmap::Result<JSONValue> {
     let (value, is_collection, is_grouped) = match &form {
         JMAPMailHeaderForm::Addresses | JMAPMailHeaderForm::GroupedAddresses => {
             if let Some(value) = message_headers.remove(&JMAPMailProperties::Header(
@@ -989,7 +982,7 @@ pub fn transform_rfc_header(
     is_collection: bool,
     is_grouped: bool,
     as_collection: bool,
-) -> jmap_store::Result<JSONValue> {
+) -> jmap::Result<JSONValue> {
     Ok(match (header, form.clone()) {
         (RfcHeader::Date | RfcHeader::ResentDate, JMAPMailHeaderForm::Date)
         | (
@@ -1237,7 +1230,7 @@ pub fn transform_json_string(value: JSONValue, as_collection: bool) -> JSONValue
 mod tests {
     use std::collections::HashMap;
 
-    use jmap_store::json::JSONValue;
+    use jmap::json::JSONValue;
 
     #[test]
     fn test_json_transform() {

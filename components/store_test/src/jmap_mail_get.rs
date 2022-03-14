@@ -1,10 +1,10 @@
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
-    import::JMAPMailLocalStoreImport,
+    import::JMAPMailImport,
     HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailProperties,
 };
-use jmap_store::{json::JSONValue, JMAPGet};
+use jmap::{json::JSONValue, JMAPGet};
 use mail_parser::RfcHeader;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -85,14 +85,15 @@ where
             continue;
         }
         let blob = fs::read(&file_name).unwrap();
+        let blob_len = blob.len();
         let jmap_id = mail_store
             .mail_import_blob(
                 0,
                 RaftId::default(),
-                &blob,
+                blob,
                 vec![],
                 vec![Tag::Text("tag".into())],
-                Some((blob.len() * 1000000) as i64),
+                Some((blob_len * 1000000) as i64),
             )
             .unwrap()
             .unwrap_object()

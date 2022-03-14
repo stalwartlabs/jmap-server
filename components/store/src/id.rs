@@ -4,22 +4,22 @@ use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 
 use crate::{
-    changelog::ChangeLogId,
+    changes::ChangeId,
     serialize::{serialize_bm_internal, BM_TOMBSTONED_IDS, BM_USED_IDS},
-    AccountId, CollectionId, DocumentId, JMAPStore, Store, StoreError,
+    AccountId, DocumentId, Collection, JMAPStore, Store, StoreError,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct IdCacheKey {
     pub account_id: AccountId,
-    pub collection_id: CollectionId,
+    pub collection: Collection,
 }
 
 impl IdCacheKey {
-    pub fn new(account_id: AccountId, collection_id: CollectionId) -> Self {
+    pub fn new(account_id: AccountId, collection: Collection) -> Self {
         Self {
             account_id,
-            collection_id,
+            collection,
         }
     }
 }
@@ -28,11 +28,11 @@ impl IdCacheKey {
 pub struct IdAssigner {
     pub freed_ids: Option<RoaringBitmap>,
     pub next_id: DocumentId,
-    pub next_change_id: ChangeLogId,
+    pub next_change_id: ChangeId,
 }
 
 impl IdAssigner {
-    pub fn new(used_ids: Option<RoaringBitmap>, next_change_id: ChangeLogId) -> Self {
+    pub fn new(used_ids: Option<RoaringBitmap>, next_change_id: ChangeId) -> Self {
         let (next_id, freed_ids) = if let Some(used_ids) = used_ids {
             let next_id = used_ids.max().unwrap() + 1;
             //TODO test properly
@@ -71,7 +71,7 @@ impl IdAssigner {
         }
     }
 
-    pub fn assign_change_id(&mut self) -> ChangeLogId {
+    pub fn assign_change_id(&mut self) -> ChangeId {
         let id = self.next_change_id;
         self.next_change_id += 1;
         id
@@ -85,15 +85,15 @@ where
     pub fn get_id_assigner(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
     ) -> crate::Result<Arc<Mutex<IdAssigner>>> {
         self.doc_id_cache
             .get_or_try_insert_with::<_, StoreError>(
-                IdCacheKey::new(account_id, collection_id),
+                IdCacheKey::new(account_id, collection),
                 || {
                     Ok(Arc::new(Mutex::new(IdAssigner::new(
-                        self.get_document_ids_used(account_id, collection_id)?,
-                        self.get_last_change_id(account_id, collection_id)?
+                        self.get_document_ids_used(account_id, collection)?,
+                        self.get_last_change_id(account_id, collection)?
                             .map(|id| id + 1)
                             .unwrap_or(0),
                     ))))
@@ -105,10 +105,10 @@ where
     pub fn assign_change_id(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
-    ) -> crate::Result<ChangeLogId> {
+        collection: Collection,
+    ) -> crate::Result<ChangeId> {
         Ok(self
-            .get_id_assigner(account_id, collection_id)?
+            .get_id_assigner(account_id, collection)?
             .lock()
             .assign_change_id())
     }
@@ -116,10 +116,10 @@ where
     pub fn assign_document_id(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
     ) -> crate::Result<DocumentId> {
         Ok(self
-            .get_id_assigner(account_id, collection_id)?
+            .get_id_assigner(account_id, collection)?
             .lock()
             .assign_document_id())
     }
@@ -127,23 +127,19 @@ where
     pub fn get_document_ids_used(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(&serialize_bm_internal(
-            account_id,
-            collection_id,
-            BM_USED_IDS,
-        ))
+        self.get_bitmap(&serialize_bm_internal(account_id, collection, BM_USED_IDS))
     }
 
     pub fn get_tombstoned_ids(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
     ) -> crate::Result<Option<RoaringBitmap>> {
         self.get_bitmap(&serialize_bm_internal(
             account_id,
-            collection_id,
+            collection,
             BM_TOMBSTONED_IDS,
         ))
     }
@@ -151,10 +147,10 @@ where
     pub fn get_document_ids(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(mut docs) = self.get_document_ids_used(account_id, collection_id)? {
-            if let Some(tombstoned_docs) = self.get_tombstoned_ids(account_id, collection_id)? {
+        if let Some(mut docs) = self.get_document_ids_used(account_id, collection)? {
+            if let Some(tombstoned_docs) = self.get_tombstoned_ids(account_id, collection)? {
                 docs ^= tombstoned_docs;
             }
             Ok(Some(docs))
@@ -170,7 +166,7 @@ where
 pub fn set_document_ids(
     &self,
     account_id: AccountId,
-    collection_id: CollectionId,
+    collection: Collection,
     bitmap: RoaringBitmap,
 ) -> crate::Result<()> {
     use crate::bitmaps::IS_BITMAP;
@@ -184,7 +180,7 @@ pub fn set_document_ids(
     self.db
         .put_cf(
             &self.get_handle("bitmaps")?,
-            &serialize_bm_internal(account_id, collection_id, BM_USED_IDS),
+            &serialize_bm_internal(account_id, collection, BM_USED_IDS),
             bytes,
         )
         .map_err(|e| StoreError::InternalError(e.to_string()))

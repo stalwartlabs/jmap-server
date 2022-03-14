@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use jmap_store::changes::{JMAPChanges, JMAPState};
+use jmap::changes::{JMAPChanges, JMAPState};
 use store::{
     batch::{LogAction, WriteBatch},
     raft::RaftId,
-    JMAPStore, Store,
+    Collection, JMAPStore, Store,
 };
 
 pub fn jmap_changes<T>(mail_store: JMAPStore<T>)
@@ -126,22 +126,23 @@ where
         let mut documents = Vec::new();
 
         for change in changes {
-            let mut batch =
-                WriteBatch::insert(0, mail_store.assign_document_id(0, 0).unwrap(), 0u64);
+            let mut batch = WriteBatch::insert(
+                Collection::Mail,
+                mail_store.assign_document_id(0, Collection::Mail).unwrap(),
+                0u64,
+            );
             batch.log_action = change;
             documents.push(batch);
         }
 
         mail_store
             .update_documents(0, RaftId::default(), documents)
-            
             .unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
             let changes = mail_store
-                .get_jmap_changes(0, 0, state.clone(), 0)
-                
+                .get_jmap_changes(0, Collection::Mail, state.clone(), 0)
                 .unwrap();
 
             assert_eq!(
@@ -181,8 +182,7 @@ where
 
                 for _ in 0..100 {
                     let changes = mail_store
-                        .get_jmap_changes(0, 0, int_state, max_changes)
-                        
+                        .get_jmap_changes(0, Collection::Mail, int_state, max_changes)
                         .unwrap();
 
                     assert!(

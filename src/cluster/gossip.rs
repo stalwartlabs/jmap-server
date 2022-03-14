@@ -307,7 +307,9 @@ where
         if let Some(source_peer_idx) = source_peer_idx {
             if do_full_sync {
                 self.peers[source_peer_idx]
-                    .dispatch_request(rpc::Request::Synchronize(self.build_peer_info()))
+                    .dispatch_request(rpc::Request::UpdatePeers {
+                        peers: self.build_peer_info(),
+                    })
                     .await;
             } else if send_pong {
                 self.send_gossip(
@@ -332,8 +334,10 @@ where
     pub async fn handle_join_reply(&mut self, id: usize) {
         if let Some(peer) = self.peers.get(id) {
             if peer.is_seed() {
-                peer.dispatch_request(rpc::Request::Synchronize(self.build_peer_info()))
-                    .await;
+                peer.dispatch_request(rpc::Request::UpdatePeers {
+                    peers: self.build_peer_info(),
+                })
+                .await;
             }
         }
     }

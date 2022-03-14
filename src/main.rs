@@ -1,6 +1,8 @@
 pub mod cluster;
 pub mod error;
 pub mod jmap;
+#[cfg(test)]
+pub mod tests;
 
 use std::{
     net::SocketAddr,
@@ -14,7 +16,7 @@ use store_rocksdb::RocksDB;
 use crate::{cluster::main::start_cluster, jmap::jmap_request};
 
 pub struct JMAPServer<T> {
-    pub jmap_store: Arc<JMAPStore<T>>,
+    pub store: Arc<JMAPStore<T>>,
     pub is_raft_leader: AtomicBool,
     pub worker_pool: rayon::ThreadPool,
 }
@@ -31,7 +33,7 @@ async fn main() -> std::io::Result<()> {
 
     // Build the JMAP store
     let jmap_server = web::Data::new(JMAPServer {
-        jmap_store: JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings).into(),
+        store: JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings).into(),
         worker_pool: rayon::ThreadPoolBuilder::new()
             .num_threads(
                 settings

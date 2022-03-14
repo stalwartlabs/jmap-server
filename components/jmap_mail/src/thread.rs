@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
-use jmap_store::{
+use jmap::{
     changes::{JMAPChanges, JMAPChangesRequest, JMAPChangesResponse},
     id::JMAPIdSerialize,
     json::JSONValue,
-    JMAPError, JMAPGet, JMAPGetResponse, JMAP_MAIL, JMAP_THREAD,
+    JMAPError, JMAPGet, JMAPGetResponse,
 };
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
-    Comparator, FieldComparator, Filter, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag,
+    Comparator, FieldComparator, Filter, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store,
+    Tag,
 };
 
 use crate::{JMAPMailProperties, MessageField};
@@ -17,12 +18,12 @@ pub trait JMAPMailThread {
     fn thread_get(
         &self,
         request: JMAPGet<JMAPMailProperties, ()>,
-    ) -> jmap_store::Result<jmap_store::JMAPGetResponse>;
+    ) -> jmap::Result<jmap::JMAPGetResponse>;
 
     fn thread_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap_store::Result<JMAPChangesResponse<()>>;
+    ) -> jmap::Result<JMAPChangesResponse<()>>;
 }
 
 impl<T> JMAPMailThread for JMAPStore<T>
@@ -32,7 +33,7 @@ where
     fn thread_get(
         &self,
         request: JMAPGet<JMAPMailProperties, ()>,
-    ) -> jmap_store::Result<jmap_store::JMAPGetResponse> {
+    ) -> jmap::Result<jmap::JMAPGetResponse> {
         let thread_ids = request.ids.unwrap_or_default();
 
         if thread_ids.len() > self.config.mail_thread_max_results {
@@ -46,7 +47,7 @@ where
             let thread_id = jmap_thread_id.get_document_id();
             if let Some(doc_ids) = self.get_tag(
                 request.account_id,
-                JMAP_MAIL,
+                Collection::Mail,
                 MessageField::ThreadId.into(),
                 Tag::Id(thread_id),
             )? {
@@ -55,7 +56,7 @@ where
                 let email_ids: Vec<JSONValue> = self
                     .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                         request.account_id,
-                        JMAP_MAIL,
+                        Collection::Mail,
                         Filter::DocumentSet(doc_ids),
                         Comparator::Field(FieldComparator {
                             field: MessageField::ReceivedAt.into(),
@@ -78,7 +79,7 @@ where
         }
 
         Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, JMAP_THREAD)?,
+            state: self.get_state(request.account_id, Collection::Thread)?,
             list: if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
@@ -95,10 +96,10 @@ where
     fn thread_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap_store::Result<JMAPChangesResponse<()>> {
+    ) -> jmap::Result<JMAPChangesResponse<()>> {
         self.get_jmap_changes(
             request.account,
-            JMAP_THREAD,
+            Collection::Thread,
             request.since_state,
             request.max_changes,
         )

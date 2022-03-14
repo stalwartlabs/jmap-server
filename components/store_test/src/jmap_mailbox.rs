@@ -3,20 +3,20 @@ use std::{
     iter::FromIterator,
 };
 
+use jmap::{
+    changes::{JMAPChangesRequest, JMAPState},
+    id::JMAPIdSerialize,
+    json::JSONValue,
+    JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest, JMAPSet,
+};
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
-    import::JMAPMailLocalStoreImport,
+    import::JMAPMailImport,
     mailbox::{
         JMAPMailMailbox, JMAPMailboxComparator, JMAPMailboxFilterCondition, JMAPMailboxProperties,
         JMAPMailboxQueryArguments, JMAPMailboxSetArguments,
     },
     set::JMAPMailSet,
-};
-use jmap_store::{
-    changes::{JMAPChangesRequest, JMAPState},
-    id::JMAPIdSerialize,
-    json::JSONValue,
-    JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest, JMAPSet,
 };
 
 use store::{raft::RaftId, JMAPId, JMAPIdPrefix, JMAPStore, Store};
@@ -529,7 +529,7 @@ where
         .mail_import_blob(
             0,
             RaftId::default(),
-            b"From: test@test.com\nSubject: hey\n\ntest",
+            b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
             vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox"))
                 .unwrap()
                 .get_document_id()],

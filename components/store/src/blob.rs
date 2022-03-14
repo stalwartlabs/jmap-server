@@ -16,7 +16,7 @@ use crate::{
         serialize_blob_key, serialize_temporary_blob_key, StoreDeserialize, StoreSerialize,
         BLOB_KEY, TEMP_BLOB_KEY,
     },
-    AccountId, CollectionId, ColumnFamily, Direction, DocumentId, JMAPStore, Store, StoreError,
+    AccountId, ColumnFamily, Direction, DocumentId, Collection, JMAPStore, Store, StoreError,
     WriteOperation,
 };
 use sha2::Digest;
@@ -147,11 +147,21 @@ where
     pub fn get_blob(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
+        document: DocumentId,
+        blob_index: BlobIndex,
+    ) -> crate::Result<Option<Vec<u8>>> {
+        self.get_blob_range(account, collection, document, blob_index, 0..u32::MAX)
+    }
+
+    pub fn get_blob_range(
+        &self,
+        account: AccountId,
+        collection: Collection,
         document: DocumentId,
         blob_index: BlobIndex,
         blob_range: Range<u32>,
-    ) -> crate::Result<Option<(BlobIndex, Vec<u8>)>> {
+    ) -> crate::Result<Option<Vec<u8>>> {
         Ok(self
             .get_blobs(
                 account,
@@ -159,13 +169,14 @@ where
                 document,
                 vec![(blob_index, blob_range)],
             )?
-            .pop())
+            .pop()
+            .map(|(_, blob)| blob))
     }
 
     pub fn get_blobs(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         document: DocumentId,
         items: Vec<(BlobIndex, Range<u32>)>,
     ) -> crate::Result<Vec<(BlobIndex, Vec<u8>)>> {

@@ -1,13 +1,10 @@
 use chrono::DateTime;
-use jmap_store::blob::JMAPBlobStore;
-use jmap_store::changes::JMAPChanges;
-use jmap_store::id::{BlobId, JMAPIdSerialize};
-use jmap_store::json::JSONValue;
-use jmap_store::JMAP_MAILBOX_CHANGES;
-use jmap_store::{
-    json::JSONPointer, JMAPError, JMAPSet, JMAPSetErrorType, JMAPSetResponse, JMAP_MAIL,
-    JMAP_MAILBOX,
-};
+use jmap::blob::JMAPBlobStore;
+use jmap::changes::JMAPChanges;
+use jmap::id::{BlobId, JMAPIdSerialize};
+use jmap::json::JSONValue;
+
+use jmap::{json::JSONPointer, JMAPError, JMAPSet, JMAPSetErrorType, JMAPSetResponse};
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
 use mail_builder::headers::date::Date;
@@ -22,9 +19,9 @@ use store::batch::WriteBatch;
 use store::field::FieldOptions;
 use store::roaring::RoaringBitmap;
 use store::serialize::StoreSerialize;
-use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError, Tag};
+use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError, Tag};
 
-use crate::import::{Bincoded, JMAPMailLocalStoreImport};
+use crate::import::{Bincoded, JMAPMailImport};
 use crate::parse::get_message_blob;
 use crate::query::MailboxId;
 use crate::{
@@ -39,7 +36,7 @@ pub struct MessageItem {
 }
 
 pub trait JMAPMailSet {
-    fn mail_set(&self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse>;
+    fn mail_set(&self, request: JMAPSet<()>) -> jmap::Result<JMAPSetResponse>;
     fn build_message(
         &self,
         account: AccountId,
@@ -74,8 +71,8 @@ impl<T> JMAPMailSet for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_set(&self, request: JMAPSet<()>) -> jmap_store::Result<JMAPSetResponse> {
-        let old_state = self.get_state(request.account_id, JMAP_MAIL)?;
+    fn mail_set(&self, request: JMAPSet<()>) -> jmap::Result<JMAPSetResponse> {
+        let old_state = self.get_state(request.account_id, Collection::Mail)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
                 return Err(JMAPError::StateMismatch);
@@ -95,7 +92,7 @@ where
             ..Default::default()
         };
         let document_ids = self
-            .get_document_ids(request.account_id, JMAP_MAIL)?
+            .get_document_ids(request.account_id, Collection::Mail)?
             .unwrap_or_else(RoaringBitmap::new);
         let mut mailbox_ids = None;
 
@@ -108,7 +105,7 @@ where
                     mailbox_ids
                 } else {
                     mailbox_ids = self
-                        .get_document_ids(request.account_id, JMAP_MAILBOX)?
+                        .get_document_ids(request.account_id, Collection::Mailbox)?
                         .unwrap_or_default()
                         .into();
                     mailbox_ids.as_ref().unwrap()
@@ -121,7 +118,7 @@ where
                             self.mail_import_blob(
                                 request.account_id,
                                 self.assign_raft_id(),
-                                &import_item.blob,
+                                import_item.blob,
                                 import_item.mailbox_ids,
                                 import_item.keywords,
                                 import_item.received_at,
@@ -185,7 +182,7 @@ where
                         continue;
                     }
                 }
-                let mut document = WriteBatch::update(JMAP_MAIL, document_id, jmap_id);
+                let mut document = WriteBatch::update(Collection::Mail, document_id, jmap_id);
 
                 let mut keyword_op_list = HashMap::new();
                 let mut keyword_op_clear_all = false;
@@ -354,7 +351,7 @@ where
                         mailbox_ids
                     } else {
                         mailbox_ids = self
-                            .get_document_ids(request.account_id, JMAP_MAILBOX)?
+                            .get_document_ids(request.account_id, Collection::Mailbox)?
                             .unwrap_or_default()
                             .into();
                         mailbox_ids.as_ref().unwrap()
@@ -364,7 +361,7 @@ where
                     let current_mailboxes = self
                         .get_document_value::<Bincoded<Vec<MailboxId>>>(
                             request.account_id,
-                            JMAP_MAIL,
+                            Collection::Mail,
                             document_id,
                             MessageField::Mailbox.into(),
                         )?
@@ -455,7 +452,7 @@ where
                     let current_keywords = self
                         .get_document_value::<Bincoded<Vec<Tag>>>(
                             request.account_id,
-                            JMAP_MAIL,
+                            Collection::Mail,
                             document_id,
                             MessageField::Keyword.into(),
                         )?
@@ -529,7 +526,7 @@ where
                             .get_document_value::<Bincoded<Vec<MailboxId>>>(
                                 //TODO use StoreDeserialize
                                 request.account_id,
-                                JMAP_MAIL,
+                                Collection::Mail,
                                 document_id,
                                 MessageField::Mailbox.into(),
                             )?
@@ -552,11 +549,12 @@ where
 
                 // Log mailbox changes
                 if !changed_mailboxes.is_empty() {
-                    let change_id = self.assign_change_id(request.account_id, JMAP_MAILBOX)?;
+                    let change_id =
+                        self.assign_change_id(request.account_id, Collection::Mailbox)?;
                     for changed_mailbox_id in changed_mailboxes {
                         changes.push(
                             WriteBatch::update(
-                                JMAP_MAILBOX,
+                                Collection::Mailbox,
                                 changed_mailbox_id,
                                 changed_mailbox_id,
                             )
@@ -564,7 +562,7 @@ where
                         );
                         changes.push(
                             WriteBatch::update(
-                                JMAP_MAILBOX_CHANGES,
+                                Collection::MailboxChanges,
                                 changed_mailbox_id,
                                 changed_mailbox_id,
                             )
@@ -603,7 +601,11 @@ where
                 if let Some(jmap_id) = destroy_id.to_jmap_id() {
                     let document_id = jmap_id.get_document_id();
                     if document_ids.contains(document_id) {
-                        changes.push(WriteBatch::delete(JMAP_MAIL, document_id, jmap_id));
+                        changes.push(WriteBatch::delete(
+                            Collection::Mail,
+                            document_id,
+                            jmap_id,
+                        ));
                         destroyed.push(destroy_id);
                         continue;
                     }
@@ -627,7 +629,7 @@ where
 
         if !changes.is_empty() {
             self.update_documents(request.account_id, self.assign_raft_id(), changes)?;
-            response.new_state = self.get_state(request.account_id, JMAP_MAIL)?;
+            response.new_state = self.get_state(request.account_id, Collection::Mail)?;
         } else {
             response.new_state = response.old_state.clone();
         }

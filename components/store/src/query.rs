@@ -7,8 +7,8 @@ use crate::{
         serialize_index_key_prefix,
     },
     term_index::TermIndex,
-    AccountId, CollectionId, ColumnFamily, Comparator, Direction, DocumentId, FieldId, FieldValue,
-    Filter, FilterOperator, JMAPId, JMAPStore, LogicalOperator, Store, StoreError,
+    AccountId, ColumnFamily, Comparator, Direction, DocumentId, FieldId, FieldValue, Filter,
+    FilterOperator, Collection, JMAPId, JMAPStore, LogicalOperator, Store, StoreError,
 };
 use nlp::Language;
 use roaring::RoaringBitmap;
@@ -31,7 +31,7 @@ where
     T: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
 {
     pub account_id: AccountId,
-    pub collection_id: CollectionId,
+    pub collection: Collection,
     pub filter_map_fnc: Option<T>,
     pub filter: Filter,
     pub sort: Comparator,
@@ -43,13 +43,13 @@ where
 {
     pub fn new(
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
         filter: Filter,
         sort: Comparator,
     ) -> Self {
         Self {
             account_id,
-            collection_id,
+            collection,
             filter_map_fnc: None,
             filter,
             sort,
@@ -116,9 +116,9 @@ where
         U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
     {
         let mut document_ids = self
-            .get_document_ids_used(request.account_id, request.collection_id)?
+            .get_document_ids_used(request.account_id, request.collection)?
             .unwrap_or_else(RoaringBitmap::new);
-        let tombstoned_ids = self.get_tombstoned_ids(request.account_id, request.collection_id)?;
+        let tombstoned_ids = self.get_tombstoned_ids(request.account_id, request.collection)?;
 
         let filter = match request.filter {
             Filter::Operator(filter) => filter,
@@ -166,7 +166,7 @@ where
                                     &mut state.bm,
                                     self.get_bitmap(&serialize_bm_text_key(
                                         request.account_id,
-                                        request.collection_id,
+                                        request.collection,
                                         filter_cond.field,
                                         &keyword,
                                     ))?,
@@ -183,7 +183,7 @@ where
                                             .map(|token| {
                                                 serialize_bm_text_key(
                                                     request.account_id,
-                                                    request.collection_id,
+                                                    request.collection,
                                                     field_cond_field,
                                                     &token.word,
                                                 )
@@ -209,7 +209,7 @@ where
                                                 requested_ids.insert(match_term.id);
                                                 keys.push(serialize_bm_term_key(
                                                     request.account_id,
-                                                    request.collection_id,
+                                                    request.collection,
                                                     filter_cond.field,
                                                     match_term.id,
                                                     true,
@@ -228,7 +228,7 @@ where
                                                             ColumnFamily::Values,
                                                             &serialize_acd_key_leb128(
                                                                 request.account_id,
-                                                                request.collection_id,
+                                                                request.collection,
                                                                 document_id,
                                                             ),
                                                         )?
@@ -281,7 +281,7 @@ where
                                                     requested_ids.insert(term_op);
                                                     keys.push(serialize_bm_term_key(
                                                         request.account_id,
-                                                        request.collection_id,
+                                                        request.collection,
                                                         filter_cond.field,
                                                         term_op.0,
                                                         term_op.1,
@@ -323,7 +323,7 @@ where
                                     self.range_to_bitmap(
                                         &serialize_index_key_base(
                                             request.account_id,
-                                            request.collection_id,
+                                            request.collection,
                                             filter_cond.field,
                                             &i.to_be_bytes(),
                                         ),
@@ -339,7 +339,7 @@ where
                                     self.range_to_bitmap(
                                         &serialize_index_key_base(
                                             request.account_id,
-                                            request.collection_id,
+                                            request.collection,
                                             filter_cond.field,
                                             &i.to_be_bytes(),
                                         ),
@@ -355,7 +355,7 @@ where
                                     self.range_to_bitmap(
                                         &serialize_index_key_base(
                                             request.account_id,
-                                            request.collection_id,
+                                            request.collection,
                                             filter_cond.field,
                                             &f.to_be_bytes(),
                                         ),
@@ -370,7 +370,7 @@ where
                                     &mut state.bm,
                                     self.get_bitmap(&serialize_bm_tag_key(
                                         request.account_id,
-                                        request.collection_id,
+                                        request.collection,
                                         filter_cond.field,
                                         &tag,
                                     ))?,
@@ -442,23 +442,28 @@ where
                     Comparator::Field(comp) => {
                         let prefix = serialize_index_key_prefix(
                             request.account_id,
-                            request.collection_id,
+                            request.collection as u8,
                             comp.field,
                         );
                         IndexType::DB(DBIndex {
                             it: None,
                             start_key: if !comp.ascending {
-                                let (key_account_id, key_collection_id, key_field) =
-                                    if comp.field < FieldId::MAX {
-                                        (request.account_id, request.collection_id, comp.field + 1)
-                                    } else if request.collection_id < CollectionId::MAX {
-                                        (request.account_id, request.collection_id + 1, comp.field)
-                                    } else {
-                                        (request.account_id + 1, request.collection_id, comp.field)
-                                    };
+                                let (key_account_id, key_collection, key_field) = if comp.field
+                                    < FieldId::MAX
+                                {
+                                    (request.account_id, request.collection as u8, comp.field + 1)
+                                } else if (request.collection as u8) < u8::MAX {
+                                    (
+                                        request.account_id,
+                                        (request.collection as u8) + 1,
+                                        comp.field,
+                                    )
+                                } else {
+                                    (request.account_id + 1, request.collection as u8, comp.field)
+                                };
                                 serialize_index_key_prefix(
                                     key_account_id,
-                                    key_collection_id,
+                                    key_collection,
                                     key_field,
                                 )
                             } else {

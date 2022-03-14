@@ -1,5 +1,5 @@
 use store::{
-    query::JMAPStoreQuery, CollectionId, Comparator, DocumentId, Filter, FilterOperator, JMAPId,
+    query::JMAPStoreQuery, Comparator, DocumentId, Filter, FilterOperator, Collection, JMAPId,
     LogicalOperator,
 };
 
@@ -17,7 +17,7 @@ struct QueryState<T> {
 impl<T, U, V> JMAPQueryRequest<T, U, V> {
     pub fn build_query<W, X, Y>(
         &mut self,
-        collection_id: CollectionId,
+        collection: Collection,
         mut condition_map_fnc: W,
         mut comparator_map_fnc: X,
         filter_map_fnc: Option<Y>,
@@ -98,7 +98,7 @@ impl<T, U, V> JMAPQueryRequest<T, U, V> {
 
         Ok(JMAPStoreQuery {
             account_id: self.account_id,
-            collection_id,
+            collection,
             filter_map_fnc,
             filter,
             sort,

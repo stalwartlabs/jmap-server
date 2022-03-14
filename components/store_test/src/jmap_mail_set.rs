@@ -1,18 +1,18 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
+use jmap::{
+    blob::JMAPBlobStore,
+    id::{BlobId, JMAPIdSerialize},
+    json::{JSONNumber, JSONValue},
+    JMAPGet, JMAPSet,
+};
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
     parse::get_message_blob,
     set::JMAPMailSet,
     JMAPMailBodyProperties, JMAPMailProperties,
 };
-use jmap_store::{
-    blob::JMAPBlobStore,
-    id::{BlobId, JMAPIdSerialize},
-    json::{JSONNumber, JSONValue},
-    JMAPGet, JMAPSet, JMAP_MAILBOX,
-};
-use store::{batch::WriteBatch, raft::RaftId, JMAPId, JMAPStore, Store};
+use store::{batch::WriteBatch, raft::RaftId, Collection, JMAPId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
@@ -107,20 +107,24 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     // TODO use mailbox create API
-    let doc_id = mail_store.assign_document_id(0, JMAP_MAILBOX).unwrap();
+    let doc_id = mail_store
+        .assign_document_id(0, Collection::Mailbox)
+        .unwrap();
     mail_store
         .update_document(
             0,
             RaftId::default(),
-            WriteBatch::insert(JMAP_MAILBOX, doc_id, doc_id),
+            WriteBatch::insert(Collection::Mailbox, doc_id, doc_id),
         )
         .unwrap();
-    let doc_id = mail_store.assign_document_id(0, JMAP_MAILBOX).unwrap();
+    let doc_id = mail_store
+        .assign_document_id(0, Collection::Mailbox)
+        .unwrap();
     mail_store
         .update_document(
             0,
             RaftId::default(),
-            WriteBatch::insert(JMAP_MAILBOX, doc_id, doc_id),
+            WriteBatch::insert(Collection::Mailbox, doc_id, doc_id),
         )
         .unwrap();
 

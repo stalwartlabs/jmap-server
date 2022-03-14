@@ -1,5 +1,5 @@
-use jmap_mail::{import::JMAPMailLocalStoreImport, thread::JMAPMailThread};
-use jmap_store::{json::JSONValue, JMAPGet};
+use jmap::{json::JSONValue, JMAPGet};
+use jmap_mail::{import::JMAPMailImport, thread::JMAPMailThread};
 use store::{raft::RaftId, JMAPStore, Store};
 
 pub fn jmap_mail_thread<T>(mail_store: JMAPStore<T>)
@@ -14,7 +14,7 @@ where
             .mail_import_blob(
                 0,
                 RaftId::default(),
-                format!("Subject: test\nReferences: <1234>\n\n{}", num).as_bytes(),
+                format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
                 vec![],
                 vec![],
                 Some(10000i64 + num as i64),

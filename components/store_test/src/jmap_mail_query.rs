@@ -1,21 +1,21 @@
+use jmap::{JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest};
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
-    import::JMAPMailLocalStoreImport,
+    import::JMAPMailImport,
     query::{
         JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQuery, JMAPMailQueryArguments,
         MailboxId,
     },
     JMAPMailProperties, MessageField,
 };
-use jmap_store::{JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest, JMAP_MAIL};
 use mail_parser::RfcHeader;
 use std::{
     collections::{hash_map::Entry, HashMap},
     time::Instant,
 };
 use store::{
-    query::JMAPIdMapFnc, raft::RaftId, Comparator, FieldValue, Filter, Integer, JMAPId, JMAPStore,
-    Store, Tag,
+    query::JMAPIdMapFnc, raft::RaftId, Collection, Comparator, FieldValue, Filter, Integer, JMAPId,
+    JMAPStore, Store, Tag,
 };
 use store::{query::JMAPStoreQuery, JMAPIdPrefix};
 
@@ -108,7 +108,7 @@ where
                 .mail_import_blob(
                     0,
                     RaftId::default(),
-                    &format!(
+                    format!(
                         concat!(
                             "From: {}\nCc: {}\nMessage-ID: <{}>\n",
                             "References: <{}>\nComments: {}\nSubject: [{}]",
@@ -159,7 +159,7 @@ where
             mail_store
                 .get_tag(
                     0,
-                    JMAP_MAIL,
+                    Collection::Mail,
                     MessageField::ThreadId.into(),
                     Tag::Id(thread_id as Integer)
                 )
@@ -174,7 +174,7 @@ where
         mail_store
             .get_tag(
                 0,
-                JMAP_MAIL,
+                Collection::Mail,
                 MessageField::ThreadId.into(),
                 Tag::Id(MAX_THREADS as Integer)
             )
@@ -763,7 +763,7 @@ where
     let doc_id = mail_store
         .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
             0,
-            JMAP_MAIL,
+            Collection::Mail,
             Filter::eq(
                 MessageField::MessageIdRef.into(),
                 FieldValue::Keyword(anchor.into()),
@@ -776,7 +776,7 @@ where
         .get_document_id();
 
     let thread_id = mail_store
-        .get_document_value(0, JMAP_MAIL, doc_id, MessageField::ThreadId.into())
+        .get_document_value(0, Collection::Mail, doc_id, MessageField::ThreadId.into())
         .unwrap()
         .unwrap();
 

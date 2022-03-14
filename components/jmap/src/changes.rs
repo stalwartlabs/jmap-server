@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use store::{
-    changelog::{ChangeLogEntry, ChangeLogId, ChangeLogQuery},
+    changes::{Change, ChangeId, Query},
     leb128::Leb128,
-    AccountId, CollectionId, JMAPId, JMAPStore, Store, StoreError,
+    AccountId, Collection, JMAPId, JMAPStore, Store, StoreError,
 };
 
 use crate::{
@@ -40,9 +40,9 @@ pub struct JMAPChangesResponse<T> {
     pub new_state: JMAPState,
     pub has_more_changes: bool,
     pub total_changes: usize,
-    pub created: HashSet<ChangeLogId>,
-    pub updated: HashSet<ChangeLogId>,
-    pub destroyed: HashSet<ChangeLogId>,
+    pub created: HashSet<ChangeId>,
+    pub updated: HashSet<ChangeId>,
+    pub destroyed: HashSet<ChangeId>,
     pub arguments: T,
 }
 
@@ -88,15 +88,15 @@ where
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
-    pub from_id: ChangeLogId,
-    pub to_id: ChangeLogId,
+    pub from_id: ChangeId,
+    pub to_id: ChangeId,
     pub items_sent: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JMAPState {
     Initial,
-    Exact(ChangeLogId),
+    Exact(ChangeId),
     Intermediate(JMAPIntermediateState),
 }
 
@@ -111,11 +111,11 @@ impl JMAPState {
         JMAPState::Initial
     }
 
-    pub fn new_exact(id: ChangeLogId) -> Self {
+    pub fn new_exact(id: ChangeId) -> Self {
         JMAPState::Exact(id)
     }
 
-    pub fn new_intermediate(from_id: ChangeLogId, to_id: ChangeLogId, items_sent: usize) -> Self {
+    pub fn new_intermediate(from_id: ChangeId, to_id: ChangeId, items_sent: usize) -> Self {
         JMAPState::Intermediate(JMAPIntermediateState {
             from_id,
             to_id,
@@ -131,12 +131,12 @@ impl JMAPIdSerialize for JMAPState {
     {
         match id.as_bytes().get(0)? {
             b'n' => JMAPState::Initial.into(),
-            b's' => JMAPState::Exact(ChangeLogId::from_str_radix(id.get(1..)?, 16).ok()?).into(),
+            b's' => JMAPState::Exact(ChangeId::from_str_radix(id.get(1..)?, 16).ok()?).into(),
             b'r' => {
                 let mut it = hex_reader(id, 1);
 
-                let from_id = ChangeLogId::from_leb128_it(&mut it)?;
-                let to_id = from_id.checked_add(ChangeLogId::from_leb128_it(&mut it)?)?;
+                let from_id = ChangeId::from_leb128_it(&mut it)?;
+                let to_id = from_id.checked_add(ChangeId::from_leb128_it(&mut it)?)?;
                 let items_sent = usize::from_leb128_it(&mut it)?;
 
                 if items_sent > 0 {
@@ -182,11 +182,12 @@ impl From<JMAPState> for JSONValue {
 }
 
 pub trait JMAPChanges {
-    fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState>;
+    fn get_state(&self, account: AccountId, collection: Collection)
+        -> store::Result<JMAPState>;
     fn get_jmap_changes(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
     ) -> store::Result<JMAPChangesResponse<()>>;
@@ -196,7 +197,11 @@ impl<T> JMAPChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn get_state(&self, account: AccountId, collection: CollectionId) -> store::Result<JMAPState> {
+    fn get_state(
+        &self,
+        account: AccountId,
+        collection: Collection,
+    ) -> store::Result<JMAPState> {
         Ok(self
             .get_last_change_id(account, collection)?
             .map(JMAPState::Exact)
@@ -206,15 +211,13 @@ where
     fn get_jmap_changes(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
     ) -> store::Result<JMAPChangesResponse<()>> {
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
-                let changelog = self
-                    .get_changes(account, collection, ChangeLogQuery::All)?
-                    .unwrap();
+                let changelog = self.get_changes(account, collection, Query::All)?.unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
                     return Ok(JMAPChangesResponse {
                         new_state: since_state.clone(),
@@ -232,7 +235,7 @@ where
             }
             JMAPState::Exact(change_id) => (
                 0,
-                self.get_changes(account, collection, ChangeLogQuery::Since(*change_id))?
+                self.get_changes(account, collection, Query::Since(*change_id))?
                     .ok_or(StoreError::NotFound)?,
             ),
             JMAPState::Intermediate(intermediate_state) => {
@@ -240,10 +243,7 @@ where
                     .get_changes(
                         account,
                         collection,
-                        ChangeLogQuery::RangeInclusive(
-                            intermediate_state.from_id,
-                            intermediate_state.to_id,
-                        ),
+                        Query::RangeInclusive(intermediate_state.from_id, intermediate_state.to_id),
                     )?
                     .ok_or(StoreError::NotFound)?;
                 if intermediate_state.items_sent >= changelog.changes.len() {
@@ -252,7 +252,7 @@ where
                         self.get_changes(
                             account,
                             collection,
-                            ChangeLogQuery::Since(intermediate_state.to_id),
+                            Query::Since(intermediate_state.to_id),
                         )?
                         .ok_or(StoreError::NotFound)?,
                     )
@@ -287,9 +287,9 @@ where
 
             for change in changelog.changes {
                 match change {
-                    ChangeLogEntry::Insert(item) => created.insert(item),
-                    ChangeLogEntry::Update(item) => updated.insert(item),
-                    ChangeLogEntry::Delete(item) => destroyed.insert(item),
+                    Change::Insert(item) => created.insert(item),
+                    Change::Update(item) => updated.insert(item),
+                    Change::Delete(item) => destroyed.insert(item),
                 };
             }
         } else {
@@ -378,7 +378,7 @@ pub fn query_changes(
 #[cfg(test)]
 mod tests {
 
-    use store::changelog::ChangeLogId;
+    use store::changes::ChangeId;
 
     use crate::id::JMAPIdSerialize;
 
@@ -390,7 +390,7 @@ mod tests {
             JMAPState::new_initial(),
             JMAPState::new_exact(0),
             JMAPState::new_exact(12345678),
-            JMAPState::new_exact(ChangeLogId::MAX),
+            JMAPState::new_exact(ChangeId::MAX),
             JMAPState::new_intermediate(0, 0, 1),
             JMAPState::new_intermediate(1024, 2048, 100),
             JMAPState::new_intermediate(12345678, 87654321, 1),
@@ -398,11 +398,7 @@ mod tests {
             JMAPState::new_intermediate(0, 87654321, 12345678),
             JMAPState::new_intermediate(12345678, 87654321, 1),
             JMAPState::new_intermediate(12345678, 87654321, 12345678),
-            JMAPState::new_intermediate(
-                ChangeLogId::MAX,
-                ChangeLogId::MAX,
-                ChangeLogId::MAX as usize,
-            ),
+            JMAPState::new_intermediate(ChangeId::MAX, ChangeId::MAX, ChangeId::MAX as usize),
         ] {
             assert_eq!(
                 JMAPState::from_jmap_string(&id.to_jmap_string()).unwrap(),

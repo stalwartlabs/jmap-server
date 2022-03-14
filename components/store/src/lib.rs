@@ -1,7 +1,7 @@
 pub mod batch;
 pub mod bitmap;
 pub mod blob;
-pub mod changelog;
+pub mod changes;
 pub mod config;
 pub mod delete;
 pub mod field;
@@ -23,7 +23,6 @@ use std::{
     time::Duration,
 };
 
-use changelog::ChangeLogId;
 use config::EnvSettings;
 use id::{IdAssigner, IdCacheKey};
 use moka::sync::Cache;
@@ -32,9 +31,11 @@ use nlp::Language;
 use parking_lot::{Mutex, MutexGuard};
 use raft::{LogIndex, RaftId};
 use roaring::RoaringBitmap;
+use serde::{Deserialize, Serialize};
 use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
 
 pub use bincode;
+pub use lz4_flex;
 pub use parking_lot;
 pub use roaring;
 pub use tracing;
@@ -61,7 +62,6 @@ impl StoreError {
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub type AccountId = u32;
-pub type CollectionId = u8;
 pub type DocumentId = u32;
 pub type ThreadId = u32;
 pub type FieldId = u8;
@@ -89,6 +89,34 @@ impl JMAPIdPrefix for JMAPId {
 
     fn get_prefix_id(&self) -> DocumentId {
         (self >> 32) as DocumentId
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Collection {
+    Mail = 0,
+    Mailbox = 1,
+    MailboxChanges = 2,
+    Thread = 3,
+    None = 255,
+}
+
+impl From<u8> for Collection {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Collection::Mail,
+            1 => Collection::Mailbox,
+            2 => Collection::MailboxChanges,
+            3 => Collection::Thread,
+            _ => Collection::None,
+        }
+    }
+}
+
+impl From<Collection> for u8 {
+    fn from(collection: Collection) -> u8 {
+        collection as u8
     }
 }
 
@@ -462,7 +490,7 @@ where
         store
     }
 
-    pub fn lock_account(&self, account: AccountId, collection: CollectionId) -> MutexGuard<'_, ()> {
+    pub fn lock_account(&self, account: AccountId, collection: Collection) -> MutexGuard<'_, ()> {
         self.account_lock.lock_hash((account, collection))
     }
 }

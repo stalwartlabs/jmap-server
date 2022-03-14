@@ -11,7 +11,7 @@ use actix_web::web;
 use serde::{Deserialize, Serialize};
 use store::{
     bincode,
-    raft::{LogIndex, TermId},
+    raft::{Entry, LogIndex, TermId},
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
@@ -74,6 +74,7 @@ where
     pub last_log_term: TermId,
     pub commit_index: LogIndex,
     pub state: raft::State,
+    pub pending_changes: Option<Vec<Entry>>,
 }
 
 #[derive(Debug)]
@@ -163,6 +164,10 @@ where
         self.peers.iter().find(|p| p.peer_id == peer_id)
     }
 
+    pub fn get_peer_mut(&mut self, peer_id: PeerId) -> Option<&mut Peer> {
+        self.peers.iter_mut().find(|p| p.peer_id == peer_id)
+    }
+
     async fn init(
         settings: &EnvSettings,
         core: web::Data<JMAPServer<T>>,
@@ -247,6 +252,7 @@ where
             last_peer_pinged: u32::MAX as usize,
             tx,
             gossip_tx,
+            pending_changes: None,
         };
 
         // Add previously discovered peers

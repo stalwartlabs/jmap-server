@@ -4,9 +4,9 @@ use std::{
     vec,
 };
 
-use chrono::{FixedOffset, LocalResult, SecondsFormat, TimeZone, Utc};
-use jmap_store::blob::JMAPBlobStore;
-use jmap_store::{
+use chrono::{LocalResult, SecondsFormat, TimeZone, Utc};
+use jmap::blob::JMAPBlobStore;
+use jmap::{
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
     JMAPError,
@@ -17,8 +17,8 @@ use mail_parser::{
         fields::thread::thread_name,
         preview::{preview_html, preview_text},
     },
-    Addr, ContentType, DateTime, Group, HeaderValue, Message, MessageAttachment, MessagePart,
-    RfcHeader, RfcHeaders,
+    Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader,
+    RfcHeaders,
 };
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
@@ -66,20 +66,14 @@ impl From<JMAPMailParseResponse> for JSONValue {
 }
 
 pub trait JMAPMailParse {
-    fn mail_parse(
-        &self,
-        request: JMAPMailParseRequest,
-    ) -> jmap_store::Result<JMAPMailParseResponse>;
+    fn mail_parse(&self, request: JMAPMailParseRequest) -> jmap::Result<JMAPMailParseResponse>;
 }
 
 impl<T> JMAPMailParse for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_parse(
-        &self,
-        mut request: JMAPMailParseRequest,
-    ) -> jmap_store::Result<JMAPMailParseResponse> {
+    fn mail_parse(&self, mut request: JMAPMailParseRequest) -> jmap::Result<JMAPMailParseResponse> {
         let mut parsed = HashMap::new();
         let mut not_parsable = Vec::new();
         let mut not_found = Vec::new();
@@ -235,6 +229,7 @@ fn build_message_response(
         body_offset: message.offset_body,
         body_structure: message.structure,
         headers: Vec::with_capacity(total_parts + 1),
+        received_at: 0,
     };
     let mut has_attachments = false;
 
@@ -681,9 +676,10 @@ fn build_message_response(
 
 pub fn build_message_document(
     document: &mut WriteBatch,
-    message: Message,
+    raw_message: Vec<u8>,
     received_at: Option<i64>,
 ) -> store::Result<(Vec<String>, String)> {
+    let message = Message::parse(&raw_message).ok_or(StoreError::ParseError)?;
     let mut total_parts = message.parts.len();
     let mut total_blobs = 0;
     let mut message_data = MessageData {
@@ -697,6 +693,7 @@ pub fn build_message_document(
         body_offset: message.offset_body,
         body_structure: message.structure,
         headers: Vec::with_capacity(total_parts + 1),
+        received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
     };
     let mut language_detector = LanguageDetector::new();
     let mut has_attachments = false;
@@ -711,22 +708,20 @@ pub fn build_message_document(
         FieldOptions::Sort,
     );
 
-    {
-        let received_at = received_at.unwrap_or_else(|| Utc::now().timestamp());
-        message_data.properties.insert(
-            JMAPMailProperties::ReceivedAt,
-            if let LocalResult::Single(received_at) = Utc.timestamp_opt(received_at, 0) {
-                JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
-            } else {
-                JSONValue::Null
-            },
-        );
-        document.long_int(
-            MessageField::ReceivedAt,
-            received_at as LongInteger,
-            FieldOptions::Sort,
-        );
-    }
+    message_data.properties.insert(
+        JMAPMailProperties::ReceivedAt,
+        if let LocalResult::Single(received_at) = Utc.timestamp_opt(message_outline.received_at, 0)
+        {
+            JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
+        } else {
+            JSONValue::Null
+        },
+    );
+    document.long_int(
+        MessageField::ReceivedAt,
+        message_outline.received_at as LongInteger,
+        FieldOptions::Sort,
+    );
 
     let mut reference_ids = Vec::new();
     let mut mime_parts = HashMap::with_capacity(5);
@@ -1156,7 +1151,7 @@ pub fn build_message_document(
 
     document.binary(
         MessageField::Internal,
-        message.raw_message.into_owned(),
+        raw_message,
         FieldOptions::StoreAsBlob(MESSAGE_RAW),
     );
 
@@ -1321,30 +1316,6 @@ fn parse_content_type(
     }
 }
 
-fn parse_datetime(document: &mut WriteBatch, header_name: RfcHeader, date_time: &DateTime) {
-    if (0..23).contains(&date_time.tz_hour)
-        && (0..59).contains(&date_time.tz_minute)
-        && (1970..2500).contains(&date_time.year)
-        && (1..12).contains(&date_time.month)
-        && (1..31).contains(&date_time.day)
-        && (0..23).contains(&date_time.hour)
-        && (0..59).contains(&date_time.minute)
-        && (0..59).contains(&date_time.second)
-    {
-        if let LocalResult::Single(datetime) | LocalResult::Ambiguous(datetime, _) =
-            FixedOffset::west_opt(
-                ((date_time.tz_hour as i32 * 3600i32) + date_time.tz_minute as i32)
-                    * if date_time.tz_before_gmt { 1i32 } else { -1i32 },
-            )
-            .unwrap_or_else(|| FixedOffset::east(0))
-            .ymd_opt(date_time.year as i32, date_time.month, date_time.day)
-            .and_hms_opt(date_time.hour, date_time.minute, date_time.second)
-        {
-            document.long_int(header_name, datetime.timestamp() as u64, FieldOptions::Sort);
-        }
-    }
-}
-
 #[allow(clippy::manual_flatten)]
 fn add_addr_sort(document: &mut WriteBatch, header_name: RfcHeader, header_value: &HeaderValue) {
     let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
@@ -1429,7 +1400,9 @@ fn parse_header(document: &mut WriteBatch, header_name: RfcHeader, header_value:
             }
         }
         HeaderValue::DateTime(date_time) => {
-            parse_datetime(document, header_name, date_time);
+            if let Some(timestamp) = date_time.to_timestamp() {
+                document.long_int(header_name, timestamp as u64, FieldOptions::Sort);
+            }
         }
         HeaderValue::ContentType(content_type) => {
             parse_content_type(document, header_name, content_type);

@@ -1,18 +1,18 @@
 use crate::query::JMAPMailQuery;
 use crate::query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments};
-use jmap_store::changes::query_changes;
-use jmap_store::JMAPQueryRequest;
-use jmap_store::{
+use jmap::changes::query_changes;
+use jmap::JMAPQueryRequest;
+use jmap::{
     changes::{JMAPChanges, JMAPChangesRequest, JMAPChangesResponse, JMAPQueryChangesResponse},
-    JMAPQueryChangesRequest, JMAP_MAIL,
+    JMAPQueryChangesRequest,
 };
-use store::{JMAPStore, Store};
+use store::{Collection, JMAPStore, Store};
 
 pub trait JMAPMailChanges {
     fn mail_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap_store::Result<JMAPChangesResponse<()>>;
+    ) -> jmap::Result<JMAPChangesResponse<()>>;
 
     fn mail_query_changes(
         &self,
@@ -21,7 +21,7 @@ pub trait JMAPMailChanges {
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap_store::Result<JMAPQueryChangesResponse>;
+    ) -> jmap::Result<JMAPQueryChangesResponse>;
 }
 
 impl<T> JMAPMailChanges for JMAPStore<T>
@@ -31,10 +31,10 @@ where
     fn mail_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap_store::Result<JMAPChangesResponse<()>> {
+    ) -> jmap::Result<JMAPChangesResponse<()>> {
         self.get_jmap_changes(
             request.account,
-            JMAP_MAIL,
+            Collection::Mail,
             request.since_state,
             request.max_changes,
         )
@@ -48,10 +48,10 @@ where
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap_store::Result<JMAPQueryChangesResponse> {
+    ) -> jmap::Result<JMAPQueryChangesResponse> {
         let changes = self.get_jmap_changes(
             query.account_id,
-            JMAP_MAIL,
+            Collection::Mail,
             query.since_query_state,
             query.max_changes,
         )?;

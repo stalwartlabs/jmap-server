@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
-use jmap_mail::{import::JMAPMailLocalStoreImport, MessageField};
-use jmap_store::JMAP_MAIL;
+use jmap_mail::{import::JMAPMailImport, MessageField};
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     raft::RaftId,
-    Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
+    Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
 };
 
 pub enum ThreadTest {
@@ -77,7 +76,7 @@ where
                 .mail_import_blob(
                     base_test_num,
                     RaftId::default(),
-                    message.as_bytes(),
+                    message.as_bytes().to_vec(),
                     vec![],
                     vec![],
                     None,
@@ -90,7 +89,7 @@ where
                 .mail_import_blob(
                     base_test_num + 1,
                     RaftId::default(),
-                    message.as_bytes(),
+                    message.as_bytes().to_vec(),
                     vec![],
                     vec![],
                     None,
@@ -104,7 +103,7 @@ where
                     .mail_import_blob(
                         base_test_num + 2,
                         RaftId::default(),
-                        message.as_bytes(),
+                        message.as_bytes().to_vec(),
                         vec![],
                         vec![],
                         None,
@@ -116,7 +115,7 @@ where
                     .mail_import_blob(
                         base_test_num + 3,
                         RaftId::default(),
-                        message.as_bytes(),
+                        message.as_bytes().to_vec(),
                         vec![],
                         vec![],
                         None,
@@ -131,7 +130,7 @@ where
                     .mail_import_blob(
                         base_test_num + 4,
                         RaftId::default(),
-                        message.as_bytes(),
+                        message.as_bytes().to_vec(),
                         vec![],
                         vec![],
                         None,
@@ -143,7 +142,7 @@ where
                     .mail_import_blob(
                         base_test_num + 5,
                         RaftId::default(),
-                        message.as_bytes(),
+                        message.as_bytes().to_vec(),
                         vec![],
                         vec![],
                         None,
@@ -156,7 +155,7 @@ where
             let message_doc_ids = mail_store
                 .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
                     base_test_num + test_num,
-                    JMAP_MAIL,
+                    Collection::Mail,
                     Filter::None,
                     Comparator::None,
                 ))
@@ -178,7 +177,7 @@ where
                     mail_store
                         .get_document_value(
                             base_test_num + test_num,
-                            JMAP_MAIL,
+                            Collection::Mail,
                             message_doc_id.get_document_id(),
                             MessageField::ThreadId.into(),
                         )
@@ -201,7 +200,7 @@ where
                     mail_store
                         .get_tag(
                             base_test_num + test_num,
-                            JMAP_MAIL,
+                            Collection::Mail,
                             MessageField::ThreadId.into(),
                             Tag::Id(thread_id),
                         )

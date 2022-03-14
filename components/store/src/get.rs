@@ -2,7 +2,7 @@ use roaring::RoaringBitmap;
 
 use crate::{
     serialize::{serialize_bm_tag_key, serialize_stored_key, StoreDeserialize},
-    AccountId, CollectionId, ColumnFamily, DocumentId, FieldId, JMAPStore, Store, Tag,
+    AccountId, ColumnFamily, DocumentId, FieldId, Collection, JMAPStore, Store, Tag,
 };
 
 impl<T> JMAPStore<T>
@@ -12,7 +12,7 @@ where
     pub fn get_document_value<U>(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         document: DocumentId,
         field: FieldId,
     ) -> crate::Result<Option<U>>
@@ -31,7 +31,7 @@ where
     pub fn get_multi_document_value<U>(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         documents: impl Iterator<Item = DocumentId>,
         field: FieldId,
     ) -> crate::Result<Vec<Option<U>>>
@@ -49,14 +49,14 @@ where
     pub fn get_tag(
         &self,
         account_id: AccountId,
-        collection_id: CollectionId,
+        collection: Collection,
         field: FieldId,
         tag: Tag,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(document_ids) = self.get_document_ids(account_id, collection_id)? {
+        if let Some(document_ids) = self.get_document_ids(account_id, collection)? {
             if let Some(mut tagged_docs) = self.db.get::<RoaringBitmap>(
                 ColumnFamily::Bitmaps,
-                &serialize_bm_tag_key(account_id, collection_id, field, &tag),
+                &serialize_bm_tag_key(account_id, collection, field, &tag),
             )? {
                 tagged_docs &= &document_ids;
                 if !tagged_docs.is_empty() {
@@ -71,7 +71,7 @@ where
     pub fn get_tags(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         field: FieldId,
         tags: &[Tag],
     ) -> crate::Result<Vec<Option<RoaringBitmap>>> {

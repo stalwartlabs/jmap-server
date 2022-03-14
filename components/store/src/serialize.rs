@@ -1,12 +1,12 @@
 use std::convert::TryInto;
 
 use crate::{
-    leb128::Leb128, AccountId, ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer,
-    LongInteger, Tag, TermId,
+    leb128::Leb128, AccountId, DocumentId, FieldId, Float, Integer, Collection, LongInteger,
+    Tag, TermId,
 };
 
 pub const COLLECTION_PREFIX_LEN: usize =
-    std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>();
+    std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>();
 pub const FIELD_PREFIX_LEN: usize = COLLECTION_PREFIX_LEN + std::mem::size_of::<FieldId>();
 pub const KEY_BASE_LEN: usize = FIELD_PREFIX_LEN + std::mem::size_of::<DocumentId>();
 
@@ -26,13 +26,13 @@ pub const TEMP_BLOB_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
 
 pub fn serialize_stored_key(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     document: DocumentId,
     field: FieldId,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN);
     account.to_leb128_bytes(&mut bytes);
-    bytes.push(collection);
+    bytes.push(collection.into());
     document.to_leb128_bytes(&mut bytes);
     bytes.push(field);
     bytes
@@ -40,7 +40,7 @@ pub fn serialize_stored_key(
 
 pub fn serialize_stored_key_global(
     account: Option<AccountId>,
-    collection: Option<CollectionId>,
+    collection: Option<Collection>,
     field: Option<FieldId>,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN);
@@ -48,7 +48,7 @@ pub fn serialize_stored_key_global(
         account.to_leb128_bytes(&mut bytes);
     }
     if let Some(collection) = collection {
-        bytes.push(collection);
+        bytes.push(collection.into());
     }
     if let Some(field) = field {
         bytes.push(field);
@@ -58,12 +58,12 @@ pub fn serialize_stored_key_global(
 
 pub fn serialize_blob_key(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     document: DocumentId,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + BLOB_KEY.len());
     account.to_leb128_bytes(&mut bytes);
-    bytes.push(collection);
+    bytes.push(collection.into());
     document.to_leb128_bytes(&mut bytes);
     bytes.extend_from_slice(BLOB_KEY);
     bytes
@@ -80,7 +80,7 @@ pub fn serialize_temporary_blob_key(account: AccountId, hash: u64, timestamp: u6
 
 pub fn serialize_bm_tag_key(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     field: FieldId,
     tag: &Tag,
 ) -> Vec<u8> {
@@ -100,7 +100,7 @@ pub fn serialize_bm_tag_key(
             BM_TAG_TEXT
         }
     };
-    bytes.push(collection);
+    bytes.push(collection.into());
     bytes.push(field);
     bytes.push(bm_type);
     bytes
@@ -108,14 +108,14 @@ pub fn serialize_bm_tag_key(
 
 pub fn serialize_bm_text_key(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     field: FieldId,
     text: &str,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + text.len() + 1);
     account.to_leb128_bytes(&mut bytes);
     bytes.extend_from_slice(text.as_bytes());
-    bytes.push(collection);
+    bytes.push(collection.into());
     bytes.push(field);
     bytes.push(BM_TEXT);
     bytes
@@ -123,7 +123,7 @@ pub fn serialize_bm_text_key(
 
 pub fn serialize_bm_term_key(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     field: FieldId,
     term_id: TermId,
     is_exact: bool,
@@ -131,7 +131,7 @@ pub fn serialize_bm_term_key(
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + std::mem::size_of::<TermId>() + 2);
     account.to_leb128_bytes(&mut bytes);
     term_id.to_leb128_bytes(&mut bytes);
-    bytes.push(collection);
+    bytes.push(collection.into());
     bytes.push(field);
     bytes.push(if is_exact {
         BM_TERM_EXACT
@@ -141,24 +141,24 @@ pub fn serialize_bm_term_key(
     bytes
 }
 
-pub fn serialize_bm_internal(account: AccountId, collection: CollectionId, id: u8) -> Vec<u8> {
+pub fn serialize_bm_internal(account: AccountId, collection: Collection, id: u8) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + 1);
     account.to_leb128_bytes(&mut bytes);
-    bytes.push(collection);
+    bytes.push(collection.into());
     bytes.push(id);
     bytes
 }
 
 pub fn serialize_index_key(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     document: DocumentId,
     field: FieldId,
     key: &[u8],
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + key.len());
     bytes.extend_from_slice(&account.to_be_bytes());
-    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.push(collection.into());
     bytes.extend_from_slice(&field.to_be_bytes());
     bytes.extend_from_slice(key);
     bytes.extend_from_slice(&document.to_be_bytes());
@@ -167,34 +167,31 @@ pub fn serialize_index_key(
 
 pub fn serialize_index_key_base(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     field: FieldId,
     key: &[u8],
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN + key.len());
     bytes.extend_from_slice(&account.to_be_bytes());
-    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.push(collection.into());
     bytes.extend_from_slice(&field.to_be_bytes());
     bytes.extend_from_slice(key);
     bytes
 }
 
-pub fn serialize_index_key_prefix(
-    account: AccountId,
-    collection: CollectionId,
-    field: FieldId,
-) -> Vec<u8> {
+pub fn serialize_index_key_prefix(account: AccountId, collection: u8, field: FieldId) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(KEY_BASE_LEN);
     bytes.extend_from_slice(&account.to_be_bytes());
-    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.push(collection);
     bytes.extend_from_slice(&field.to_be_bytes());
     bytes
 }
-pub fn serialize_ac_key_be(account: AccountId, collection: CollectionId) -> Vec<u8> {
-    let mut bytes =
-        Vec::with_capacity(std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>());
+pub fn serialize_ac_key_be(account: AccountId, collection: Collection) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(
+        std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>(),
+    );
     bytes.extend_from_slice(&account.to_be_bytes());
-    bytes.extend_from_slice(&collection.to_be_bytes());
+    bytes.push(collection.into());
     bytes
 }
 
@@ -206,43 +203,32 @@ pub fn serialize_a_key_be(account: AccountId) -> Vec<u8> {
 
 pub fn serialize_acd_key_leb128(
     account: AccountId,
-    collection: CollectionId,
+    collection: Collection,
     document: DocumentId,
 ) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
         std::mem::size_of::<AccountId>()
-            + std::mem::size_of::<CollectionId>()
+            + std::mem::size_of::<Collection>()
             + std::mem::size_of::<DocumentId>(),
     );
     account.to_leb128_bytes(&mut bytes);
-    bytes.push(collection);
+    bytes.push(collection.into());
     document.to_leb128_bytes(&mut bytes);
     bytes
 }
 
-pub fn serialize_ac_key_leb128(account: AccountId, collection: CollectionId) -> Vec<u8> {
-    let mut bytes =
-        Vec::with_capacity(std::mem::size_of::<AccountId>() + std::mem::size_of::<CollectionId>());
+pub fn serialize_ac_key_leb128(account: AccountId, collection: Collection) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(
+        std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>(),
+    );
     account.to_leb128_bytes(&mut bytes);
-    bytes.push(collection);
+    bytes.push(collection.into());
     bytes
 }
 
 pub fn serialize_a_key_leb128(account: AccountId) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
     account.to_leb128_bytes(&mut bytes);
-    bytes
-}
-
-pub fn serialize_changelog_key(
-    account: AccountId,
-    collection: CollectionId,
-    change_id: ChangeLogId,
-) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(FIELD_PREFIX_LEN + std::mem::size_of::<ChangeLogId>());
-    bytes.extend_from_slice(&account.to_be_bytes());
-    bytes.extend_from_slice(&collection.to_be_bytes());
-    bytes.extend_from_slice(&change_id.to_be_bytes());
     bytes
 }
 

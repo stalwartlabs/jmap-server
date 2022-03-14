@@ -11,7 +11,7 @@ use crate::{
         serialize_ac_key_be, serialize_ac_key_leb128, serialize_blob_key, serialize_bm_internal,
         StoreDeserialize, StoreSerialize, BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
     },
-    AccountId, CollectionId, ColumnFamily, Direction, DocumentId, JMAPStore, Store, StoreError,
+    AccountId, ColumnFamily, Direction, DocumentId, Collection, JMAPStore, Store, StoreError,
     WriteOperation,
 };
 
@@ -62,7 +62,7 @@ where
         Ok(())
     }
 
-    fn delete_collection(&self, account: AccountId, collection: CollectionId) -> crate::Result<()> {
+    fn delete_collection(&self, account: AccountId, collection: Collection) -> crate::Result<()> {
         let mut batch = WriteBatch::default();
         let mut batch_size = 0;
 
@@ -139,7 +139,7 @@ where
     pub fn purge_tombstoned(
         &self,
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
     ) -> crate::Result<()> {
         let documents = if let Some(documents) = self.get_tombstoned_ids(account, collection)? {
             documents
@@ -207,13 +207,14 @@ where
         // TODO delete files using a separate process
         // TODO delete empty bitmaps
 
+        let collection_u8 = collection as u8;
         for (key, value) in self
             .db
             .iterator(ColumnFamily::Bitmaps, &prefix, Direction::Forward)?
         {
             if !key.starts_with(&prefix) {
                 break;
-            } else if key.len() > 3 && key[key.len() - 3] == collection {
+            } else if key.len() > 3 && key[key.len() - 3] == collection_u8 {
                 let mut bm =
                     RoaringBitmap::deserialize(&value).ok_or(StoreError::DataCorruption)?;
                 bm.bitand_assign(&documents);

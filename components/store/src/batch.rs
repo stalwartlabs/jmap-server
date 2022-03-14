@@ -1,8 +1,9 @@
 use nlp::Language;
 
 use crate::{
+    changes::ChangeId,
     field::{Field, FieldOptions, Text, UpdateField},
-    ChangeLogId, CollectionId, DocumentId, FieldId, Float, Integer, JMAPId, LongInteger, Tag,
+    DocumentId, FieldId, Float, Integer, Collection, JMAPId, LongInteger, Tag,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -11,9 +12,9 @@ pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
 pub struct WriteBatch {
-    pub collection_id: CollectionId,
+    pub collection: Collection,
     pub default_language: Language,
-    pub log_id: Option<ChangeLogId>,
+    pub log_id: Option<ChangeId>,
     pub log_action: LogAction,
     pub action: WriteAction,
     pub fields: Vec<UpdateField>,
@@ -21,10 +22,10 @@ pub struct WriteBatch {
 
 #[derive(Debug, Clone, Copy)]
 pub enum LogAction {
-    Insert(ChangeLogId),
-    Update(ChangeLogId),
-    Delete(ChangeLogId),
-    Move(ChangeLogId, ChangeLogId),
+    Insert(JMAPId),
+    Update(JMAPId),
+    Delete(JMAPId),
+    Move(JMAPId, JMAPId),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,12 +37,12 @@ pub enum WriteAction {
 
 impl WriteBatch {
     pub fn insert(
-        collection_id: CollectionId,
+        collection: Collection,
         document_id: DocumentId,
         jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
-            collection_id,
+            collection,
             default_language: Language::English,
             log_action: LogAction::Insert(jmap_id.into()),
             action: WriteAction::Insert(document_id),
@@ -51,12 +52,12 @@ impl WriteBatch {
     }
 
     pub fn update(
-        collection_id: CollectionId,
+        collection: Collection,
         document_id: DocumentId,
         jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
-            collection_id,
+            collection,
             default_language: Language::English,
             log_action: LogAction::Update(jmap_id.into()),
             action: WriteAction::Update(document_id),
@@ -66,12 +67,12 @@ impl WriteBatch {
     }
 
     pub fn delete(
-        collection_id: CollectionId,
+        collection: Collection,
         document_id: DocumentId,
         jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
-            collection_id,
+            collection,
             default_language: Language::English,
             log_action: LogAction::Delete(jmap_id.into()),
             action: WriteAction::Delete(document_id),
@@ -81,13 +82,13 @@ impl WriteBatch {
     }
 
     pub fn moved(
-        collection_id: CollectionId,
+        collection: Collection,
         document_id: DocumentId,
         old_jmap_id: impl Into<JMAPId>,
         new_jmap_id: impl Into<JMAPId>,
     ) -> WriteBatch {
         WriteBatch {
-            collection_id,
+            collection,
             default_language: Language::English,
             log_action: LogAction::Move(old_jmap_id.into(), new_jmap_id.into()),
             action: WriteAction::Update(document_id),
@@ -111,7 +112,7 @@ impl WriteBatch {
         }
     }
 
-    pub fn log_with_id(mut self, change_id: ChangeLogId) -> Self {
+    pub fn log_with_id(mut self, change_id: ChangeId) -> Self {
         self.log_id = Some(change_id);
         self
     }

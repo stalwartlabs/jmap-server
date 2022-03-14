@@ -124,6 +124,10 @@ where
         matches!(self.state, State::Follower { .. })
     }
 
+    pub fn is_following_peer(&self, leader_id: PeerId) -> bool {
+        matches!(self.state, State::Follower { peer_id } if peer_id == leader_id)
+    }
+
     pub fn start_election_timer(&mut self, now: bool) {
         self.state = State::Wait {
             election_due: election_timeout(now),
@@ -304,38 +308,6 @@ where
             self.become_leader();
         }
     }
-
-    pub async fn handle_match_log_request(
-        &mut self,
-        peer_id: PeerId,
-        term: TermId,
-        last: RaftId,
-    ) -> Response {
-        if self.term < term {
-            self.term = term;
-        }
-
-        let (success, matched) =
-            if self.term == term && self.log_is_behind_or_eq(last.term, last.index) {
-                self.follow_leader(peer_id);
-                match self.core.get_prev_raft_id(last).await {
-                    Ok(Some(matched)) => (true, matched),
-                    Ok(None) => (true, RaftId::null()),
-                    Err(err) => {
-                        debug!("Failed to get prev raft id: {:?}", err);
-                        (false, RaftId::null())
-                    }
-                }
-            } else {
-                (false, RaftId::null())
-            };
-
-        Response::MatchLog {
-            term: self.term,
-            success,
-            matched,
-        }
-    }
 }
 
 impl Peer {
@@ -363,20 +335,20 @@ where
 {
     pub fn set_raft_leader(&self, term: TermId) {
         self.is_raft_leader.store(true, Ordering::Relaxed);
-        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
+        self.store.raft_log_term.store(term, Ordering::Relaxed);
     }
 
     pub fn set_raft_follower(&self, term: TermId) {
         self.is_raft_leader.store(false, Ordering::Relaxed);
-        self.jmap_store.raft_log_term.store(term, Ordering::Relaxed);
+        self.store.raft_log_term.store(term, Ordering::Relaxed);
     }
 
     pub fn last_log_index(&self) -> LogIndex {
-        self.jmap_store.raft_log_index.load(Ordering::Relaxed)
+        self.store.raft_log_index.load(Ordering::Relaxed)
     }
 
     pub fn last_log_term(&self) -> TermId {
-        self.jmap_store.raft_log_term.load(Ordering::Relaxed)
+        self.store.raft_log_term.load(Ordering::Relaxed)
     }
 
     pub fn is_leader(&self) -> bool {
@@ -384,14 +356,12 @@ where
     }
 
     pub async fn get_prev_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
-        let jmap_store = self.jmap_store.clone();
-        self.spawn_worker(move || jmap_store.get_prev_raft_id(key))
-            .await
+        let store = self.store.clone();
+        self.spawn_worker(move || store.get_prev_raft_id(key)).await
     }
 
     pub async fn get_next_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
-        let jmap_store = self.jmap_store.clone();
-        self.spawn_worker(move || jmap_store.get_next_raft_id(key))
-            .await
+        let store = self.store.clone();
+        self.spawn_worker(move || store.get_next_raft_id(key)).await
     }
 }

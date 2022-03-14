@@ -1,13 +1,11 @@
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::time::Instant;
+use std::{net::SocketAddr, time::Duration};
 
 use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use store::{bincode, leb128::Leb128, raft::RaftId};
+use store::{bincode, changes::ChangeId, leb128::Leb128, raft::RaftId, AccountId, Collection};
 use store::{
     raft::TermId,
     tracing::{debug, error},
@@ -15,43 +13,73 @@ use store::{
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
-    time,
+    time::{self},
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-use super::{gossip::PeerInfo, log, Event, Peer, PeerId, IPC_CHANNEL_BUFFER};
+use super::log::Change;
+use super::{gossip::PeerInfo, Event, Peer, PeerId, IPC_CHANNEL_BUFFER};
 
 const RPC_TIMEOUT_MS: u64 = 1000;
-const RPC_MAX_BACKOFF_MS: u64 = 30000; // 30 seconds
-const RPC_INACTIVITY_TIMEOUT: u64 = 60 * 1000; //TODO configure
+const RPC_MAX_BACKOFF_MS: u64 = 3 * 60 * 1000; // 1 minute
+const RPC_MAX_CONNECT_ATTEMPTS: u32 = 5;
+const RPC_INACTIVITY_TIMEOUT: u64 = 5 * 60 * 1000; //TODO configure
 const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024; //TODO configure
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
-    Synchronize(Vec<PeerInfo>),
-    Auth { peer_id: PeerId, key: String },
-    Vote { term: TermId, last: RaftId },
-    MatchLog { term: TermId, last: RaftId },
-    AppendEntries(Vec<log::Entry>),
+    UpdatePeers {
+        peers: Vec<PeerInfo>,
+    },
+    Auth {
+        peer_id: PeerId,
+        key: String,
+    },
+    Vote {
+        term: TermId,
+        last: RaftId,
+    },
+    SynchronizeLog {
+        term: TermId,
+        last: RaftId,
+    },
+    AppendEntries {
+        term: TermId,
+        entries: Vec<store::raft::Entry>,
+    },
+    UpdateStore {
+        account_id: AccountId,
+        collection: Collection,
+        changes: Vec<Change>,
+    },
     None,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateCollection {
+    pub account_id: AccountId,
+    pub collection: Collection,
+    pub from_change_id: Option<ChangeId>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
-    Synchronize(Vec<PeerInfo>),
+    UpdatePeers {
+        peers: Vec<PeerInfo>,
+    },
     Vote {
         term: TermId,
         vote_granted: bool,
     },
-    MatchLog {
+    SynchronizeLog {
         term: TermId,
         success: bool,
         matched: RaftId,
     },
-    AppendEntries {
-        commited: RaftId,
-        success: bool,
+    NeedUpdates {
+        collections: Vec<UpdateCollection>,
     },
+    Continue,
     None,
 }
 
@@ -67,7 +95,7 @@ pub enum RpcEvent {
 #[derive(Default)]
 pub struct RpcEncoder {}
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Protocol {
     Request(Request),
     Response(Response),
@@ -191,18 +219,12 @@ pub fn spawn_peer_rpc(
     peer_addr: SocketAddr,
 ) -> mpsc::Sender<RpcEvent> {
     let (tx, mut rx) = mpsc::channel::<RpcEvent>(IPC_CHANNEL_BUFFER);
-    let auth_frame = Protocol::Request(Request::Auth {
-        peer_id: local_peer_id,
-        key,
-    });
 
     tokio::spawn(async move {
         let mut conn_ = None;
-        let mut connection_attempts = 0;
-        let mut next_connection_attempt = Instant::now();
 
-        loop {
-            let message =
+        'main: loop {
+            let mut message =
                 match time::timeout(Duration::from_millis(RPC_INACTIVITY_TIMEOUT), rx.recv()).await
                 {
                     Ok(Some(message)) => message,
@@ -211,54 +233,121 @@ pub fn spawn_peer_rpc(
                         break;
                     }
                     Err(_) => {
-                        // Close connection after 1 minute of inactivity
+                        // Close connection after the configured inactivity timeout.
                         if conn_.is_some() {
-                            debug!("Closing inactive connection to peer {}.", peer_id);
+                            debug!("Closing inactive connection to peer {}.", peer_addr);
                             conn_ = None;
                         }
                         continue;
                     }
                 };
 
-            // Connect to peer if not already connected
+            // Connect to peer if we are not already connected.
             let conn = if let Some(conn) = &mut conn_ {
                 conn
             } else {
-                if connection_attempts > 0 && next_connection_attempt > Instant::now() {
-                    debug!(
-                        "Waiting {} ms before reconnecting to peer {}.",
-                        (next_connection_attempt - Instant::now()).as_millis(),
-                        peer_id
-                    );
-                    continue;
-                }
+                let mut connection_attempts = 0;
 
-                match connect_peer(peer_addr, auth_frame.clone()).await {
-                    Ok(conn) => {
-                        if connection_attempts > 0 {
-                            connection_attempts = 0;
+                'retry: loop {
+                    // Connect and authenticate with peer.
+                    match connect_peer(
+                        peer_addr,
+                        Protocol::Request(Request::Auth {
+                            peer_id: local_peer_id,
+                            key: key.clone(),
+                        }),
+                    )
+                    .await
+                    {
+                        Ok(conn) => {
+                            conn_ = conn.into();
+
+                            if connection_attempts < RPC_MAX_CONNECT_ATTEMPTS {
+                                // Connection established, send message.
+                                break 'retry;
+                            } else {
+                                // Connection established, but we have already notified the task the current
+                                // message was undeliverable. Continue with the next message on the queue.
+                                continue 'main;
+                            }
                         }
-                        conn_ = conn.into();
-                        conn_.as_mut().unwrap()
-                    }
-                    Err(err) => {
-                        error!(
-                            "Failed to connect to peer {} at {}: {}",
-                            peer_id, peer_addr, err
-                        );
-                        message.failed();
+                        Err(err) => {
+                            // Keep retrying.
+                            connection_attempts += 1;
 
-                        // Truncated exponential backoff
-                        next_connection_attempt = Instant::now()
-                            + Duration::from_millis(std::cmp::min(
+                            if connection_attempts == RPC_MAX_CONNECT_ATTEMPTS {
+                                // Give up trying to deliver the message,
+                                // notify task that the message could not be sent.
+                                message.failed();
+                                message = RpcEvent::FireAndForget {
+                                    request: Request::None,
+                                };
+                            }
+
+                            // Truncated exponential backoff
+                            let mut next_attempt_ms = std::cmp::min(
                                 2u64.pow(connection_attempts)
                                     + rand::thread_rng().gen_range(0..1000),
                                 RPC_MAX_BACKOFF_MS,
-                            ));
-                        connection_attempts += 1;
-                        continue;
+                            );
+
+                            error!(
+                                "Failed to connect to peer {} ({}), retrying in {} ms.",
+                                peer_addr, err, next_attempt_ms
+                            );
+
+                            // Reject messages while we wait to reconnect.
+                            'wait: loop {
+                                let timer = Instant::now();
+
+                                match time::timeout(
+                                    Duration::from_millis(next_attempt_ms),
+                                    rx.recv(),
+                                )
+                                .await
+                                {
+                                    Ok(Some(new_message)) => {
+                                        match new_message {
+                                            new_message @ RpcEvent::FireAndForget {
+                                                request: Request::UpdatePeers { .. },
+                                            } => {
+                                                // Peer requested to update peer list via gossip, which means that
+                                                // it is probably back online, attempt to reconnect.
+                                                message = new_message;
+                                                connection_attempts = 0;
+                                                continue 'retry;
+                                            }
+                                            _ => {
+                                                // Do not accept new messages until we are able to reconnect.
+                                                new_message.failed();
+                                            }
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        // RPC process was ended.
+                                        break 'main;
+                                    }
+                                    Err(_) => {
+                                        // Timeout reached, attempt to reconnect.
+                                        break 'wait;
+                                    }
+                                }
+
+                                // Continue waiting to reconnect.
+                                let elapsed_ms = timer.elapsed().as_millis() as u64;
+                                if next_attempt_ms > elapsed_ms {
+                                    next_attempt_ms -= elapsed_ms;
+                                } else {
+                                    break 'wait;
+                                }
+                            }
+
+                            continue 'retry;
+                        }
                     }
                 }
+
+                conn_.as_mut().unwrap()
             };
 
             let err = match message {

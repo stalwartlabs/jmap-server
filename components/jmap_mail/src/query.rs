@@ -1,14 +1,14 @@
 use std::collections::HashSet;
 
-use jmap_store::JMAPComparator;
-use jmap_store::{changes::JMAPChanges, JMAPQueryRequest, JMAPQueryResponse, JMAP_MAIL};
+use jmap::JMAPComparator;
+use jmap::{changes::JMAPChanges, JMAPQueryRequest, JMAPQueryResponse};
 use mail_parser::RfcHeader;
 use nlp::Language;
-use store::JMAPIdPrefix;
 use store::{
     roaring::RoaringBitmap, AccountId, Comparator, DocumentSetComparator, FieldComparator,
     FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, TextQuery, ThreadId,
 };
+use store::{Collection, JMAPIdPrefix};
 
 use crate::MessageField;
 
@@ -64,7 +64,7 @@ pub trait JMAPMailQuery {
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap_store::Result<JMAPQueryResponse>;
+    ) -> jmap::Result<JMAPQueryResponse>;
 
     fn get_thread_keywords(
         &self,
@@ -85,7 +85,7 @@ where
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap_store::Result<JMAPQueryResponse> {
+    ) -> jmap::Result<JMAPQueryResponse> {
         let mut is_immutable_filter = true;
         let mut is_immutable_sort = true;
         let account_id = request.account_id;
@@ -267,7 +267,7 @@ where
                         set: self
                             .get_tag(
                                 account_id,
-                                JMAP_MAIL,
+                                Collection::Mail,
                                 MessageField::Keyword.into(),
                                 Tag::Text(keyword),
                             )?
@@ -302,7 +302,7 @@ where
             Ok(
                 if let Some(thread_id) = self.get_document_value::<ThreadId>(
                     account_id,
-                    JMAP_MAIL,
+                    Collection::Mail,
                     document_id,
                     MessageField::ThreadId.into(),
                 )? {
@@ -321,12 +321,16 @@ where
             request.limit = self.config.query_max_results;
         }
 
-        let results =
-            self.query(request.build_query(JMAP_MAIL, cond_fnc, sort_fnc, filter_map_fnc)?)?;
+        let results = self.query(request.build_query(
+            Collection::Mail,
+            cond_fnc,
+            sort_fnc,
+            filter_map_fnc,
+        )?)?;
 
         request.into_response(
             results,
-            self.get_state(account_id, JMAP_MAIL)?,
+            self.get_state(account_id, Collection::Mail)?,
             is_immutable_filter && is_immutable_sort,
         )
     }
@@ -339,7 +343,7 @@ where
     ) -> store::Result<RoaringBitmap> {
         if let Some(tagged_doc_ids) = self.get_tag(
             account,
-            JMAP_MAIL,
+            Collection::Mail,
             MessageField::Keyword.into(),
             Tag::Text(keyword),
         )? {
@@ -353,12 +357,12 @@ where
 
                 if let Some(thread_doc_ids) = self.get_tag(
                     account,
-                    JMAP_MAIL,
+                    Collection::Mail,
                     MessageField::ThreadId.into(),
                     Tag::Id(
                         self.get_document_value(
                             account,
-                            JMAP_MAIL,
+                            Collection::Mail,
                             tagged_doc_id,
                             MessageField::ThreadId.into(),
                         )?

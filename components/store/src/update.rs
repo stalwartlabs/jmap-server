@@ -6,7 +6,7 @@ use crate::{
     batch::{WriteAction, WriteBatch},
     bitmap::set_clear_bits,
     blob::BlobEntries,
-    changelog::LogWriter,
+    changes::LogWriter,
     field::{FieldOptions, Text, TokenIterator, UpdateField},
     raft::RaftId,
     serialize::{
@@ -40,6 +40,7 @@ where
         let mut write_batch = Vec::with_capacity(batches.len());
         let mut change_log = LogWriter::new(account_id, raft_id);
         let mut bitmap_list = HashMap::new();
+        let add_changes = !raft_id.is_none();
 
         for batch in batches {
             let update_id = match batch.action {
@@ -48,7 +49,7 @@ where
                     bitmap_list
                         .entry(serialize_bm_internal(
                             account_id,
-                            batch.collection_id,
+                            batch.collection,
                             BM_USED_IDS,
                         ))
                         .or_insert_with(HashMap::new)
@@ -61,7 +62,7 @@ where
                     // Remove any external blobs
                     if let Some(blob) = self.db.get::<BlobEntries>(
                         ColumnFamily::Values,
-                        &serialize_blob_key(account_id, batch.collection_id, document_id),
+                        &serialize_blob_key(account_id, batch.collection, document_id),
                     )? {
                         // Decrement blob count
                         blob.items.into_iter().for_each(|key| {
@@ -77,7 +78,7 @@ where
                     bitmap_list
                         .entry(serialize_bm_internal(
                             account_id,
-                            batch.collection_id,
+                            batch.collection,
                             BM_TOMBSTONED_IDS,
                         ))
                         .or_insert_with(HashMap::new)
@@ -112,7 +113,7 @@ where
                                     bitmap_list
                                         .entry(serialize_bm_text_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             t.field,
                                             &text,
                                         ))
@@ -126,7 +127,7 @@ where
                                         bitmap_list
                                             .entry(serialize_bm_text_key(
                                                 account_id,
-                                                batch.collection_id,
+                                                batch.collection,
                                                 t.field,
                                                 &token.word,
                                             ))
@@ -151,7 +152,7 @@ where
                                             bitmap_list
                                                 .entry(serialize_bm_term_key(
                                                     account_id,
-                                                    batch.collection_id,
+                                                    batch.collection,
                                                     t.field,
                                                     term.id,
                                                     true,
@@ -163,7 +164,7 @@ where
                                                 bitmap_list
                                                     .entry(serialize_bm_term_key(
                                                         account_id,
-                                                        batch.collection_id,
+                                                        batch.collection,
                                                         t.field,
                                                         term.id_stemmed,
                                                         false,
@@ -191,7 +192,7 @@ where
                                         ColumnFamily::Values,
                                         serialize_stored_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             t.field,
                                         ),
@@ -204,7 +205,7 @@ where
                                         ColumnFamily::Indexes,
                                         serialize_index_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             t.field,
                                             text.as_bytes(),
@@ -217,7 +218,7 @@ where
                                     ColumnFamily::Values,
                                     serialize_stored_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         t.field,
                                     ),
@@ -227,7 +228,7 @@ where
                                     ColumnFamily::Indexes,
                                     serialize_index_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         t.field,
                                         text.as_bytes(),
@@ -239,7 +240,7 @@ where
                             bitmap_list
                                 .entry(serialize_bm_tag_key(
                                     account_id,
-                                    batch.collection_id,
+                                    batch.collection,
                                     t.get_field(),
                                     &t.value,
                                 ))
@@ -254,7 +255,7 @@ where
                                     ColumnFamily::Values,
                                     serialize_stored_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         b.get_field(),
                                     ),
@@ -269,7 +270,7 @@ where
                                         ColumnFamily::Values,
                                         serialize_stored_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             i.get_field(),
                                         ),
@@ -282,7 +283,7 @@ where
                                         ColumnFamily::Indexes,
                                         serialize_index_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             i.get_field(),
                                             &i.value.to_be_bytes(),
@@ -295,7 +296,7 @@ where
                                     ColumnFamily::Values,
                                     serialize_stored_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         i.get_field(),
                                     ),
@@ -305,7 +306,7 @@ where
                                     ColumnFamily::Indexes,
                                     serialize_index_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         i.get_field(),
                                         &i.value.to_be_bytes(),
@@ -320,7 +321,7 @@ where
                                         ColumnFamily::Values,
                                         serialize_stored_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             i.get_field(),
                                         ),
@@ -333,7 +334,7 @@ where
                                         ColumnFamily::Indexes,
                                         serialize_index_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             i.get_field(),
                                             &i.value.to_be_bytes(),
@@ -346,7 +347,7 @@ where
                                     ColumnFamily::Values,
                                     serialize_stored_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         i.get_field(),
                                     ),
@@ -356,7 +357,7 @@ where
                                     ColumnFamily::Indexes,
                                     serialize_index_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         i.get_field(),
                                         &i.value.to_be_bytes(),
@@ -371,7 +372,7 @@ where
                                         ColumnFamily::Values,
                                         serialize_stored_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             f.get_field(),
                                         ),
@@ -384,7 +385,7 @@ where
                                         ColumnFamily::Indexes,
                                         serialize_index_key(
                                             account_id,
-                                            batch.collection_id,
+                                            batch.collection,
                                             document_id,
                                             f.get_field(),
                                             &f.value.to_be_bytes(),
@@ -397,7 +398,7 @@ where
                                     ColumnFamily::Values,
                                     serialize_stored_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         f.get_field(),
                                     ),
@@ -407,7 +408,7 @@ where
                                     ColumnFamily::Indexes,
                                     serialize_index_key(
                                         account_id,
-                                        batch.collection_id,
+                                        batch.collection,
                                         document_id,
                                         f.get_field(),
                                         &f.value.to_be_bytes(),
@@ -422,7 +423,7 @@ where
                 if !term_index.is_empty() {
                     write_batch.push(WriteOperation::set(
                         ColumnFamily::Values,
-                        serialize_acd_key_leb128(account_id, batch.collection_id, document_id),
+                        serialize_acd_key_leb128(account_id, batch.collection, document_id),
                         term_index.compress(),
                     ));
                 }
@@ -448,25 +449,29 @@ where
 
                     write_batch.push(WriteOperation::set(
                         ColumnFamily::Values,
-                        serialize_blob_key(account_id, batch.collection_id, document_id),
+                        serialize_blob_key(account_id, batch.collection, document_id),
                         blob_entries.serialize().unwrap(),
                     ));
                 }
             }
 
-            change_log.add_change(
-                batch.collection_id,
-                if let Some(change_id) = batch.log_id {
-                    change_id
-                } else {
-                    self.assign_change_id(account_id, batch.collection_id)?
-                },
-                batch.log_action,
-            );
+            if add_changes {
+                change_log.add_change(
+                    batch.collection,
+                    if let Some(change_id) = batch.log_id {
+                        change_id
+                    } else {
+                        self.assign_change_id(account_id, batch.collection)?
+                    },
+                    batch.log_action,
+                );
+            }
         }
 
         // Write Raft and change log
-        change_log.serialize(&mut write_batch);
+        if add_changes {
+            change_log.serialize(&mut write_batch);
+        }
 
         // Update bitmaps
         for (key, doc_id_list) in bitmap_list {

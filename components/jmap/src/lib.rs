@@ -11,12 +11,6 @@ use id::JMAPIdSerialize;
 use json::JSONValue;
 use store::{AccountId, JMAPId, StoreError};
 
-pub const JMAP_MAIL: u8 = 0;
-pub const JMAP_MAILBOX: u8 = 1;
-pub const JMAP_MAILBOX_CHANGES: u8 = 2;
-pub const JMAP_THREAD: u8 = 3;
-pub const JMAP_BLOB: u8 = 4;
-
 #[derive(Debug)]
 pub enum JMAPError {
     InvalidArguments,

@@ -5,7 +5,7 @@ edition = "2018"
 
 [dependencies]
 nlp = { path = "components/nlp" }
-jmap_store = { path = "components/jmap_store" }
+jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
@@ -21,13 +21,17 @@ num_cpus = "1.13.1"
 futures = "0.3"
 rayon = "1.5.1"
 
+[dev-dependencies]
+store_test = { path = "components/store_test" }
+
 [workspace]
 resolver = "2"
 members = [
     "components/nlp",
     "components/store",
     "components/store_rocksdb",
-    "components/jmap_store",
+    "components/store_test",
+    "components/jmap",
     "components/jmap_mail",
 ]
 

@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 store = { path = "../store" }
 mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
-jmap_store = { path = "../jmap_store" }
+jmap = { path = "../jmap" }
 jmap_mail = { path = "../jmap_mail" }
 nlp = { path = "../nlp" }
 csv = "1.1"

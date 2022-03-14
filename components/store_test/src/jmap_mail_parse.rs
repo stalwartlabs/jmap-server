@@ -2,12 +2,12 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
-    import::JMAPMailLocalStoreImport,
+    import::JMAPMailImport,
     parse::{get_message_blob, JMAPMailParse, JMAPMailParseRequest},
     HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailProperties,
 };
-use jmap_store::{
+use jmap::{
     blob::JMAPBlobStore,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
@@ -39,7 +39,7 @@ where
                         .mail_import_blob(
                             0,
                             RaftId::default(),
-                            &fs::read(&test_file).unwrap(),
+                            fs::read(&test_file).unwrap(),
                             vec![],
                             vec![],
                             None,

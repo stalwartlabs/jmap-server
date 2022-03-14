@@ -12,9 +12,6 @@ use store::{
     Result, Store, StoreError,
 };
 
-#[cfg(test)]
-pub mod tests;
-
 pub struct RocksDB {
     db: DBWithThreadMode<MultiThreaded>,
 }

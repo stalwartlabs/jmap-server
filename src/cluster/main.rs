@@ -110,15 +110,28 @@ where
 
                 response_tx
                     .send(match request {
-                        rpc::Request::Synchronize(peers) => {
+                        rpc::Request::UpdatePeers { peers } => {
                             self.sync_peer_info(peers).await;
-                            rpc::Response::Synchronize(self.build_peer_info())
+                            rpc::Response::UpdatePeers {
+                                peers: self.build_peer_info(),
+                            }
                         }
                         rpc::Request::Vote { term, last } => {
                             self.handle_vote_request(peer_id, term, last)
                         }
-                        rpc::Request::MatchLog { term, last } => {
-                            self.handle_match_log_request(peer_id, term, last).await
+                        rpc::Request::SynchronizeLog { term, last } => {
+                            self.handle_synchronize_request(peer_id, term, last).await
+                        }
+                        rpc::Request::AppendEntries { term, entries } => {
+                            self.handle_append_entries(peer_id, term, entries).await
+                        }
+                        rpc::Request::UpdateStore {
+                            account_id,
+                            collection,
+                            changes,
+                        } => {
+                            self.handle_update_store(peer_id, account_id, collection, changes)
+                                .await
                         }
                         _ => rpc::Response::None,
                     })
@@ -129,7 +142,7 @@ where
                 //debug!("Reply [{}]: {:?}", peer_id, response);
 
                 match response {
-                    rpc::Response::Synchronize(peers) => {
+                    rpc::Response::UpdatePeers { peers } => {
                         self.sync_peer_info(peers).await;
                     }
                     rpc::Response::Vote { term, vote_granted } => {

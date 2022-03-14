@@ -10,7 +10,7 @@ pub mod thread;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
-use jmap_store::json::JSONValue;
+use jmap::json::JSONValue;
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderOffset, MessagePartId, MessageStructure, RfcHeader,
@@ -56,6 +56,7 @@ pub struct MessageOutline {
     pub body_offset: usize,
     pub body_structure: MessageStructure,
     pub headers: Vec<HashMap<HeaderName, Vec<HeaderOffset>>>,
+    pub received_at: i64,
 }
 
 impl StoreSerialize for MessageOutline {

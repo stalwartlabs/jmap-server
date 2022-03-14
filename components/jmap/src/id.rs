@@ -1,6 +1,6 @@
-use std::fmt::Write;
+use std::io::Write;
 
-use store::{blob::BlobIndex, leb128::Leb128, AccountId, CollectionId, DocumentId, JMAPId};
+use store::{blob::BlobIndex, leb128::Leb128, AccountId, DocumentId, Collection, JMAPId};
 
 pub trait JMAPIdSerialize {
     fn from_jmap_string(id: &str) -> Option<Self>
@@ -40,6 +40,8 @@ impl HexWriter {
 
 impl std::io::Write for HexWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use std::fmt::Write;
+
         for &byte in buf {
             write!(&mut self.result, "{:02x}", byte).unwrap();
         }
@@ -61,7 +63,7 @@ pub fn hex_reader(id: &str, start_pos: usize) -> impl Iterator<Item = u8> + '_ {
 #[derive(Clone, Debug)]
 pub struct OwnedBlob {
     pub account: AccountId,
-    pub collection: CollectionId,
+    pub collection: Collection,
     pub document: DocumentId,
     pub blob_index: BlobIndex,
 }
@@ -90,7 +92,7 @@ pub enum BlobId {
 impl BlobId {
     pub fn new_owned(
         account: AccountId,
-        collection: CollectionId,
+        collection: Collection,
         document: DocumentId,
         blob_index: BlobIndex,
     ) -> Self {
@@ -138,7 +140,7 @@ impl JMAPIdSerialize for BlobId {
 
                 Some(BlobId::Owned(OwnedBlob {
                     account: AccountId::from_leb128_it(&mut it)?,
-                    collection: CollectionId::from_leb128_it(&mut it)?,
+                    collection: it.next()?.into(),
                     document: DocumentId::from_leb128_it(&mut it)?,
                     blob_index: BlobIndex::from_leb128_it(&mut it)?,
                 }))
@@ -170,7 +172,7 @@ impl JMAPIdSerialize for BlobId {
                 Some(BlobId::InnerOwned(InnerBlob {
                     blob_id: OwnedBlob {
                         account: AccountId::from_leb128_it(&mut it)?,
-                        collection: CollectionId::from_leb128_it(&mut it)?,
+                        collection: it.next()?.into(),
                         document: DocumentId::from_leb128_it(&mut it)?,
                         blob_index: BlobIndex::from_leb128_it(&mut it)?,
                     },
@@ -181,13 +183,14 @@ impl JMAPIdSerialize for BlobId {
         }
     }
 
+    #[allow(clippy::unused_io_amount)]
     fn to_jmap_string(&self) -> String {
         let mut writer = HexWriter::with_capacity(10);
         match self {
             BlobId::Owned(blob_id) => {
                 writer.result.push('o');
                 blob_id.account.to_leb128_writer(&mut writer).unwrap();
-                blob_id.collection.to_leb128_writer(&mut writer).unwrap();
+                writer.write(&[blob_id.collection as u8]).unwrap();
                 blob_id.document.to_leb128_writer(&mut writer).unwrap();
                 blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
             }
@@ -204,11 +207,7 @@ impl JMAPIdSerialize for BlobId {
                     .account
                     .to_leb128_writer(&mut writer)
                     .unwrap();
-                blob_id
-                    .blob_id
-                    .collection
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
+                writer.write(&[blob_id.blob_id.collection as u8]).unwrap();
                 blob_id
                     .blob_id
                     .document
