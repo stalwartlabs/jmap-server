@@ -5,7 +5,7 @@ use crate::leb128::Leb128;
 use crate::raft::RaftId;
 use crate::serialize::{DeserializeBigEndian, COLLECTION_PREFIX_LEN, FIELD_PREFIX_LEN};
 use crate::{
-    AccountId, ColumnFamily, Direction, Collection, JMAPId, JMAPStore, Store, StoreError,
+    AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError,
     WriteOperation,
 };
 
@@ -15,6 +15,7 @@ pub type ChangeId = u64;
 pub enum Change {
     Insert(JMAPId),
     Update(JMAPId),
+    ChildUpdate(JMAPId),
     Delete(JMAPId),
 }
 
@@ -52,71 +53,72 @@ impl Changes {
         if total_inserts > 0 {
             for _ in 0..total_inserts {
                 self.changes
-                    .push(Change::Insert(ChangeId::from_leb128_it(&mut bytes_it)?));
+                    .push(Change::Insert(JMAPId::from_leb128_it(&mut bytes_it)?));
             }
         }
 
         if total_updates > 0 {
-            'update_outer: for _ in 0..total_updates {
-                let id = ChangeId::from_leb128_it(&mut bytes_it)?;
+            let mut is_child_update = false;
 
+            'update_outer: for _ in 0..total_updates {
+                let id = JMAPId::from_leb128_it(&mut bytes_it)?;
+                if !is_child_update && id == JMAPId::MAX {
+                    is_child_update = true;
+                    continue;
+                }
+
+                let mut add_as_child_update = is_child_update;
                 if !self.changes.is_empty() {
-                    let mut update_idx = None;
                     for (idx, change) in self.changes.iter().enumerate() {
                         match change {
-                            Change::Insert(insert_id) => {
-                                if *insert_id == id {
-                                    // Item updated after inserted, no need to count this change.
-                                    continue 'update_outer;
-                                }
+                            Change::Insert(insert_id) if *insert_id == id => {
+                                // Item updated after inserted, no need to count this change.
+                                continue 'update_outer;
                             }
-                            Change::Update(update_id) => {
-                                if *update_id == id {
-                                    update_idx = Some(idx);
-                                    break;
-                                }
+                            Change::Update(update_id) if *update_id == id => {
+                                // Move update to the front
+                                add_as_child_update = false;
+                                self.changes.remove(idx);
+                                break;
+                            }
+                            Change::ChildUpdate(update_id) if *update_id == id => {
+                                // Move update to the front
+                                self.changes.remove(idx);
+                                break;
                             }
                             _ => (),
                         }
                     }
-
-                    // Move update to the front
-                    if let Some(idx) = update_idx {
-                        self.changes.remove(idx);
-                    }
                 }
 
-                self.changes.push(Change::Update(id));
+                self.changes.push(if !add_as_child_update {
+                    Change::Update(id)
+                } else {
+                    Change::ChildUpdate(id)
+                });
             }
         }
 
         if total_deletes > 0 {
             'delete_outer: for _ in 0..total_deletes {
-                let id = ChangeId::from_leb128_it(&mut bytes_it)?;
+                let id = JMAPId::from_leb128_it(&mut bytes_it)?;
 
                 if !self.changes.is_empty() {
-                    //let mut update_idx = None;
                     'delete_inner: for (idx, change) in self.changes.iter().enumerate() {
                         match change {
-                            Change::Insert(insert_id) => {
-                                if *insert_id == id {
-                                    self.changes.remove(idx);
-                                    continue 'delete_outer;
-                                }
+                            Change::Insert(insert_id) if *insert_id == id => {
+                                self.changes.remove(idx);
+                                continue 'delete_outer;
                             }
-                            Change::Update(update_id) => {
-                                if *update_id == id {
-                                    self.changes.remove(idx);
-                                    //update_idx = Some(idx);
-                                    break 'delete_inner;
-                                }
+                            Change::Update(update_id) | Change::ChildUpdate(update_id)
+                                if *update_id == id =>
+                            {
+                                self.changes.remove(idx);
+                                break 'delete_inner;
                             }
                             _ => (),
                         }
                     }
-                    /*if let Some(idx) = update_idx {
-                        self.changes.remove(idx);
-                    }*/
                 }
 
                 self.changes.push(Change::Delete(id));
@@ -132,6 +134,7 @@ pub struct Entry {
     pub inserts: Vec<JMAPId>,
     pub updates: Vec<JMAPId>,
     pub deletes: Vec<JMAPId>,
+    pub child_updates: Vec<JMAPId>,
 }
 
 impl From<Entry> for Vec<u8> {
@@ -148,13 +151,17 @@ impl Entry {
 
     pub fn serialize(self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
-            (self.inserts.len() + self.updates.len() + self.deletes.len() + 3)
+            (self.inserts.len()
+                + self.updates.len()
+                + self.child_updates.len()
+                + self.deletes.len()
+                + 3)
                 * std::mem::size_of::<usize>(),
         );
         self.inserts.len().to_leb128_bytes(&mut buf);
-        self.updates.len().to_leb128_bytes(&mut buf);
+        (self.updates.len() + self.child_updates.len()).to_leb128_bytes(&mut buf);
         self.deletes.len().to_leb128_bytes(&mut buf);
-        for list in [self.inserts, self.updates, self.deletes] {
+        for list in [self.inserts, self.updates, self.child_updates, self.deletes] {
             for id in list {
                 id.to_leb128_bytes(&mut buf);
             }
@@ -194,12 +201,7 @@ impl LogWriter {
         }
     }
 
-    pub fn add_change(
-        &mut self,
-        collection: Collection,
-        change_id: ChangeId,
-        action: LogAction,
-    ) {
+    pub fn add_change(&mut self, collection: Collection, change_id: ChangeId, action: LogAction) {
         let log_entry = self
             .changes
             .entry((collection, change_id))
@@ -218,6 +220,13 @@ impl LogWriter {
             LogAction::Move(old_id, id) => {
                 log_entry.inserts.push(id);
                 log_entry.deletes.push(old_id);
+            }
+            LogAction::UpdateChild(id) => {
+                if log_entry.child_updates.is_empty() {
+                    // Add marker
+                    log_entry.child_updates.push(JMAPId::MAX);
+                }
+                log_entry.child_updates.push(id);
             }
         }
     }

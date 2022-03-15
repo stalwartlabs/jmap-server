@@ -14,151 +14,153 @@ use std::{
     time::Instant,
 };
 use store::{
-    query::JMAPIdMapFnc, raft::RaftId, Collection, Comparator, FieldValue, Filter, Integer, JMAPId,
+    query::JMAPIdMapFnc, AccountId, Collection, Comparator, FieldValue, Filter, Integer, JMAPId,
     JMAPStore, Store, Tag,
 };
 use store::{query::JMAPStoreQuery, JMAPIdPrefix};
 
 use crate::{db_insert_filter_sort::FIELDS, deflate_artwork_data};
 
-pub fn jmap_mail_query<T>(mail_store: JMAPStore<T>, do_insert: bool)
+const MAX_THREADS: usize = 100;
+const MAX_MESSAGES: usize = 1000;
+const MAX_MESSAGES_PER_THREAD: usize = 100;
+
+pub fn jmap_mail_query_prepare<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    const MAX_THREADS: usize = 100;
-    const MAX_MESSAGES: usize = 1000;
-    const MAX_MESSAGES_PER_THREAD: usize = 100;
-
-    if do_insert {
-        let now = Instant::now();
-        let mut fields = HashMap::new();
-        for (field_num, field) in FIELDS.iter().enumerate() {
-            fields.insert(field.to_string(), field_num);
-        }
-
-        let mut total_messages = 0;
-        let mut total_threads = 0;
-        let mut thread_count = HashMap::new();
-        let mut artist_count = HashMap::new();
-
-        'outer: for record in csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_reader(&deflate_artwork_data()[..])
-            .records()
-        {
-            let record = record.unwrap();
-            let mut values_str = HashMap::new();
-            let mut values_int = HashMap::new();
-
-            for field_name in [
-                "year",
-                "acquisitionYear",
-                "accession_number",
-                "artist",
-                "artistRole",
-                "medium",
-                "title",
-                "creditLine",
-                "inscription",
-            ] {
-                let field = record.get(fields[field_name]).unwrap();
-                if field.is_empty()
-                    || (field_name == "title" && (field.contains('[') || field.contains(']')))
-                {
-                    continue 'outer;
-                } else if field_name == "year" || field_name == "acquisitionYear" {
-                    let field = field.parse::<i32>().unwrap_or(0);
-                    if field < 1000 {
-                        continue 'outer;
-                    }
-                    values_int.insert(field_name.to_string(), field);
-                } else {
-                    values_str.insert(field_name.to_string(), field.to_string());
-                }
-            }
-
-            let val = artist_count
-                .entry(values_str["artist"].clone())
-                .or_insert(0);
-            if *val == 3 {
-                continue;
-            }
-            *val += 1;
-
-            match thread_count.entry(values_int["year"]) {
-                Entry::Occupied(mut e) => {
-                    let messages_per_thread = e.get_mut();
-                    if *messages_per_thread == MAX_MESSAGES_PER_THREAD {
-                        continue;
-                    }
-                    *messages_per_thread += 1;
-                }
-                Entry::Vacant(e) => {
-                    if total_threads == MAX_THREADS {
-                        continue;
-                    }
-                    total_threads += 1;
-                    e.insert(1);
-                }
-            }
-
-            total_messages += 1;
-
-            mail_store
-                .mail_import_blob(
-                    0,
-                    RaftId::default(),
-                    format!(
-                        concat!(
-                            "From: {}\nCc: {}\nMessage-ID: <{}>\n",
-                            "References: <{}>\nComments: {}\nSubject: [{}]",
-                            " Year {}\n\n{}\n{}\n"
-                        ),
-                        values_str["artist"],
-                        values_str["medium"],
-                        values_str["accession_number"],
-                        values_int["year"],
-                        values_str["artistRole"],
-                        values_str["title"],
-                        values_int["year"],
-                        values_str["creditLine"],
-                        values_str["inscription"]
-                    )
-                    .into_bytes(),
-                    vec![
-                        values_int["year"] as MailboxId,
-                        (values_int["acquisitionYear"] + 1000) as MailboxId,
-                    ],
-                    vec![
-                        Tag::Text(values_str["medium"].clone()),
-                        Tag::Text(values_str["artistRole"].clone()),
-                        Tag::Text(values_str["accession_number"][0..1].to_string()),
-                        Tag::Text(format!(
-                            "N{}",
-                            &values_str["accession_number"]
-                                [values_str["accession_number"].len() - 1..]
-                        )),
-                    ],
-                    Some(values_int["year"] as i64),
-                )
-                .unwrap();
-
-            if total_messages == MAX_MESSAGES {
-                break;
-            }
-        }
-        println!(
-            "Imported {} messages in {} ms (single thread).",
-            total_messages,
-            now.elapsed().as_millis()
-        );
+    let now = Instant::now();
+    let mut fields = HashMap::new();
+    for (field_num, field) in FIELDS.iter().enumerate() {
+        fields.insert(field.to_string(), field_num);
     }
 
+    let mut total_messages = 0;
+    let mut total_threads = 0;
+    let mut thread_count = HashMap::new();
+    let mut artist_count = HashMap::new();
+
+    'outer: for record in csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_reader(&deflate_artwork_data()[..])
+        .records()
+    {
+        let record = record.unwrap();
+        let mut values_str = HashMap::new();
+        let mut values_int = HashMap::new();
+
+        for field_name in [
+            "year",
+            "acquisitionYear",
+            "accession_number",
+            "artist",
+            "artistRole",
+            "medium",
+            "title",
+            "creditLine",
+            "inscription",
+        ] {
+            let field = record.get(fields[field_name]).unwrap();
+            if field.is_empty()
+                || (field_name == "title" && (field.contains('[') || field.contains(']')))
+            {
+                continue 'outer;
+            } else if field_name == "year" || field_name == "acquisitionYear" {
+                let field = field.parse::<i32>().unwrap_or(0);
+                if field < 1000 {
+                    continue 'outer;
+                }
+                values_int.insert(field_name.to_string(), field);
+            } else {
+                values_str.insert(field_name.to_string(), field.to_string());
+            }
+        }
+
+        let val = artist_count
+            .entry(values_str["artist"].clone())
+            .or_insert(0);
+        if *val == 3 {
+            continue;
+        }
+        *val += 1;
+
+        match thread_count.entry(values_int["year"]) {
+            Entry::Occupied(mut e) => {
+                let messages_per_thread = e.get_mut();
+                if *messages_per_thread == MAX_MESSAGES_PER_THREAD {
+                    continue;
+                }
+                *messages_per_thread += 1;
+            }
+            Entry::Vacant(e) => {
+                if total_threads == MAX_THREADS {
+                    continue;
+                }
+                total_threads += 1;
+                e.insert(1);
+            }
+        }
+
+        total_messages += 1;
+
+        mail_store
+            .mail_import_blob(
+                account_id,
+                mail_store.assign_raft_id(),
+                format!(
+                    concat!(
+                        "From: {}\nCc: {}\nMessage-ID: <{}>\n",
+                        "References: <{}>\nComments: {}\nSubject: [{}]",
+                        " Year {}\n\n{}\n{}\n"
+                    ),
+                    values_str["artist"],
+                    values_str["medium"],
+                    values_str["accession_number"],
+                    values_int["year"],
+                    values_str["artistRole"],
+                    values_str["title"],
+                    values_int["year"],
+                    values_str["creditLine"],
+                    values_str["inscription"]
+                )
+                .into_bytes(),
+                vec![
+                    values_int["year"] as MailboxId,
+                    (values_int["acquisitionYear"] + 1000) as MailboxId,
+                ],
+                vec![
+                    Tag::Text(values_str["medium"].clone()),
+                    Tag::Text(values_str["artistRole"].clone()),
+                    Tag::Text(values_str["accession_number"][0..1].to_string()),
+                    Tag::Text(format!(
+                        "N{}",
+                        &values_str["accession_number"][values_str["accession_number"].len() - 1..]
+                    )),
+                ],
+                Some(values_int["year"] as i64),
+            )
+            .unwrap();
+
+        if total_messages == MAX_MESSAGES {
+            break;
+        }
+    }
+    println!(
+        "Imported {} messages in {} ms (single thread).",
+        total_messages,
+        now.elapsed().as_millis()
+    );
+}
+
+pub fn jmap_mail_query<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
+where
+    T: for<'x> Store<'x> + 'static,
+{
     for thread_id in 0..MAX_THREADS {
         assert!(
             mail_store
                 .get_tag(
-                    0,
+                    account_id,
                     Collection::Mail,
                     MessageField::ThreadId.into(),
                     Tag::Id(thread_id as Integer)
@@ -173,7 +175,7 @@ where
     assert!(
         mail_store
             .get_tag(
-                0,
+                account_id,
                 Collection::Mail,
                 MessageField::ThreadId.into(),
                 Tag::Id(MAX_THREADS as Integer)
@@ -185,13 +187,13 @@ where
     );
 
     println!("Running JMAP Mail query tests...");
-    test_query(&mail_store);
+    test_query(mail_store, account_id);
 
     println!("Running JMAP Mail query options tests...");
-    test_query_options(&mail_store);
+    test_query_options(mail_store, account_id);
 }
 
-fn test_query<T>(mail_store: &JMAPStore<T>)
+fn test_query<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -422,7 +424,7 @@ where
         assert_eq!(
             mail_store
                 .mail_query(JMAPQueryRequest {
-                    account_id: 0,
+                    account_id,
                     filter,
                     sort,
                     position: 0,
@@ -437,21 +439,21 @@ where
                 .unwrap()
                 .ids
                 .into_iter()
-                .map(|id| get_message_id(mail_store, id))
+                .map(|id| get_message_id(mail_store, id, account_id))
                 .collect::<Vec<String>>(),
             expected_results
         );
     }
 }
 
-fn test_query_options<T>(mail_store: &JMAPStore<T>)
+fn test_query_options<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
     for (mut query, expected_results, expected_results_collapsed) in [
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
@@ -477,7 +479,7 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
@@ -503,7 +505,7 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
@@ -529,7 +531,7 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
@@ -555,7 +557,7 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
@@ -575,7 +577,7 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
@@ -595,14 +597,14 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01205"),
+                anchor: get_anchor(mail_store, "N01205", account_id),
                 anchor_offset: 0,
                 limit: 10,
                 calculate_total: true,
@@ -621,14 +623,14 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01205"),
+                anchor: get_anchor(mail_store, "N01205", account_id),
                 anchor_offset: 10,
                 limit: 10,
                 calculate_total: true,
@@ -647,14 +649,14 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01205"),
+                anchor: get_anchor(mail_store, "N01205", account_id),
                 anchor_offset: -10,
                 limit: 10,
                 calculate_total: true,
@@ -673,14 +675,14 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "N01496"),
+                anchor: get_anchor(mail_store, "N01496", account_id),
                 anchor_offset: -10,
                 limit: 10,
                 calculate_total: true,
@@ -693,14 +695,14 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "AR00164"),
+                anchor: get_anchor(mail_store, "AR00164", account_id),
                 anchor_offset: 10,
                 limit: 10,
                 calculate_total: true,
@@ -713,14 +715,14 @@ where
         ),
         (
             JMAPQueryRequest {
-                account_id: 0,
+                account_id,
                 filter: JMAPFilter::<JMAPMailFilterCondition>::None,
                 sort: vec![
                     JMAPComparator::ascending(JMAPMailComparator::Subject),
                     JMAPComparator::ascending(JMAPMailComparator::From),
                 ],
                 position: 0,
-                anchor: get_anchor(mail_store, "AR00164"),
+                anchor: get_anchor(mail_store, "AR00164", account_id),
                 anchor_offset: 0,
                 limit: 0,
                 calculate_total: true,
@@ -738,7 +740,7 @@ where
                 .unwrap()
                 .ids
                 .into_iter()
-                .map(|id| { get_message_id(mail_store, id) })
+                .map(|id| { get_message_id(mail_store, id, account_id) })
                 .collect::<Vec<String>>(),
             expected_results
         );
@@ -749,20 +751,20 @@ where
                 .unwrap()
                 .ids
                 .into_iter()
-                .map(|id| { get_message_id(mail_store, id) })
+                .map(|id| { get_message_id(mail_store, id, account_id) })
                 .collect::<Vec<String>>(),
             expected_results_collapsed
         );
     }
 }
 
-fn get_anchor<T>(mail_store: &JMAPStore<T>, anchor: &str) -> Option<JMAPId>
+fn get_anchor<T>(mail_store: &JMAPStore<T>, anchor: &str, account_id: AccountId) -> Option<JMAPId>
 where
     T: for<'x> Store<'x> + 'static,
 {
     let doc_id = mail_store
         .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
-            0,
+            account_id,
             Collection::Mail,
             Filter::eq(
                 MessageField::MessageIdRef.into(),
@@ -776,20 +778,25 @@ where
         .get_document_id();
 
     let thread_id = mail_store
-        .get_document_value(0, Collection::Mail, doc_id, MessageField::ThreadId.into())
+        .get_document_value(
+            account_id,
+            Collection::Mail,
+            doc_id,
+            MessageField::ThreadId.into(),
+        )
         .unwrap()
         .unwrap();
 
     JMAPId::from_parts(thread_id, doc_id).into()
 }
 
-fn get_message_id<T>(mail_store: &JMAPStore<T>, jmap_id: JMAPId) -> String
+fn get_message_id<T>(mail_store: &JMAPStore<T>, jmap_id: JMAPId, account_id: AccountId) -> String
 where
     T: for<'x> Store<'x> + 'static,
 {
     mail_store
         .mail_get(JMAPGet {
-            account_id: 0,
+            account_id,
             ids: vec![jmap_id].into(),
             properties: vec![JMAPMailProperties::MessageId].into(),
             arguments: JMAPMailGetArguments::default(),

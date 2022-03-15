@@ -1,10 +1,10 @@
+use jmap::{json::JSONValue, JMAPGet};
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
     import::JMAPMailImport,
     HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailProperties,
 };
-use jmap::{json::JSONValue, JMAPGet};
 use mail_parser::RfcHeader;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,7 +12,7 @@ use std::{
     fs,
     path::PathBuf,
 };
-use store::{raft::RaftId, JMAPStore, Store, Tag};
+use store::{ AccountId, JMAPStore, Store, Tag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -71,7 +71,7 @@ impl<'x> From<JSONValue> for SortedJSONValue {
     }
 }
 
-pub fn jmap_mail_get<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_get<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -88,8 +88,8 @@ where
         let blob_len = blob.len();
         let jmap_id = mail_store
             .mail_import_blob(
-                0,
-                RaftId::default(),
+                account_id,
+                mail_store.assign_raft_id(),
                 blob,
                 vec![],
                 vec![Tag::Text("tag".into())],
@@ -106,7 +106,7 @@ where
         let result = if file_name.file_name().unwrap() != "headers.eml" {
             mail_store
                 .mail_get(JMAPGet {
-                    account_id: 0,
+                    account_id,
                     ids: vec![jmap_id].into(),
                     properties: vec![
                         JMAPMailProperties::Id,
@@ -341,7 +341,7 @@ where
                 result.extend(
                     mail_store
                         .mail_get(JMAPGet {
-                            account_id: 0,
+                            account_id,
                             ids: vec![jmap_id].into(),
                             properties: vec![property].into(),
                             arguments: JMAPMailGetArguments {

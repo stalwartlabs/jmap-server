@@ -18,9 +18,8 @@ use store::roaring::RoaringBitmap;
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::{batch::WriteBatch, Store};
 use store::{
-    bincode, AccountId, Comparator, ComparisonOperator, DocumentId, FieldComparator, FieldId,
-    FieldValue, Filter, Collection, JMAPId, JMAPIdPrefix, JMAPStore, LongInteger, StoreError,
-    Tag,
+    bincode, AccountId, Collection, Comparator, ComparisonOperator, DocumentId, FieldComparator,
+    FieldId, FieldValue, Filter, JMAPId, JMAPIdPrefix, JMAPStore, LongInteger, StoreError, Tag,
 };
 
 use crate::MessageField;
@@ -811,23 +810,16 @@ where
         &self,
         request: JMAPChangesRequest,
     ) -> jmap::Result<JMAPChangesResponse<JMAPMailboxChangesResponse>> {
-        let changes = self.get_jmap_changes(
-            request.account,
+        let mut changes = self.get_jmap_changes(
+            request.account_id,
             Collection::Mailbox,
             request.since_state.clone(),
             request.max_changes,
         )?;
 
         let mut updated_properties = None;
-        if !changes.updated.is_empty() {
-            let message_changes = self.get_jmap_changes(
-                request.account,
-                Collection::MailboxChanges,
-                request.since_state,
-                request.max_changes,
-            )?;
-
-            if message_changes.updated == changes.updated {
+        if !changes.arguments.is_empty() {
+            if changes.updated.is_empty() {
                 updated_properties = vec![
                     JMAPMailboxProperties::TotalEmails,
                     JMAPMailboxProperties::UnreadEmails,
@@ -835,6 +827,12 @@ where
                     JMAPMailboxProperties::UnreadThreads,
                 ]
                 .into();
+                changes.updated = changes.arguments;
+            } else {
+                for jmap_id in changes.arguments {
+                    debug_assert!(!changes.updated.contains(&jmap_id));
+                    changes.updated.push(jmap_id);
+                }
             }
         }
 
@@ -860,12 +858,19 @@ where
             JMAPMailboxQueryArguments,
         >,
     ) -> jmap::Result<JMAPQueryChangesResponse> {
-        let changes = self.get_jmap_changes(
+        let mut changes = self.get_jmap_changes(
             request.account_id,
             Collection::Mailbox,
             request.since_query_state,
             request.max_changes,
         )?;
+
+        if !changes.arguments.is_empty() {
+            for jmap_id in &changes.arguments {
+                debug_assert!(!changes.updated.contains(jmap_id));
+                changes.updated.push(*jmap_id);
+            }
+        }
 
         let query_results = if changes.total_changes > 0 || request.calculate_total {
             Some(self.mailbox_query(JMAPQueryRequest {

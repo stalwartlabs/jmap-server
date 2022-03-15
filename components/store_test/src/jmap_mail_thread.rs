@@ -1,8 +1,8 @@
 use jmap::{json::JSONValue, JMAPGet};
 use jmap_mail::{import::JMAPMailImport, thread::JMAPMailThread};
-use store::{raft::RaftId, JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
-pub fn jmap_mail_thread<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_thread<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -12,8 +12,8 @@ where
     for num in [5, 3, 1, 2, 4] {
         let mut result = mail_store
             .mail_import_blob(
-                0,
-                RaftId::default(),
+                account_id,
+                mail_store.assign_raft_id(),
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
                 vec![],
                 vec![],
@@ -29,7 +29,7 @@ where
     assert_eq!(
         mail_store
             .thread_get(JMAPGet {
-                account_id: 0,
+                account_id,
                 ids: Some(vec![thread_id]),
                 properties: None,
                 arguments: ()

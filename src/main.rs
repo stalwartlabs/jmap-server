@@ -12,13 +12,20 @@ use std::{
 use actix_web::{middleware, web, App, HttpServer};
 use store::{config::EnvSettings, tracing::info, JMAPStore};
 use store_rocksdb::RocksDB;
+use tokio::sync::mpsc;
 
-use crate::{cluster::main::start_cluster, jmap::jmap_request};
+use crate::{
+    cluster::{main::start_cluster, IPC_CHANNEL_BUFFER},
+    jmap::jmap_request,
+};
 
 pub struct JMAPServer<T> {
     pub store: Arc<JMAPStore<T>>,
-    pub is_raft_leader: AtomicBool,
+    pub cluster_tx: mpsc::Sender<cluster::Event>,
     pub worker_pool: rayon::ThreadPool,
+    pub is_cluster: bool,
+    pub is_leader: AtomicBool,
+    pub is_up_to_date: AtomicBool,
 }
 
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
@@ -30,8 +37,10 @@ async fn main() -> std::io::Result<()> {
 
     // Read configuration parameters
     let settings = EnvSettings::new();
+    let is_cluster = settings.get("cluster").is_some();
 
     // Build the JMAP store
+    let (cluster_tx, cluster_rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
     let jmap_server = web::Data::new(JMAPServer {
         store: JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings).into(),
         worker_pool: rayon::ThreadPoolBuilder::new()
@@ -43,11 +52,16 @@ async fn main() -> std::io::Result<()> {
             )
             .build()
             .unwrap(),
-        is_raft_leader: false.into(),
+        cluster_tx: cluster_tx.clone(),
+        is_cluster,
+        is_leader: (!is_cluster).into(),
+        is_up_to_date: (!is_cluster).into(),
     });
 
     // Start cluster
-    start_cluster(jmap_server.clone(), &settings).await;
+    if is_cluster {
+        start_cluster(jmap_server.clone(), &settings, cluster_rx, cluster_tx).await;
+    }
 
     // Start HTTP server
     let http_addr = SocketAddr::from((

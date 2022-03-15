@@ -10,6 +10,7 @@ use store::{
     raft::TermId,
     tracing::{debug, error},
 };
+use tokio::sync::watch;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
@@ -41,10 +42,11 @@ pub enum Request {
     },
     SynchronizeLog {
         term: TermId,
-        last: RaftId,
+        last_log: RaftId,
     },
     AppendEntries {
         term: TermId,
+        last_log: RaftId,
         entries: Vec<store::raft::Entry>,
     },
     UpdateStore {
@@ -177,7 +179,12 @@ impl Encoder<Protocol> for RpcEncoder {
     }
 }
 
-pub async fn spawn_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Event>, key: String) {
+pub async fn spawn_rpc(
+    bind_addr: SocketAddr,
+    mut shutdown_rx: watch::Receiver<bool>,
+    main_tx: mpsc::Sender<Event>,
+    key: String,
+) {
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
         panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
@@ -185,18 +192,27 @@ pub async fn spawn_rpc(bind_addr: SocketAddr, tx: mpsc::Sender<Event>, key: Stri
 
     tokio::spawn(async move {
         loop {
-            match listener.accept().await {
-                Ok((stream, _)) => {
-                    let tx = tx.clone();
-                    let key = key.clone();
-                    tokio::spawn(async move {
-                        handle_conn(stream, tx, key).await;
-                    });
+            tokio::select! {
+                stream = listener.accept() => {
+                    match stream {
+                        Ok((stream, _)) => {
+                            let main_tx = main_tx.clone();
+                            let key = key.clone();
+                            let shutdown_rx = shutdown_rx.clone();
+                            tokio::spawn(async move {
+                                handle_conn(stream, shutdown_rx, main_tx, key).await;
+                            });
+                        }
+                        Err(err) => {
+                            error!("Failed to accept TCP connection: {}", err);
+                        }
+                    }
+                },
+                _ = shutdown_rx.changed() => {
+                    debug!("RPC listener shutting down.");
+                    break;
                 }
-                Err(err) => {
-                    error!("Failed to accept TCP connection: {}", err);
-                }
-            }
+            };
         }
     });
 }
@@ -229,7 +245,7 @@ pub fn spawn_peer_rpc(
                 {
                     Ok(Some(message)) => message,
                     Ok(None) => {
-                        debug!("Peer RPC process exiting.");
+                        debug!("Peer RPC process with {} exiting.", peer_addr);
                         break;
                     }
                     Err(_) => {
@@ -325,6 +341,7 @@ pub fn spawn_peer_rpc(
                                     }
                                     Ok(None) => {
                                         // RPC process was ended.
+                                        debug!("Peer RPC process with {} exiting.", peer_addr);
                                         break 'main;
                                     }
                                     Err(_) => {
@@ -394,7 +411,12 @@ pub fn spawn_peer_rpc(
     tx
 }
 
-async fn handle_conn(stream: TcpStream, tx: mpsc::Sender<Event>, auth_key: String) {
+async fn handle_conn(
+    stream: TcpStream,
+    mut shutdown_rx: watch::Receiver<bool>,
+    main_tx: mpsc::Sender<Event>,
+    auth_key: String,
+) {
     let peer_addr = stream.peer_addr().unwrap();
     let mut frames = Framed::new(stream, RpcEncoder::default());
 
@@ -428,45 +450,58 @@ async fn handle_conn(stream: TcpStream, tx: mpsc::Sender<Event>, auth_key: Strin
         }
     };
 
-    while let Some(frame) = frames.next().await {
-        match frame {
-            Ok(Protocol::Request(request)) => {
-                let (response_tx, response_rx) = oneshot::channel();
+    loop {
+        tokio::select! {
+            frame = frames.next() => {
+                match frame {
+                    Some(Ok(Protocol::Request(request))) => {
+                        let (response_tx, response_rx) = oneshot::channel();
 
-                if let Err(err) = tx
-                    .send(Event::RpcRequest {
-                        peer_id,
-                        response_tx,
-                        request,
-                    })
-                    .await
-                {
-                    error!("Failed to send RPC request to core: {}", err);
-                    return;
-                }
-
-                match response_rx.await {
-                    Ok(response) => {
-                        if let Err(err) = frames.send(Protocol::Response(response)).await {
-                            error!("Failed to send RPC response: {}", err);
+                        if let Err(err) = main_tx
+                            .send(Event::RpcRequest {
+                                peer_id,
+                                response_tx,
+                                request,
+                            })
+                            .await
+                        {
+                            error!("Failed to send RPC request to core: {}", err);
                             return;
                         }
+
+                        match response_rx.await {
+                            Ok(response) => {
+                                if let Err(err) = frames.send(Protocol::Response(response)).await {
+                                    error!("Failed to send RPC response: {}", err);
+                                    return;
+                                }
+                            }
+                            Err(err) => {
+                                error!("Failed to receive RPC response: {}", err);
+                                return;
+                            }
+                        }
                     }
-                    Err(err) => {
-                        error!("Failed to receive RPC response: {}", err);
+                    Some(Ok(invalid)) => {
+                        error!("Received invalid RPC frame from {}: {:?}", peer_id, invalid);
                         return;
                     }
+                    Some(Err(err)) => {
+                        error!("Failed to read RPC request from {}: {}", peer_addr, err);
+                        return;
+                    }
+                    None => {
+                        debug!("RPC connection with peer {} closed.", peer_addr);
+                        break;
+                    }
                 }
-            }
-            Ok(invalid) => {
-                error!("Received invalid RPC frame from {}: {:?}", peer_id, invalid);
+
+            },
+            _ = shutdown_rx.changed() => {
+                debug!("RPC connection with peer {} shutting down.", peer_addr);
                 return;
             }
-            Err(err) => {
-                error!("Failed to read RPC request from {}: {}", peer_addr, err);
-                return;
-            }
-        }
+        };
     }
 }
 

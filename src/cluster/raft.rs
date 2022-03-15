@@ -10,6 +10,7 @@ use tokio::sync::watch;
 use crate::cluster::log::spawn_append_entries;
 use crate::JMAPServer;
 
+use super::Event;
 use super::{
     rpc::{Request, Response},
     Cluster, Peer, PeerId,
@@ -87,13 +88,15 @@ where
     }
 
     pub fn log_is_behind_or_eq(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
-        last_log_term > self.last_log_term
-            || (last_log_term == self.last_log_term && last_log_index >= self.last_log_index)
+        last_log_term > self.last_log.term
+            || (last_log_term == self.last_log.term
+                && last_log_index.wrapping_add(1) >= self.last_log.index.wrapping_add(1))
     }
 
     pub fn log_is_behind(&self, last_log_term: TermId, last_log_index: LogIndex) -> bool {
-        last_log_term > self.last_log_term
-            || (last_log_term == self.last_log_term && last_log_index > self.last_log_index)
+        last_log_term > self.last_log.term
+            || (last_log_term == self.last_log.term
+                && last_log_index.wrapping_add(1) > self.last_log.index.wrapping_add(1))
     }
 
     pub fn can_grant_vote(&self, candidate_peer_id: PeerId) -> bool {
@@ -132,13 +135,13 @@ where
         self.state = State::Wait {
             election_due: election_timeout(now),
         };
-        self.core.set_raft_follower(self.term);
+        self.core.set_follower();
         self.reset();
     }
 
     pub fn step_down(&mut self, term: TermId) {
         self.reset();
-        self.core.set_raft_follower(term);
+        self.core.set_follower();
         self.term = term;
         self.state = State::Wait {
             election_due: match self.state {
@@ -160,7 +163,7 @@ where
             peer_id,
             election_due: election_timeout(false),
         };
-        self.core.set_raft_follower(self.term);
+        self.core.set_follower();
         self.reset();
         debug!(
             "Voted for peer {} for term {}.",
@@ -171,7 +174,7 @@ where
 
     pub fn follow_leader(&mut self, peer_id: PeerId) {
         self.state = State::Follower { peer_id };
-        self.core.set_raft_follower(self.term);
+        self.core.set_follower();
         self.reset();
         debug!(
             "Following peer {} for term {}.",
@@ -182,7 +185,7 @@ where
 
     pub fn send_append_entries(&self) {
         if let State::Leader { tx, .. } = &self.state {
-            if let Err(err) = tx.send(self.last_log_index) {
+            if let Err(err) = tx.send(self.last_log.index) {
                 error!("Failed to broadcast append entries: {}", err);
             }
         }
@@ -193,20 +196,20 @@ where
             election_due: election_timeout(now),
         };
         self.term += 1;
-        self.core.set_raft_follower(self.term);
+        self.core.set_follower();
         self.reset();
         debug!("Running for election for term {}.", self.term);
     }
 
     pub fn become_leader(&mut self) {
         debug!("This node is the new leader for term {}.", self.term);
-        let (tx, rx) = watch::channel(self.last_log_index);
+        let (tx, rx) = watch::channel(self.last_log.index);
         self.peers
             .iter()
             .filter(|p| p.is_in_shard(self.shard_id))
             .for_each(|p| spawn_append_entries(self, p, rx.clone()));
         self.state = State::Leader { tx, rx };
-        self.core.set_raft_leader(self.term);
+        self.core.set_leader(self.term);
         self.reset();
     }
 
@@ -255,7 +258,7 @@ where
                 self.run_for_election(now);
                 for peer in &self.peers {
                     if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
-                        peer.vote_for_me(self.term, self.last_log_index, self.last_log_term)
+                        peer.vote_for_me(self.term, self.last_log.index, self.last_log.term)
                             .await;
                     }
                 }
@@ -333,14 +336,36 @@ impl<T> JMAPServer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn set_raft_leader(&self, term: TermId) {
-        self.is_raft_leader.store(true, Ordering::Relaxed);
+    pub fn set_leader(&self, term: TermId) {
+        self.is_leader.store(true, Ordering::Relaxed);
+        self.is_up_to_date.store(true, Ordering::Relaxed);
         self.store.raft_log_term.store(term, Ordering::Relaxed);
     }
 
-    pub fn set_raft_follower(&self, term: TermId) {
-        self.is_raft_leader.store(false, Ordering::Relaxed);
-        self.store.raft_log_term.store(term, Ordering::Relaxed);
+    pub fn set_follower(&self) {
+        self.is_leader.store(false, Ordering::Relaxed);
+        self.is_up_to_date.store(false, Ordering::Relaxed);
+    }
+
+    pub fn update_last_log(&self, last_log: RaftId) {
+        self.store
+            .raft_log_index
+            .store(last_log.index, Ordering::Relaxed);
+        self.store
+            .raft_log_term
+            .store(last_log.term, Ordering::Relaxed);
+    }
+
+    pub fn is_leader(&self) -> bool {
+        self.is_leader.load(Ordering::Relaxed)
+    }
+
+    pub fn is_up_to_date(&self) -> bool {
+        self.is_up_to_date.load(Ordering::Relaxed)
+    }
+
+    pub fn set_up_to_date(&self, val: bool) {
+        self.is_up_to_date.store(val, Ordering::Relaxed);
     }
 
     pub fn last_log_index(&self) -> LogIndex {
@@ -351,10 +376,6 @@ where
         self.store.raft_log_term.load(Ordering::Relaxed)
     }
 
-    pub fn is_leader(&self) -> bool {
-        self.is_raft_leader.load(Ordering::Relaxed)
-    }
-
     pub async fn get_prev_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
         let store = self.store.clone();
         self.spawn_worker(move || store.get_prev_raft_id(key)).await
@@ -363,5 +384,11 @@ where
     pub async fn get_next_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
         let store = self.store.clone();
         self.spawn_worker(move || store.get_next_raft_id(key)).await
+    }
+
+    pub async fn store_changed(&self) {
+        if self.is_cluster && self.cluster_tx.send(Event::StoreChanged).await.is_err() {
+            error!("Failed to send store changed event.");
+        }
     }
 }

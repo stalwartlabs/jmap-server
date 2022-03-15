@@ -12,7 +12,7 @@ use jmap_mail::{
     set::JMAPMailSet,
     JMAPMailBodyProperties, JMAPMailProperties,
 };
-use store::{batch::WriteBatch, raft::RaftId, Collection, JMAPId, JMAPStore, Store};
+use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
@@ -35,7 +35,7 @@ impl<'x> From<SortedJSONValue> for JSONValue {
     }
 }
 
-fn store_blobs<T>(mail_store: &JMAPStore<T>, value: &mut JSONValue)
+fn store_blobs<T>(mail_store: &JMAPStore<T>, value: &mut JSONValue, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -45,20 +45,20 @@ where
                 if k == "blobId" {
                     if let JSONValue::String(value) = v {
                         *value = mail_store
-                            .upload_blob(0, value.as_bytes())
+                            .upload_blob(account_id, value.as_bytes())
                             .unwrap()
                             .to_jmap_string();
                     } else {
                         panic!("blobId is not a string");
                     }
                 } else {
-                    store_blobs(mail_store, v);
+                    store_blobs(mail_store, v, account_id);
                 }
             }
         }
         JSONValue::Array(a) => {
             for v in a.iter_mut() {
-                store_blobs(mail_store, v);
+                store_blobs(mail_store, v, account_id);
             }
         }
         _ => {}
@@ -102,36 +102,40 @@ fn assert_diff(str1: &str, str2: &str, filename: &str) {
     assert_eq!(str1.len(), str2.len(), "{}", filename);
 }
 
-pub fn jmap_mail_set<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_set<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
     // TODO use mailbox create API
     let doc_id = mail_store
-        .assign_document_id(0, Collection::Mailbox)
+        .assign_document_id(account_id, Collection::Mailbox)
         .unwrap();
     mail_store
         .update_document(
-            0,
-            RaftId::default(),
+            account_id,
+            mail_store.assign_raft_id(),
             WriteBatch::insert(Collection::Mailbox, doc_id, doc_id),
         )
         .unwrap();
     let doc_id = mail_store
-        .assign_document_id(0, Collection::Mailbox)
+        .assign_document_id(account_id, Collection::Mailbox)
         .unwrap();
     mail_store
         .update_document(
-            0,
-            RaftId::default(),
+            account_id,
+            mail_store.assign_raft_id(),
             WriteBatch::insert(Collection::Mailbox, doc_id, doc_id),
         )
         .unwrap();
 
-    jmap_mail_update(&mail_store, jmap_mail_create(&mail_store));
+    jmap_mail_update(
+        mail_store,
+        jmap_mail_create(mail_store, account_id),
+        account_id,
+    );
 }
 
-fn jmap_mail_create<T>(mail_store: &JMAPStore<T>) -> Vec<String>
+fn jmap_mail_create<T>(mail_store: &JMAPStore<T>, account_id: AccountId) -> Vec<String>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -148,7 +152,7 @@ where
 
         let result = mail_store
             .mail_set(JMAPSet {
-                account_id: 0,
+                account_id,
                 if_in_state: None,
                 create: HashMap::from_iter(
                     vec![("1".to_string(), {
@@ -162,7 +166,7 @@ where
                         .unwrap_object()
                         .unwrap()
                         {
-                            store_blobs(mail_store, &mut v);
+                            store_blobs(mail_store, &mut v, account_id);
                             result.insert(k, v);
                         }
                         result.into()
@@ -189,7 +193,7 @@ where
 
         let raw_message = mail_store
             .download_blob(
-                0,
+                account_id,
                 &BlobId::from_jmap_string(values.get("blobId").unwrap().to_string().unwrap())
                     .unwrap(),
                 get_message_blob,
@@ -204,7 +208,7 @@ where
         let parsed_message = SortedJSONValue::from(
             mail_store
                 .mail_get(JMAPGet {
-                    account_id: 0,
+                    account_id,
                     ids: vec![jmap_id].into(),
                     properties: vec![
                         JMAPMailProperties::Id,
@@ -305,13 +309,14 @@ fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
 fn get_mailboxes_and_keywords<T>(
     mail_store: &JMAPStore<T>,
     message_id: &str,
+    account_id: AccountId,
 ) -> (Vec<String>, Vec<String>)
 where
     T: for<'x> Store<'x> + 'static,
 {
     let mut result = mail_store
         .mail_get(JMAPGet {
-            account_id: 0,
+            account_id,
             ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
             properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords].into(),
             arguments: JMAPMailGetArguments {
@@ -354,8 +359,11 @@ where
     (mailboxes, keywords)
 }
 
-fn jmap_mail_update<T>(mail_store: &JMAPStore<T>, mut message_ids: Vec<String>)
-where
+fn jmap_mail_update<T>(
+    mail_store: &JMAPStore<T>,
+    mut message_ids: Vec<String>,
+    account_id: AccountId,
+) where
     T: for<'x> Store<'x> + 'static,
 {
     let message_id_1 = message_ids.pop().unwrap();
@@ -365,7 +373,7 @@ where
     assert_eq!(
         mail_store
             .mail_set(JMAPSet {
-                account_id: 0,
+                account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
                     message_id_1.clone(),
@@ -384,7 +392,7 @@ where
     );
 
     assert_eq!(
-        get_mailboxes_and_keywords(mail_store, &message_id_1),
+        get_mailboxes_and_keywords(mail_store, &message_id_1, account_id),
         (
             vec!["i00".to_string(), "i01".to_string()],
             vec!["test1".to_string(), "test2".to_string()]
@@ -394,7 +402,7 @@ where
     assert_eq!(
         mail_store
             .mail_set(JMAPSet {
-                account_id: 0,
+                account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
                     message_id_1.clone(),
@@ -415,7 +423,7 @@ where
     );
 
     assert_eq!(
-        get_mailboxes_and_keywords(mail_store, &message_id_1),
+        get_mailboxes_and_keywords(mail_store, &message_id_1, account_id),
         (
             vec!["i01".to_string()],
             vec!["test1".to_string(), "test3".to_string()]
@@ -425,7 +433,7 @@ where
     assert_eq!(
         mail_store
             .mail_set(JMAPSet {
-                account_id: 0,
+                account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
                     message_id_1.clone(),
@@ -456,7 +464,7 @@ where
     assert_eq!(
         mail_store
             .mail_set(JMAPSet {
-                account_id: 0,
+                account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
                     message_id_1.clone(),
@@ -487,7 +495,7 @@ where
     assert_eq!(
         mail_store
             .mail_set(JMAPSet {
-                account_id: 0,
+                account_id,
                 if_in_state: None,
                 update: JSONValue::Null,
                 create: JSONValue::Null,
@@ -506,7 +514,7 @@ where
         ],
         mail_store
             .mail_get(JMAPGet {
-                account_id: 0,
+                account_id,
                 ids: vec![
                     JMAPId::from_jmap_string(&message_id_2).unwrap(),
                     JMAPId::from_jmap_string(&message_id_3).unwrap()

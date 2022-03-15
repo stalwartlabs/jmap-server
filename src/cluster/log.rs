@@ -65,6 +65,7 @@ const RETRY_MS: u64 = 30 * 1000;
 const BATCH_MAX_ENTRIES: usize = 10;
 const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
 
+#[derive(Debug)]
 enum State {
     Synchronize,
     AppendEntries,
@@ -83,7 +84,7 @@ where
     let peer_name = peer.to_string();
 
     let term = cluster.term;
-    let mut last = RaftId::new(cluster.last_log_term, cluster.last_log_index);
+    let mut last_log = cluster.last_log;
     let main_tx = cluster.tx.clone();
     let core = cluster.core.clone();
 
@@ -99,7 +100,8 @@ where
             match poll!(Box::pin(rx.changed())) {
                 Poll::Ready(result) => match result {
                     Ok(_) => {
-                        last.index = *rx.borrow();
+                        last_log.index = *rx.borrow();
+                        last_log.term = term;
                         if matches!(&state, State::Wait) {
                             state = State::AppendEntries;
                         }
@@ -112,8 +114,10 @@ where
                 Poll::Pending => (),
             }
 
+            //println!("{} -> State: {:#?}", peer_name, state);
+
             let request = match &mut state {
-                State::Synchronize => Request::SynchronizeLog { term, last },
+                State::Synchronize => Request::SynchronizeLog { term, last_log },
                 State::PushChanges { changes, .. } => match prepare_changes(&core, changes).await {
                     Ok(request) => request,
                     Err(err) => {
@@ -124,8 +128,9 @@ where
                 State::Wait => {
                     // Wait for the next change
                     if rx.changed().await.is_ok() {
-                        debug!("Received new log index.");
-                        last.index = *rx.borrow();
+                        last_log.index = *rx.borrow();
+                        last_log.term = term;
+                        debug!("Received new log index: {:?}", last_log);
                     } else {
                         debug!("Log sync process with {} exiting.", peer_name);
                         break;
@@ -145,7 +150,13 @@ where
                     {
                         Ok(entries) => {
                             if !entries.is_empty() {
-                                Request::AppendEntries { term, entries }
+                                last_sent_id = entries.last().unwrap().raft_id;
+
+                                Request::AppendEntries {
+                                    term,
+                                    last_log,
+                                    entries,
+                                }
                             } else {
                                 debug!(
                                     "No entries left to send to {} after {:?}.",
@@ -207,8 +218,9 @@ where
                     // the next change is received.
                     match time::timeout(Duration::from_millis(RETRY_MS), rx.changed()).await {
                         Ok(Ok(())) => {
-                            debug!("Received new log index.");
-                            last.index = *rx.borrow();
+                            last_log.index = *rx.borrow();
+                            last_log.term = term;
+                            debug!("Received new log index: {:?}", last_log);
                         }
                         Ok(Err(_)) => {
                             debug!("Log sync process with {} exiting.", peer_name);
@@ -283,18 +295,19 @@ where
                 collection.account_id,
                 collection.collection,
                 collection.from_change_id,
-                matches!(
-                    collection.collection,
-                    Collection::MailboxChanges | Collection::Thread
-                ),
+                matches!(collection.collection, Collection::Thread),
             )
         })
         .await
     {
-        Ok(changes) => State::PushChanges {
-            collections,
-            changes,
-        },
+        Ok(changes) => {
+            debug_assert!(!changes.is_empty(), "{:#?}", changes);
+
+            State::PushChanges {
+                collections,
+                changes,
+            }
+        }
         Err(err) => {
             error!("Error getting raft changes: {:?}", err);
             State::Synchronize
@@ -555,17 +568,22 @@ where
         &mut self,
         peer_id: PeerId,
         term: TermId,
-        last: RaftId,
+        last_log: RaftId,
     ) -> Response {
         if self.term < term {
             self.term = term;
         }
 
         let (success, matched) =
-            if self.term == term && self.log_is_behind_or_eq(last.term, last.index) {
+            if self.term == term && self.log_is_behind_or_eq(last_log.term, last_log.index) {
                 self.follow_leader(peer_id);
-                match self.core.get_prev_raft_id(last).await {
-                    Ok(Some(matched)) => (true, matched),
+                self.commit_id = last_log;
+
+                match self.core.get_prev_raft_id(last_log).await {
+                    Ok(Some(matched)) => {
+                        self.core.set_up_to_date(matched == last_log);
+                        (true, matched)
+                    }
                     Ok(None) => (true, RaftId::none()),
                     Err(err) => {
                         debug!("Failed to get prev raft id: {:?}", err);
@@ -587,15 +605,19 @@ where
         &mut self,
         peer_id: PeerId,
         term: TermId,
+        last_log: RaftId,
         entries: Vec<Entry>,
     ) -> Response {
-        if term < self.term || !self.is_following_peer(peer_id) {
+        if self.term > term || !self.is_following_peer(peer_id) {
             return Response::SynchronizeLog {
                 term: self.term,
                 success: false,
-                matched: RaftId::new(self.last_log_term, self.last_log_index),
+                matched: self.last_log,
             };
+        } else if self.term < term {
+            self.term = term;
         }
+        self.commit_id = last_log;
 
         let core = self.core.clone();
         match self
@@ -661,9 +683,11 @@ where
             return Response::SynchronizeLog {
                 term: self.term,
                 success: false,
-                matched: RaftId::new(self.last_log_term, self.last_log_index),
+                matched: self.last_log,
             };
         }
+
+        //println!("{:#?}", changes);
 
         let core = self.core.clone();
         match self
@@ -765,21 +789,34 @@ where
     }
 
     pub async fn commit_pending_changes(&mut self) -> bool {
-        let mut success = true;
         if let Some(pending_changes) = std::mem::take(&mut self.pending_changes) {
             let core = self.core.clone();
+            let last_log = pending_changes.last().map(|e| e.raft_id);
+
             match self
                 .core
                 .spawn_worker(move || core.store.insert_raft_entries(pending_changes))
                 .await
             {
-                Ok(_) => (),
+                Ok(_) => {
+                    // If this node matches the leader's commit index,
+                    // read-only requests can be accepted on this node.
+                    if let Some(last_log) = last_log {
+                        self.core.update_last_log(last_log);
+
+                        if self.commit_id == last_log {
+                            self.core.set_up_to_date(true);
+                        }
+                    }
+                    return true;
+                }
                 Err(err) => {
                     error!("Failed to commit pending changes: {:?}", err);
-                    success = false;
+                    return false;
                 }
             }
         }
-        success
+
+        true
     }
 }

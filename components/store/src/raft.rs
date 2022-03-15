@@ -8,12 +8,12 @@ use crate::{changes, JMAPId, JMAPIdPrefix, WriteOperation};
 use crate::{
     changes::ChangeId,
     serialize::{DeserializeBigEndian, INTERNAL_KEY_PREFIX},
-    AccountId, ColumnFamily, Direction, Collection, JMAPStore, Store, StoreError,
+    AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
 pub type TermId = u64;
 pub type LogIndex = u64;
 
-#[derive(Default, Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct RaftId {
     pub term: TermId,
     pub index: LogIndex,
@@ -24,19 +24,15 @@ impl RaftId {
         Self { term, index }
     }
 
-    pub fn first() -> Self {
-        Self { term: 0, index: 0 }
-    }
-
     pub fn none() -> Self {
         Self {
-            term: TermId::MAX,
+            term: 0,
             index: LogIndex::MAX,
         }
     }
 
     pub fn is_none(&self) -> bool {
-        self.term == TermId::MAX && self.index == LogIndex::MAX
+        self.index == LogIndex::MAX
     }
 
     pub fn deserialize_key(bytes: &[u8]) -> Option<Self> {
@@ -74,15 +70,14 @@ impl Entry {
         let mut value_it = value.iter();
 
         let account_id = AccountId::from_leb128_it(&mut value_it)?;
-        let mut total_changes = usize::from_leb128_it(&mut value_it)?;
+        let total_changes = usize::from_leb128_it(&mut value_it)?;
         let mut changes = Vec::with_capacity(total_changes);
 
-        while total_changes > 0 {
+        for _ in 0..total_changes {
             changes.push(Change {
                 collection: (*value_it.next()?).into(),
                 change_id: ChangeId::from_leb128_it(&mut value_it)?,
             });
-            total_changes -= 1;
         }
 
         Entry {
@@ -145,27 +140,33 @@ impl PendingChanges {
 
     pub fn deserialize(&mut self, change_id: ChangeId, bytes: &[u8]) -> Option<()> {
         let mut bytes_it = bytes.iter();
-        let mut total_inserts = usize::from_leb128_it(&mut bytes_it)?;
-        let mut total_updates = usize::from_leb128_it(&mut bytes_it)?;
-        let mut total_deletes = usize::from_leb128_it(&mut bytes_it)?;
+        let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
+        let total_updates = usize::from_leb128_it(&mut bytes_it)?;
+        let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
 
         let mut inserted_ids = Vec::with_capacity(total_inserts);
 
-        while total_inserts > 0 {
+        for _ in 0..total_inserts {
             inserted_ids.push(JMAPId::from_leb128_it(&mut bytes_it)?);
-            total_inserts -= 1;
         }
 
-        while total_updates > 0 {
-            let document_id = JMAPId::from_leb128_it(&mut bytes_it)?.get_document_id();
-            if !self.inserts.contains(document_id) {
-                self.updates.push(document_id);
+        let mut ignore_child_update = false;
+        for _ in 0..total_updates {
+            match JMAPId::from_leb128_it(&mut bytes_it)? {
+                JMAPId::MAX => {
+                    ignore_child_update = true;
+                }
+                jmap_id if !ignore_child_update => {
+                    let document_id = jmap_id.get_document_id();
+                    if !self.inserts.contains(document_id) {
+                        self.updates.push(document_id);
+                    }
+                }
+                _ => {}
             }
-
-            total_updates -= 1;
         }
 
-        while total_deletes > 0 {
+        for _ in 0..total_deletes {
             let deleted_id = JMAPId::from_leb128_it(&mut bytes_it)?;
             let document_id = deleted_id.get_document_id();
             let prefix_id = deleted_id.get_prefix_id();
@@ -185,7 +186,6 @@ impl PendingChanges {
                 }
                 self.updates.remove(document_id);
             }
-            total_deletes -= 1;
         }
 
         for inserted_id in inserted_ids {
@@ -208,7 +208,10 @@ where
     pub fn assign_raft_id(&self) -> RaftId {
         RaftId {
             term: self.raft_log_term.load(Ordering::Relaxed),
-            index: self.raft_log_index.fetch_add(1, Ordering::Relaxed),
+            index: self
+                .raft_log_index
+                .fetch_add(1, Ordering::Relaxed)
+                .wrapping_add(1),
         }
     }
 
@@ -329,9 +332,9 @@ where
         let mut changes = PendingChanges::new(account, collection);
 
         let (is_inclusive, from_change_id) = if let Some(from_change_id) = from_change_id {
-            (true, from_change_id)
+            (false, from_change_id)
         } else {
-            (false, 0)
+            (true, 0)
         };
 
         let key = changes::Entry::serialize_key(account, collection, from_change_id);

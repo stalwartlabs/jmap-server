@@ -10,12 +10,11 @@ use jmap_mail::{
 use store::{
     batch::{LogAction, WriteBatch},
     field::FieldOptions,
-    raft::RaftId,
-    JMAPId, JMAPStore, Store, Tag,
+    AccountId, JMAPId, JMAPStore, Store, Tag,
 };
 use store::{Collection, JMAPIdPrefix};
 
-pub fn jmap_mail_query_changes<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_query_changes<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -65,8 +64,8 @@ where
             LogAction::Insert(id) => {
                 let jmap_id = mail_store
                     .mail_import_blob(
-                        0,
-                        RaftId::default(),
+                        account_id,
+                        mail_store.assign_raft_id(),
                         format!(
                             "From: test_{}\nSubject: test_{}\n\ntest",
                             if change_num % 2 == 0 { 1 } else { 2 },
@@ -100,8 +99,8 @@ where
 
                 mail_store
                     .update_document(
-                        0,
-                        RaftId::default(),
+                        account_id,
+                        mail_store.assign_raft_id(),
                         WriteBatch::update(Collection::Mail, id.get_document_id(), id),
                     )
                     .unwrap();
@@ -111,8 +110,8 @@ where
                 let id = *id_map.get(id).unwrap();
                 mail_store
                     .update_document(
-                        0,
-                        RaftId::default(),
+                        account_id,
+                        mail_store.assign_raft_id(),
                         WriteBatch::delete(Collection::Mail, id.get_document_id(), id),
                     )
                     .unwrap();
@@ -131,7 +130,7 @@ where
                     FieldOptions::None,
                 );
                 mail_store
-                    .update_document(0, RaftId::default(), batch)
+                    .update_document(account_id, mail_store.assign_raft_id(), batch)
                     .unwrap();
 
                 id_map.insert(*to, new_id);
@@ -141,13 +140,14 @@ where
                 removed_ids.insert(id);
                 thread_id += 1;
             }
+            LogAction::UpdateChild(_) => unreachable!(),
         }
 
         let mut new_state = JMAPState::Initial;
         for state in &states {
             for (test_num, query) in vec![
                 JMAPQueryChangesRequest {
-                    account_id: 0,
+                    account_id,
                     filter: JMAPFilter::None,
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
@@ -159,7 +159,7 @@ where
                     },
                 },
                 JMAPQueryChangesRequest {
-                    account_id: 0,
+                    account_id,
                     filter: JMAPFilter::Condition(JMAPMailFilterCondition::From("test_1".into())),
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
@@ -171,7 +171,7 @@ where
                     },
                 },
                 JMAPQueryChangesRequest {
-                    account_id: 0,
+                    account_id,
                     filter: JMAPFilter::Condition(JMAPMailFilterCondition::InMailbox(1)),
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
@@ -183,7 +183,7 @@ where
                     },
                 },
                 JMAPQueryChangesRequest {
-                    account_id: 0,
+                    account_id,
                     filter: JMAPFilter::None,
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),

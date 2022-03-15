@@ -97,8 +97,7 @@ impl JMAPIdPrefix for JMAPId {
 pub enum Collection {
     Mail = 0,
     Mailbox = 1,
-    MailboxChanges = 2,
-    Thread = 3,
+    Thread = 2,
     None = 255,
 }
 
@@ -107,8 +106,7 @@ impl From<u8> for Collection {
         match value {
             0 => Collection::Mail,
             1 => Collection::Mailbox,
-            2 => Collection::MailboxChanges,
-            3 => Collection::Thread,
+            2 => Collection::Thread,
             _ => Collection::None,
         }
     }
@@ -388,15 +386,18 @@ where
 pub struct JMAPStore<T> {
     pub db: T,
     pub config: JMAPStoreConfig,
+
+    pub account_lock: MutexMap<()>,
     pub blob_lock: MutexMap<()>,
+
     pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
+
     pub term_id_cache: Cache<String, TermId>,
     pub term_id_lock: MutexMap<()>,
     pub term_id_last: AtomicU64,
 
     pub raft_log_term: AtomicU64,
     pub raft_log_index: AtomicU64,
-    pub account_lock: MutexMap<()>,
 }
 
 pub struct JMAPStoreConfig {
@@ -484,7 +485,10 @@ where
                 id.index += 1;
                 id
             })
-            .unwrap_or(RaftId { term: 0, index: 0 });
+            .unwrap_or(RaftId {
+                term: 0,
+                index: LogIndex::MAX,
+            });
         store.raft_log_index = raft_id.index.into();
         store.raft_log_term = raft_id.term.into();
         store

@@ -458,11 +458,7 @@ where
             if add_changes {
                 change_log.add_change(
                     batch.collection,
-                    if let Some(change_id) = batch.log_id {
-                        change_id
-                    } else {
-                        self.assign_change_id(account_id, batch.collection)?
-                    },
+                    self.assign_change_id(account_id, batch.collection)?,
                     batch.log_action,
                 );
             }

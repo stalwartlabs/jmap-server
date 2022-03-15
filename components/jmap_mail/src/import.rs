@@ -92,10 +92,7 @@ impl From<JMAPMailImportResponse> for JSONValue {
 }
 
 pub trait JMAPMailImport {
-    fn mail_import(
-        &self,
-        request: JMAPMailImportRequest,
-    ) -> jmap::Result<JMAPMailImportResponse>;
+    fn mail_import(&self, request: JMAPMailImportRequest) -> jmap::Result<JMAPMailImportResponse>;
 
     fn mail_import_blob(
         &self,
@@ -129,10 +126,7 @@ impl<T> JMAPMailImport for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_import(
-        &self,
-        request: JMAPMailImportRequest,
-    ) -> jmap::Result<JMAPMailImportResponse> {
+    fn mail_import(&self, request: JMAPMailImportRequest) -> jmap::Result<JMAPMailImportResponse> {
         let old_state = self.get_state(request.account_id, Collection::Mail)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -251,21 +245,17 @@ where
                 })?,
                 FieldOptions::Store,
             );
-            let change_id = self.assign_change_id(account_id, Collection::Mailbox)?;
             for mailbox_id in mailbox_ids.items {
                 document.tag(
                     MessageField::Mailbox,
                     Tag::Id(mailbox_id),
                     FieldOptions::None,
                 );
-                documents.push(
-                    WriteBatch::update(Collection::Mailbox, mailbox_id, mailbox_id)
-                        .log_with_id(change_id),
-                );
-                documents.push(
-                    WriteBatch::update(Collection::MailboxChanges, mailbox_id, mailbox_id)
-                        .log_with_id(change_id),
-                );
+                documents.push(WriteBatch::update_child(
+                    Collection::Mailbox,
+                    mailbox_id,
+                    mailbox_id,
+                ));
             }
         }
 

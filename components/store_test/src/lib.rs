@@ -30,9 +30,14 @@ pub fn deflate_artwork_data() -> Vec<u8> {
     result
 }
 
-pub fn init_temp_dir(name: &str, delete_if_exists: bool) -> (EnvSettings, PathBuf) {
+pub fn init_settings(
+    name: &str,
+    peer_num: u32,
+    total_peers: u32,
+    delete_if_exists: bool,
+) -> (EnvSettings, PathBuf) {
     let mut temp_dir = std::env::temp_dir();
-    temp_dir.push(name);
+    temp_dir.push(format!("{}_{}", name, peer_num));
 
     if delete_if_exists && temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).unwrap();
@@ -45,7 +50,22 @@ pub fn init_temp_dir(name: &str, delete_if_exists: bool) -> (EnvSettings, PathBu
                         "db-path".to_string(),
                         temp_dir.to_str().unwrap().to_string(),
                     ),
-                    ("worker-pool-size".to_string(), "8".to_string()),
+                    ("cluster".to_string(), "secret_key".to_string()),
+                    ("http-port".to_string(), (8000 + peer_num).to_string()),
+                    ("rpc-port".to_string(), (9000 + peer_num).to_string()),
+                    (
+                        "seed-nodes".to_string(),
+                        (1..=total_peers)
+                            .filter_map(|i| {
+                                if i == peer_num {
+                                    None
+                                } else {
+                                    Some(format!("127.0.0.1:{}", (9000 + i)))
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(";"),
+                    ),
                 ]
                 .into_iter(),
             ),

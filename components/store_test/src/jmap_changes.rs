@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use jmap::changes::{JMAPChanges, JMAPState};
 use store::{
     batch::{LogAction, WriteBatch},
-    raft::RaftId,
-    Collection, JMAPStore, Store,
+    
+    AccountId, Collection, JMAPStore, Store,
 };
 
-pub fn jmap_changes<T>(mail_store: JMAPStore<T>)
+pub fn jmap_changes<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -128,7 +128,9 @@ where
         for change in changes {
             let mut batch = WriteBatch::insert(
                 Collection::Mail,
-                mail_store.assign_document_id(0, Collection::Mail).unwrap(),
+                mail_store
+                    .assign_document_id(account_id, Collection::Mail)
+                    .unwrap(),
                 0u64,
             );
             batch.log_action = change;
@@ -136,13 +138,13 @@ where
         }
 
         mail_store
-            .update_documents(0, RaftId::default(), documents)
+            .update_documents(account_id, mail_store.assign_raft_id(), documents)
             .unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
             let changes = mail_store
-                .get_jmap_changes(0, Collection::Mail, state.clone(), 0)
+                .get_jmap_changes(account_id, Collection::Mail, state.clone(), 0)
                 .unwrap();
 
             assert_eq!(
@@ -182,7 +184,7 @@ where
 
                 for _ in 0..100 {
                     let changes = mail_store
-                        .get_jmap_changes(0, Collection::Mail, int_state, max_changes)
+                        .get_jmap_changes(account_id, Collection::Mail, int_state, max_changes)
                         .unwrap();
 
                     assert!(

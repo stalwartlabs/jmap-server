@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use store::raft::{LogIndex, TermId};
 use store::tracing::{debug, error, info};
 use store::{leb128::Leb128, Store};
+use tokio::sync::watch;
 use tokio::{net::UdpSocket, sync::mpsc};
 
 use crate::cluster::rpc::spawn_peer_rpc;
@@ -61,8 +62,8 @@ where
             peer_id: cluster.peer_id,
             epoch: cluster.epoch,
             generation: cluster.generation,
-            last_log_term: cluster.last_log_term,
-            last_log_index: cluster.last_log_index,
+            last_log_term: cluster.last_log.term,
+            last_log_index: cluster.last_log.index,
         }
     }
 }
@@ -103,8 +104,8 @@ where
             peer_id: cluster.peer_id,
             shard_id: cluster.shard_id,
             epoch: cluster.epoch,
-            last_log_index: cluster.last_log_index,
-            last_log_term: cluster.last_log_term,
+            last_log_index: cluster.last_log.index,
+            last_log_term: cluster.last_log.term,
             generation: cluster.generation,
             addr: cluster.addr,
             jmap_url: cluster.jmap_url.clone(),
@@ -208,8 +209,9 @@ impl Request {
 */
 pub async fn spawn_quidnunc(
     bind_addr: SocketAddr,
-    mut rx: mpsc::Receiver<(SocketAddr, Request)>,
-    tx: mpsc::Sender<Event>,
+    mut shutdown_rx: watch::Receiver<bool>,
+    mut gossip_rx: mpsc::Receiver<(SocketAddr, Request)>,
+    main_tx: mpsc::Sender<Event>,
 ) {
     let _socket = Arc::new(match UdpSocket::bind(bind_addr).await {
         Ok(socket) => socket,
@@ -221,7 +223,7 @@ pub async fn spawn_quidnunc(
 
     let socket = _socket.clone();
     tokio::spawn(async move {
-        while let Some((target_addr, response)) = rx.recv().await {
+        while let Some((target_addr, response)) = gossip_rx.recv().await {
             //debug!("Sending packet to {}: {:?}", target_addr, response);
             if let Err(e) = socket.send_to(&response.to_bytes(), &target_addr).await {
                 error!("Failed to send UDP packet to {}: {}", target_addr, e);
@@ -235,21 +237,29 @@ pub async fn spawn_quidnunc(
 
         loop {
             //TODO encrypt packets
-            match socket.recv_from(&mut buf).await {
-                Ok((size, addr)) => {
-                    if let Some(request) = Request::from_bytes(&buf[..size]) {
-                        //debug!("Received packet from {}: {:?}", addr, request);
-                        if let Err(e) = tx.send(Event::Gossip { addr, request }).await {
-                            error!("Gossip process error, tx.send() failed: {}", e);
+            tokio::select! {
+                packet = socket.recv_from(&mut buf) => {
+                    match packet {
+                        Ok((size, addr)) => {
+                            if let Some(request) = Request::from_bytes(&buf[..size]) {
+                                //debug!("Received packet from {}: {:?}", addr, request);
+                                if let Err(e) = main_tx.send(Event::Gossip { addr, request }).await {
+                                    error!("Gossip process error, tx.send() failed: {}", e);
+                                }
+                            } else {
+                                debug!("Received invalid gossip message from {}", addr);
+                            }
                         }
-                    } else {
-                        debug!("Received invalid gossip message from {}", addr);
+                        Err(e) => {
+                            error!("Gossip process ended, socket.recv_from() failed: {}", e);
+                        }
                     }
+                },
+                _ = shutdown_rx.changed() => {
+                    debug!("Gossip listener shutting down.");
+                    break;
                 }
-                Err(e) => {
-                    error!("Gossip process ended, socket.recv_from() failed: {}", e);
-                }
-            }
+            };
         }
     });
 }

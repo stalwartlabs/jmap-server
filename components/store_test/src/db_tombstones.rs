@@ -45,18 +45,18 @@ where
         builder.tag(7, Tag::Static(0), FieldOptions::None);
         builder.tag(8, Tag::Text("my custom tag".into()), FieldOptions::None);
 
-        db.update_document(0, RaftId::default(), builder).unwrap();
+        db.update_document(0, RaftId::none(), builder).unwrap();
     }
 
     db.update_document(
         0,
-        RaftId::default(),
+        RaftId::none(),
         WriteBatch::delete(Collection::Mail, 9, 9u64),
     )
     .unwrap();
     db.update_document(
         0,
-        RaftId::default(),
+        RaftId::none(),
         WriteBatch::delete(Collection::Mail, 0, 0u64),
     )
     .unwrap();

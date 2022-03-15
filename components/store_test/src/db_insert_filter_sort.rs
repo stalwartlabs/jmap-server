@@ -10,8 +10,8 @@ use store::{
     field::{FieldOptions, FullText, Text},
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     raft::RaftId,
-    Comparator, ComparisonOperator, FieldValue, Filter, Collection, JMAPIdPrefix, JMAPStore,
-    Store, TextQuery,
+    Collection, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
+    TextQuery,
 };
 
 use crate::deflate_artwork_data;
@@ -163,7 +163,7 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            db.update_documents(0, RaftId::default(), chunk).unwrap();
+                            db.update_documents(0, RaftId::none(), chunk).unwrap();
                             println!(
                                 "Inserted {} entries in {} ms (Thread {}/{}).",
                                 num_docs,

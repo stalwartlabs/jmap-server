@@ -1,5 +1,11 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
+use jmap::{
+    blob::JMAPBlobStore,
+    id::{BlobId, JMAPIdSerialize},
+    json::JSONValue,
+    JMAPGet,
+};
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
     import::JMAPMailImport,
@@ -7,18 +13,12 @@ use jmap_mail::{
     HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailProperties,
 };
-use jmap::{
-    blob::JMAPBlobStore,
-    id::{BlobId, JMAPIdSerialize},
-    json::JSONValue,
-    JMAPGet,
-};
 use mail_parser::RfcHeader;
-use store::{raft::RaftId, JMAPStore, Store};
+use store::{ AccountId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
-pub fn jmap_mail_parse<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_parse<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -34,11 +34,11 @@ where
         let blob_id = BlobId::from_jmap_string(
             &mail_store
                 .mail_get(JMAPGet {
-                    account_id: 0,
+                    account_id,
                     ids: vec![mail_store
                         .mail_import_blob(
-                            0,
-                            RaftId::default(),
+                            account_id,
+                            mail_store.assign_raft_id(),
                             fs::read(&test_file).unwrap(),
                             vec![],
                             vec![],
@@ -86,7 +86,7 @@ where
 
         let result = mail_store
             .mail_parse(JMAPMailParseRequest {
-                account_id: 0,
+                account_id,
                 blob_ids: vec![blob_id.clone()],
                 properties: vec![
                     JMAPMailProperties::Id,
@@ -160,7 +160,7 @@ where
 
                 let inner_blob = mail_store
                     .download_blob(
-                        0,
+                        account_id,
                         &BlobId::from_jmap_string(part.get("blobId").unwrap().to_string().unwrap())
                             .unwrap(),
                         get_message_blob,
@@ -197,7 +197,7 @@ where
     let mut test_file = test_dir;
     test_file.push("headers.eml");
     let blob_id = mail_store
-        .upload_blob(0, &fs::read(&test_file).unwrap())
+        .upload_blob(account_id, &fs::read(&test_file).unwrap())
         .unwrap();
 
     let mut properties = vec![
@@ -382,7 +382,7 @@ where
         result.extend(
             mail_store
                 .mail_parse(JMAPMailParseRequest {
-                    account_id: 0,
+                    account_id,
                     blob_ids: vec![blob_id.clone()],
                     properties: vec![property],
                     arguments: JMAPMailGetArguments {

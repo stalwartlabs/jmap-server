@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use store::JMAPStore;
-use store_test::{destroy_temp_dir, init_temp_dir};
+use store_test::{destroy_temp_dir, init_settings};
 
 use crate::RocksDB;
 
 fn init_db(name: &str, delete_if_exists: bool) -> (JMAPStore<RocksDB>, PathBuf) {
-    let (settings, temp_dir) = init_temp_dir(name, delete_if_exists);
+    let (settings, temp_dir) = init_settings(name, 1, 1, delete_if_exists);
 
     (
         JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings),
@@ -54,7 +54,7 @@ fn blobs() {
 fn jmap_mail_merge_threads() {
     let (db, temp_dir) = init_db("strdb_threads_test", true);
 
-    store_test::jmap_mail_merge_threads::jmap_mail_merge_threads(db);
+    store_test::jmap_mail_merge_threads::jmap_mail_merge_threads(&db);
 
     destroy_temp_dir(temp_dir);
 }
@@ -63,7 +63,8 @@ fn jmap_mail_merge_threads() {
 fn jmap_mail_query() {
     let (db, temp_dir) = init_db("strdb_mail_query_test", true);
 
-    store_test::jmap_mail_query::jmap_mail_query(db, true);
+    store_test::jmap_mail_query::jmap_mail_query_prepare(&db, 1);
+    store_test::jmap_mail_query::jmap_mail_query(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -72,7 +73,7 @@ fn jmap_mail_query() {
 fn jmap_changes() {
     let (db, temp_dir) = init_db("strdb_changes_test", true);
 
-    store_test::jmap_changes::jmap_changes(db);
+    store_test::jmap_changes::jmap_changes(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -81,7 +82,7 @@ fn jmap_changes() {
 fn jmap_mail_query_changes() {
     let (db, temp_dir) = init_db("strdb_query_changes_test", true);
 
-    store_test::jmap_mail_query_changes::jmap_mail_query_changes(db);
+    store_test::jmap_mail_query_changes::jmap_mail_query_changes(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -90,7 +91,7 @@ fn jmap_mail_query_changes() {
 fn jmap_mail_get() {
     let (db, temp_dir) = init_db("strdb_mail_get_test", true);
 
-    store_test::jmap_mail_get::jmap_mail_get(db);
+    store_test::jmap_mail_get::jmap_mail_get(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -99,7 +100,7 @@ fn jmap_mail_get() {
 fn jmap_mail_set() {
     let (db, temp_dir) = init_db("strdb_mail_set_test", true);
 
-    store_test::jmap_mail_set::jmap_mail_set(db);
+    store_test::jmap_mail_set::jmap_mail_set(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -108,7 +109,7 @@ fn jmap_mail_set() {
 fn jmap_mail_parse() {
     let (db, temp_dir) = init_db("strdb_mail_parse_test", true);
 
-    store_test::jmap_mail_parse::jmap_mail_parse(db);
+    store_test::jmap_mail_parse::jmap_mail_parse(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -117,7 +118,7 @@ fn jmap_mail_parse() {
 fn jmap_mail_thread() {
     let (db, temp_dir) = init_db("strdb_mail_thread_test", true);
 
-    store_test::jmap_mail_thread::jmap_mail_thread(db);
+    store_test::jmap_mail_thread::jmap_mail_thread(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }
@@ -126,7 +127,7 @@ fn jmap_mail_thread() {
 fn jmap_mailbox() {
     let (db, temp_dir) = init_db("strdb_mailbox_test", true);
 
-    store_test::jmap_mailbox::jmap_mailbox(db);
+    store_test::jmap_mailbox::jmap_mailbox(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }

@@ -6,7 +6,7 @@ use store::{
     field::FieldOptions,
     raft::RaftId,
     serialize::{StoreDeserialize, BLOB_KEY},
-    ColumnFamily, Direction, Collection, JMAPStore, Store, StoreError,
+    Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
 
 trait GetAllBlobs {
@@ -77,8 +77,7 @@ where
                 s.spawn_fifo(move |_| {
                     let mut document = WriteBatch::insert(
                         Collection::Mail,
-                        db.assign_document_id(account, Collection::Mail)
-                            .unwrap(),
+                        db.assign_document_id(account, Collection::Mail).unwrap(),
                         0u64,
                     );
                     for (blob_index, blob) in
@@ -86,7 +85,7 @@ where
                     {
                         document.binary(0, blob.clone(), FieldOptions::StoreAsBlob(blob_index));
                     }
-                    db.update_document(account, RaftId::default(), document)
+                    db.update_document(account, RaftId::none(), document)
                         .unwrap();
                 });
             }
@@ -124,7 +123,7 @@ where
     for account in 0..100 {
         db.update_document(
             account,
-            RaftId::default(),
+            RaftId::none(),
             WriteBatch::delete(Collection::Mail, 0, 0u64),
         )
         .unwrap();

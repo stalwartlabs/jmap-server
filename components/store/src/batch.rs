@@ -1,9 +1,8 @@
 use nlp::Language;
 
 use crate::{
-    changes::ChangeId,
     field::{Field, FieldOptions, Text, UpdateField},
-    DocumentId, FieldId, Float, Integer, Collection, JMAPId, LongInteger, Tag,
+    Collection, DocumentId, FieldId, Float, Integer, JMAPId, LongInteger, Tag,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -14,7 +13,6 @@ pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 pub struct WriteBatch {
     pub collection: Collection,
     pub default_language: Language,
-    pub log_id: Option<ChangeId>,
     pub log_action: LogAction,
     pub action: WriteAction,
     pub fields: Vec<UpdateField>,
@@ -25,6 +23,7 @@ pub enum LogAction {
     Insert(JMAPId),
     Update(JMAPId),
     Delete(JMAPId),
+    UpdateChild(JMAPId),
     Move(JMAPId, JMAPId),
 }
 
@@ -47,7 +46,6 @@ impl WriteBatch {
             log_action: LogAction::Insert(jmap_id.into()),
             action: WriteAction::Insert(document_id),
             fields: Vec::new(),
-            log_id: None,
         }
     }
 
@@ -62,7 +60,20 @@ impl WriteBatch {
             log_action: LogAction::Update(jmap_id.into()),
             action: WriteAction::Update(document_id),
             fields: Vec::new(),
-            log_id: None,
+        }
+    }
+
+    pub fn update_child(
+        collection: Collection,
+        document_id: DocumentId,
+        jmap_id: impl Into<JMAPId>,
+    ) -> WriteBatch {
+        WriteBatch {
+            collection,
+            default_language: Language::English,
+            log_action: LogAction::UpdateChild(jmap_id.into()),
+            action: WriteAction::Update(document_id),
+            fields: Vec::new(),
         }
     }
 
@@ -77,7 +88,6 @@ impl WriteBatch {
             log_action: LogAction::Delete(jmap_id.into()),
             action: WriteAction::Delete(document_id),
             fields: Vec::new(),
-            log_id: None,
         }
     }
 
@@ -93,7 +103,6 @@ impl WriteBatch {
             log_action: LogAction::Move(old_jmap_id.into(), new_jmap_id.into()),
             action: WriteAction::Update(document_id),
             fields: Vec::new(),
-            log_id: None,
         }
     }
 
@@ -110,11 +119,6 @@ impl WriteBatch {
             }
             _ => (),
         }
-    }
-
-    pub fn log_with_id(mut self, change_id: ChangeId) -> Self {
-        self.log_id = Some(change_id);
-        self
     }
 
     pub fn set_default_language(&mut self, language: Language) {

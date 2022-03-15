@@ -8,8 +8,7 @@ use jmap::{
 };
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
-    Comparator, FieldComparator, Filter, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store,
-    Tag,
+    Collection, Comparator, FieldComparator, Filter, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag,
 };
 
 use crate::{JMAPMailProperties, MessageField};
@@ -23,7 +22,7 @@ pub trait JMAPMailThread {
     fn thread_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<()>>;
+    ) -> jmap::Result<JMAPChangesResponse<Vec<JMAPId>>>;
 }
 
 impl<T> JMAPMailThread for JMAPStore<T>
@@ -96,9 +95,9 @@ where
     fn thread_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<()>> {
+    ) -> jmap::Result<JMAPChangesResponse<Vec<JMAPId>>> {
         self.get_jmap_changes(
-            request.account,
+            request.account_id,
             Collection::Thread,
             request.since_state,
             request.max_changes,

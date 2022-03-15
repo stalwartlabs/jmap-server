@@ -10,6 +10,7 @@ use store::{
 use store_rocksdb::RocksDB;
 use tokio::sync::oneshot;
 
+use crate::cluster::Event;
 use crate::JMAPServer;
 
 impl<T> JMAPServer<T>
@@ -77,6 +78,12 @@ where
         rx.await.map_err(|e| {
             StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
         })?
+    }
+
+    pub async fn shutdown(&self) {
+        if self.is_cluster && self.cluster_tx.send(Event::Shutdown).await.is_err() {
+            error!("Failed to send shutdown event to cluster.");
+        }
     }
 }
 

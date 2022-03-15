@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use jmap_mail::{import::JMAPMailImport, MessageField};
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
-    raft::RaftId,
     Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
 };
 
@@ -59,12 +58,12 @@ fn build_messages(
     messages_per_thread
 }
 
-pub fn jmap_mail_merge_threads<T>(mail_store: JMAPStore<T>)
+pub fn jmap_mail_merge_threads<T>(mail_store: &JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
-        let base_test_num = (base_test_num * 6) as u32;
+        let base_test_num = ((base_test_num * 6) as u32) + 1;
         let mut messages = Vec::new();
         let mut total_messages = 0;
         let mut messages_per_thread =
@@ -75,7 +74,7 @@ where
             mail_store
                 .mail_import_blob(
                     base_test_num,
-                    RaftId::default(),
+                    mail_store.assign_raft_id(),
                     message.as_bytes().to_vec(),
                     vec![],
                     vec![],
@@ -88,7 +87,7 @@ where
             mail_store
                 .mail_import_blob(
                     base_test_num + 1,
-                    RaftId::default(),
+                    mail_store.assign_raft_id(),
                     message.as_bytes().to_vec(),
                     vec![],
                     vec![],
@@ -102,7 +101,7 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 2,
-                        RaftId::default(),
+                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],
@@ -114,7 +113,7 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 3,
-                        RaftId::default(),
+                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],
@@ -129,7 +128,7 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 4,
-                        RaftId::default(),
+                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],
@@ -141,7 +140,7 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 5,
-                        RaftId::default(),
+                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],

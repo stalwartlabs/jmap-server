@@ -4,12 +4,15 @@ use std::{
 };
 
 use actix_web::web;
-use store::Store;
 use store::{
     config::EnvSettings,
     tracing::{debug, error, info},
 };
-use tokio::{sync::mpsc, time};
+use store::{raft::LogIndex, Store};
+use tokio::{
+    sync::{mpsc, watch},
+    time,
+};
 
 use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer, DEFAULT_RPC_PORT};
 
@@ -19,33 +22,49 @@ use super::{
     Cluster, Event,
 };
 
-pub async fn start_cluster<T>(core: web::Data<JMAPServer<T>>, settings: &EnvSettings) -> Option<()>
-where
+pub async fn start_cluster<T>(
+    core: web::Data<JMAPServer<T>>,
+    settings: &EnvSettings,
+    mut main_rx: mpsc::Receiver<Event>,
+    main_tx: mpsc::Sender<Event>,
+) where
     T: for<'x> Store<'x> + 'static,
 {
-    let (tx, mut rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
     let (gossip_tx, gossip_rx) = mpsc::channel::<(SocketAddr, gossip::Request)>(IPC_CHANNEL_BUFFER);
 
-    let mut cluster = Cluster::init(settings, core.clone(), tx.clone(), gossip_tx).await?;
+    let mut cluster = Cluster::init(settings, core.clone(), main_tx.clone(), gossip_tx).await;
 
     let bind_addr = SocketAddr::from((
         settings.parse_ipaddr("bind-addr", "127.0.0.1"),
         settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT),
     ));
     info!("Starting RPC server at {} (UDP/TCP)...", bind_addr);
+    let (shutdown_tx, shutdown_rx) = watch::channel(true);
 
-    spawn_rpc(bind_addr, tx.clone(), cluster.key.clone()).await;
-    spawn_quidnunc(bind_addr, gossip_rx, tx).await;
+    spawn_rpc(
+        bind_addr,
+        shutdown_rx.clone(),
+        main_tx.clone(),
+        cluster.key.clone(),
+    )
+    .await;
+    spawn_quidnunc(bind_addr, shutdown_rx.clone(), gossip_rx, main_tx.clone()).await;
 
     tokio::spawn(async move {
         let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
         let mut last_ping = Instant::now();
 
         loop {
-            match time::timeout(wait_timeout, rx.recv()).await {
-                Ok(Some(message)) => cluster.handle_message(message).await,
+            match time::timeout(wait_timeout, main_rx.recv()).await {
+                Ok(Some(message)) => {
+                    if !cluster.handle_message(message).await {
+                        debug!("Cluster shutting down.");
+                        shutdown_tx.send(false).ok();
+                        break;
+                    }
+                }
                 Ok(None) => {
-                    debug!("Cluster thread exiting.");
+                    debug!("Cluster main process exiting.");
                     break;
                 }
                 Err(_) => (),
@@ -78,15 +97,13 @@ where
             }
         }
     });
-
-    None
 }
 
 impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn handle_message(&mut self, message: Event) {
+    pub async fn handle_message(&mut self, message: Event) -> bool {
         match message {
             Event::Gossip { request, addr } => match request {
                 // Join request, add node and perform full sync.
@@ -119,11 +136,17 @@ where
                         rpc::Request::Vote { term, last } => {
                             self.handle_vote_request(peer_id, term, last)
                         }
-                        rpc::Request::SynchronizeLog { term, last } => {
-                            self.handle_synchronize_request(peer_id, term, last).await
+                        rpc::Request::SynchronizeLog { term, last_log } => {
+                            self.handle_synchronize_request(peer_id, term, last_log)
+                                .await
                         }
-                        rpc::Request::AppendEntries { term, entries } => {
-                            self.handle_append_entries(peer_id, term, entries).await
+                        rpc::Request::AppendEntries {
+                            term,
+                            last_log,
+                            entries,
+                        } => {
+                            self.handle_append_entries(peer_id, term, last_log, entries)
+                                .await
                         }
                         rpc::Request::UpdateStore {
                             account_id,
@@ -160,12 +183,14 @@ where
             }
             Event::StoreChanged => {
                 let last_log_index = self.core.last_log_index();
-                if last_log_index > self.last_log_index {
-                    self.last_log_index = last_log_index;
+                if last_log_index > self.last_log.index || self.last_log.index == LogIndex::MAX {
+                    self.last_log.index = last_log_index;
                     self.send_append_entries();
                 }
             }
+            Event::Shutdown => return false,
         }
+        true
     }
 
     pub async fn ping_peers(&mut self) {

@@ -6,13 +6,13 @@ use jmap::{
     changes::{JMAPChanges, JMAPChangesRequest, JMAPChangesResponse, JMAPQueryChangesResponse},
     JMAPQueryChangesRequest,
 };
-use store::{Collection, JMAPStore, Store};
+use store::{Collection, JMAPId, JMAPStore, Store};
 
 pub trait JMAPMailChanges {
     fn mail_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<()>>;
+    ) -> jmap::Result<JMAPChangesResponse<Vec<JMAPId>>>;
 
     fn mail_query_changes(
         &self,
@@ -31,9 +31,9 @@ where
     fn mail_changes(
         &self,
         request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<()>> {
+    ) -> jmap::Result<JMAPChangesResponse<Vec<JMAPId>>> {
         self.get_jmap_changes(
-            request.account,
+            request.account_id,
             Collection::Mail,
             request.since_state,
             request.max_changes,

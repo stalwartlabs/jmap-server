@@ -549,25 +549,12 @@ where
 
                 // Log mailbox changes
                 if !changed_mailboxes.is_empty() {
-                    let change_id =
-                        self.assign_change_id(request.account_id, Collection::Mailbox)?;
                     for changed_mailbox_id in changed_mailboxes {
-                        changes.push(
-                            WriteBatch::update(
-                                Collection::Mailbox,
-                                changed_mailbox_id,
-                                changed_mailbox_id,
-                            )
-                            .log_with_id(change_id),
-                        );
-                        changes.push(
-                            WriteBatch::update(
-                                Collection::MailboxChanges,
-                                changed_mailbox_id,
-                                changed_mailbox_id,
-                            )
-                            .log_with_id(change_id),
-                        );
+                        changes.push(WriteBatch::update_child(
+                            Collection::Mailbox,
+                            changed_mailbox_id,
+                            changed_mailbox_id,
+                        ));
                     }
                 }
 
@@ -601,11 +588,7 @@ where
                 if let Some(jmap_id) = destroy_id.to_jmap_id() {
                     let document_id = jmap_id.get_document_id();
                     if document_ids.contains(document_id) {
-                        changes.push(WriteBatch::delete(
-                            Collection::Mail,
-                            document_id,
-                            jmap_id,
-                        ));
+                        changes.push(WriteBatch::delete(Collection::Mail, document_id, jmap_id));
                         destroyed.push(destroy_id);
                         continue;
                     }

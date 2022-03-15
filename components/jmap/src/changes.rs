@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use store::{
     changes::{Change, ChangeId, Query},
@@ -14,7 +14,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct JMAPChangesRequest {
-    pub account: AccountId,
+    pub account_id: AccountId,
     pub since_state: JMAPState,
     pub max_changes: usize,
 }
@@ -40,9 +40,9 @@ pub struct JMAPChangesResponse<T> {
     pub new_state: JMAPState,
     pub has_more_changes: bool,
     pub total_changes: usize,
-    pub created: HashSet<ChangeId>,
-    pub updated: HashSet<ChangeId>,
-    pub destroyed: HashSet<ChangeId>,
+    pub created: Vec<ChangeId>,
+    pub updated: Vec<ChangeId>,
+    pub destroyed: Vec<ChangeId>,
     pub arguments: T,
 }
 
@@ -182,26 +182,21 @@ impl From<JMAPState> for JSONValue {
 }
 
 pub trait JMAPChanges {
-    fn get_state(&self, account: AccountId, collection: Collection)
-        -> store::Result<JMAPState>;
+    fn get_state(&self, account: AccountId, collection: Collection) -> store::Result<JMAPState>;
     fn get_jmap_changes(
         &self,
         account: AccountId,
         collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse<()>>;
+    ) -> store::Result<JMAPChangesResponse<Vec<JMAPId>>>;
 }
 
 impl<T> JMAPChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn get_state(
-        &self,
-        account: AccountId,
-        collection: Collection,
-    ) -> store::Result<JMAPState> {
+    fn get_state(&self, account: AccountId, collection: Collection) -> store::Result<JMAPState> {
         Ok(self
             .get_last_change_id(account, collection)?
             .map(JMAPState::Exact)
@@ -214,7 +209,7 @@ where
         collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse<()>> {
+    ) -> store::Result<JMAPChangesResponse<Vec<JMAPId>>> {
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self.get_changes(account, collection, Query::All)?.unwrap();
@@ -224,10 +219,10 @@ where
                         old_state: since_state,
                         has_more_changes: false,
                         total_changes: 0,
-                        created: HashSet::new(),
-                        updated: HashSet::new(),
-                        destroyed: HashSet::new(),
-                        arguments: (),
+                        created: Vec::new(),
+                        updated: Vec::new(),
+                        destroyed: Vec::new(),
+                        arguments: Vec::new(),
                     });
                 }
 
@@ -275,27 +270,21 @@ where
             false
         };
 
-        let mut created;
-        let mut updated;
-        let mut destroyed;
+        let mut created = Vec::new();
+        let mut updated = Vec::new();
+        let mut child_updated = Vec::new();
+        let mut destroyed = Vec::new();
 
         let total_changes = changelog.changes.len();
         if total_changes > 0 {
-            created = HashSet::with_capacity(total_changes);
-            updated = HashSet::with_capacity(total_changes);
-            destroyed = HashSet::with_capacity(total_changes);
-
             for change in changelog.changes {
                 match change {
-                    Change::Insert(item) => created.insert(item),
-                    Change::Update(item) => updated.insert(item),
-                    Change::Delete(item) => destroyed.insert(item),
+                    Change::Insert(item) => created.push(item),
+                    Change::Update(item) => updated.push(item),
+                    Change::Delete(item) => destroyed.push(item),
+                    Change::ChildUpdate(item) => child_updated.push(item),
                 };
             }
-        } else {
-            created = HashSet::new();
-            updated = HashSet::new();
-            destroyed = HashSet::new();
         }
 
         Ok(JMAPChangesResponse {
@@ -314,13 +303,13 @@ where
             created,
             updated,
             destroyed,
-            arguments: (),
+            arguments: child_updated,
         })
     }
 }
 
 pub fn query_changes(
-    changes: JMAPChangesResponse<()>,
+    changes: JMAPChangesResponse<Vec<JMAPId>>,
     query_results: Option<JMAPQueryResponse>,
     up_to_id: Option<JMAPId>,
 ) -> JMAPQueryChangesResponse {

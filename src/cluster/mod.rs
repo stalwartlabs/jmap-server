@@ -11,13 +11,13 @@ use actix_web::web;
 use serde::{Deserialize, Serialize};
 use store::{
     bincode,
-    raft::{Entry, LogIndex, TermId},
+    raft::{Entry, LogIndex, RaftId, TermId},
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
 use store::{
     config::EnvSettings,
-    tracing::{debug, error, info},
+    tracing::{error, info},
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -70,9 +70,8 @@ where
 
     // Raft status
     pub term: TermId,
-    pub last_log_index: LogIndex,
-    pub last_log_term: TermId,
-    pub commit_index: LogIndex,
+    pub last_log: RaftId,
+    pub commit_id: RaftId,
     pub state: raft::State,
     pub pending_changes: Option<Vec<Entry>>,
 }
@@ -96,6 +95,7 @@ pub enum Event {
         term: TermId,
     },
     StoreChanged,
+    Shutdown,
 }
 
 pub struct Peer {
@@ -173,8 +173,8 @@ where
         core: web::Data<JMAPServer<T>>,
         tx: mpsc::Sender<Event>,
         gossip_tx: mpsc::Sender<(SocketAddr, gossip::Request)>,
-    ) -> Option<Self> {
-        let key = settings.get("cluster")?;
+    ) -> Self {
+        let key = settings.get("cluster").unwrap();
 
         // Obtain public addresses to advertise
         let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
@@ -243,9 +243,8 @@ where
             key,
             jmap_url: format!("{}/jmap", jmap_url),
             term: core.last_log_term(),
-            last_log_index: core.last_log_index(),
-            last_log_term: core.last_log_term(),
-            commit_index: 0,
+            last_log: RaftId::new(core.last_log_term(), core.last_log_index()),
+            commit_id: RaftId::new(core.last_log_term(), core.last_log_index()),
             state: raft::State::default(),
             core,
             peers: vec![],
@@ -258,7 +257,6 @@ where
         // Add previously discovered peers
         if let Some(peer_list) = cluster.core.get_key::<PeerList>("peer_list").await.unwrap() {
             for peer in peer_list.peers {
-                debug!("Deserialized {:?}", peer);
                 cluster
                     .peers
                     .push(Peer::new(&cluster, peer, gossip::State::Offline));
@@ -294,7 +292,7 @@ where
             }
         }
 
-        cluster.into()
+        cluster
     }
 }
 
