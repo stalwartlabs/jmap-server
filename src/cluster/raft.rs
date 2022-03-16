@@ -5,12 +5,11 @@ use rand::Rng;
 use store::raft::{LogIndex, RaftId, TermId};
 use store::tracing::{debug, error, info};
 use store::Store;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::cluster::log::spawn_append_entries;
 use crate::JMAPServer;
 
-use super::Event;
+use super::{log, rpc};
 use super::{
     rpc::{Request, Response},
     Cluster, Peer, PeerId,
@@ -38,6 +37,7 @@ pub enum State {
     },
     Follower {
         peer_id: PeerId,
+        tx: mpsc::Sender<log::Event>,
     },
 }
 
@@ -127,8 +127,11 @@ where
         matches!(self.state, State::Follower { .. })
     }
 
-    pub fn is_following_peer(&self, leader_id: PeerId) -> bool {
-        matches!(self.state, State::Follower { peer_id } if peer_id == leader_id)
+    pub fn is_following_peer(&self, leader_id: PeerId) -> Option<&mpsc::Sender<log::Event>> {
+        match &self.state {
+            State::Follower { peer_id, tx } if peer_id == &leader_id => Some(tx),
+            _ => None,
+        }
     }
 
     pub fn start_election_timer(&mut self, now: bool) {
@@ -172,8 +175,12 @@ where
         );
     }
 
-    pub fn follow_leader(&mut self, peer_id: PeerId) {
-        self.state = State::Follower { peer_id };
+    pub fn follow_leader(&mut self, peer_id: PeerId) -> mpsc::Sender<log::Event> {
+        let tx = self.spawn_raft_follower();
+        self.state = State::Follower {
+            peer_id,
+            tx: tx.clone(),
+        };
         self.core.set_follower();
         self.reset();
         debug!(
@@ -181,6 +188,7 @@ where
             self.get_peer(peer_id).unwrap(),
             self.term
         );
+        tx
     }
 
     pub fn send_append_entries(&self) {
@@ -207,7 +215,7 @@ where
         self.peers
             .iter()
             .filter(|p| p.is_in_shard(self.shard_id))
-            .for_each(|p| spawn_append_entries(self, p, rx.clone()));
+            .for_each(|p| self.spawn_raft_leader(p, rx.clone()));
         self.state = State::Leader { tx, rx };
         self.core.set_leader(self.term);
         self.reset();
@@ -215,7 +223,7 @@ where
 
     pub fn add_follower(&self, peer_id: PeerId) {
         if let State::Leader { rx, .. } = &self.state {
-            spawn_append_entries(self, self.get_peer(peer_id).unwrap(), rx.clone())
+            self.spawn_raft_leader(self.get_peer(peer_id).unwrap(), rx.clone())
         }
     }
 
@@ -275,31 +283,34 @@ where
         }
     }
 
-    pub fn handle_vote_request(&mut self, peer_id: PeerId, term: TermId, last: RaftId) -> Response {
+    pub fn handle_vote_request(
+        &mut self,
+        peer_id: PeerId,
+        response_tx: oneshot::Sender<rpc::Response>,
+        term: TermId,
+        last: RaftId,
+    ) {
         if self.term < term {
             self.step_down(term);
         }
 
-        Response::Vote {
-            term: self.term,
-            vote_granted: if self.term == term
-                && self.can_grant_vote(peer_id)
-                && self.log_is_behind_or_eq(last.term, last.index)
-            {
-                self.vote_for(peer_id);
-                true
-            } else {
-                false
-            },
-        }
+        response_tx
+            .send(Response::Vote {
+                term: self.term,
+                vote_granted: if self.term == term
+                    && self.can_grant_vote(peer_id)
+                    && self.log_is_behind_or_eq(last.term, last.index)
+                {
+                    self.vote_for(peer_id);
+                    true
+                } else {
+                    false
+                },
+            })
+            .unwrap_or_else(|_| error!("Oneshot response channel closed."));
     }
 
-    pub async fn handle_vote_response(
-        &mut self,
-        peer_id: PeerId,
-        term: TermId,
-        vote_granted: bool,
-    ) {
+    pub fn handle_vote_response(&mut self, peer_id: PeerId, term: TermId, vote_granted: bool) {
         if self.term < term {
             self.step_down(term);
             return;
@@ -387,7 +398,13 @@ where
     }
 
     pub async fn store_changed(&self) {
-        if self.is_cluster && self.cluster_tx.send(Event::StoreChanged).await.is_err() {
+        if self.is_cluster
+            && self
+                .cluster_tx
+                .send(super::Event::StoreChanged)
+                .await
+                .is_err()
+        {
             error!("Failed to send store changed event.");
         }
     }

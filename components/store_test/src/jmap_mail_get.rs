@@ -12,7 +12,7 @@ use std::{
     fs,
     path::PathBuf,
 };
-use store::{ AccountId, JMAPStore, Store, Tag};
+use store::{AccountId, JMAPStore, Store, Tag};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -89,7 +89,6 @@ where
         let jmap_id = mail_store
             .mail_import_blob(
                 account_id,
-                mail_store.assign_raft_id(),
                 blob,
                 vec![],
                 vec![Tag::Text("tag".into())],

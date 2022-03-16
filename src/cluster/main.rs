@@ -125,51 +125,35 @@ where
             } => {
                 //debug!("Req [{}]: {:?}", peer_id, request);
 
-                response_tx
-                    .send(match request {
-                        rpc::Request::UpdatePeers { peers } => {
-                            self.sync_peer_info(peers).await;
-                            rpc::Response::UpdatePeers {
-                                peers: self.build_peer_info(),
-                            }
-                        }
-                        rpc::Request::Vote { term, last } => {
-                            self.handle_vote_request(peer_id, term, last)
-                        }
-                        rpc::Request::SynchronizeLog { term, last_log } => {
-                            self.handle_synchronize_request(peer_id, term, last_log)
-                                .await
-                        }
-                        rpc::Request::AppendEntries {
-                            term,
-                            last_log,
-                            entries,
-                        } => {
-                            self.handle_append_entries(peer_id, term, last_log, entries)
-                                .await
-                        }
-                        rpc::Request::UpdateStore {
-                            account_id,
-                            collection,
-                            changes,
-                        } => {
-                            self.handle_update_store(peer_id, account_id, collection, changes)
-                                .await
-                        }
-                        _ => rpc::Response::None,
-                    })
-                    .ok()
-                    .unwrap_or_else(|| error!("Oneshot response channel closed."));
+                match request {
+                    rpc::Request::UpdatePeers { peers } => {
+                        self.handle_update_peers(response_tx, peers);
+                    }
+                    rpc::Request::Vote { term, last } => {
+                        self.handle_vote_request(peer_id, response_tx, term, last);
+                    }
+                    rpc::Request::BecomeFollower { term, last_log } => {
+                        self.handle_become_follower(peer_id, response_tx, term, last_log)
+                            .await;
+                    }
+                    rpc::Request::AppendEntries { term, request } => {
+                        self.handle_append_entries(peer_id, response_tx, term, request)
+                            .await;
+                    }
+                    _ => response_tx
+                        .send(rpc::Response::None)
+                        .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
+                }
             }
             Event::RpcResponse { peer_id, response } => {
                 //debug!("Reply [{}]: {:?}", peer_id, response);
 
                 match response {
                     rpc::Response::UpdatePeers { peers } => {
-                        self.sync_peer_info(peers).await;
+                        self.sync_peer_info(peers);
                     }
                     rpc::Response::Vote { term, vote_granted } => {
-                        self.handle_vote_response(peer_id, term, vote_granted).await;
+                        self.handle_vote_response(peer_id, term, vote_granted);
                     }
                     _ => (),
                 }
@@ -183,6 +167,9 @@ where
             }
             Event::StoreChanged => {
                 let last_log_index = self.core.last_log_index();
+                if self.term > self.last_log.term {
+                    self.last_log.term = self.term;
+                }
                 if last_log_index > self.last_log.index || self.last_log.index == LogIndex::MAX {
                     self.last_log.index = last_log_index;
                     self.send_append_entries();

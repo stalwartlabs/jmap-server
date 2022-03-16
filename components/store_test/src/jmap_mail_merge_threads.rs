@@ -74,7 +74,6 @@ where
             mail_store
                 .mail_import_blob(
                     base_test_num,
-                    mail_store.assign_raft_id(),
                     message.as_bytes().to_vec(),
                     vec![],
                     vec![],
@@ -87,7 +86,6 @@ where
             mail_store
                 .mail_import_blob(
                     base_test_num + 1,
-                    mail_store.assign_raft_id(),
                     message.as_bytes().to_vec(),
                     vec![],
                     vec![],
@@ -101,7 +99,6 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 2,
-                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],
@@ -113,7 +110,6 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 3,
-                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],
@@ -128,7 +124,6 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 4,
-                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],
@@ -140,7 +135,6 @@ where
                 mail_store
                     .mail_import_blob(
                         base_test_num + 5,
-                        mail_store.assign_raft_id(),
                         message.as_bytes().to_vec(),
                         vec![],
                         vec![],

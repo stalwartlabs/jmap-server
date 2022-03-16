@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use store::raft::{LogIndex, TermId};
 use store::tracing::{debug, error, info};
 use store::{leb128::Leb128, Store};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio::{net::UdpSocket, sync::mpsc};
 
 use crate::cluster::rpc::spawn_peer_rpc;
@@ -242,7 +242,7 @@ pub async fn spawn_quidnunc(
                     match packet {
                         Ok((size, addr)) => {
                             if let Some(request) = Request::from_bytes(&buf[..size]) {
-                                //debug!("Received packet from {}: {:?}", addr, request);
+                                //debug!("Received packet from {}", addr);
                                 if let Err(e) = main_tx.send(Event::Gossip { addr, request }).await {
                                     error!("Gossip process error, tx.send() failed: {}", e);
                                 }
@@ -352,7 +352,7 @@ where
         }
     }
 
-    pub async fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
+    pub fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
         let mut remove_seeds = false;
         let mut peers_changed = false;
         let is_leading = self.is_leading();
@@ -461,6 +461,19 @@ where
             }
         }
         result
+    }
+
+    pub fn handle_update_peers(
+        &mut self,
+        response_tx: oneshot::Sender<rpc::Response>,
+        peers: Vec<PeerInfo>,
+    ) {
+        self.sync_peer_info(peers);
+        response_tx
+            .send(rpc::Response::UpdatePeers {
+                peers: self.build_peer_info(),
+            })
+            .unwrap_or_else(|_| error!("Oneshot response channel closed."));
     }
 }
 

@@ -6,10 +6,9 @@ use std::{
 
 use nlp::Language;
 use store::{
-    batch::WriteBatch,
+    batch::{Document, WriteBatch},
     field::{FieldOptions, FullText, Text},
     query::{JMAPIdMapFnc, JMAPStoreQuery},
-    raft::RaftId,
     Collection, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
     TextQuery,
 };
@@ -96,8 +95,7 @@ where
                     let record_id = db.assign_document_id(0, Collection::Mail).unwrap();
 
                     s.spawn_fifo(move |_| {
-                        let mut builder =
-                            WriteBatch::insert(Collection::Mail, record_id, record_id);
+                        let mut builder = Document::new(Collection::Mail, record_id);
                         for (pos, field) in record.iter().enumerate() {
                             match FIELDS_OPTIONS[pos] {
                                 FieldType::Text => {
@@ -163,7 +161,11 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            db.update_documents(0, RaftId::none(), chunk).unwrap();
+                            let mut batch = WriteBatch::new(0);
+                            for document in chunk {
+                                batch.insert_document(document);
+                            }
+                            db.write(batch).unwrap();
                             println!(
                                 "Inserted {} entries in {} ms (Thread {}/{}).",
                                 num_docs,

@@ -11,7 +11,7 @@ use actix_web::web;
 use serde::{Deserialize, Serialize};
 use store::{
     bincode,
-    raft::{Entry, LogIndex, RaftId, TermId},
+    raft::{LogIndex, RaftId, TermId},
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
@@ -71,9 +71,7 @@ where
     // Raft status
     pub term: TermId,
     pub last_log: RaftId,
-    pub commit_id: RaftId,
     pub state: raft::State,
-    pub pending_changes: Option<Vec<Entry>>,
 }
 
 #[derive(Debug)]
@@ -244,14 +242,12 @@ where
             jmap_url: format!("{}/jmap", jmap_url),
             term: core.last_log_term(),
             last_log: RaftId::new(core.last_log_term(), core.last_log_index()),
-            commit_id: RaftId::new(core.last_log_term(), core.last_log_index()),
             state: raft::State::default(),
             core,
             peers: vec![],
             last_peer_pinged: u32::MAX as usize,
             tx,
             gossip_tx,
-            pending_changes: None,
         };
 
         // Add previously discovered peers

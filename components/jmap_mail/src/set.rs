@@ -15,7 +15,7 @@ use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use store::batch::WriteBatch;
+use store::batch::{Document, WriteBatch};
 use store::field::FieldOptions;
 use store::roaring::RoaringBitmap;
 use store::serialize::StoreSerialize;
@@ -86,7 +86,7 @@ where
             return Err(JMAPError::RequestTooLarge);
         }
 
-        let mut changes = Vec::with_capacity(total_changes);
+        let mut changes = WriteBatch::new(request.account_id);
         let mut response = JMAPSetResponse {
             old_state,
             ..Default::default()
@@ -117,7 +117,6 @@ where
                             create_id,
                             self.mail_import_blob(
                                 request.account_id,
-                                self.assign_raft_id(),
                                 import_item.blob,
                                 import_item.mailbox_ids,
                                 import_item.keywords,
@@ -182,7 +181,7 @@ where
                         continue;
                     }
                 }
-                let mut document = WriteBatch::update(Collection::Mail, document_id, jmap_id);
+                let mut document = Document::new(Collection::Mail, document_id);
 
                 let mut keyword_op_list = HashMap::new();
                 let mut keyword_op_clear_all = false;
@@ -550,16 +549,13 @@ where
                 // Log mailbox changes
                 if !changed_mailboxes.is_empty() {
                     for changed_mailbox_id in changed_mailboxes {
-                        changes.push(WriteBatch::update_child(
-                            Collection::Mailbox,
-                            changed_mailbox_id,
-                            changed_mailbox_id,
-                        ));
+                        changes.log_child_update(Collection::Mailbox, changed_mailbox_id);
                     }
                 }
 
                 if !document.is_empty() {
-                    changes.push(document);
+                    changes.update_document(document);
+                    changes.log_update(Collection::Mail, jmap_id);
                     updated.insert(jmap_id_str, JSONValue::Null);
                 } else {
                     not_updated.insert(
@@ -588,7 +584,8 @@ where
                 if let Some(jmap_id) = destroy_id.to_jmap_id() {
                     let document_id = jmap_id.get_document_id();
                     if document_ids.contains(document_id) {
-                        changes.push(WriteBatch::delete(Collection::Mail, document_id, jmap_id));
+                        changes.delete_document(Collection::Mail, document_id);
+                        changes.log_delete(Collection::Mail, jmap_id);
                         destroyed.push(destroy_id);
                         continue;
                     }
@@ -611,7 +608,7 @@ where
         }
 
         if !changes.is_empty() {
-            self.update_documents(request.account_id, self.assign_raft_id(), changes)?;
+            self.write(changes)?;
             response.new_state = self.get_state(request.account_id, Collection::Mail)?;
         } else {
             response.new_state = response.old_state.clone();

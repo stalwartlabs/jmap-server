@@ -13,7 +13,6 @@ where
         let mut result = mail_store
             .mail_import_blob(
                 account_id,
-                mail_store.assign_raft_id(),
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
                 vec![],
                 vec![],

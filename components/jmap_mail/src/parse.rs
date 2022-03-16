@@ -22,7 +22,7 @@ use mail_parser::{
 };
 use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
-    batch::{WriteBatch, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
+    batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     blob::BlobIndex,
     field::{FieldOptions, FullText, Text},
     leb128::Leb128,
@@ -675,7 +675,7 @@ fn build_message_response(
 }
 
 pub fn build_message_document(
-    document: &mut WriteBatch,
+    document: &mut Document,
     raw_message: Vec<u8>,
     received_at: Option<i64>,
 ) -> store::Result<(Vec<String>, String)> {
@@ -1189,7 +1189,7 @@ pub fn build_message_document(
 }
 
 fn parse_attached_message(
-    document: &mut WriteBatch,
+    document: &mut Document,
     message: &mut Message,
     language_detector: &mut LanguageDetector,
 ) {
@@ -1221,7 +1221,7 @@ fn parse_attached_message(
     }
 }
 
-fn parse_address(document: &mut WriteBatch, header_name: RfcHeader, address: &Addr) {
+fn parse_address(document: &mut Document, header_name: RfcHeader, address: &Addr) {
     if let Some(name) = &address.name {
         parse_text(document, header_name, name);
     };
@@ -1236,7 +1236,7 @@ fn parse_address(document: &mut WriteBatch, header_name: RfcHeader, address: &Ad
     };
 }
 
-fn parse_address_group(document: &mut WriteBatch, header_name: RfcHeader, group: &Group) {
+fn parse_address_group(document: &mut Document, header_name: RfcHeader, group: &Group) {
     if let Some(name) = &group.name {
         parse_text(document, header_name, name);
     };
@@ -1246,7 +1246,7 @@ fn parse_address_group(document: &mut WriteBatch, header_name: RfcHeader, group:
     }
 }
 
-fn parse_text(document: &mut WriteBatch, header_name: RfcHeader, text: &str) {
+fn parse_text(document: &mut Document, header_name: RfcHeader, text: &str) {
     match header_name {
         RfcHeader::Keywords
         | RfcHeader::ContentLanguage
@@ -1276,11 +1276,7 @@ fn parse_text(document: &mut WriteBatch, header_name: RfcHeader, text: &str) {
     }
 }
 
-fn parse_content_type(
-    document: &mut WriteBatch,
-    header_name: RfcHeader,
-    content_type: &ContentType,
-) {
+fn parse_content_type(document: &mut Document, header_name: RfcHeader, content_type: &ContentType) {
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
         document.text(
             header_name,
@@ -1317,7 +1313,7 @@ fn parse_content_type(
 }
 
 #[allow(clippy::manual_flatten)]
-fn add_addr_sort(document: &mut WriteBatch, header_name: RfcHeader, header_value: &HeaderValue) {
+fn add_addr_sort(document: &mut Document, header_name: RfcHeader, header_value: &HeaderValue) {
     let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
         col.first().unwrap_or(&HeaderValue::Empty)
     } else {
@@ -1373,7 +1369,7 @@ fn add_addr_sort(document: &mut WriteBatch, header_name: RfcHeader, header_value
     };
 }
 
-fn parse_header(document: &mut WriteBatch, header_name: RfcHeader, header_value: &HeaderValue) {
+fn parse_header(document: &mut Document, header_name: RfcHeader, header_value: &HeaderValue) {
     match header_value {
         HeaderValue::Address(address) => {
             parse_address(document, header_name, address);

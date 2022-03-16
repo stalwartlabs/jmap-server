@@ -12,7 +12,10 @@ use jmap_mail::{
     set::JMAPMailSet,
     JMAPMailBodyProperties, JMAPMailProperties,
 };
-use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
+use store::{
+    batch::{Document, WriteBatch},
+    AccountId, Collection, JMAPId, JMAPStore, Store,
+};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
@@ -111,21 +114,19 @@ where
         .assign_document_id(account_id, Collection::Mailbox)
         .unwrap();
     mail_store
-        .update_document(
+        .write(WriteBatch::insert(
             account_id,
-            mail_store.assign_raft_id(),
-            WriteBatch::insert(Collection::Mailbox, doc_id, doc_id),
-        )
+            Document::new(Collection::Mailbox, doc_id),
+        ))
         .unwrap();
     let doc_id = mail_store
         .assign_document_id(account_id, Collection::Mailbox)
         .unwrap();
     mail_store
-        .update_document(
+        .write(WriteBatch::insert(
             account_id,
-            mail_store.assign_raft_id(),
-            WriteBatch::insert(Collection::Mailbox, doc_id, doc_id),
-        )
+            Document::new(Collection::Mailbox, doc_id),
+        ))
         .unwrap();
 
     jmap_mail_update(

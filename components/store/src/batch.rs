@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+
 use nlp::Language;
 
 use crate::{
+    changes::ChangeId,
     field::{Field, FieldOptions, Text, UpdateField},
-    Collection, DocumentId, FieldId, Float, Integer, JMAPId, LongInteger, Tag,
+    leb128::Leb128,
+    serialize::{DeserializeBigEndian, COLLECTION_PREFIX_LEN, FIELD_PREFIX_LEN},
+    AccountId, Collection, DocumentId, FieldId, Float, Integer, JMAPId, LongInteger, Tag,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -10,114 +15,43 @@ pub const MAX_ID_LENGTH: usize = 80;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
-pub struct WriteBatch {
+pub struct Document {
     pub collection: Collection,
+    pub document_id: DocumentId,
     pub default_language: Language,
-    pub log_action: LogAction,
-    pub action: WriteAction,
     pub fields: Vec<UpdateField>,
 }
-
-#[derive(Debug, Clone, Copy)]
-pub enum LogAction {
-    Insert(JMAPId),
-    Update(JMAPId),
-    Delete(JMAPId),
-    UpdateChild(JMAPId),
-    Move(JMAPId, JMAPId),
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum WriteAction {
-    Insert(DocumentId),
-    Update(DocumentId),
-    Delete(DocumentId),
+    Insert(Document),
+    Update(Document),
+    Delete {
+        collection: Collection,
+        document_id: DocumentId,
+    },
 }
 
-impl WriteBatch {
-    pub fn insert(
-        collection: Collection,
-        document_id: DocumentId,
-        jmap_id: impl Into<JMAPId>,
-    ) -> WriteBatch {
-        WriteBatch {
-            collection,
-            default_language: Language::English,
-            log_action: LogAction::Insert(jmap_id.into()),
-            action: WriteAction::Insert(document_id),
-            fields: Vec::new(),
-        }
-    }
+pub struct WriteBatch {
+    pub account_id: AccountId,
+    pub changes: HashMap<Collection, Change>,
+    pub documents: Vec<WriteAction>,
+}
 
-    pub fn update(
-        collection: Collection,
-        document_id: DocumentId,
-        jmap_id: impl Into<JMAPId>,
-    ) -> WriteBatch {
-        WriteBatch {
-            collection,
-            default_language: Language::English,
-            log_action: LogAction::Update(jmap_id.into()),
-            action: WriteAction::Update(document_id),
-            fields: Vec::new(),
-        }
-    }
+#[derive(Default)]
+pub struct Change {
+    pub inserts: Vec<JMAPId>,
+    pub updates: Vec<JMAPId>,
+    pub deletes: Vec<JMAPId>,
+    pub child_updates: Vec<JMAPId>,
+}
 
-    pub fn update_child(
-        collection: Collection,
-        document_id: DocumentId,
-        jmap_id: impl Into<JMAPId>,
-    ) -> WriteBatch {
-        WriteBatch {
+impl Document {
+    pub fn new(collection: Collection, document_id: DocumentId) -> Document {
+        Document {
             collection,
+            document_id,
             default_language: Language::English,
-            log_action: LogAction::UpdateChild(jmap_id.into()),
-            action: WriteAction::Update(document_id),
             fields: Vec::new(),
-        }
-    }
-
-    pub fn delete(
-        collection: Collection,
-        document_id: DocumentId,
-        jmap_id: impl Into<JMAPId>,
-    ) -> WriteBatch {
-        WriteBatch {
-            collection,
-            default_language: Language::English,
-            log_action: LogAction::Delete(jmap_id.into()),
-            action: WriteAction::Delete(document_id),
-            fields: Vec::new(),
-        }
-    }
-
-    pub fn moved(
-        collection: Collection,
-        document_id: DocumentId,
-        old_jmap_id: impl Into<JMAPId>,
-        new_jmap_id: impl Into<JMAPId>,
-    ) -> WriteBatch {
-        WriteBatch {
-            collection,
-            default_language: Language::English,
-            log_action: LogAction::Move(old_jmap_id.into(), new_jmap_id.into()),
-            action: WriteAction::Update(document_id),
-            fields: Vec::new(),
-        }
-    }
-
-    pub fn update_jmap_id(&mut self, jmap_id: impl Into<JMAPId>) {
-        match self.log_action {
-            LogAction::Insert(ref mut id) => {
-                *id = jmap_id.into();
-            }
-            LogAction::Update(ref mut id) => {
-                *id = jmap_id.into();
-            }
-            LogAction::Delete(ref mut id) => {
-                *id = jmap_id.into();
-            }
-            _ => (),
         }
     }
 
@@ -174,11 +108,152 @@ impl WriteBatch {
     }
 }
 
-impl IntoIterator for WriteBatch {
+impl IntoIterator for Document {
     type Item = UpdateField;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.fields.into_iter()
+    }
+}
+
+impl WriteBatch {
+    pub fn new(account_id: AccountId) -> Self {
+        WriteBatch {
+            account_id,
+            changes: HashMap::new(),
+            documents: Vec::new(),
+        }
+    }
+
+    pub fn insert(account_id: AccountId, document: Document) -> Self {
+        WriteBatch {
+            account_id,
+            changes: HashMap::new(),
+            documents: vec![WriteAction::Insert(document)],
+        }
+    }
+
+    pub fn delete(account_id: AccountId, collection: Collection, document_id: DocumentId) -> Self {
+        WriteBatch {
+            account_id,
+            changes: HashMap::new(),
+            documents: vec![WriteAction::Delete {
+                collection,
+                document_id,
+            }],
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.documents.is_empty() && self.changes.is_empty()
+    }
+
+    pub fn insert_document(&mut self, document: Document) {
+        self.documents.push(WriteAction::Insert(document));
+    }
+
+    pub fn update_document(&mut self, document: Document) {
+        self.documents.push(WriteAction::Update(document));
+    }
+
+    pub fn delete_document(&mut self, collection: Collection, document_id: DocumentId) {
+        self.documents.push(WriteAction::Delete {
+            collection,
+            document_id,
+        });
+    }
+
+    pub fn log_insert(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
+        self.changes
+            .entry(collection)
+            .or_insert_with(Change::new)
+            .inserts
+            .push(jmap_id.into());
+    }
+
+    pub fn log_update(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
+        self.changes
+            .entry(collection)
+            .or_insert_with(Change::new)
+            .updates
+            .push(jmap_id.into());
+    }
+
+    pub fn log_child_update(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
+        self.changes
+            .entry(collection)
+            .or_insert_with(Change::new)
+            .child_updates
+            .push(jmap_id.into());
+    }
+
+    pub fn log_delete(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
+        self.changes
+            .entry(collection)
+            .or_insert_with(Change::new)
+            .deletes
+            .push(jmap_id.into());
+    }
+
+    pub fn log_move(
+        &mut self,
+        collection: Collection,
+        old_jmap_id: impl Into<JMAPId>,
+        new_jmap_id: impl Into<JMAPId>,
+    ) {
+        let change = self.changes.entry(collection).or_insert_with(Change::new);
+        change.deletes.push(old_jmap_id.into());
+        change.inserts.push(new_jmap_id.into());
+    }
+}
+
+impl From<Change> for Vec<u8> {
+    fn from(writer: Change) -> Self {
+        writer.serialize()
+    }
+}
+
+//TODO delete old changelog entries
+impl Change {
+    pub fn new() -> Self {
+        Change::default()
+    }
+
+    pub fn serialize(self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(
+            (self.inserts.len()
+                + self.updates.len()
+                + self.child_updates.len()
+                + self.deletes.len()
+                + 4)
+                * std::mem::size_of::<usize>(),
+        );
+        self.inserts.len().to_leb128_bytes(&mut buf);
+        self.updates.len().to_leb128_bytes(&mut buf);
+        self.child_updates.len().to_leb128_bytes(&mut buf);
+        self.deletes.len().to_leb128_bytes(&mut buf);
+        for list in [self.inserts, self.updates, self.child_updates, self.deletes] {
+            for id in list {
+                id.to_leb128_bytes(&mut buf);
+            }
+        }
+        buf
+    }
+
+    pub fn serialize_key(
+        account: AccountId,
+        collection: Collection,
+        change_id: ChangeId,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(FIELD_PREFIX_LEN + std::mem::size_of::<ChangeId>());
+        bytes.extend_from_slice(&account.to_be_bytes());
+        bytes.push(collection.into());
+        bytes.extend_from_slice(&change_id.to_be_bytes());
+        bytes
+    }
+
+    pub fn deserialize_change_id(bytes: &[u8]) -> Option<ChangeId> {
+        bytes.deserialize_be_u64(COLLECTION_PREFIX_LEN)
     }
 }

@@ -8,11 +8,13 @@ use jmap_mail::{
     MessageField,
 };
 use store::{
-    batch::{LogAction, WriteBatch},
+    batch::{Document, WriteBatch},
     field::FieldOptions,
     AccountId, JMAPId, JMAPStore, Store, Tag,
 };
 use store::{Collection, JMAPIdPrefix};
+
+use crate::jmap_changes::LogAction;
 
 pub fn jmap_mail_query_changes<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
@@ -65,7 +67,6 @@ where
                 let jmap_id = mail_store
                     .mail_import_blob(
                         account_id,
-                        mail_store.assign_raft_id(),
                         format!(
                             "From: test_{}\nSubject: test_{}\n\ntest",
                             if change_num % 2 == 0 { 1 } else { 2 },
@@ -96,42 +97,34 @@ where
             }
             LogAction::Update(id) => {
                 let id = *id_map.get(id).unwrap();
-
-                mail_store
-                    .update_document(
-                        account_id,
-                        mail_store.assign_raft_id(),
-                        WriteBatch::update(Collection::Mail, id.get_document_id(), id),
-                    )
-                    .unwrap();
+                let mut batch = WriteBatch::new(account_id);
+                batch.log_update(Collection::Mail, id);
+                mail_store.write(batch).unwrap();
                 updated_ids.insert(id);
             }
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
-                mail_store
-                    .update_document(
-                        account_id,
-                        mail_store.assign_raft_id(),
-                        WriteBatch::delete(Collection::Mail, id.get_document_id(), id),
-                    )
-                    .unwrap();
+                let mut batch = WriteBatch::new(account_id);
+                batch.delete_document(Collection::Mail, id.get_document_id());
+                batch.log_delete(Collection::Mail, id);
+                mail_store.write(batch).unwrap();
                 removed_ids.insert(id);
             }
             LogAction::Move(from, to) => {
                 let id = *id_map.get(from).unwrap();
                 let new_id = JMAPId::from_parts(thread_id, id.get_document_id());
 
-                let mut batch =
-                    WriteBatch::moved(Collection::Mail, id.get_document_id(), id, new_id);
-                batch.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
-                batch.tag(
+                let mut batch = WriteBatch::new(account_id);
+                let mut document = Document::new(Collection::Mail, id.get_document_id());
+                document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
+                document.tag(
                     MessageField::ThreadId,
                     Tag::Id(thread_id),
                     FieldOptions::None,
                 );
-                mail_store
-                    .update_document(account_id, mail_store.assign_raft_id(), batch)
-                    .unwrap();
+                batch.update_document(document);
+                batch.log_move(Collection::Mail, id, new_id);
+                mail_store.write(batch).unwrap();
 
                 id_map.insert(*to, new_id);
                 if type1_ids.contains(&id) {

@@ -12,6 +12,7 @@ use jmap::{
     JMAPQueryResponse,
 };
 
+use store::batch::Document;
 use store::field::{FieldOptions, Text};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
 use store::roaring::RoaringBitmap;
@@ -211,7 +212,7 @@ pub trait JMAPMailMailbox {
 
     fn raft_update_mailbox(
         &self,
-        batch: &mut Vec<WriteBatch>,
+        batch: &mut WriteBatch,
         account_id: AccountId,
         mailbox_id: JMAPId,
         mailbox: Mailbox,
@@ -239,7 +240,7 @@ where
             return Err(JMAPError::RequestTooLarge);
         }
 
-        let mut changes = Vec::with_capacity(total_changes);
+        let mut changes = WriteBatch::new(request.account_id);
         let mut response = JMAPSetResponse {
             old_state,
             ..Default::default()
@@ -284,7 +285,7 @@ where
                     self.assign_document_id(request.account_id, Collection::Mailbox)?;
                 let jmap_id = assigned_id as JMAPId;
 
-                changes.push(build_mailbox_document(
+                changes.insert_document(build_mailbox_document(
                     Mailbox {
                         name: mailbox.name.unwrap(),
                         parent_id: mailbox.parent_id.unwrap_or(0),
@@ -292,8 +293,8 @@ where
                         sort_order: mailbox.sort_order.unwrap_or(0),
                     },
                     assigned_id,
-                    jmap_id,
                 )?);
+                changes.log_insert(Collection::Mailbox, jmap_id);
 
                 // Generate JSON object
                 let mut values: HashMap<String, JSONValue> = HashMap::new();
@@ -380,7 +381,8 @@ where
                 if let Some(document) =
                     build_changed_mailbox_document(mailbox, mailbox_changes, document_id)?
                 {
-                    changes.push(document);
+                    changes.update_document(document);
+                    changes.log_update(Collection::Mailbox, jmap_id);
                 }
                 updated.insert(jmap_id_str, JSONValue::Null);
             }
@@ -460,20 +462,18 @@ where
                                     .zip(message_doc_ids)
                                 {
                                     if let Some(thread_id) = thread_id {
-                                        changes.push(WriteBatch::delete(
+                                        changes.delete_document(Collection::Mail, message_doc_id);
+                                        changes.log_delete(
                                             Collection::Mail,
-                                            message_doc_id,
                                             JMAPId::from_parts(thread_id, message_doc_id),
-                                        ));
+                                        );
                                     }
                                 }
                             }
 
-                            changes.push(WriteBatch::delete(
-                                Collection::Mailbox,
-                                document_id,
-                                jmap_id,
-                            ));
+                            changes.delete_document(Collection::Mailbox, document_id);
+                            changes.log_delete(Collection::Mailbox, jmap_id);
+
                             destroyed.push(destroy_id.into());
                             continue;
                         }
@@ -496,7 +496,7 @@ where
         }
 
         if !changes.is_empty() {
-            self.update_documents(request.account_id, self.assign_raft_id(), changes)?;
+            self.write(changes)?;
             response.new_state = self.get_state(request.account_id, Collection::Mailbox)?;
         } else {
             response.new_state = response.old_state.clone();
@@ -1182,7 +1182,7 @@ where
 
     fn raft_update_mailbox(
         &self,
-        batch: &mut Vec<WriteBatch>,
+        batch: &mut WriteBatch,
         account_id: AccountId,
         mailbox_id: JMAPId,
         mailbox: Mailbox,
@@ -1201,26 +1201,22 @@ where
                     parent_id: current_mailbox.parent_id.into(),
                     role: current_mailbox.role.into(),
                     sort_order: current_mailbox.sort_order.into(),
-                    is_subscribed: true.into(), //TODO fix
+                    is_subscribed: true.into(), //TODO implement
                 },
                 document_id,
             )? {
-                batch.push(document);
+                batch.update_document(document);
             }
         } else {
-            batch.push(build_mailbox_document(mailbox, document_id, mailbox_id)?);
+            batch.insert_document(build_mailbox_document(mailbox, document_id)?);
         };
 
         Ok(())
     }
 }
 
-fn build_mailbox_document(
-    mailbox: Mailbox,
-    document_id: DocumentId,
-    jmap_id: JMAPId,
-) -> store::Result<WriteBatch> {
-    let mut document = WriteBatch::insert(Collection::Mailbox, document_id, jmap_id);
+fn build_mailbox_document(mailbox: Mailbox, document_id: DocumentId) -> store::Result<Document> {
+    let mut document = Document::new(Collection::Mailbox, document_id);
 
     document.text(
         JMAPMailboxProperties::Name,
@@ -1264,8 +1260,8 @@ fn build_changed_mailbox_document(
     mut mailbox: Mailbox,
     mailbox_changes: MailboxChanges,
     document_id: DocumentId,
-) -> store::Result<Option<WriteBatch>> {
-    let mut document = WriteBatch::update(Collection::Mailbox, document_id, document_id);
+) -> store::Result<Option<Document>> {
+    let mut document = Document::new(Collection::Mailbox, document_id);
 
     if let Some(new_name) = mailbox_changes.name {
         if new_name != mailbox.name {

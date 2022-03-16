@@ -526,7 +526,6 @@ where
     let message_id = mail_store
         .mail_import_blob(
             account_id,
-            mail_store.assign_raft_id(),
             b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
             vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox"))
                 .unwrap()

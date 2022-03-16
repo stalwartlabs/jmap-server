@@ -8,8 +8,8 @@ use jmap_mail::import::{Bincoded, JMAPMailImport};
 use jmap_mail::mailbox::{JMAPMailMailbox, JMAPMailboxProperties, Mailbox};
 use jmap_mail::query::MailboxId;
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
-use store::batch::WriteBatch;
-use store::changes::{self, ChangeId};
+use store::batch::{self, WriteBatch};
+use store::changes::ChangeId;
 use store::leb128::Leb128;
 use store::raft::{Entry, LogIndex, PendingChanges, RaftId, TermId};
 use store::serialize::StoreDeserialize;
@@ -29,9 +29,13 @@ use crate::JMAPServer;
 use super::rpc::UpdateCollection;
 use super::{
     rpc::{self, Request, Response, RpcEvent},
-    Cluster, Event,
+    Cluster,
 };
-use super::{Peer, PeerId};
+use super::{Peer, PeerId, IPC_CHANNEL_BUFFER};
+
+const RETRY_MS: u64 = 30 * 1000;
+const BATCH_MAX_ENTRIES: usize = 10;
+const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum Change {
@@ -61,12 +65,9 @@ pub enum Change {
     Commit,
 }
 
-const RETRY_MS: u64 = 30 * 1000;
-const BATCH_MAX_ENTRIES: usize = 10;
-const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
-
 #[derive(Debug)]
 enum State {
+    BecomeLeader,
     Synchronize,
     AppendEntries,
     PushChanges {
@@ -76,187 +77,552 @@ enum State {
     Wait,
 }
 
-pub fn spawn_append_entries<T>(cluster: &Cluster<T>, peer: &Peer, mut rx: watch::Receiver<LogIndex>)
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum AppendEntriesRequest {
+    Synchronize {
+        last_log: RaftId,
+    },
+    UpdateLog {
+        last_log: RaftId,
+        entries: Vec<store::raft::Entry>,
+    },
+    UpdateStore {
+        account_id: AccountId,
+        collection: Collection,
+        changes: Vec<Change>,
+    },
+}
+
+pub struct Event {
+    pub response_tx: oneshot::Sender<rpc::Response>,
+    pub request: AppendEntriesRequest,
+}
+
+impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let peer_tx = peer.tx.clone();
-    let peer_name = peer.to_string();
+    pub fn spawn_raft_leader(&self, peer: &Peer, mut rx: watch::Receiver<LogIndex>) {
+        let peer_tx = peer.tx.clone();
+        let peer_name = peer.to_string();
 
-    let term = cluster.term;
-    let mut last_log = cluster.last_log;
-    let main_tx = cluster.tx.clone();
-    let core = cluster.core.clone();
+        let term = self.term;
+        let mut last_log = self.last_log;
+        let main_tx = self.tx.clone();
+        let core = self.core.clone();
 
-    let mut state = State::Synchronize;
-    let mut last_commited_id = RaftId::none();
-    let mut last_sent_id = RaftId::none();
+        let mut state = State::BecomeLeader;
+        let mut last_commited_id = RaftId::none();
+        let mut last_sent_id = RaftId::none();
 
-    tokio::spawn(async move {
-        debug!("Starting append entries process for peer {}.", peer_name);
+        tokio::spawn(async move {
+            debug!("Starting append entries process for peer {}.", peer_name);
 
-        loop {
-            // Poll the receiver to make sure this node is still the leader.
-            match poll!(Box::pin(rx.changed())) {
-                Poll::Ready(result) => match result {
-                    Ok(_) => {
-                        last_log.index = *rx.borrow();
-                        last_log.term = term;
-                        if matches!(&state, State::Wait) {
-                            state = State::AppendEntries;
+            loop {
+                // Poll the receiver to make sure this node is still the leader.
+                match poll!(Box::pin(rx.changed())) {
+                    Poll::Ready(result) => match result {
+                        Ok(_) => {
+                            last_log.index = *rx.borrow();
+                            last_log.term = term;
+                            if matches!(&state, State::Wait) {
+                                state = State::AppendEntries;
+                            }
+                        }
+                        Err(_) => {
+                            debug!("Log sync process with {} exiting.", peer_name);
+                            break;
+                        }
+                    },
+                    Poll::Pending => (),
+                }
+
+                //println!("{} -> State: {:#?}", peer_name, state);
+
+                let request = match &mut state {
+                    State::BecomeLeader => {
+                        state = State::Synchronize;
+                        Request::BecomeFollower { term, last_log }
+                    }
+                    State::Synchronize => Request::AppendEntries {
+                        term,
+                        request: AppendEntriesRequest::Synchronize { last_log },
+                    },
+                    State::PushChanges { changes, .. } => {
+                        match prepare_changes(&core, term, changes).await {
+                            Ok(request) => request,
+                            Err(err) => {
+                                error!("Failed to prepare changes: {:?}", err);
+                                continue;
+                            }
                         }
                     }
-                    Err(_) => {
-                        debug!("Log sync process with {} exiting.", peer_name);
-                        break;
-                    }
-                },
-                Poll::Pending => (),
-            }
-
-            //println!("{} -> State: {:#?}", peer_name, state);
-
-            let request = match &mut state {
-                State::Synchronize => Request::SynchronizeLog { term, last_log },
-                State::PushChanges { changes, .. } => match prepare_changes(&core, changes).await {
-                    Ok(request) => request,
-                    Err(err) => {
-                        error!("Failed to prepare changes: {:?}", err);
+                    State::Wait => {
+                        // Wait for the next change
+                        if rx.changed().await.is_ok() {
+                            last_log.index = *rx.borrow();
+                            last_log.term = term;
+                            debug!("Received new log index: {:?}", last_log);
+                        } else {
+                            debug!("Log sync process with {} exiting.", peer_name);
+                            break;
+                        }
+                        state = State::AppendEntries;
                         continue;
                     }
-                },
-                State::Wait => {
-                    // Wait for the next change
-                    if rx.changed().await.is_ok() {
-                        last_log.index = *rx.borrow();
-                        last_log.term = term;
-                        debug!("Received new log index: {:?}", last_log);
-                    } else {
-                        debug!("Log sync process with {} exiting.", peer_name);
-                        break;
-                    }
-                    state = State::AppendEntries;
-                    continue;
-                }
-                State::AppendEntries => {
-                    let _core = core.clone();
-                    match core
-                        .spawn_worker(move || {
-                            _core
-                                .store
-                                .get_raft_entries(last_sent_id, BATCH_MAX_ENTRIES)
-                        })
-                        .await
-                    {
-                        Ok(entries) => {
-                            if !entries.is_empty() {
-                                last_sent_id = entries.last().unwrap().raft_id;
+                    State::AppendEntries => {
+                        let _core = core.clone();
+                        match core
+                            .spawn_worker(move || {
+                                _core
+                                    .store
+                                    .get_raft_entries(last_sent_id, BATCH_MAX_ENTRIES)
+                            })
+                            .await
+                        {
+                            Ok(entries) => {
+                                if !entries.is_empty() {
+                                    last_sent_id = entries.last().unwrap().raft_id;
 
-                                Request::AppendEntries {
-                                    term,
-                                    last_log,
-                                    entries,
+                                    Request::AppendEntries {
+                                        term,
+                                        request: AppendEntriesRequest::UpdateLog {
+                                            last_log,
+                                            entries,
+                                        },
+                                    }
+                                } else {
+                                    debug!(
+                                        "No entries left to send to {} after {:?}.",
+                                        peer_name, last_sent_id
+                                    );
+                                    state = State::Wait;
+                                    continue;
                                 }
-                            } else {
-                                debug!(
-                                    "No entries left to send to {} after {:?}.",
-                                    peer_name, last_sent_id
-                                );
+                            }
+                            Err(err) => {
+                                error!("Error getting raft entries: {:?}", err);
+                                last_sent_id = last_commited_id;
                                 state = State::Wait;
                                 continue;
                             }
                         }
-                        Err(err) => {
-                            error!("Error getting raft entries: {:?}", err);
-                            last_sent_id = last_commited_id;
-                            state = State::Wait;
-                            continue;
+                    }
+                };
+
+                match send_request(&peer_tx, request).await {
+                    Response::BecomeFollower {
+                        term: peer_term,
+                        success,
+                    } => {
+                        if !success || peer_term > term {
+                            if let Err(err) = main_tx
+                                .send(super::Event::StepDown { term: peer_term })
+                                .await
+                            {
+                                error!("Error sending step down message: {}", err);
+                            }
+                            break;
                         }
                     }
-                }
-            };
 
-            match send_request(&peer_tx, request).await {
-                Response::SynchronizeLog {
-                    term: peer_term,
-                    success,
-                    matched,
-                } => {
-                    if !success || peer_term > term {
-                        if let Err(err) = main_tx.send(Event::StepDown { term: peer_term }).await {
-                            error!("Error sending step down message: {}", err);
-                        }
-                        break;
-                    } else if !matched.is_none() {
-                        let local_match = match core.get_next_raft_id(matched).await {
-                            Ok(Some(local_match)) => local_match,
-                            Ok(None) => {
-                                error!("Log sync failed: local match is null");
-                                break;
-                            }
-                            Err(err) => {
-                                error!("Error getting next raft id: {:?}", err);
-                                break;
-                            }
-                        };
-                        if local_match != matched {
-                            // TODO delete out of sync entries
-                            error!(
+                    Response::SynchronizeLog { matched } => {
+                        if !matched.is_none() {
+                            let local_match = match core.get_next_raft_id(matched).await {
+                                Ok(Some(local_match)) => local_match,
+                                Ok(None) => {
+                                    error!("Log sync failed: local match is null");
+                                    break;
+                                }
+                                Err(err) => {
+                                    error!("Error getting next raft id: {:?}", err);
+                                    break;
+                                }
+                            };
+                            if local_match != matched {
+                                // TODO delete out of sync entries
+                                error!(
                                 "Failed to match raft logs with {}, local match: {:?}, peer match: {:?}", peer_name,
                                 local_match, matched
                             );
-                            break;
+                                break;
+                            }
                         }
-                    }
 
-                    last_commited_id = matched;
-                    last_sent_id = matched;
-                    state = State::AppendEntries;
-                }
-                Response::None => {
-                    // There was a problem delivering the message, wait 30 seconds or until
-                    // the next change is received.
-                    match time::timeout(Duration::from_millis(RETRY_MS), rx.changed()).await {
-                        Ok(Ok(())) => {
-                            last_log.index = *rx.borrow();
-                            last_log.term = term;
-                            debug!("Received new log index: {:?}", last_log);
-                        }
-                        Ok(Err(_)) => {
-                            debug!("Log sync process with {} exiting.", peer_name);
-                            break;
-                        }
-                        Err(_) => (),
+                        last_commited_id = matched;
+                        last_sent_id = matched;
+                        state = State::AppendEntries;
                     }
-                    state = State::Synchronize;
-                }
-                Response::NeedUpdates { collections } => {
-                    state = get_next_changes(&core, collections).await;
-                }
-                Response::Continue => match &mut state {
-                    State::PushChanges {
-                        changes,
-                        collections,
-                    } if changes.is_empty() => {
-                        if collections.is_empty() {
-                            last_commited_id = last_sent_id;
-                            state = State::AppendEntries;
-                        } else {
-                            state = get_next_changes(&core, std::mem::take(collections)).await;
+                    Response::None => {
+                        // There was a problem delivering the message, wait 30 seconds or until
+                        // the next change is received.
+                        match time::timeout(Duration::from_millis(RETRY_MS), rx.changed()).await {
+                            Ok(Ok(())) => {
+                                last_log.index = *rx.borrow();
+                                last_log.term = term;
+                                debug!("Received new log index: {:?}", last_log);
+                            }
+                            Ok(Err(_)) => {
+                                debug!("Log sync process with {} exiting.", peer_name);
+                                break;
+                            }
+                            Err(_) => (),
                         }
+                        state = State::Synchronize;
                     }
-                    _ => (),
-                },
+                    Response::NeedUpdates { collections } => {
+                        state = get_next_changes(&core, collections).await;
+                    }
+                    Response::Continue => match &mut state {
+                        State::PushChanges {
+                            changes,
+                            collections,
+                        } if changes.is_empty() => {
+                            if collections.is_empty() {
+                                last_commited_id = last_sent_id;
+                                state = State::AppendEntries;
+                            } else {
+                                state = get_next_changes(&core, std::mem::take(collections)).await;
+                            }
+                        }
+                        _ => (),
+                    },
 
-                response @ (Response::UpdatePeers { .. } | Response::Vote { .. }) => {
-                    error!(
-                        "Unexpected response from peer {}: {:?}",
-                        peer_name, response
-                    );
+                    response @ (Response::UpdatePeers { .. } | Response::Vote { .. }) => {
+                        error!(
+                            "Unexpected response from peer {}: {:?}",
+                            peer_name, response
+                        );
+                    }
                 }
             }
+        });
+    }
+
+    pub fn spawn_raft_follower(&self) -> mpsc::Sender<Event> {
+        let (tx, mut rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
+        let core = self.core.clone();
+
+        tokio::spawn(async move {
+            let mut commit_id = RaftId::none();
+            let mut pending_entries = Vec::new();
+
+            while let Some(event) = rx.recv().await {
+                event
+                    .response_tx
+                    .send(match event.request {
+                        AppendEntriesRequest::Synchronize { last_log } => {
+                            commit_id = last_log;
+                            Response::SynchronizeLog {
+                                matched: match core.get_prev_raft_id(last_log).await {
+                                    Ok(Some(matched)) => {
+                                        core.set_up_to_date(matched == last_log);
+                                        matched
+                                    }
+                                    Ok(None) => RaftId::none(),
+                                    Err(err) => {
+                                        debug!("Failed to get prev raft id: {:?}", err);
+                                        RaftId::none()
+                                    }
+                                },
+                            }
+                        }
+                        AppendEntriesRequest::UpdateLog { last_log, entries } => {
+                            commit_id = last_log;
+                            handle_update_log(&core, last_log, entries, &mut pending_entries).await
+                        }
+                        AppendEntriesRequest::UpdateStore {
+                            account_id,
+                            collection,
+                            changes,
+                        } => {
+                            handle_update_store(
+                                &core,
+                                &mut pending_entries,
+                                commit_id,
+                                account_id,
+                                collection,
+                                changes,
+                            )
+                            .await
+                        }
+                    })
+                    .unwrap_or_else(|_| error!("Oneshot response channel closed."));
+            }
+        });
+        tx
+    }
+
+    pub async fn handle_become_follower(
+        &mut self,
+        peer_id: PeerId,
+        response_tx: oneshot::Sender<rpc::Response>,
+        term: TermId,
+        last_log: RaftId,
+    ) {
+        if self.term < term {
+            self.term = term;
         }
-    });
+
+        if self.term == term && self.log_is_behind_or_eq(last_log.term, last_log.index) {
+            self.follow_leader(peer_id)
+                .send(Event {
+                    response_tx,
+                    request: AppendEntriesRequest::Synchronize { last_log },
+                })
+                .await
+                .unwrap_or_else(|err| error!("Failed to send event: {}", err));
+        } else {
+            response_tx
+                .send(Response::BecomeFollower {
+                    term: self.term,
+                    success: false,
+                })
+                .unwrap_or_else(|_| error!("Oneshot response channel closed."));
+        }
+    }
+
+    pub async fn handle_append_entries(
+        &mut self,
+        peer_id: PeerId,
+        response_tx: oneshot::Sender<rpc::Response>,
+        term: TermId,
+        request: AppendEntriesRequest,
+    ) {
+        if term > self.term {
+            self.term = term;
+        }
+
+        match self.is_following_peer(peer_id) {
+            Some(tx) => {
+                tx.send(Event {
+                    response_tx,
+                    request,
+                })
+                .await
+                .unwrap_or_else(|err| error!("Failed to send event: {}", err));
+            }
+            _ => response_tx
+                .send(rpc::Response::BecomeFollower {
+                    term: self.term,
+                    success: false,
+                })
+                .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
+        }
+    }
+}
+
+pub async fn handle_update_log<T>(
+    core_: &web::Data<JMAPServer<T>>,
+    commit_id: RaftId,
+    entries: Vec<Entry>,
+    pending_entries: &mut Vec<Entry>,
+) -> Response
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let core = core_.clone();
+    match core_
+        .spawn_worker(move || {
+            let mut collections = HashMap::new();
+            for entry in &entries {
+                for change in &entry.changes {
+                    if let hash_map::Entry::Vacant(e) =
+                        collections.entry((entry.account_id, change.collection))
+                    {
+                        e.insert(UpdateCollection {
+                            account_id: entry.account_id,
+                            collection: change.collection,
+                            from_change_id: if let Some(last_change_id) = core
+                                .store
+                                .get_last_change_id(entry.account_id, change.collection)?
+                            {
+                                if change.change_id <= last_change_id {
+                                    continue;
+                                } else {
+                                    Some(last_change_id)
+                                }
+                            } else {
+                                None
+                            },
+                        });
+                    }
+                }
+            }
+
+            Ok((collections, entries))
+        })
+        .await
+    {
+        Ok((collections, entries)) => {
+            if !collections.is_empty() {
+                *pending_entries = entries;
+                Response::NeedUpdates {
+                    collections: collections.into_values().collect(),
+                }
+            } else if commit_log(core_, entries, commit_id).await {
+                Response::Continue
+            } else {
+                Response::None
+            }
+        }
+        Err(err) => {
+            debug!("Worker failed: {:?}", err);
+            Response::None
+        }
+    }
+}
+
+pub async fn handle_update_store<T>(
+    core_: &web::Data<JMAPServer<T>>,
+    pending_entries: &mut Vec<Entry>,
+    commit_id: RaftId,
+    account_id: AccountId,
+    collection: Collection,
+    changes: Vec<Change>,
+) -> Response
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    //println!("{:#?}", changes);
+
+    let core = core_.clone();
+    match core_
+        .spawn_worker(move || {
+            let mut do_commit = false;
+            let mut document_batch = WriteBatch::new(account_id);
+            let mut log_batch = Vec::with_capacity(changes.len());
+
+            debug!(
+                "Inserting {} changes in {}/{:?}...",
+                changes.len(),
+                account_id,
+                collection
+            );
+
+            for change in changes {
+                match change {
+                    Change::InsertMail {
+                        jmap_id,
+                        keywords,
+                        mailboxes,
+                        received_at,
+                        body,
+                    } => {
+                        core.store.raft_update_mail(
+                            &mut document_batch,
+                            account_id,
+                            jmap_id,
+                            mailboxes,
+                            keywords,
+                            Some((
+                                lz4_flex::decompress_size_prepended(&body).map_err(|err| {
+                                    StoreError::InternalError(format!(
+                                        "Failed to decompress raft update: {}",
+                                        err
+                                    ))
+                                })?,
+                                received_at,
+                            )),
+                        )?;
+                    }
+                    Change::UpdateMail {
+                        jmap_id,
+                        keywords,
+                        mailboxes,
+                    } => {
+                        core.store.raft_update_mail(
+                            &mut document_batch,
+                            account_id,
+                            jmap_id,
+                            mailboxes,
+                            keywords,
+                            None,
+                        )?;
+                    }
+                    Change::UpdateMailbox { jmap_id, mailbox } => {
+                        core.store.raft_update_mailbox(
+                            &mut document_batch,
+                            account_id,
+                            jmap_id,
+                            mailbox,
+                        )?;
+                    }
+                    Change::InsertChange { change_id, entry } => {
+                        log_batch.push(WriteOperation::set(
+                            ColumnFamily::Logs,
+                            batch::Change::serialize_key(account_id, collection, change_id),
+                            entry,
+                        ));
+                    }
+                    Change::Delete { document_id } => {
+                        document_batch.delete_document(collection, document_id)
+                    }
+                    Change::Commit => {
+                        do_commit = true;
+                    }
+                }
+            }
+            if !document_batch.is_empty() {
+                core.store.write(document_batch)?;
+            }
+            if !log_batch.is_empty() {
+                core.store.db.write(log_batch)?;
+            }
+
+            Ok(do_commit)
+        })
+        .await
+    {
+        Ok(do_commit) => {
+            if do_commit && !commit_log(core_, std::mem::take(pending_entries), commit_id).await {
+                Response::None
+            } else {
+                Response::Continue
+            }
+        }
+        Err(err) => {
+            debug!("Failed to update store: {:?}", err);
+            Response::None
+        }
+    }
+}
+
+pub async fn commit_log<T>(
+    core_: &web::Data<JMAPServer<T>>,
+    entries: Vec<Entry>,
+    commit_id: RaftId,
+) -> bool
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    if !entries.is_empty() {
+        let core = core_.clone();
+        let last_log = entries.last().map(|e| e.raft_id);
+
+        match core_
+            .spawn_worker(move || core.store.insert_raft_entries(entries))
+            .await
+        {
+            Ok(_) => {
+                // If this node matches the leader's commit index,
+                // read-only requests can be accepted on this node.
+                if let Some(last_log) = last_log {
+                    core_.update_last_log(last_log);
+
+                    if commit_id == last_log {
+                        core_.set_up_to_date(true);
+                    }
+                }
+            }
+            Err(err) => {
+                error!("Failed to commit pending changes: {:?}", err);
+                return false;
+            }
+        }
+    }
+
+    true
 }
 
 async fn send_request(peer_tx: &mpsc::Sender<rpc::RpcEvent>, request: Request) -> Response {
@@ -317,6 +683,7 @@ where
 
 async fn prepare_changes<T>(
     core: &web::Data<JMAPServer<T>>,
+    term: TermId,
     changes: &mut PendingChanges,
 ) -> store::Result<Request>
 where
@@ -378,10 +745,13 @@ where
         push_changes.push(Change::Commit);
     }
 
-    Ok(Request::UpdateStore {
-        account_id: changes.account_id,
-        collection: changes.collection,
-        changes: push_changes,
+    Ok(Request::AppendEntries {
+        term,
+        request: AppendEntriesRequest::UpdateStore {
+            account_id: changes.account_id,
+            collection: changes.collection,
+            changes: push_changes,
+        },
     })
 }
 
@@ -548,7 +918,7 @@ where
             .db
             .get::<Vec<u8>>(
                 ColumnFamily::Logs,
-                &changes::Entry::serialize_key(account_id, collection, change_id),
+                &batch::Change::serialize_key(account_id, collection, change_id),
             )?
             .map(|entry| {
                 (
@@ -558,265 +928,4 @@ where
             }))
     })
     .await
-}
-
-impl<T> Cluster<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    pub async fn handle_synchronize_request(
-        &mut self,
-        peer_id: PeerId,
-        term: TermId,
-        last_log: RaftId,
-    ) -> Response {
-        if self.term < term {
-            self.term = term;
-        }
-
-        let (success, matched) =
-            if self.term == term && self.log_is_behind_or_eq(last_log.term, last_log.index) {
-                self.follow_leader(peer_id);
-                self.commit_id = last_log;
-
-                match self.core.get_prev_raft_id(last_log).await {
-                    Ok(Some(matched)) => {
-                        self.core.set_up_to_date(matched == last_log);
-                        (true, matched)
-                    }
-                    Ok(None) => (true, RaftId::none()),
-                    Err(err) => {
-                        debug!("Failed to get prev raft id: {:?}", err);
-                        (false, RaftId::none())
-                    }
-                }
-            } else {
-                (false, RaftId::none())
-            };
-
-        Response::SynchronizeLog {
-            term: self.term,
-            success,
-            matched,
-        }
-    }
-
-    pub async fn handle_append_entries(
-        &mut self,
-        peer_id: PeerId,
-        term: TermId,
-        last_log: RaftId,
-        entries: Vec<Entry>,
-    ) -> Response {
-        if self.term > term || !self.is_following_peer(peer_id) {
-            return Response::SynchronizeLog {
-                term: self.term,
-                success: false,
-                matched: self.last_log,
-            };
-        } else if self.term < term {
-            self.term = term;
-        }
-        self.commit_id = last_log;
-
-        let core = self.core.clone();
-        match self
-            .core
-            .spawn_worker(move || {
-                let mut collections = HashMap::new();
-                for entry in &entries {
-                    for change in &entry.changes {
-                        if let hash_map::Entry::Vacant(e) =
-                            collections.entry((entry.account_id, change.collection))
-                        {
-                            e.insert(UpdateCollection {
-                                account_id: entry.account_id,
-                                collection: change.collection,
-                                from_change_id: if let Some(last_change_id) = core
-                                    .store
-                                    .get_last_change_id(entry.account_id, change.collection)?
-                                {
-                                    if change.change_id <= last_change_id {
-                                        continue;
-                                    } else {
-                                        Some(last_change_id)
-                                    }
-                                } else {
-                                    None
-                                },
-                            });
-                        }
-                    }
-                }
-
-                Ok((collections, entries))
-            })
-            .await
-        {
-            Ok((collections, entries)) => {
-                self.pending_changes = entries.into();
-                if !collections.is_empty() {
-                    Response::NeedUpdates {
-                        collections: collections.into_values().collect(),
-                    }
-                } else if self.commit_pending_changes().await {
-                    Response::Continue
-                } else {
-                    Response::None
-                }
-            }
-            Err(err) => {
-                debug!("Worker failed: {:?}", err);
-                Response::None
-            }
-        }
-    }
-
-    pub async fn handle_update_store(
-        &mut self,
-        peer_id: PeerId,
-        account_id: AccountId,
-        collection: Collection,
-        changes: Vec<Change>,
-    ) -> Response {
-        if !self.is_following_peer(peer_id) {
-            return Response::SynchronizeLog {
-                term: self.term,
-                success: false,
-                matched: self.last_log,
-            };
-        }
-
-        //println!("{:#?}", changes);
-
-        let core = self.core.clone();
-        match self
-            .core
-            .spawn_worker(move || {
-                let mut do_commit = false;
-                let mut document_batch = Vec::with_capacity(changes.len());
-                let mut log_batch = Vec::with_capacity(changes.len());
-
-                for change in changes {
-                    match change {
-                        Change::InsertMail {
-                            jmap_id,
-                            keywords,
-                            mailboxes,
-                            received_at,
-                            body,
-                        } => {
-                            core.store.raft_update_mail(
-                                &mut document_batch,
-                                account_id,
-                                jmap_id,
-                                mailboxes,
-                                keywords,
-                                Some((
-                                    lz4_flex::decompress_size_prepended(&body).map_err(|err| {
-                                        StoreError::InternalError(format!(
-                                            "Failed to decompress raft update: {}",
-                                            err
-                                        ))
-                                    })?,
-                                    received_at,
-                                )),
-                            )?;
-                        }
-                        Change::UpdateMail {
-                            jmap_id,
-                            keywords,
-                            mailboxes,
-                        } => {
-                            core.store.raft_update_mail(
-                                &mut document_batch,
-                                account_id,
-                                jmap_id,
-                                mailboxes,
-                                keywords,
-                                None,
-                            )?;
-                        }
-                        Change::UpdateMailbox { jmap_id, mailbox } => {
-                            core.store.raft_update_mailbox(
-                                &mut document_batch,
-                                account_id,
-                                jmap_id,
-                                mailbox,
-                            )?;
-                        }
-                        Change::InsertChange { change_id, entry } => {
-                            log_batch.push(WriteOperation::set(
-                                ColumnFamily::Logs,
-                                changes::Entry::serialize_key(account_id, collection, change_id),
-                                entry,
-                            ));
-                        }
-                        Change::Delete { document_id } => document_batch.push(WriteBatch::delete(
-                            collection,
-                            document_id,
-                            document_id,
-                        )),
-                        Change::Commit => {
-                            do_commit = true;
-                        }
-                    }
-                }
-                if !document_batch.is_empty() {
-                    core.store
-                        .update_documents(account_id, RaftId::none(), document_batch)?;
-                }
-                if !log_batch.is_empty() {
-                    core.store.db.write(log_batch)?;
-                }
-
-                Ok(do_commit)
-            })
-            .await
-        {
-            Ok(do_commit) => {
-                if do_commit && !self.commit_pending_changes().await {
-                    Response::None
-                } else {
-                    Response::Continue
-                }
-            }
-            Err(err) => {
-                debug!("Failed to update store: {:?}", err);
-                Response::None
-            }
-        }
-    }
-
-    pub async fn commit_pending_changes(&mut self) -> bool {
-        if let Some(pending_changes) = std::mem::take(&mut self.pending_changes) {
-            let core = self.core.clone();
-            let last_log = pending_changes.last().map(|e| e.raft_id);
-
-            match self
-                .core
-                .spawn_worker(move || core.store.insert_raft_entries(pending_changes))
-                .await
-            {
-                Ok(_) => {
-                    // If this node matches the leader's commit index,
-                    // read-only requests can be accepted on this node.
-                    if let Some(last_log) = last_log {
-                        self.core.update_last_log(last_log);
-
-                        if self.commit_id == last_log {
-                            self.core.set_up_to_date(true);
-                        }
-                    }
-                    return true;
-                }
-                Err(err) => {
-                    error!("Failed to commit pending changes: {:?}", err);
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
 }

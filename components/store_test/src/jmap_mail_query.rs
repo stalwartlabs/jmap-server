@@ -106,7 +106,6 @@ where
         mail_store
             .mail_import_blob(
                 account_id,
-                mail_store.assign_raft_id(),
                 format!(
                     concat!(
                         "From: {}\nCc: {}\nMessage-ID: <{}>\n",

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use actix_web::web;
 use jmap_mail::import::JMAPMailImport;
@@ -39,7 +39,7 @@ async fn build_peer(
 async fn build_cluster(
     num_peers: u32,
     delete_if_exists: bool,
-) -> (Vec<web::Data<JMAPServer<RocksDB>>>, Vec<PathBuf>) {
+) -> (Arc<Vec<web::Data<JMAPServer<RocksDB>>>>, Vec<PathBuf>) {
     tracing_subscriber::fmt::init();
     let mut servers = Vec::new();
     let mut paths = Vec::new();
@@ -48,17 +48,16 @@ async fn build_cluster(
         servers.push(server);
         paths.push(path);
     }
-    (servers, paths)
+    (Arc::new(servers), paths)
 }
 
-async fn get_leader(
-    peers: &[web::Data<JMAPServer<RocksDB>>],
-) -> (usize, &web::Data<JMAPServer<RocksDB>>) {
+async fn get_leader(peers: &[web::Data<JMAPServer<RocksDB>>]) -> &web::Data<JMAPServer<RocksDB>> {
     for _ in 0..100 {
         sleep(Duration::from_millis(100)).await;
         for (peer_num, peer) in peers.iter().enumerate() {
             if peer.is_leader() {
-                return (peer_num, peer);
+                println!("Peer {} is the leader.", peer_num);
+                return peer;
             }
         }
     }
@@ -84,22 +83,32 @@ async fn wait_for_update(peers: &[web::Data<JMAPServer<RocksDB>>]) {
 async fn test_cluster() {
     let (peers, temp_dirs) = build_cluster(2, true).await;
 
-    let (_, leader) = get_leader(&peers).await;
-
-    leader
-        .store
-        .mail_import_blob(
-            1,
-            leader.store.assign_raft_id(),
-            b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
-            vec![1],
-            vec![Tag::Text("hey".to_string())],
-            None,
-        )
-        .unwrap();
+    /*leader
+    .store
+    .mail_import_blob(
+        1,
+        b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
+        vec![1],
+        vec![Tag::Text("hey".to_string())],
+        None,
+    )
+    .unwrap();*/
+    let leader = get_leader(&peers).await;
+    let _leader = leader.clone();
+    tokio::task::spawn_blocking(move || {
+        store_test::jmap_mail_query::jmap_mail_query_prepare(&_leader.store, 1);
+    })
+    .await
+    .unwrap();
 
     leader.store_changed().await;
     wait_for_update(&peers).await;
+    for peer in peers.iter() {
+        if !peer.is_leader() {
+            println!("Testing peer...");
+            store_test::jmap_mail_query::jmap_mail_query(&peer.store, 1);
+        }
+    }
 
     for temp_dir in temp_dirs {
         destroy_temp_dir(temp_dir);

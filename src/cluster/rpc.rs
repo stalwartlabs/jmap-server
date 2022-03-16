@@ -18,7 +18,7 @@ use tokio::{
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-use super::log::Change;
+use super::log::AppendEntriesRequest;
 use super::{gossip::PeerInfo, Event, Peer, PeerId, IPC_CHANNEL_BUFFER};
 
 const RPC_TIMEOUT_MS: u64 = 1000;
@@ -40,19 +40,13 @@ pub enum Request {
         term: TermId,
         last: RaftId,
     },
-    SynchronizeLog {
+    BecomeFollower {
         term: TermId,
         last_log: RaftId,
     },
     AppendEntries {
         term: TermId,
-        last_log: RaftId,
-        entries: Vec<store::raft::Entry>,
-    },
-    UpdateStore {
-        account_id: AccountId,
-        collection: Collection,
-        changes: Vec<Change>,
+        request: AppendEntriesRequest,
     },
     None,
 }
@@ -66,21 +60,11 @@ pub struct UpdateCollection {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
-    UpdatePeers {
-        peers: Vec<PeerInfo>,
-    },
-    Vote {
-        term: TermId,
-        vote_granted: bool,
-    },
-    SynchronizeLog {
-        term: TermId,
-        success: bool,
-        matched: RaftId,
-    },
-    NeedUpdates {
-        collections: Vec<UpdateCollection>,
-    },
+    UpdatePeers { peers: Vec<PeerInfo> },
+    Vote { term: TermId, vote_granted: bool },
+    BecomeFollower { term: TermId, success: bool },
+    SynchronizeLog { matched: RaftId },
+    NeedUpdates { collections: Vec<UpdateCollection> },
     Continue,
     None,
 }

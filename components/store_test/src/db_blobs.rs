@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use store::{
-    batch::WriteBatch,
+    batch::{Document, WriteBatch},
     blob::BlobEntries,
     field::FieldOptions,
-    raft::RaftId,
     serialize::{StoreDeserialize, BLOB_KEY},
     Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
@@ -75,18 +74,16 @@ where
                 let db = db.clone();
                 let blobs = blobs.clone();
                 s.spawn_fifo(move |_| {
-                    let mut document = WriteBatch::insert(
+                    let mut document = Document::new(
                         Collection::Mail,
                         db.assign_document_id(account, Collection::Mail).unwrap(),
-                        0u64,
                     );
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
                         document.binary(0, blob.clone(), FieldOptions::StoreAsBlob(blob_index));
                     }
-                    db.update_document(account, RaftId::none(), document)
-                        .unwrap();
+                    db.write(WriteBatch::insert(account, document)).unwrap();
                 });
             }
         });
@@ -121,12 +118,8 @@ where
     assert_eq!(blobs.len(), 40);
 
     for account in 0..100 {
-        db.update_document(
-            account,
-            RaftId::none(),
-            WriteBatch::delete(Collection::Mail, 0, 0u64),
-        )
-        .unwrap();
+        db.write(WriteBatch::delete(account, Collection::Mail, 0))
+            .unwrap();
     }
 
     for (_, ref_count) in db.get_all_blobs().unwrap() {

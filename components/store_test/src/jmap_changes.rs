@@ -1,11 +1,16 @@
 use std::collections::HashSet;
 
 use jmap::changes::{JMAPChanges, JMAPState};
-use store::{
-    batch::{LogAction, WriteBatch},
-    
-    AccountId, Collection, JMAPStore, Store,
-};
+use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
+
+#[derive(Debug, Clone, Copy)]
+pub enum LogAction {
+    Insert(JMAPId),
+    Update(JMAPId),
+    Delete(JMAPId),
+    UpdateChild(JMAPId),
+    Move(JMAPId, JMAPId),
+}
 
 pub fn jmap_changes<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
@@ -123,23 +128,28 @@ where
             ],
         ),
     ] {
-        let mut documents = Vec::new();
+        let mut documents = WriteBatch::new(account_id);
 
         for change in changes {
-            let mut batch = WriteBatch::insert(
+            /*let mut document = Document::new(
                 Collection::Mail,
                 mail_store
                     .assign_document_id(account_id, Collection::Mail)
                     .unwrap(),
-                0u64,
-            );
-            batch.log_action = change;
-            documents.push(batch);
+            );*/
+            match change {
+                LogAction::Insert(id) => documents.log_insert(Collection::Mail, id),
+                LogAction::Update(id) => documents.log_update(Collection::Mail, id),
+                LogAction::Delete(id) => documents.log_delete(Collection::Mail, id),
+                LogAction::UpdateChild(id) => documents.log_child_update(Collection::Mail, id),
+                LogAction::Move(old_id, new_id) => {
+                    documents.log_move(Collection::Mail, old_id, new_id)
+                }
+            }
+            //documents.insert_document(document);
         }
 
-        mail_store
-            .update_documents(account_id, mail_store.assign_raft_id(), documents)
-            .unwrap();
+        mail_store.write(documents).unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {

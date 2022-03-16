@@ -14,7 +14,7 @@ use jmap_mail::{
     JMAPMailProperties,
 };
 use mail_parser::RfcHeader;
-use store::{ AccountId, JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
 use crate::jmap_mail_get::SortedJSONValue;
 
@@ -38,7 +38,6 @@ where
                     ids: vec![mail_store
                         .mail_import_blob(
                             account_id,
-                            mail_store.assign_raft_id(),
                             fs::read(&test_file).unwrap(),
                             vec![],
                             vec![],

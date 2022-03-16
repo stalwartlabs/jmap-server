@@ -91,6 +91,19 @@ macro_rules! impl_unsigned_leb128 {
     };
 }
 
+pub fn skip_leb128_it<T, I>(it: T) -> Option<()>
+where
+    T: Iterator<Item = I>,
+    I: std::borrow::Borrow<u8>,
+{
+    for byte in it {
+        if (byte.borrow() & 0x80) == 0 {
+            return Some(());
+        }
+    }
+    None
+}
+
 pub fn skip_leb128_value(bytes: &[u8]) -> Option<usize> {
     let mut position = 0;
     loop {

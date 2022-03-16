@@ -2,9 +2,9 @@ use std::sync::atomic::Ordering;
 
 use roaring::{RoaringBitmap, RoaringTreemap};
 
-use crate::leb128::Leb128;
+use crate::leb128::{skip_leb128_it, Leb128};
 use crate::serialize::{StoreSerialize, COLLECTION_PREFIX_LEN};
-use crate::{changes, JMAPId, JMAPIdPrefix, WriteOperation};
+use crate::{batch, JMAPId, JMAPIdPrefix, WriteOperation};
 use crate::{
     changes::ChangeId,
     serialize::{DeserializeBigEndian, INTERNAL_KEY_PREFIX},
@@ -142,6 +142,7 @@ impl PendingChanges {
         let mut bytes_it = bytes.iter();
         let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
         let total_updates = usize::from_leb128_it(&mut bytes_it)?;
+        let total_child_updates = usize::from_leb128_it(&mut bytes_it)?;
         let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
 
         let mut inserted_ids = Vec::with_capacity(total_inserts);
@@ -150,20 +151,16 @@ impl PendingChanges {
             inserted_ids.push(JMAPId::from_leb128_it(&mut bytes_it)?);
         }
 
-        let mut ignore_child_update = false;
         for _ in 0..total_updates {
-            match JMAPId::from_leb128_it(&mut bytes_it)? {
-                JMAPId::MAX => {
-                    ignore_child_update = true;
-                }
-                jmap_id if !ignore_child_update => {
-                    let document_id = jmap_id.get_document_id();
-                    if !self.inserts.contains(document_id) {
-                        self.updates.push(document_id);
-                    }
-                }
-                _ => {}
+            let document_id = JMAPId::from_leb128_it(&mut bytes_it)?.get_document_id();
+            if !self.inserts.contains(document_id) {
+                self.updates.push(document_id);
             }
+        }
+
+        // Skip child updates
+        for _ in 0..total_child_updates {
+            skip_leb128_it(&mut bytes_it)?;
         }
 
         for _ in 0..total_deletes {
@@ -337,7 +334,7 @@ where
             (true, 0)
         };
 
-        let key = changes::Entry::serialize_key(account, collection, from_change_id);
+        let key = batch::Change::serialize_key(account, collection, from_change_id);
         let key_len = key.len();
         let prefix = &key[0..COLLECTION_PREFIX_LEN];
 

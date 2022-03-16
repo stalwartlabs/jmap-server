@@ -1,10 +1,9 @@
 use std::iter::FromIterator;
 
 use nlp::Language;
-use store::batch::WriteBatch;
+use store::batch::{Document, WriteBatch};
 use store::field::{FieldOptions, FullText, Text};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
-use store::raft::RaftId;
 use store::{
     Collection, Comparator, FieldId, FieldValue, Filter, Float, Integer, JMAPStore, LongInteger,
     Store, Tag, TextQuery,
@@ -15,10 +14,9 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     for raw_doc_num in 0u64..10u64 {
-        let mut builder = WriteBatch::insert(
+        let mut builder = Document::new(
             Collection::Mail,
             db.assign_document_id(0, Collection::Mail).unwrap(),
-            raw_doc_num,
         );
         builder.text(
             0,
@@ -45,21 +43,13 @@ where
         builder.tag(7, Tag::Static(0), FieldOptions::None);
         builder.tag(8, Tag::Text("my custom tag".into()), FieldOptions::None);
 
-        db.update_document(0, RaftId::none(), builder).unwrap();
+        db.write(WriteBatch::insert(0, builder)).unwrap();
     }
 
-    db.update_document(
-        0,
-        RaftId::none(),
-        WriteBatch::delete(Collection::Mail, 9, 9u64),
-    )
-    .unwrap();
-    db.update_document(
-        0,
-        RaftId::none(),
-        WriteBatch::delete(Collection::Mail, 0, 0u64),
-    )
-    .unwrap();
+    db.write(WriteBatch::delete(0, Collection::Mail, 9))
+        .unwrap();
+    db.write(WriteBatch::delete(0, Collection::Mail, 0))
+        .unwrap();
 
     for do_purge in [true, false] {
         for field in 0..6 {

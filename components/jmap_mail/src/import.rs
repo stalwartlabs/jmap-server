@@ -10,8 +10,8 @@ use jmap::{
 };
 
 use serde::de::DeserializeOwned;
+use store::batch::Document;
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
-use store::raft::RaftId;
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::tracing::debug;
 use store::{
@@ -97,7 +97,6 @@ pub trait JMAPMailImport {
     fn mail_import_blob(
         &self,
         account_id: AccountId,
-        raft_id: RaftId,
         blob: Vec<u8>,
         mailbox_ids: Vec<MailboxId>,
         keywords: Vec<Tag>,
@@ -107,13 +106,13 @@ pub trait JMAPMailImport {
     fn mail_merge_threads(
         &self,
         account_id: AccountId,
-        documents: &mut Vec<WriteBatch>,
+        documents: &mut WriteBatch,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
 
     fn raft_update_mail(
         &self,
-        batch: &mut Vec<WriteBatch>,
+        batch: &mut WriteBatch,
         account_id: AccountId,
         jmap_id: JMAPId,
         mailbox_ids: Vec<MailboxId>,
@@ -179,7 +178,6 @@ where
                     item.id,
                     self.mail_import_blob(
                         request.account_id,
-                        self.assign_raft_id(),
                         blob,
                         item.mailbox_ids,
                         item.keywords,
@@ -220,7 +218,6 @@ where
     fn mail_import_blob(
         &self,
         account_id: AccountId,
-        raft_id: RaftId,
         blob: Vec<u8>,
         mailbox_ids: Vec<MailboxId>,
         keywords: Vec<Tag>,
@@ -228,11 +225,11 @@ where
     ) -> jmap::Result<JSONValue> {
         // Build message document
         let document_id = self.assign_document_id(account_id, Collection::Mail)?;
-        let mut document = WriteBatch::insert(Collection::Mail, document_id, document_id);
+        let mut batch = WriteBatch::new(account_id);
+        let mut document = Document::new(Collection::Mail, document_id);
         let blob_len = blob.len();
         let (reference_ids, thread_name) =
             build_message_document(&mut document, blob, received_at)?;
-        let mut documents = Vec::new();
 
         // Add mailbox tags
         if !mailbox_ids.is_empty() {
@@ -251,11 +248,7 @@ where
                     Tag::Id(mailbox_id),
                     FieldOptions::None,
                 );
-                documents.push(WriteBatch::update_child(
-                    Collection::Mailbox,
-                    mailbox_id,
-                    mailbox_id,
-                ));
+                batch.log_child_update(Collection::Mailbox, mailbox_id);
             }
         }
 
@@ -326,7 +319,7 @@ where
                     // Merge all matching threads
                     Some(self.mail_merge_threads(
                         account_id,
-                        &mut documents,
+                        &mut batch,
                         thread_ids.into_iter().collect(),
                     )?)
                 }
@@ -339,7 +332,7 @@ where
             thread_id
         } else {
             let thread_id = self.assign_document_id(account_id, Collection::Thread)?;
-            documents.push(WriteBatch::insert(Collection::Thread, thread_id, thread_id));
+            batch.log_insert(Collection::Thread, thread_id);
             thread_id
         };
 
@@ -365,11 +358,11 @@ where
         );
 
         let jmap_mail_id = JMAPId::from_parts(thread_id, document_id);
-        document.update_jmap_id(jmap_mail_id);
-        documents.push(document);
+        batch.log_insert(Collection::Mail, jmap_mail_id);
+        batch.insert_document(document);
 
         // Write documents to store
-        self.update_documents(account_id, raft_id, documents)?;
+        self.write(batch)?;
 
         // Generate JSON object
         let mut values = HashMap::with_capacity(4);
@@ -392,7 +385,7 @@ where
     fn mail_merge_threads(
         &self,
         account_id: AccountId,
-        documents: &mut Vec<WriteBatch>,
+        batch: &mut WriteBatch,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId> {
         // Query tags for all thread ids
@@ -427,12 +420,7 @@ where
 
         for (document_set, delete_thread_id) in document_sets {
             for document_id in document_set {
-                let mut document = WriteBatch::moved(
-                    Collection::Mail,
-                    document_id,
-                    JMAPId::from_parts(delete_thread_id, document_id),
-                    JMAPId::from_parts(thread_id, document_id),
-                );
+                let mut document = Document::new(Collection::Mail, document_id);
                 document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
                 document.tag(
                     MessageField::ThreadId,
@@ -444,15 +432,15 @@ where
                     Tag::Id(delete_thread_id),
                     FieldOptions::Clear,
                 );
-
-                documents.push(document);
+                batch.log_move(
+                    Collection::Mail,
+                    JMAPId::from_parts(delete_thread_id, document_id),
+                    JMAPId::from_parts(thread_id, document_id),
+                );
+                batch.update_document(document);
             }
 
-            documents.push(WriteBatch::delete(
-                Collection::Thread,
-                delete_thread_id,
-                delete_thread_id,
-            ));
+            batch.log_delete(Collection::Thread, delete_thread_id);
         }
 
         Ok(thread_id)
@@ -460,7 +448,7 @@ where
 
     fn raft_update_mail(
         &self,
-        batch: &mut Vec<WriteBatch>,
+        batch: &mut WriteBatch,
         account_id: AccountId,
         jmap_id: JMAPId,
         mailbox_ids: Vec<MailboxId>,
@@ -468,8 +456,7 @@ where
         insert: Option<(Vec<u8>, i64)>,
     ) -> store::Result<()> {
         if let Some((raw_message, received_at)) = insert {
-            let mut document =
-                WriteBatch::insert(Collection::Mail, jmap_id.get_document_id(), jmap_id);
+            let mut document = Document::new(Collection::Mail, jmap_id.get_document_id());
 
             // Parse and build message document
             let (reference_ids, thread_name) =
@@ -529,12 +516,10 @@ where
                 FieldOptions::Sort,
             );
 
-            batch.push(document);
+            batch.insert_document(document);
         } else {
             let document_id = jmap_id.get_document_id();
-
-            let mut document =
-                WriteBatch::update(Collection::Mail, jmap_id.get_document_id(), jmap_id);
+            let mut document = Document::new(Collection::Mail, document_id);
 
             // Process mailbox changes
             if let Some(current_mailbox_ids) = self.get_document_value::<Bincoded<Vec<MailboxId>>>(
@@ -647,7 +632,7 @@ where
             };
 
             if !document.is_empty() {
-                batch.push(document);
+                batch.update_document(document);
             }
         }
         Ok(())
