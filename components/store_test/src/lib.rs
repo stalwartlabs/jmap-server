@@ -95,6 +95,8 @@ pub trait StoreCompareWith<T> {
     fn compare_with(&self, other: &JMAPStore<T>) -> BTreeMap<ColumnFamily, usize>;
 }
 
+const ASSERT: bool = true;
+
 impl<T> StoreCompareWith<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -145,7 +147,17 @@ where
                                 .unwrap_or_default();
                             other_tagged_docs &= &last_ids;
 
-                            /*if tagged_docs != other_tagged_docs {
+                            if ASSERT {
+                                assert_eq!(
+                                    tagged_docs,
+                                    other_tagged_docs,
+                                    "{:?}/{}/{:?}/{}",
+                                    cf,
+                                    account_id,
+                                    collection,
+                                    key.last().unwrap()
+                                );
+                            } else if tagged_docs != other_tagged_docs {
                                 println!(
                                     "{:?} != {:?} for {:?}/{}/{:?}/{}",
                                     tagged_docs,
@@ -155,16 +167,7 @@ where
                                     collection,
                                     key.last().unwrap()
                                 );
-                            }*/
-                            assert_eq!(
-                                tagged_docs,
-                                other_tagged_docs,
-                                "{:?}/{}/{:?}/{}",
-                                cf,
-                                account_id,
-                                collection,
-                                key.last().unwrap()
-                            );
+                            }
 
                             if !tagged_docs.is_empty() {
                                 *total_keys.get_mut(&cf).unwrap() += 1;
@@ -350,13 +353,26 @@ where
                     ColumnFamily::Logs => {
                         *total_keys.get_mut(&cf).unwrap() += 1;
 
-                        assert_eq!(
-                            value,
-                            other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into(),
-                            "{:?} {:?}",
-                            cf,
-                            key
-                        );
+                        if ASSERT {
+                            assert_eq!(
+                                value,
+                                other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into(),
+                                "{:?} {:?}",
+                                cf,
+                                key
+                            );
+                        } else if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap()
+                        {
+                            let other_value = other_value.into_boxed_slice();
+                            if value != other_value {
+                                println!(
+                                    "Value mismatch: {:?} -> {:?} != {:?}",
+                                    key, value, other_value
+                                );
+                            }
+                        } else {
+                            println!("Missing key: {:?}", key);
+                        }
                     }
                     _ => (),
                 }

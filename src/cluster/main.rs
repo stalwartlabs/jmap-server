@@ -4,11 +4,11 @@ use std::{
 };
 
 use actix_web::web;
+use store::Store;
 use store::{
     config::EnvSettings,
     tracing::{debug, error, info},
 };
-use store::{raft::LogIndex, Store};
 use tokio::{
     sync::{mpsc, watch},
     time,
@@ -63,10 +63,17 @@ pub async fn start_cluster<T>(
                     #[cfg(test)]
                     if let Event::IsOffline(status) = &message {
                         is_offline = *status;
-                        if is_offline {
-                            for peer in &mut cluster.peers {
-                                peer.state = gossip::State::Offline;
-                            }
+                        for peer in &mut cluster.peers {
+                            peer.state = if is_offline {
+                                gossip::State::Offline
+                            } else {
+                                gossip::State::Suspected
+                            };
+                        }
+
+                        if !is_offline {
+                            cluster.ping_peers().await;
+                            last_ping = Instant::now();
                         }
                         cluster.start_election_timer(false);
                         continue;
@@ -180,15 +187,9 @@ where
                     self.start_election_timer(false);
                 }
             }
-            Event::StoreChanged => {
-                let last_log_index = self.core.last_log_index();
-                if self.term > self.last_log.term {
-                    self.last_log.term = self.term;
-                }
-                if last_log_index > self.last_log.index || self.last_log.index == LogIndex::MAX {
-                    self.last_log.index = last_log_index;
-                    self.send_append_entries();
-                }
+            Event::StoreChanged { last_log } => {
+                self.last_log = last_log;
+                self.send_append_entries();
             }
             Event::Shutdown => return false,
 
@@ -224,6 +225,7 @@ where
 
         // Start a new election
         if leader_is_offline {
+            debug!("Leader is offline, starting a new election.");
             self.request_votes(true).await;
         }
 

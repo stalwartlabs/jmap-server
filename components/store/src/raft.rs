@@ -3,11 +3,9 @@ use std::sync::atomic::Ordering;
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 use crate::leb128::{skip_leb128_it, Leb128};
-use crate::serialize::{LogKey, StoreSerialize, COLLECTION_PREFIX_LEN};
+use crate::serialize::{LogKey, StoreSerialize};
 use crate::{
-    changes::ChangeId,
-    serialize::{DeserializeBigEndian, INTERNAL_KEY_PREFIX},
-    AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
+    changes::ChangeId, AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
 use crate::{JMAPId, JMAPIdPrefix, WriteOperation};
 pub type TermId = u64;
@@ -138,7 +136,7 @@ impl PendingChanges {
         for _ in 0..total_updates {
             let document_id = JMAPId::from_leb128_it(&mut bytes_it)?.get_document_id();
             if !self.inserts.contains(document_id) {
-                self.updates.push(document_id);
+                self.updates.insert(document_id);
             }
         }
 
@@ -156,14 +154,15 @@ impl PendingChanges {
                     && inserted_id.get_prefix_id() != prefix_id
             }) {
                 // There was a prefix change, count this change as an update.
+
                 inserted_ids.remove(pos);
                 if !self.inserts.contains(document_id) {
-                    self.updates.push(document_id);
+                    self.updates.insert(document_id);
                 }
             } else {
                 // This change is an actual deletion
                 if !self.inserts.remove(document_id) {
-                    self.deletes.push(document_id);
+                    self.deletes.insert(document_id);
                 }
                 self.updates.remove(document_id);
             }
@@ -176,7 +175,7 @@ impl PendingChanges {
             self.deletes.remove(document_id);
         }
 
-        self.changes.push(change_id);
+        self.changes.insert(change_id);
 
         Some(())
     }
@@ -190,7 +189,7 @@ where
         RaftId {
             term: self.raft_term.load(Ordering::Relaxed),
             index: self
-                .raft_log_index
+                .raft_index
                 .fetch_add(1, Ordering::Relaxed)
                 .wrapping_add(1),
         }
@@ -198,14 +197,13 @@ where
 
     pub fn get_prev_raft_id(&self, key: RaftId) -> crate::Result<Option<RaftId>> {
         let key = LogKey::serialize_raft(&key);
-        let key_len = key.len();
 
         if let Some((key, _)) = self
             .db
             .iterator(ColumnFamily::Logs, &key, Direction::Backward)?
             .next()
         {
-            if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
+            if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
                 return Ok(Some(LogKey::deserialize_raft(&key).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
                 })?));
@@ -216,14 +214,13 @@ where
 
     pub fn get_next_raft_id(&self, key: RaftId) -> crate::Result<Option<RaftId>> {
         let key = LogKey::serialize_raft(&key);
-        let key_len = key.len();
 
         if let Some((key, _)) = self
             .db
             .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
             .next()
         {
-            if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
+            if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
                 return Ok(Some(LogKey::deserialize_raft(&key).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
                 })?));
@@ -243,13 +240,13 @@ where
         } else {
             (true, LogKey::serialize_raft(&RaftId::new(0, 0)))
         };
-        let key_len = key.len();
+        let prefix = &[LogKey::RAFT_KEY_PREFIX];
 
         for (key, value) in self
             .db
             .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
         {
-            if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
+            if key.starts_with(prefix) {
                 let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
                 })?;
@@ -283,26 +280,6 @@ where
         )
     }
 
-    /*pub fn get_raft_entry(&self, raft_id: RaftId) -> crate::Result<Option<Entry>> {
-        let key = raft_id.serialize_key();
-        let key_len = key.len();
-
-        if let Some((key, value)) = self
-            .db
-            .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
-            .next()
-        {
-            if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
-                return Ok(Some(
-                    Entry::deserialize(&value, LogKey::deserialize_raft(key)?).ok_or_else(|| {
-                        StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
-                    })?,
-                ));
-            }
-        }
-        Ok(None)
-    }*/
-
     pub fn get_pending_changes(
         &self,
         account: AccountId,
@@ -319,8 +296,7 @@ where
         };
 
         let key = LogKey::serialize_change(account, collection, from_change_id);
-        let key_len = key.len();
-        let prefix = &key[0..COLLECTION_PREFIX_LEN];
+        let prefix = &key[0..LogKey::CHANGE_ID_POS];
 
         for (key, value) in self
             .db
@@ -328,19 +304,13 @@ where
         {
             if !key.starts_with(prefix) {
                 break;
-            } else if key.len() != key_len {
-                //TODO avoid collisions with Raft keys
-                continue;
             }
-            let change_id = key
-                .as_ref()
-                .deserialize_be_u64(COLLECTION_PREFIX_LEN)
-                .ok_or_else(|| {
-                    StoreError::InternalError(format!(
-                        "Failed to deserialize changelog key for [{}/{:?}]: [{:?}]",
-                        account, collection, key
-                    ))
-                })?;
+            let change_id = LogKey::deserialize_change_id(&key).ok_or_else(|| {
+                StoreError::InternalError(format!(
+                    "Failed to deserialize changelog key for [{}/{:?}]: [{:?}]",
+                    account, collection, key
+                ))
+            })?;
 
             if change_id > from_change_id || (is_inclusive && change_id == from_change_id) {
                 if !only_ids {
@@ -351,7 +321,7 @@ where
                         ))
                     })?;
                 } else {
-                    changes.changes.push(change_id);
+                    changes.changes.insert(change_id);
                 }
             }
         }

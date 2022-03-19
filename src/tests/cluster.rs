@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use actix_web::web;
 use store::{raft::RaftId, JMAPStore, Store};
@@ -6,7 +6,7 @@ use store_rocksdb::RocksDB;
 use store_test::{
     destroy_temp_dir, init_settings,
     jmap_mail_merge_threads::build_thread_test_messages,
-    jmap_mail_set::insert_email,
+    jmap_mail_set::{delete_email, insert_email, update_email},
     jmap_mailbox::{delete_mailbox, insert_mailbox, rename_mailbox},
     StoreCompareWith,
 };
@@ -107,10 +107,12 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let mut updated = vec![false; peers.len()];
-    let mut last_logs = vec![RaftId::none(); peers.len()];
 
     for _ in 0..100 {
+        let mut last_logs = vec![RaftId::none(); peers.len()];
+
         sleep(Duration::from_millis(100)).await;
+
         for (peer_num, peer) in peers.iter().enumerate() {
             if peer.is_offline() {
                 updated[peer_num] = true;
@@ -121,8 +123,11 @@ where
                     .await
                     .unwrap()
                     .unwrap_or_else(RaftId::none);
+            } else {
+                updated[peer_num] = false;
             }
         }
+
         if updated.iter().all(|u| *u) {
             let mut last_log = RaftId::none();
             for peer_last_log in &last_logs {
@@ -130,7 +135,7 @@ where
                     if last_log.is_none() {
                         last_log = *peer_last_log;
                     } else if last_log != *peer_last_log {
-                        panic!("Raft index mismatch: {:?}", last_logs);
+                        panic!("Raft index mismatch: {:?} {:?}", last_logs, updated);
                     }
                 }
             }
@@ -156,10 +161,10 @@ where
                                 panic!("Follower {} is offline.", follower_pos);
                             }
                         }
-                        println!(
+                        /*println!(
                             "Comparing stores of leader {} with follower {}",
                             leader_pos, follower_pos
-                        );
+                        );*/
                         assert!(follower.is_up_to_date());
                         let keys_leader = leader.store.compare_with(&follower.store);
                         let keys_follower = follower.store.compare_with(&leader.store);
@@ -211,7 +216,7 @@ where
     // Create the Inbox
     let leader = assert_leader_elected(&peers).await;
     let inbox_id = insert_mailbox(&leader.store, 1, "Inbox", "INBOX");
-    leader.store_changed().await;
+    leader.notify_changes().await;
     assert_cluster_updated(&peers).await;
 
     // Keep one peer down to test full sync at the end
@@ -220,7 +225,9 @@ where
     // Insert chunks of ten messages in different nodes
     let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
     while !messages.is_empty() {
-        let chunk = messages.drain(..).take(10).collect::<Vec<_>>();
+        let chunk = messages
+            .drain(0..std::cmp::min(20, messages.len()))
+            .collect::<Vec<_>>();
         let leader = assert_leader_elected(&peers).await;
         let store = leader.store.clone();
         tokio::task::spawn_blocking(move || {
@@ -239,7 +246,7 @@ where
         .unwrap();
 
         // Notify peers of changes
-        leader.store_changed().await;
+        leader.notify_changes().await;
         assert_cluster_updated(&peers).await;
 
         // Bring back previous offline leader
@@ -247,6 +254,7 @@ where
             prev_offline_leader.set_offline(false).await;
         }
         assert_cluster_updated(&peers).await;
+        assert_mirrored_stores(peers.clone(), true).await;
 
         // Deactivate the current leader
         leader.set_offline(true).await;
@@ -256,8 +264,155 @@ where
     // Activate all nodes
     activate_all_peers(&peers).await;
     assert_cluster_updated(&peers).await;
-    //println!("sleepign");
-    //sleep(Duration::from_millis(5000)).await;
+    assert_mirrored_stores(peers, false).await;
+}
+
+#[derive(Debug)]
+enum Ac {
+    NewEmail((u32, u32)),
+    UpdateEmail(u32),
+    DeleteEmail(u32),
+    InsertMailbox(u32),
+    UpdateMailbox(u32),
+    DeleteMailbox(u32),
+}
+
+async fn test_distruibuted_update_delete<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let test_batches = vec![
+        vec![
+            Ac::InsertMailbox(1),
+            Ac::NewEmail((1, 1)),
+            Ac::UpdateEmail(1),
+            Ac::DeleteEmail(1),
+        ],
+        vec![
+            Ac::InsertMailbox(2),
+            Ac::UpdateMailbox(2),
+            Ac::DeleteMailbox(2),
+        ],
+        vec![
+            Ac::NewEmail((1, 1)),
+            Ac::NewEmail((2, 1)),
+            Ac::NewEmail((3, 1)),
+            Ac::InsertMailbox(3),
+            Ac::InsertMailbox(4),
+            Ac::InsertMailbox(5),
+        ],
+        vec![Ac::UpdateEmail(1), Ac::UpdateEmail(2), Ac::UpdateEmail(3)],
+        vec![
+            Ac::UpdateMailbox(3),
+            Ac::UpdateMailbox(4),
+            Ac::UpdateMailbox(5),
+        ],
+        vec![Ac::DeleteEmail(1)],
+        vec![Ac::DeleteEmail(2)],
+        vec![
+            Ac::UpdateMailbox(3),
+            Ac::DeleteMailbox(4),
+            Ac::UpdateMailbox(5),
+        ],
+        vec![Ac::DeleteEmail(3)],
+        vec![Ac::DeleteMailbox(3), Ac::DeleteMailbox(5)],
+        vec![
+            Ac::InsertMailbox(2),
+            Ac::NewEmail((1, 2)),
+            Ac::NewEmail((2, 2)),
+            Ac::NewEmail((3, 2)),
+        ],
+        vec![Ac::UpdateEmail(1)],
+        vec![Ac::DeleteEmail(2)],
+        vec![Ac::DeleteMailbox(2)],
+    ];
+
+    // Keep one node offline
+    assert_leader_elected(&peers).await.set_offline(true).await;
+    let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
+    let mut mailbox_map = HashMap::new();
+    let mut email_map = HashMap::new();
+
+    for (batch_num, batch) in test_batches.into_iter().enumerate() {
+        println!("{:?}", batch);
+        let leader = assert_leader_elected(&peers).await;
+
+        for action in batch {
+            match action {
+                Ac::NewEmail((local_id, mailbox_id)) => {
+                    email_map.insert(
+                        local_id,
+                        insert_email(
+                            &leader.store,
+                            2,
+                            format!(
+                                "From: test@test.com\nSubject: test {}\n\nTest message {}",
+                                local_id, local_id
+                            )
+                            .into_bytes(),
+                            vec![*mailbox_map.get(&mailbox_id).unwrap()],
+                            vec![],
+                            None,
+                        ),
+                    );
+                }
+                Ac::UpdateEmail(local_id) => {
+                    update_email(
+                        &leader.store,
+                        2,
+                        *mailbox_map.get(&local_id).unwrap(),
+                        None,
+                        Some(vec![format!("tag_{}", batch_num)]),
+                    );
+                }
+                Ac::DeleteEmail(local_id) => {
+                    delete_email(&leader.store, 2, email_map.remove(&local_id).unwrap());
+                }
+                Ac::InsertMailbox(local_id) => {
+                    mailbox_map.insert(
+                        local_id,
+                        insert_mailbox(
+                            &leader.store,
+                            2,
+                            &format!("Mailbox {}", local_id),
+                            &format!("role_{}", local_id),
+                        ),
+                    );
+                }
+                Ac::UpdateMailbox(local_id) => {
+                    rename_mailbox(
+                        &leader.store,
+                        2,
+                        *mailbox_map.get(&local_id).unwrap(),
+                        &format!("Mailbox {}_{}", local_id, batch_num),
+                    );
+                }
+                Ac::DeleteMailbox(local_id) => {
+                    delete_mailbox(&leader.store, 2, mailbox_map.remove(&local_id).unwrap());
+                }
+            }
+
+            println!("{:?}\n{:?}", mailbox_map, email_map);
+        }
+        // Notify peers of changes
+        leader.notify_changes().await;
+        assert_cluster_updated(&peers).await;
+
+        // Bring back previous offline leader
+        if let Some(prev_offline_leader) = prev_offline_leader {
+            prev_offline_leader.set_offline(false).await;
+        }
+        assert_cluster_updated(&peers).await;
+        assert_mirrored_stores(peers.clone(), true).await;
+
+        // Deactivate the current leader
+        leader.set_offline(true).await;
+        prev_offline_leader = Some(leader);
+    }
+
+    // Activate all nodes
+    activate_all_peers(&peers).await;
+    assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers, false).await;
 }
 
@@ -266,7 +421,8 @@ async fn test_cluster() {
     let (peers, temp_dirs) = build_cluster(5, true).await;
 
     //test_election(peers.clone()).await;
-    test_distruibuted_thread_merge(peers.clone()).await;
+    //test_distruibuted_thread_merge(peers.clone()).await;
+    test_distruibuted_update_delete(peers.clone()).await;
 
     for temp_dir in temp_dirs {
         destroy_temp_dir(temp_dir);
@@ -282,7 +438,8 @@ fn test_coco() {
     for (pos1, db1) in dbs.iter().enumerate() {
         for (pos2, db2) in dbs.iter().enumerate() {
             if pos1 != pos2 {
-                println!("{}/{} -> {:?}", pos1 + 1, pos2 + 2, db1.compare_with(db2));
+                print!("{}/{} -> ", pos1, pos2);
+                println!("{:?}", db1.compare_with(db2));
             }
         }
     }

@@ -92,7 +92,9 @@ pub enum Event {
     StepDown {
         term: TermId,
     },
-    StoreChanged,
+    StoreChanged {
+        last_log: RaftId,
+    },
     Shutdown,
 
     #[cfg(test)]
@@ -117,8 +119,8 @@ pub struct Peer {
     pub last_heartbeat: Instant,
     pub hb_window: Vec<u32>,
     pub hb_window_pos: usize,
-    pub hb_sum: u32,
-    pub hb_sq_sum: u32,
+    pub hb_sum: u64,
+    pub hb_sq_sum: u64,
     pub hb_is_full: bool,
 
     // Raft state
@@ -235,6 +237,11 @@ where
         addr.hash(&mut generation);
         jmap_url.hash(&mut generation);
 
+        let last_log = core
+            .get_last_log()
+            .await
+            .unwrap()
+            .unwrap_or_else(RaftId::none);
         let mut cluster = Cluster {
             peer_id,
             shard_id,
@@ -243,8 +250,8 @@ where
             addr,
             key,
             jmap_url: format!("{}/jmap", jmap_url),
-            term: core.term(),
-            last_log: RaftId::new(core.term(), core.last_log_index()),
+            term: last_log.term,
+            last_log,
             state: raft::State::default(),
             core,
             peers: vec![],

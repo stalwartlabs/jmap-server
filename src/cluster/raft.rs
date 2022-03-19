@@ -158,7 +158,7 @@ where
                 _ => election_timeout(false),
             },
         };
-        debug!("Stepping down for term {}.", self.term);
+        debug!("[{}] Stepping down for term {}.", self.addr, self.term);
     }
 
     pub fn vote_for(&mut self, peer_id: PeerId) {
@@ -169,7 +169,8 @@ where
         self.core.set_follower();
         self.reset();
         debug!(
-            "Voted for peer {} for term {}.",
+            "[{}] Voted for peer {} for term {}.",
+            self.addr,
             self.get_peer(peer_id).unwrap(),
             self.term
         );
@@ -184,7 +185,8 @@ where
         self.core.set_follower();
         self.reset();
         debug!(
-            "Following peer {} for term {}.",
+            "[{}] Following peer {} for term {}.",
+            self.addr,
             self.get_peer(peer_id).unwrap(),
             self.term
         );
@@ -206,11 +208,17 @@ where
         self.term += 1;
         self.core.set_follower();
         self.reset();
-        debug!("Running for election for term {}.", self.term);
+        debug!(
+            "[{}] Running for election for term {}.",
+            self.addr, self.term
+        );
     }
 
     pub fn become_leader(&mut self) {
-        debug!("This node is the new leader for term {}.", self.term);
+        debug!(
+            "[{}] This node is the new leader for term {}.",
+            self.addr, self.term
+        );
         let (tx, rx) = watch::channel(self.last_log.index);
         self.peers
             .iter()
@@ -272,6 +280,10 @@ where
                 }
             } else {
                 // Wait to receive a vote request from a more up-to-date peer.
+                debug!(
+                    "[{}] Waiting for a vote request from a more up-to-date peer.",
+                    self.addr
+                );
                 self.start_election_timer(now);
             }
         } else {
@@ -351,17 +363,12 @@ where
         self.is_leader.store(true, Ordering::Relaxed);
         self.is_up_to_date.store(true, Ordering::Relaxed);
         self.store.raft_term.store(term, Ordering::Relaxed);
+        self.store.doc_id_cache.invalidate_all();
     }
 
     pub fn set_follower(&self) {
         self.is_leader.store(false, Ordering::Relaxed);
         self.is_up_to_date.store(false, Ordering::Relaxed);
-    }
-
-    pub fn update_last_log_index(&self, last_log_index: LogIndex) {
-        self.store
-            .raft_log_index
-            .store(last_log_index, Ordering::Relaxed);
     }
 
     pub fn is_leader(&self) -> bool {
@@ -376,17 +383,13 @@ where
         self.is_up_to_date.store(val, Ordering::Relaxed);
     }
 
-    pub fn last_log_index(&self) -> LogIndex {
-        self.store.raft_log_index.load(Ordering::Relaxed)
-    }
-
-    pub fn term(&self) -> TermId {
-        self.store.raft_term.load(Ordering::Relaxed)
+    pub fn update_raft_index(&self, index: LogIndex) {
+        self.store.raft_index.store(index, Ordering::Relaxed);
     }
 
     pub async fn get_last_log(&self) -> store::Result<Option<RaftId>> {
         let store = self.store.clone();
-        self.spawn_worker(move || store.get_prev_raft_id(RaftId::none()))
+        self.spawn_worker(move || store.get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX)))
             .await
     }
 
@@ -400,15 +403,25 @@ where
         self.spawn_worker(move || store.get_next_raft_id(key)).await
     }
 
-    pub async fn store_changed(&self) {
+    pub async fn store_changed(&self, last_log: RaftId) {
         if self.is_cluster
             && self
                 .cluster_tx
-                .send(super::Event::StoreChanged)
+                .send(super::Event::StoreChanged { last_log })
                 .await
                 .is_err()
         {
             error!("Failed to send store changed event.");
         }
+    }
+
+    #[cfg(test)]
+    pub async fn notify_changes(&self) {
+        self.cluster_tx
+            .send(super::Event::StoreChanged {
+                last_log: self.get_last_log().await.unwrap().unwrap(),
+            })
+            .await
+            .unwrap();
     }
 }

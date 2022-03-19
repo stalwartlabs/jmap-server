@@ -398,7 +398,7 @@ pub struct JMAPStore<T> {
     pub term_id_last: AtomicU64,
 
     pub raft_term: AtomicU64,
-    pub raft_log_index: AtomicU64,
+    pub raft_index: AtomicU64,
 }
 
 pub struct JMAPStoreConfig {
@@ -473,7 +473,7 @@ where
                 .build(),
             blob_lock: MutexMap::with_capacity(1024),
             account_lock: MutexMap::with_capacity(1024),
-            raft_log_index: 0.into(),
+            raft_index: 0.into(),
             raft_term: 0.into(),
             db,
         };
@@ -490,8 +490,8 @@ where
                 term: 0,
                 index: LogIndex::MAX,
             });
-        store.raft_log_index = raft_id.index.into();
         store.raft_term = raft_id.term.into();
+        store.raft_index = raft_id.index.into();
         store
     }
 

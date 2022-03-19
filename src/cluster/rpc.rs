@@ -384,10 +384,7 @@ pub fn spawn_peer_rpc(
                 },
             };
 
-            error!(
-                "Failed to send RPC request to peer {} at {}: {}",
-                peer_id, peer_addr, err
-            );
+            error!("Failed to send RPC request to peer {}: {}", peer_addr, err);
             conn_ = None;
         }
     });

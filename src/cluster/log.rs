@@ -33,6 +33,9 @@ use super::{
 };
 use super::{Peer, PeerId, IPC_CHANNEL_BUFFER};
 
+#[cfg(test)]
+const RETRY_MS: u64 = 1000;
+#[cfg(not(test))]
 const RETRY_MS: u64 = 30 * 1000;
 const BATCH_MAX_ENTRIES: usize = 10;
 const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
@@ -105,6 +108,7 @@ where
     pub fn spawn_raft_leader(&self, peer: &Peer, mut rx: watch::Receiver<LogIndex>) {
         let peer_tx = peer.tx.clone();
         let peer_name = peer.to_string();
+        let local_name = self.addr.to_string();
 
         let term = self.term;
         let mut last_log = self.last_log;
@@ -116,7 +120,10 @@ where
         let mut last_sent_id = RaftId::none();
 
         tokio::spawn(async move {
-            debug!("Starting raft leader process for peer {}.", peer_name);
+            debug!(
+                "[{}] Starting raft leader process for peer {}.",
+                local_name, peer_name
+            );
 
             loop {
                 // Poll the receiver to make sure this node is still the leader.
@@ -130,7 +137,10 @@ where
                             }
                         }
                         Err(_) => {
-                            debug!("Raft leader process for {} exiting.", peer_name);
+                            debug!(
+                                "[{}] Raft leader process for {} exiting.",
+                                local_name, peer_name
+                            );
                             break;
                         }
                     },
@@ -165,9 +175,12 @@ where
                         if rx.changed().await.is_ok() {
                             last_log.index = *rx.borrow();
                             last_log.term = term;
-                            debug!("Received new log index: {:?}", last_log);
+                            debug!("[{}] Received new log index: {:?}", local_name, last_log);
                         } else {
-                            debug!("Raft leader process for {} exiting.", peer_name);
+                            debug!(
+                                "[{}] Raft leader process for {} exiting.",
+                                local_name, peer_name
+                            );
                             break;
                         }
                         state = State::AppendEntries;
@@ -196,8 +209,8 @@ where
                                     }
                                 } else {
                                     debug!(
-                                        "No entries left to send to {} after {:?}.",
-                                        peer_name, last_sent_id
+                                        "[{}] No entries left to send to {} after {:?}.",
+                                        local_name, peer_name, last_sent_id
                                     );
                                     state = State::Wait;
                                     continue;
@@ -265,15 +278,21 @@ where
                             Ok(Ok(())) => {
                                 last_log.index = *rx.borrow();
                                 last_log.term = term;
-                                debug!("Received new log index: {:?}", last_log);
+                                debug!(
+                                    "[{}] Received new log index while waiting: {:?}",
+                                    local_name, last_log
+                                );
                             }
                             Ok(Err(_)) => {
-                                debug!("Raft leader process for {} exiting.", peer_name);
+                                debug!(
+                                    "[{}] Raft leader process for {} exiting.",
+                                    local_name, peer_name
+                                );
                                 break;
                             }
                             Err(_) => (),
                         }
-                        state = State::Synchronize;
+                        state = State::BecomeLeader;
                     }
                     Response::NeedUpdates { collections } => {
                         state = get_next_changes(&core, collections).await;
@@ -431,6 +450,8 @@ pub async fn handle_update_log<T>(
 where
     T: for<'x> Store<'x> + 'static,
 {
+    debug_assert!(!entries.is_empty());
+
     let core = core_.clone();
     match core_
         .spawn_worker(move || {
@@ -466,6 +487,7 @@ where
     {
         Ok((collections, entries)) => {
             if !collections.is_empty() {
+                core_.set_up_to_date(false);
                 *pending_entries = entries;
                 Response::NeedUpdates {
                     collections: collections.into_values().collect(),
@@ -619,7 +641,8 @@ where
                 // If this node matches the leader's commit index,
                 // read-only requests can be accepted on this node.
                 if let Some(last_log) = last_log {
-                    core_.update_last_log_index(last_log.index);
+                    core_.update_raft_index(last_log.index);
+                    core_.store_changed(last_log).await;
 
                     if commit_id == last_log {
                         core_.set_up_to_date(true);
@@ -704,6 +727,8 @@ where
     let mut batch_size = 0;
     let mut push_changes = Vec::new();
 
+    //println!("Changes: {:#?}", changes);
+
     loop {
         let item = if let Some(document_id) = changes.inserts.min() {
             changes.inserts.remove(document_id);
@@ -742,7 +767,8 @@ where
             push_changes.push(item);
             batch_size += item_size;
         } else {
-            debug!(
+            debug_assert!(
+                false,
                 "Failed to fetch item in collection {:?}",
                 changes.collection,
             );

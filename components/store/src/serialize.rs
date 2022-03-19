@@ -263,6 +263,16 @@ impl IndexKey {
 }
 
 impl LogKey {
+    pub const CHANGE_KEY_PREFIX: u8 = 0;
+    pub const RAFT_KEY_PREFIX: u8 = 1;
+    pub const CHANGE_KEY_LEN: usize = std::mem::size_of::<AccountId>()
+        + std::mem::size_of::<Collection>()
+        + std::mem::size_of::<ChangeId>()
+        + 1;
+    pub const RAFT_KEY_LEN: usize = std::mem::size_of::<RaftId>() + 1;
+    pub const CHANGE_ID_POS: usize =
+        std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>() + 1;
+
     pub fn deserialize_raft(bytes: &[u8]) -> Option<RaftId> {
         RaftId {
             term: bytes.deserialize_be_u64(1)?,
@@ -272,8 +282,8 @@ impl LogKey {
     }
 
     pub fn serialize_raft(id: &RaftId) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<RaftId>() + 1);
-        bytes.push(INTERNAL_KEY_PREFIX);
+        let mut bytes = Vec::with_capacity(LogKey::RAFT_KEY_LEN);
+        bytes.push(LogKey::RAFT_KEY_PREFIX);
         bytes.extend_from_slice(&id.term.to_be_bytes());
         bytes.extend_from_slice(&id.index.to_be_bytes());
         bytes
@@ -284,7 +294,8 @@ impl LogKey {
         collection: Collection,
         change_id: ChangeId,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(FIELD_PREFIX_LEN + std::mem::size_of::<ChangeId>());
+        let mut bytes = Vec::with_capacity(LogKey::CHANGE_KEY_LEN);
+        bytes.push(LogKey::CHANGE_KEY_PREFIX);
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.push(collection.into());
         bytes.extend_from_slice(&change_id.to_be_bytes());
@@ -292,7 +303,7 @@ impl LogKey {
     }
 
     pub fn deserialize_change_id(bytes: &[u8]) -> Option<ChangeId> {
-        bytes.deserialize_be_u64(COLLECTION_PREFIX_LEN)
+        bytes.deserialize_be_u64(LogKey::CHANGE_ID_POS)
     }
 }
 

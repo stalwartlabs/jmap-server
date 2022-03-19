@@ -1,6 +1,6 @@
 use crate::leb128::Leb128;
 
-use crate::serialize::{LogKey, COLLECTION_PREFIX_LEN};
+use crate::serialize::LogKey;
 use crate::{AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError};
 
 pub type ChangeId = u64;
@@ -123,16 +123,15 @@ where
         account: AccountId,
         collection: Collection,
     ) -> crate::Result<Option<ChangeId>> {
-        let key = LogKey::serialize_change(account, collection, ChangeId::MAX);
-        let key_len = key.len();
+        let match_key = LogKey::serialize_change(account, collection, ChangeId::MAX);
 
         if let Some((key, _)) = self
             .db
-            .iterator(ColumnFamily::Logs, &key, Direction::Backward)?
+            .iterator(ColumnFamily::Logs, &match_key, Direction::Backward)?
             .into_iter()
             .next()
         {
-            if key.starts_with(&key[0..COLLECTION_PREFIX_LEN]) && key.len() == key_len {
+            if key.starts_with(&match_key[0..LogKey::CHANGE_ID_POS]) {
                 return Ok(Some(LogKey::deserialize_change_id(&key).ok_or_else(
                     || {
                         StoreError::InternalError(format!(
@@ -162,8 +161,7 @@ where
             }
         };
         let key = LogKey::serialize_change(account, collection, from_change_id);
-        let key_len = key.len();
-        let prefix = &key[0..COLLECTION_PREFIX_LEN];
+        let prefix = &key[0..LogKey::CHANGE_ID_POS];
         let mut is_first = true;
 
         for (key, value) in self
@@ -172,9 +170,6 @@ where
         {
             if !key.starts_with(prefix) {
                 break;
-            } else if key.len() != key_len {
-                //TODO avoid collisions with Raft keys
-                continue;
             }
             let change_id = LogKey::deserialize_change_id(&key).ok_or_else(|| {
                 StoreError::InternalError(format!(

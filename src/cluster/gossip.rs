@@ -276,7 +276,7 @@ where
 
     pub async fn handle_ping(&mut self, peers: Vec<PeerStatus>, send_pong: bool) {
         if peers.is_empty() {
-            debug!("Received empty peers sync packet.");
+            debug!("Received empty ping packet.");
         }
 
         let mut source_peer_idx = None;
@@ -480,6 +480,7 @@ where
 impl Peer {
     fn update_heartbeat(&mut self) {
         if !self.is_alive() {
+            debug!("Peer {} is back online.", self.addr);
             self.state = State::Alive;
         }
         self.hb_window_pos = (self.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;
@@ -489,14 +490,16 @@ impl Peer {
         }
 
         if self.hb_is_full {
-            self.hb_sum -= self.hb_window[self.hb_window_pos];
-            self.hb_sq_sum -= u32::pow(self.hb_window[self.hb_window_pos], 2);
+            let hb_window = self.hb_window[self.hb_window_pos] as u64;
+            self.hb_sum -= hb_window;
+            self.hb_sq_sum -= hb_window.saturating_mul(hb_window);
         }
 
-        let hb_diff = self.last_heartbeat.elapsed().as_millis() as u32;
-        self.hb_window[self.hb_window_pos] = hb_diff;
+        let hb_diff =
+            std::cmp::min(self.last_heartbeat.elapsed().as_millis(), 60 * 60 * 1000) as u64;
+        self.hb_window[self.hb_window_pos] = hb_diff as u32;
         self.hb_sum += hb_diff;
-        self.hb_sq_sum += u32::pow(hb_diff, 2);
+        self.hb_sq_sum += hb_diff.saturating_mul(hb_diff);
 
         self.last_heartbeat = Instant::now();
     }
