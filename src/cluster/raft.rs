@@ -253,7 +253,7 @@ where
         votes > ((total_peers as f64 + 1.0) / 2.0).floor() as u32
     }
 
-    pub async fn start_election(&mut self, now: bool) {
+    pub async fn request_votes(&mut self, now: bool) {
         // Check if there is enough quorum for an election.
         if self.has_election_quorum() {
             // Assess whether this node could become the leader for the next term.
@@ -350,7 +350,7 @@ where
     pub fn set_leader(&self, term: TermId) {
         self.is_leader.store(true, Ordering::Relaxed);
         self.is_up_to_date.store(true, Ordering::Relaxed);
-        self.store.raft_log_term.store(term, Ordering::Relaxed);
+        self.store.raft_term.store(term, Ordering::Relaxed);
     }
 
     pub fn set_follower(&self) {
@@ -358,13 +358,10 @@ where
         self.is_up_to_date.store(false, Ordering::Relaxed);
     }
 
-    pub fn update_last_log(&self, last_log: RaftId) {
+    pub fn update_last_log_index(&self, last_log_index: LogIndex) {
         self.store
             .raft_log_index
-            .store(last_log.index, Ordering::Relaxed);
-        self.store
-            .raft_log_term
-            .store(last_log.term, Ordering::Relaxed);
+            .store(last_log_index, Ordering::Relaxed);
     }
 
     pub fn is_leader(&self) -> bool {
@@ -383,8 +380,14 @@ where
         self.store.raft_log_index.load(Ordering::Relaxed)
     }
 
-    pub fn last_log_term(&self) -> TermId {
-        self.store.raft_log_term.load(Ordering::Relaxed)
+    pub fn term(&self) -> TermId {
+        self.store.raft_term.load(Ordering::Relaxed)
+    }
+
+    pub async fn get_last_log(&self) -> store::Result<Option<RaftId>> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.get_prev_raft_id(RaftId::none()))
+            .await
     }
 
     pub async fn get_prev_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {

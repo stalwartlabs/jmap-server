@@ -10,19 +10,16 @@ use std::{
     time::SystemTime,
 };
 
-use crate::leb128::Leb128;
+use crate::{leb128::Leb128, serialize::ValueKey};
 use crate::{
-    serialize::{
-        serialize_blob_key, serialize_temporary_blob_key, StoreDeserialize, StoreSerialize,
-        BLOB_KEY, TEMP_BLOB_KEY,
-    },
-    AccountId, ColumnFamily, Direction, DocumentId, Collection, JMAPStore, Store, StoreError,
+    serialize::{StoreDeserialize, StoreSerialize, BLOB_KEY, TEMP_BLOB_KEY},
+    AccountId, Collection, ColumnFamily, Direction, DocumentId, JMAPStore, Store, StoreError,
     WriteOperation,
 };
 use sha2::Digest;
 use sha2::Sha256;
 
-#[derive(Default)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct BlobEntries {
     pub items: Vec<BlobEntry>,
 }
@@ -45,6 +42,7 @@ impl BlobEntries {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct BlobEntry {
     pub hash: Vec<u8>,
     pub size: u32,
@@ -88,10 +86,7 @@ impl StoreDeserialize for BlobEntries {
 
 impl BlobEntry {
     pub fn as_key(&self) -> Vec<u8> {
-        let mut key = Vec::with_capacity(self.hash.len() + BLOB_KEY.len());
-        key.extend_from_slice(BLOB_KEY);
-        key.extend_from_slice(&self.hash);
-        key
+        ValueKey::serialize_blob(&self.hash)
     }
 
     pub fn as_path(&self, base_path: PathBuf, hash_levels: &[usize]) -> crate::Result<PathBuf> {
@@ -184,7 +179,7 @@ where
 
         let blob_entries = if let Some(blob_entries) = self.db.get::<BlobEntries>(
             ColumnFamily::Values,
-            &serialize_blob_key(account, collection, document),
+            &ValueKey::serialize_document_blob(account, collection, document),
         )? {
             blob_entries
         } else {
@@ -287,12 +282,9 @@ where
                         cf: ColumnFamily::Values,
                         key: key.into(),
                     });
-                    let mut blob_key = Vec::with_capacity(value.len() + BLOB_KEY.len());
-                    blob_key.extend_from_slice(BLOB_KEY);
-                    blob_key.extend_from_slice(&value);
                     batch.push(WriteOperation::Merge {
                         cf: ColumnFamily::Values,
-                        key: blob_key,
+                        key: ValueKey::serialize_blob(&value),
                         value: (-1i64).serialize().unwrap(),
                     });
                 }
@@ -366,7 +358,7 @@ where
         });
         batch.push(WriteOperation::Set {
             cf: ColumnFamily::Values,
-            key: serialize_temporary_blob_key(account, hash, timestamp),
+            key: ValueKey::serialize_temporary_blob(account, hash, timestamp),
             value: blob_entry.hash,
         });
 
@@ -383,7 +375,7 @@ where
     ) -> crate::Result<Option<Vec<u8>>> {
         if let Some(blob_entries) = self.db.get::<BlobEntries>(
             ColumnFamily::Values,
-            &serialize_temporary_blob_key(account, hash, timestamp),
+            &ValueKey::serialize_temporary_blob(account, hash, timestamp),
         )? {
             let blob_entry = blob_entries.items.get(0).ok_or_else(|| {
                 StoreError::InternalError(format!(

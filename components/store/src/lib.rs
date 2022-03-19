@@ -38,6 +38,7 @@ pub use bincode;
 pub use lz4_flex;
 pub use parking_lot;
 pub use roaring;
+pub use sha2;
 pub use tracing;
 
 #[derive(Debug, Clone)]
@@ -310,7 +311,7 @@ impl Comparator {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ColumnFamily {
     Bitmaps,
     Values,
@@ -396,7 +397,7 @@ pub struct JMAPStore<T> {
     pub term_id_lock: MutexMap<()>,
     pub term_id_last: AtomicU64,
 
-    pub raft_log_term: AtomicU64,
+    pub raft_term: AtomicU64,
     pub raft_log_index: AtomicU64,
 }
 
@@ -473,7 +474,7 @@ where
             blob_lock: MutexMap::with_capacity(1024),
             account_lock: MutexMap::with_capacity(1024),
             raft_log_index: 0.into(),
-            raft_log_term: 0.into(),
+            raft_term: 0.into(),
             db,
         };
 
@@ -490,7 +491,7 @@ where
                 index: LogIndex::MAX,
             });
         store.raft_log_index = raft_id.index.into();
-        store.raft_log_term = raft_id.term.into();
+        store.raft_term = raft_id.term.into();
         store
     }
 

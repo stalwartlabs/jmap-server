@@ -461,7 +461,7 @@ async fn handle_conn(
                                 }
                             }
                             Err(err) => {
-                                error!("Failed to receive RPC response: {}", err);
+                                debug!("Failed to receive RPC response: {}", err);
                                 return;
                             }
                         }

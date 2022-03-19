@@ -219,6 +219,7 @@ pub trait JMAPMailMailbox {
     ) -> store::Result<()>;
 }
 
+//TODO mailbox id 0 is inbox and cannot be deleted
 impl<T> JMAPMailMailbox for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -412,7 +413,7 @@ where
                                     Filter::new_condition(
                                         JMAPMailboxProperties::ParentId.into(),
                                         ComparisonOperator::Equal,
-                                        FieldValue::LongInteger(document_id as LongInteger),
+                                        FieldValue::LongInteger((document_id + 1) as LongInteger),
                                     ),
                                     Comparator::None,
                                 ))?

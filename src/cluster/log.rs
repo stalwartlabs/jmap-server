@@ -8,11 +8,11 @@ use jmap_mail::import::{Bincoded, JMAPMailImport};
 use jmap_mail::mailbox::{JMAPMailMailbox, JMAPMailboxProperties, Mailbox};
 use jmap_mail::query::MailboxId;
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
-use store::batch::{self, WriteBatch};
+use store::batch::WriteBatch;
 use store::changes::ChangeId;
 use store::leb128::Leb128;
 use store::raft::{Entry, LogIndex, PendingChanges, RaftId, TermId};
-use store::serialize::StoreDeserialize;
+use store::serialize::{LogKey, StoreDeserialize};
 use store::tracing::{debug, error};
 use store::{
     lz4_flex, AccountId, Collection, ColumnFamily, DocumentId, JMAPId, Store, StoreError, Tag,
@@ -116,7 +116,7 @@ where
         let mut last_sent_id = RaftId::none();
 
         tokio::spawn(async move {
-            debug!("Starting append entries process for peer {}.", peer_name);
+            debug!("Starting raft leader process for peer {}.", peer_name);
 
             loop {
                 // Poll the receiver to make sure this node is still the leader.
@@ -130,7 +130,7 @@ where
                             }
                         }
                         Err(_) => {
-                            debug!("Log sync process with {} exiting.", peer_name);
+                            debug!("Raft leader process for {} exiting.", peer_name);
                             break;
                         }
                     },
@@ -148,8 +148,11 @@ where
                         term,
                         request: AppendEntriesRequest::Synchronize { last_log },
                     },
-                    State::PushChanges { changes, .. } => {
-                        match prepare_changes(&core, term, changes).await {
+                    State::PushChanges {
+                        changes,
+                        collections,
+                    } => {
+                        match prepare_changes(&core, term, changes, !collections.is_empty()).await {
                             Ok(request) => request,
                             Err(err) => {
                                 error!("Failed to prepare changes: {:?}", err);
@@ -164,7 +167,7 @@ where
                             last_log.term = term;
                             debug!("Received new log index: {:?}", last_log);
                         } else {
-                            debug!("Log sync process with {} exiting.", peer_name);
+                            debug!("Raft leader process for {} exiting.", peer_name);
                             break;
                         }
                         state = State::AppendEntries;
@@ -239,6 +242,8 @@ where
                                     break;
                                 }
                             };
+                            //println!("leader log {:?}, peer log {:?}", local_match, matched);
+
                             if local_match != matched {
                                 // TODO delete out of sync entries
                                 error!(
@@ -263,7 +268,7 @@ where
                                 debug!("Received new log index: {:?}", last_log);
                             }
                             Ok(Err(_)) => {
-                                debug!("Log sync process with {} exiting.", peer_name);
+                                debug!("Raft leader process for {} exiting.", peer_name);
                                 break;
                             }
                             Err(_) => (),
@@ -319,7 +324,12 @@ where
                                         core.set_up_to_date(matched == last_log);
                                         matched
                                     }
-                                    Ok(None) => RaftId::none(),
+                                    Ok(None) => {
+                                        if last_log.is_none() {
+                                            core.set_up_to_date(true);
+                                        }
+                                        RaftId::none()
+                                    }
                                     Err(err) => {
                                         debug!("Failed to get prev raft id: {:?}", err);
                                         RaftId::none()
@@ -500,6 +510,7 @@ where
                 collection
             );
 
+            // TODO purge tombstones before reinserting id
             for change in changes {
                 match change {
                     Change::InsertMail {
@@ -551,7 +562,7 @@ where
                     Change::InsertChange { change_id, entry } => {
                         log_batch.push(WriteOperation::set(
                             ColumnFamily::Logs,
-                            batch::Change::serialize_key(account_id, collection, change_id),
+                            LogKey::serialize_change(account_id, collection, change_id),
                             entry,
                         ));
                     }
@@ -608,7 +619,7 @@ where
                 // If this node matches the leader's commit index,
                 // read-only requests can be accepted on this node.
                 if let Some(last_log) = last_log {
-                    core_.update_last_log(last_log);
+                    core_.update_last_log_index(last_log.index);
 
                     if commit_id == last_log {
                         core_.set_up_to_date(true);
@@ -685,6 +696,7 @@ async fn prepare_changes<T>(
     core: &web::Data<JMAPServer<T>>,
     term: TermId,
     changes: &mut PendingChanges,
+    has_more_changes: bool,
 ) -> store::Result<Request>
 where
     T: for<'x> Store<'x> + 'static,
@@ -741,7 +753,7 @@ where
         }
     }
 
-    if changes.is_empty() {
+    if changes.is_empty() && !has_more_changes {
         push_changes.push(Change::Commit);
     }
 
@@ -918,7 +930,7 @@ where
             .db
             .get::<Vec<u8>>(
                 ColumnFamily::Logs,
-                &batch::Change::serialize_key(account_id, collection, change_id),
+                &LogKey::serialize_change(account_id, collection, change_id),
             )?
             .map(|entry| {
                 (

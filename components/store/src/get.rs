@@ -1,8 +1,8 @@
 use roaring::RoaringBitmap;
 
 use crate::{
-    serialize::{serialize_bm_tag_key, serialize_stored_key, StoreDeserialize},
-    AccountId, ColumnFamily, DocumentId, FieldId, Collection, JMAPStore, Store, Tag,
+    serialize::{BitmapKey, StoreDeserialize, ValueKey},
+    AccountId, Collection, ColumnFamily, DocumentId, FieldId, JMAPStore, Store, Tag,
 };
 
 impl<T> JMAPStore<T>
@@ -23,7 +23,7 @@ where
             Some(tombstoned_ids) if tombstoned_ids.contains(document) => Ok(None),
             _ => self.db.get(
                 ColumnFamily::Values,
-                &serialize_stored_key(account, collection, document, field),
+                &ValueKey::serialize_value(account, collection, document, field),
             ),
         }
     }
@@ -41,7 +41,7 @@ where
         self.db.multi_get(
             ColumnFamily::Values,
             documents
-                .map(|document| serialize_stored_key(account, collection, document, field))
+                .map(|document| ValueKey::serialize_value(account, collection, document, field))
                 .collect::<Vec<_>>(),
         )
     }
@@ -56,7 +56,7 @@ where
         if let Some(document_ids) = self.get_document_ids(account_id, collection)? {
             if let Some(mut tagged_docs) = self.db.get::<RoaringBitmap>(
                 ColumnFamily::Bitmaps,
-                &serialize_bm_tag_key(account_id, collection, field, &tag),
+                &BitmapKey::serialize_tag(account_id, collection, field, &tag),
             )? {
                 tagged_docs &= &document_ids;
                 if !tagged_docs.is_empty() {
@@ -80,7 +80,7 @@ where
             for tagged_docs in self.db.multi_get::<RoaringBitmap, _>(
                 ColumnFamily::Bitmaps,
                 tags.iter()
-                    .map(|tag| serialize_bm_tag_key(account, collection, field, tag))
+                    .map(|tag| BitmapKey::serialize_tag(account, collection, field, tag))
                     .collect(),
             )? {
                 if let Some(mut tagged_docs) = tagged_docs {

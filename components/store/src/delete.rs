@@ -2,16 +2,14 @@ use std::ops::BitAndAssign;
 
 use roaring::RoaringBitmap;
 
+use crate::leb128::Leb128;
+use crate::serialize::BitmapKey;
 use crate::{
     bitmap::clear_bits,
     blob::BlobEntries,
     id::IdCacheKey,
-    serialize::{
-        deserialize_document_id_from_leb128, deserialize_index_document_id, serialize_a_key_leb128,
-        serialize_ac_key_be, serialize_ac_key_leb128, serialize_blob_key, serialize_bm_internal,
-        StoreDeserialize, StoreSerialize, BLOB_KEY, BM_TOMBSTONED_IDS, BM_USED_IDS,
-    },
-    AccountId, ColumnFamily, Direction, DocumentId, Collection, JMAPStore, Store, StoreError,
+    serialize::{IndexKey, StoreDeserialize, StoreSerialize, ValueKey, BLOB_KEY},
+    AccountId, Collection, ColumnFamily, Direction, DocumentId, JMAPStore, Store, StoreError,
     WriteOperation,
 };
 
@@ -152,14 +150,15 @@ where
         for (cf, prefix, deserialize_fnc, delete_blobs) in [
             (
                 ColumnFamily::Values,
-                serialize_ac_key_leb128(account, collection),
-                deserialize_document_id_from_leb128 as fn(&[u8]) -> Option<DocumentId>,
+                ValueKey::serialize_collection(account, collection),
+                (|bytes| DocumentId::from_leb128_bytes(bytes)?.0.into())
+                    as fn(&[u8]) -> Option<DocumentId>,
                 true,
             ),
             (
                 ColumnFamily::Indexes,
-                serialize_ac_key_be(account, collection),
-                deserialize_index_document_id as fn(&[u8]) -> Option<DocumentId>,
+                IndexKey::serialize_collection(account, collection),
+                IndexKey::deserialize_document_id as fn(&[u8]) -> Option<DocumentId>,
                 false,
             ),
         ] {
@@ -172,7 +171,8 @@ where
                         if documents.contains(doc_id) {
                             if delete_blobs
                                 && key.ends_with(BLOB_KEY)
-                                && serialize_blob_key(account, collection, doc_id)[..] == key[..]
+                                && ValueKey::serialize_document_blob(account, collection, doc_id)[..]
+                                    == key[..]
                             {
                                 BlobEntries::deserialize(&value)
                                     .ok_or(StoreError::DataCorruption)?
@@ -202,7 +202,7 @@ where
             }
         }
 
-        let prefix = serialize_a_key_leb128(account);
+        let prefix = BitmapKey::serialize_account(account);
 
         // TODO delete files using a separate process
         // TODO delete empty bitmaps
@@ -236,12 +236,12 @@ where
 
         batch.push(WriteOperation::merge(
             ColumnFamily::Bitmaps,
-            serialize_bm_internal(account, collection, BM_USED_IDS),
+            BitmapKey::serialize_used_ids(account, collection),
             clear_bits(documents.iter()),
         ));
         batch.push(WriteOperation::merge(
             ColumnFamily::Bitmaps,
-            serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS),
+            BitmapKey::serialize_tombstoned_ids(account, collection),
             clear_bits(documents.iter()),
         ));
 

@@ -8,16 +8,14 @@ use jmap::{
 };
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
+    import::JMAPMailImport,
     parse::get_message_blob,
     set::JMAPMailSet,
     JMAPMailBodyProperties, JMAPMailProperties,
 };
-use store::{
-    batch::{Document, WriteBatch},
-    AccountId, Collection, JMAPId, JMAPStore, Store,
-};
+use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
 
-use crate::jmap_mail_get::SortedJSONValue;
+use crate::{jmap_mail_get::SortedJSONValue, jmap_mailbox::insert_mailbox};
 
 impl<'x> From<SortedJSONValue> for JSONValue {
     fn from(value: SortedJSONValue) -> Self {
@@ -109,25 +107,8 @@ pub fn jmap_mail_set<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    // TODO use mailbox create API
-    let doc_id = mail_store
-        .assign_document_id(account_id, Collection::Mailbox)
-        .unwrap();
-    mail_store
-        .write(WriteBatch::insert(
-            account_id,
-            Document::new(Collection::Mailbox, doc_id),
-        ))
-        .unwrap();
-    let doc_id = mail_store
-        .assign_document_id(account_id, Collection::Mailbox)
-        .unwrap();
-    mail_store
-        .write(WriteBatch::insert(
-            account_id,
-            Document::new(Collection::Mailbox, doc_id),
-        ))
-        .unwrap();
+    let _mailbox_id_1 = insert_mailbox(mail_store, account_id, "Inbox", "INBOX");
+    let _mailbox_id_2 = insert_mailbox(mail_store, account_id, "Sent", "SENT");
 
     jmap_mail_update(
         mail_store,
@@ -535,4 +516,100 @@ fn jmap_mail_update<T>(
             .not_found
             .unwrap()
     )
+}
+
+pub fn insert_email<T>(
+    mail_store: &JMAPStore<T>,
+    account_id: AccountId,
+    raw_message: Vec<u8>,
+    mailboxes: Vec<JMAPId>,
+    keywords: Vec<&str>,
+    received_at: Option<i64>,
+) -> JMAPId
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    mail_store
+        .mail_import_blob(
+            account_id,
+            raw_message,
+            mailboxes.into_iter().map(|m| m.get_document_id()).collect(),
+            keywords
+                .into_iter()
+                .map(|k| Tag::Text(k.to_string()))
+                .collect(),
+            received_at,
+        )
+        .unwrap()
+        .unwrap_object()
+        .unwrap()
+        .get("id")
+        .unwrap()
+        .to_jmap_id()
+        .unwrap()
+}
+
+pub fn update_email<T>(
+    mail_store: &JMAPStore<T>,
+    account_id: AccountId,
+    jmap_id: JMAPId,
+    mailboxes: Option<Vec<JMAPId>>,
+    keywords: Option<Vec<String>>,
+) where
+    T: for<'x> Store<'x> + 'static,
+{
+    let mut update_values = HashMap::new();
+    if let Some(mailboxes) = mailboxes {
+        update_values.insert(
+            "mailboxIds".to_string(),
+            HashMap::from_iter(
+                mailboxes
+                    .into_iter()
+                    .map(|m| (m.to_jmap_string(), JSONValue::Bool(true))),
+            )
+            .into(),
+        );
+    }
+    if let Some(keywords) = keywords {
+        update_values.insert(
+            "keywords".to_string(),
+            HashMap::from_iter(keywords.into_iter().map(|k| (k, JSONValue::Bool(true)))).into(),
+        );
+    }
+
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id,
+                if_in_state: None,
+                update: HashMap::from_iter([(jmap_id.to_jmap_string(), update_values.into())])
+                    .into(),
+                create: JSONValue::Null,
+                destroy: JSONValue::Null,
+                arguments: (),
+            })
+            .unwrap()
+            .not_updated,
+        JSONValue::Null
+    );
+}
+
+pub fn delete_email<T>(mail_store: &JMAPStore<T>, account_id: AccountId, jmap_id: JMAPId)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    assert_eq!(
+        mail_store
+            .mail_set(JMAPSet {
+                account_id,
+                if_in_state: None,
+                update: JSONValue::Null,
+                create: JSONValue::Null,
+                destroy: vec![jmap_id.to_jmap_string().into()].into(),
+                arguments: (),
+            })
+            .unwrap()
+            .not_destroyed,
+        JSONValue::Null
+    );
 }

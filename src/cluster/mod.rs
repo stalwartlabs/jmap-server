@@ -94,6 +94,9 @@ pub enum Event {
     },
     StoreChanged,
     Shutdown,
+
+    #[cfg(test)]
+    IsOffline(bool),
 }
 
 pub struct Peer {
@@ -240,8 +243,8 @@ where
             addr,
             key,
             jmap_url: format!("{}/jmap", jmap_url),
-            term: core.last_log_term(),
-            last_log: RaftId::new(core.last_log_term(), core.last_log_index()),
+            term: core.term(),
+            last_log: RaftId::new(core.term(), core.last_log_index()),
             state: raft::State::default(),
             core,
             peers: vec![],

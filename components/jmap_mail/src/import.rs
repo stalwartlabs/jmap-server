@@ -329,6 +329,7 @@ where
         };
 
         let thread_id = if let Some(thread_id) = thread_id {
+            batch.log_child_update(Collection::Thread, thread_id);
             thread_id
         } else {
             let thread_id = self.assign_document_id(account_id, Collection::Thread)?;

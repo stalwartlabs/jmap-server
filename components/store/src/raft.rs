@@ -3,13 +3,13 @@ use std::sync::atomic::Ordering;
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 use crate::leb128::{skip_leb128_it, Leb128};
-use crate::serialize::{StoreSerialize, COLLECTION_PREFIX_LEN};
-use crate::{batch, JMAPId, JMAPIdPrefix, WriteOperation};
+use crate::serialize::{LogKey, StoreSerialize, COLLECTION_PREFIX_LEN};
 use crate::{
     changes::ChangeId,
     serialize::{DeserializeBigEndian, INTERNAL_KEY_PREFIX},
     AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
+use crate::{JMAPId, JMAPIdPrefix, WriteOperation};
 pub type TermId = u64;
 pub type LogIndex = u64;
 
@@ -33,22 +33,6 @@ impl RaftId {
 
     pub fn is_none(&self) -> bool {
         self.index == LogIndex::MAX
-    }
-
-    pub fn deserialize_key(bytes: &[u8]) -> Option<Self> {
-        RaftId {
-            term: bytes.deserialize_be_u64(1)?,
-            index: bytes.deserialize_be_u64(1 + std::mem::size_of::<LogIndex>())?,
-        }
-        .into()
-    }
-
-    pub fn serialize_key(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity((std::mem::size_of::<LogIndex>() * 2) + 1);
-        bytes.push(INTERNAL_KEY_PREFIX);
-        bytes.extend_from_slice(&self.term.to_be_bytes());
-        bytes.extend_from_slice(&self.index.to_be_bytes());
-        bytes
     }
 }
 
@@ -204,7 +188,7 @@ where
 {
     pub fn assign_raft_id(&self) -> RaftId {
         RaftId {
-            term: self.raft_log_term.load(Ordering::Relaxed),
+            term: self.raft_term.load(Ordering::Relaxed),
             index: self
                 .raft_log_index
                 .fetch_add(1, Ordering::Relaxed)
@@ -213,7 +197,7 @@ where
     }
 
     pub fn get_prev_raft_id(&self, key: RaftId) -> crate::Result<Option<RaftId>> {
-        let key = key.serialize_key();
+        let key = LogKey::serialize_raft(&key);
         let key_len = key.len();
 
         if let Some((key, _)) = self
@@ -222,7 +206,7 @@ where
             .next()
         {
             if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
-                return Ok(Some(RaftId::deserialize_key(&key).ok_or_else(|| {
+                return Ok(Some(LogKey::deserialize_raft(&key).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
                 })?));
             }
@@ -231,7 +215,7 @@ where
     }
 
     pub fn get_next_raft_id(&self, key: RaftId) -> crate::Result<Option<RaftId>> {
-        let key = key.serialize_key();
+        let key = LogKey::serialize_raft(&key);
         let key_len = key.len();
 
         if let Some((key, _)) = self
@@ -240,7 +224,7 @@ where
             .next()
         {
             if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
-                return Ok(Some(RaftId::deserialize_key(&key).ok_or_else(|| {
+                return Ok(Some(LogKey::deserialize_raft(&key).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
                 })?));
             }
@@ -255,9 +239,9 @@ where
     ) -> crate::Result<Vec<Entry>> {
         let mut entries = Vec::with_capacity(num_entries);
         let (is_inclusive, key) = if !from_raft_id.is_none() {
-            (false, from_raft_id.serialize_key())
+            (false, LogKey::serialize_raft(&from_raft_id))
         } else {
-            (true, RaftId::new(0, 0).serialize_key())
+            (true, LogKey::serialize_raft(&RaftId::new(0, 0)))
         };
         let key_len = key.len();
 
@@ -266,7 +250,7 @@ where
             .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
         {
             if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
-                let raft_id = RaftId::deserialize_key(&key).ok_or_else(|| {
+                let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
                 })?;
                 if is_inclusive || raft_id != from_raft_id {
@@ -291,7 +275,7 @@ where
                 .map(|entry| {
                     WriteOperation::set(
                         ColumnFamily::Logs,
-                        entry.raft_id.serialize_key(),
+                        LogKey::serialize_raft(&entry.raft_id),
                         entry.serialize().unwrap(),
                     )
                 })
@@ -310,7 +294,7 @@ where
         {
             if key.len() == key_len && key[0] == INTERNAL_KEY_PREFIX {
                 return Ok(Some(
-                    Entry::deserialize(&value, RaftId::deserialize_key(key)?).ok_or_else(|| {
+                    Entry::deserialize(&value, LogKey::deserialize_raft(key)?).ok_or_else(|| {
                         StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
                     })?,
                 ));
@@ -334,7 +318,7 @@ where
             (true, 0)
         };
 
-        let key = batch::Change::serialize_key(account, collection, from_change_id);
+        let key = LogKey::serialize_change(account, collection, from_change_id);
         let key_len = key.len();
         let prefix = &key[0..COLLECTION_PREFIX_LEN];
 

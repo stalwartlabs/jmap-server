@@ -1,9 +1,7 @@
 use crate::leb128::Leb128;
 
-use crate::serialize::COLLECTION_PREFIX_LEN;
-use crate::{
-    batch, AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError,
-};
+use crate::serialize::{LogKey, COLLECTION_PREFIX_LEN};
+use crate::{AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError};
 
 pub type ChangeId = u64;
 
@@ -125,7 +123,7 @@ where
         account: AccountId,
         collection: Collection,
     ) -> crate::Result<Option<ChangeId>> {
-        let key = batch::Change::serialize_key(account, collection, ChangeId::MAX);
+        let key = LogKey::serialize_change(account, collection, ChangeId::MAX);
         let key_len = key.len();
 
         if let Some((key, _)) = self
@@ -135,14 +133,14 @@ where
             .next()
         {
             if key.starts_with(&key[0..COLLECTION_PREFIX_LEN]) && key.len() == key_len {
-                return Ok(Some(
-                    batch::Change::deserialize_change_id(&key).ok_or_else(|| {
+                return Ok(Some(LogKey::deserialize_change_id(&key).ok_or_else(
+                    || {
                         StoreError::InternalError(format!(
                             "Failed to deserialize changelog key for [{}/{:?}]: [{:?}]",
                             account, collection, key
                         ))
-                    })?,
-                ));
+                    },
+                )?));
             }
         }
         Ok(None)
@@ -163,7 +161,7 @@ where
                 (true, from_change_id, to_change_id)
             }
         };
-        let key = batch::Change::serialize_key(account, collection, from_change_id);
+        let key = LogKey::serialize_change(account, collection, from_change_id);
         let key_len = key.len();
         let prefix = &key[0..COLLECTION_PREFIX_LEN];
         let mut is_first = true;
@@ -178,7 +176,7 @@ where
                 //TODO avoid collisions with Raft keys
                 continue;
             }
-            let change_id = batch::Change::deserialize_change_id(&key).ok_or_else(|| {
+            let change_id = LogKey::deserialize_change_id(&key).ok_or_else(|| {
                 StoreError::InternalError(format!(
                     "Failed to deserialize changelog key for [{}/{:?}]: [{:?}]",
                     account, collection, key

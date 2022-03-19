@@ -4,9 +4,8 @@ use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 
 use crate::{
-    changes::ChangeId,
-    serialize::{serialize_bm_internal, BM_TOMBSTONED_IDS, BM_USED_IDS},
-    AccountId, DocumentId, Collection, JMAPStore, Store, StoreError,
+    changes::ChangeId, serialize::BitmapKey, AccountId, Collection, DocumentId, JMAPStore, Store,
+    StoreError,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -129,7 +128,7 @@ where
         account_id: AccountId,
         collection: Collection,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(&serialize_bm_internal(account_id, collection, BM_USED_IDS))
+        self.get_bitmap(&BitmapKey::serialize_used_ids(account_id, collection))
     }
 
     pub fn get_tombstoned_ids(
@@ -137,11 +136,7 @@ where
         account_id: AccountId,
         collection: Collection,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(&serialize_bm_internal(
-            account_id,
-            collection,
-            BM_TOMBSTONED_IDS,
-        ))
+        self.get_bitmap(&BitmapKey::serialize_tombstoned_ids(account_id, collection))
     }
 
     pub fn get_document_ids(

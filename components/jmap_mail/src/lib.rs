@@ -30,7 +30,7 @@ pub const MESSAGE_PARTS: BlobIndex = 2;
 pub type JMAPMailHeaders = HashMap<JMAPMailProperties, JSONValue>;
 pub type JMAPMailMimeHeaders = HashMap<JMAPMailBodyProperties, JSONValue>;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageData {
     pub properties: HashMap<JMAPMailProperties, JSONValue>,
     pub mime_parts: Vec<MimePart>,
@@ -102,14 +102,14 @@ impl HeaderName {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum MimePartType {
     Text,
     Html,
     Other,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MimePart {
     pub headers: JMAPMailMimeHeaders,
     pub blob_index: BlobIndex,

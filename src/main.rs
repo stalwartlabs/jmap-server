@@ -26,6 +26,9 @@ pub struct JMAPServer<T> {
     pub is_cluster: bool,
     pub is_leader: AtomicBool,
     pub is_up_to_date: AtomicBool,
+
+    #[cfg(test)]
+    pub is_offline: AtomicBool,
 }
 
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
@@ -56,6 +59,8 @@ async fn main() -> std::io::Result<()> {
         is_cluster,
         is_leader: (!is_cluster).into(),
         is_up_to_date: (!is_cluster).into(),
+        #[cfg(test)]
+        is_offline: false.into(),
     });
 
     // Start cluster

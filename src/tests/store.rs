@@ -5,8 +5,17 @@ use store_test::{destroy_temp_dir, init_settings};
 
 use crate::RocksDB;
 
-fn init_db(name: &str, delete_if_exists: bool) -> (JMAPStore<RocksDB>, PathBuf) {
-    let (settings, temp_dir) = init_settings(name, 1, 1, delete_if_exists);
+pub fn init_db(name: &str, delete_if_exists: bool) -> (JMAPStore<RocksDB>, PathBuf) {
+    init_db_params(name, 1, 1, delete_if_exists)
+}
+
+pub fn init_db_params(
+    name: &str,
+    peer_num: u32,
+    total_peers: u32,
+    delete_if_exists: bool,
+) -> (JMAPStore<RocksDB>, PathBuf) {
+    let (settings, temp_dir) = init_settings(name, peer_num, total_peers, delete_if_exists);
 
     (
         JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings),

@@ -85,6 +85,26 @@ where
             error!("Failed to send shutdown event to cluster.");
         }
     }
+
+    #[cfg(test)]
+    pub async fn set_offline(&self, is_offline: bool) {
+        self.is_offline
+            .store(is_offline, std::sync::atomic::Ordering::Relaxed);
+        self.set_follower();
+        if self
+            .cluster_tx
+            .send(Event::IsOffline(is_offline))
+            .await
+            .is_err()
+        {
+            error!("Failed to send offline event to cluster.");
+        }
+    }
+
+    #[cfg(test)]
+    pub fn is_offline(&self) -> bool {
+        self.is_offline.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 pub async fn jmap_request(

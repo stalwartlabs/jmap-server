@@ -1,7 +1,6 @@
 use jmap::{json::JSONValue, JMAPGet};
 use jmap_mail::{
     get::{JMAPMailGet, JMAPMailGetArguments},
-    import::JMAPMailImport,
     HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailProperties,
 };
@@ -12,7 +11,9 @@ use std::{
     fs,
     path::PathBuf,
 };
-use store::{AccountId, JMAPStore, Store, Tag};
+use store::{AccountId, JMAPStore, Store};
+
+use crate::jmap_mail_set::insert_email;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -86,21 +87,14 @@ where
         }
         let blob = fs::read(&file_name).unwrap();
         let blob_len = blob.len();
-        let jmap_id = mail_store
-            .mail_import_blob(
-                account_id,
-                blob,
-                vec![],
-                vec![Tag::Text("tag".into())],
-                Some((blob_len * 1000000) as i64),
-            )
-            .unwrap()
-            .unwrap_object()
-            .unwrap()
-            .get("id")
-            .unwrap()
-            .to_jmap_id()
-            .unwrap();
+        let jmap_id = insert_email(
+            mail_store,
+            account_id,
+            blob,
+            vec![],
+            vec!["tag"],
+            Some((blob_len * 1000000) as i64),
+        );
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {
             mail_store

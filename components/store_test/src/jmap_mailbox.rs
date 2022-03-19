@@ -552,7 +552,7 @@ where
     assert_eq!(state.total_changes, 1);
     assert_eq!(
         state.updated,
-        vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox")).unwrap()] //JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox")).unwrap()HashSet::from_iter([])
+        vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox")).unwrap()]
     );
     assert_eq!(
         state.arguments.updated_properties,
@@ -920,4 +920,105 @@ fn create_nested_mailboxes<T>(
 
         assert!(id_map.insert(mailbox_id, local_id.unwrap()).is_none());
     }
+}
+
+pub fn insert_mailbox<T>(
+    mail_store: &JMAPStore<T>,
+    account_id: AccountId,
+    name: &str,
+    role: &str,
+) -> JMAPId
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let result = mail_store
+        .mailbox_set(JMAPSet {
+            account_id,
+            if_in_state: None,
+            create: HashMap::from_iter([(
+                "my_id".to_string(),
+                HashMap::from_iter([
+                    ("name".to_string(), name.to_string().into()),
+                    ("role".to_string(), role.to_string().into()),
+                ])
+                .into(),
+            )])
+            .into(),
+            update: JSONValue::Null,
+            destroy: JSONValue::Null,
+            arguments: JMAPMailboxSetArguments {
+                remove_emails: false,
+            },
+        })
+        .unwrap();
+
+    assert_eq!(result.not_created, JSONValue::Null);
+
+    JMAPId::from_jmap_string(
+        &result
+            .created
+            .unwrap_object()
+            .unwrap()
+            .remove("my_id")
+            .unwrap()
+            .unwrap_object()
+            .unwrap()
+            .remove("id")
+            .unwrap()
+            .unwrap_string()
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+pub fn rename_mailbox<T>(
+    mail_store: &JMAPStore<T>,
+    account_id: AccountId,
+    jmap_id: JMAPId,
+    new_name: &str,
+) where
+    T: for<'x> Store<'x> + 'static,
+{
+    assert_eq!(
+        mail_store
+            .mailbox_set(JMAPSet {
+                account_id,
+                if_in_state: None,
+                create: JSONValue::Null,
+                update: HashMap::from_iter([(
+                    jmap_id.to_jmap_string(),
+                    HashMap::from_iter([("name".to_string(), new_name.to_string().into())]).into(),
+                )])
+                .into(),
+                destroy: JSONValue::Null,
+                arguments: JMAPMailboxSetArguments {
+                    remove_emails: false,
+                },
+            })
+            .unwrap()
+            .not_updated,
+        JSONValue::Null
+    );
+}
+
+pub fn delete_mailbox<T>(mail_store: &JMAPStore<T>, account_id: AccountId, jmap_id: JMAPId)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    assert_eq!(
+        mail_store
+            .mailbox_set(JMAPSet {
+                account_id,
+                if_in_state: None,
+                create: JSONValue::Null,
+                update: JSONValue::Null,
+                destroy: vec![jmap_id.to_jmap_string().into()].into(),
+                arguments: JMAPMailboxSetArguments {
+                    remove_emails: true,
+                },
+            })
+            .unwrap()
+            .not_destroyed,
+        JSONValue::Null
+    );
 }

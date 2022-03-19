@@ -54,9 +54,26 @@ pub async fn start_cluster<T>(
         let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
         let mut last_ping = Instant::now();
 
+        #[cfg(test)]
+        let mut is_offline = false;
+
         loop {
             match time::timeout(wait_timeout, main_rx.recv()).await {
                 Ok(Some(message)) => {
+                    #[cfg(test)]
+                    if let Event::IsOffline(status) = &message {
+                        is_offline = *status;
+                        if is_offline {
+                            for peer in &mut cluster.peers {
+                                peer.state = gossip::State::Offline;
+                            }
+                        }
+                        cluster.start_election_timer(false);
+                        continue;
+                    } else if is_offline {
+                        continue;
+                    }
+
                     if !cluster.handle_message(message).await {
                         debug!("Cluster shutting down.");
                         shutdown_tx.send(false).ok();
@@ -67,7 +84,13 @@ pub async fn start_cluster<T>(
                     debug!("Cluster main process exiting.");
                     break;
                 }
-                Err(_) => (),
+                Err(_) =>
+                {
+                    #[cfg(test)]
+                    if is_offline {
+                        continue;
+                    }
+                }
             }
 
             if !cluster.peers.is_empty() {
@@ -83,7 +106,7 @@ pub async fn start_cluster<T>(
                 wait_timeout = Duration::from_millis(
                     if let Some(time_to_next_election) = cluster.time_to_next_election() {
                         if time_to_next_election == 0 {
-                            cluster.start_election(false).await;
+                            cluster.request_votes(false).await;
                             time_to_next_ping
                         } else if time_to_next_election < time_to_next_ping {
                             time_to_next_election
@@ -122,42 +145,34 @@ where
                 peer_id,
                 request,
                 response_tx,
-            } => {
-                //debug!("Req [{}]: {:?}", peer_id, request);
-
-                match request {
-                    rpc::Request::UpdatePeers { peers } => {
-                        self.handle_update_peers(response_tx, peers);
-                    }
-                    rpc::Request::Vote { term, last } => {
-                        self.handle_vote_request(peer_id, response_tx, term, last);
-                    }
-                    rpc::Request::BecomeFollower { term, last_log } => {
-                        self.handle_become_follower(peer_id, response_tx, term, last_log)
-                            .await;
-                    }
-                    rpc::Request::AppendEntries { term, request } => {
-                        self.handle_append_entries(peer_id, response_tx, term, request)
-                            .await;
-                    }
-                    _ => response_tx
-                        .send(rpc::Response::None)
-                        .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
+            } => match request {
+                rpc::Request::UpdatePeers { peers } => {
+                    self.handle_update_peers(response_tx, peers);
                 }
-            }
-            Event::RpcResponse { peer_id, response } => {
-                //debug!("Reply [{}]: {:?}", peer_id, response);
-
-                match response {
-                    rpc::Response::UpdatePeers { peers } => {
-                        self.sync_peer_info(peers);
-                    }
-                    rpc::Response::Vote { term, vote_granted } => {
-                        self.handle_vote_response(peer_id, term, vote_granted);
-                    }
-                    _ => (),
+                rpc::Request::Vote { term, last } => {
+                    self.handle_vote_request(peer_id, response_tx, term, last);
                 }
-            }
+                rpc::Request::BecomeFollower { term, last_log } => {
+                    self.handle_become_follower(peer_id, response_tx, term, last_log)
+                        .await;
+                }
+                rpc::Request::AppendEntries { term, request } => {
+                    self.handle_append_entries(peer_id, response_tx, term, request)
+                        .await;
+                }
+                _ => response_tx
+                    .send(rpc::Response::None)
+                    .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
+            },
+            Event::RpcResponse { peer_id, response } => match response {
+                rpc::Response::UpdatePeers { peers } => {
+                    self.sync_peer_info(peers);
+                }
+                rpc::Response::Vote { term, vote_granted } => {
+                    self.handle_vote_response(peer_id, term, vote_granted);
+                }
+                _ => (),
+            },
             Event::StepDown { term } => {
                 if term > self.term {
                     self.step_down(term);
@@ -176,6 +191,9 @@ where
                 }
             }
             Event::Shutdown => return false,
+
+            #[cfg(test)]
+            Event::IsOffline(_) => (),
         }
         true
     }
@@ -206,7 +224,7 @@ where
 
         // Start a new election
         if leader_is_offline {
-            self.start_election(true).await;
+            self.request_votes(true).await;
         }
 
         // Find next peer to ping

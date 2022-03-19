@@ -1,14 +1,10 @@
 use crate::{
     bitmap::bitmap_op,
     field::TokenIterator,
-    serialize::{
-        deserialize_index_document_id, serialize_acd_key_leb128, serialize_bm_tag_key,
-        serialize_bm_term_key, serialize_bm_text_key, serialize_index_key_base,
-        serialize_index_key_prefix,
-    },
+    serialize::{BitmapKey, IndexKey, ValueKey},
     term_index::TermIndex,
-    AccountId, ColumnFamily, Comparator, Direction, DocumentId, FieldId, FieldValue, Filter,
-    FilterOperator, Collection, JMAPId, JMAPStore, LogicalOperator, Store, StoreError,
+    AccountId, Collection, ColumnFamily, Comparator, Direction, DocumentId, FieldId, FieldValue,
+    Filter, FilterOperator, JMAPId, JMAPStore, LogicalOperator, Store, StoreError,
 };
 use nlp::Language;
 use roaring::RoaringBitmap;
@@ -164,7 +160,7 @@ where
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
-                                    self.get_bitmap(&serialize_bm_text_key(
+                                    self.get_bitmap(&BitmapKey::serialize_keyword(
                                         request.account_id,
                                         request.collection,
                                         filter_cond.field,
@@ -181,7 +177,7 @@ where
                                     self.get_bitmaps_intersection(
                                         TokenIterator::new(&text, Language::English, false)
                                             .map(|token| {
-                                                serialize_bm_text_key(
+                                                BitmapKey::serialize_keyword(
                                                     request.account_id,
                                                     request.collection,
                                                     field_cond_field,
@@ -207,7 +203,7 @@ where
                                         for match_term in &match_terms {
                                             if !requested_ids.contains(&match_term.id) {
                                                 requested_ids.insert(match_term.id);
-                                                keys.push(serialize_bm_term_key(
+                                                keys.push(BitmapKey::serialize_term(
                                                     request.account_id,
                                                     request.collection,
                                                     filter_cond.field,
@@ -226,7 +222,7 @@ where
                                                     if let Some(term_index) =
                                                         self.db.get::<TermIndex>(
                                                             ColumnFamily::Values,
-                                                            &serialize_acd_key_leb128(
+                                                            &ValueKey::serialize_term_index(
                                                                 request.account_id,
                                                                 request.collection,
                                                                 document_id,
@@ -279,7 +275,7 @@ where
                                             ] {
                                                 if !requested_ids.contains(&term_op) {
                                                     requested_ids.insert(term_op);
-                                                    keys.push(serialize_bm_term_key(
+                                                    keys.push(BitmapKey::serialize_term(
                                                         request.account_id,
                                                         request.collection,
                                                         filter_cond.field,
@@ -321,7 +317,7 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.range_to_bitmap(
-                                        &serialize_index_key_base(
+                                        &IndexKey::serialize_key(
                                             request.account_id,
                                             request.collection,
                                             filter_cond.field,
@@ -337,7 +333,7 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.range_to_bitmap(
-                                        &serialize_index_key_base(
+                                        &IndexKey::serialize_key(
                                             request.account_id,
                                             request.collection,
                                             filter_cond.field,
@@ -353,7 +349,7 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.range_to_bitmap(
-                                        &serialize_index_key_base(
+                                        &IndexKey::serialize_key(
                                             request.account_id,
                                             request.collection,
                                             filter_cond.field,
@@ -368,7 +364,7 @@ where
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
-                                    self.get_bitmap(&serialize_bm_tag_key(
+                                    self.get_bitmap(&BitmapKey::serialize_tag(
                                         request.account_id,
                                         request.collection,
                                         filter_cond.field,
@@ -440,7 +436,7 @@ where
             iterators.push(IndexIterator {
                 index: match comp {
                     Comparator::Field(comp) => {
-                        let prefix = serialize_index_key_prefix(
+                        let prefix = IndexKey::serialize_field(
                             request.account_id,
                             request.collection as u8,
                             comp.field,
@@ -461,11 +457,7 @@ where
                                 } else {
                                     (request.account_id + 1, request.collection as u8, comp.field)
                                 };
-                                serialize_index_key_prefix(
-                                    key_account_id,
-                                    key_collection,
-                                    key_field,
-                                )
+                                IndexKey::serialize_field(key_account_id, key_collection, key_field)
                             } else {
                                 prefix.clone()
                             },
@@ -595,7 +587,7 @@ where
                                 break;
                             }
 
-                            doc_id = deserialize_index_document_id(&key)?;
+                            doc_id = IndexKey::deserialize_document_id(&key)?;
                             if it_opts.remaining.contains(doc_id) {
                                 it_opts.remaining.remove(doc_id);
 

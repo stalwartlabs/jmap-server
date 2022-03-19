@@ -737,3 +737,10 @@ fn test_3() -> ThreadTest {
         ]),
     ])
 }
+
+pub fn build_thread_test_messages() -> Vec<String> {
+    let mut messages = Vec::new();
+    let mut total_messages = 0;
+    build_messages(&test_3(), &mut messages, &mut total_messages, None, 0);
+    messages
+}
