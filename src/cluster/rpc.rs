@@ -48,6 +48,7 @@ pub enum Request {
         term: TermId,
         request: AppendEntriesRequest,
     },
+    Ping,
     None,
 }
 
@@ -65,6 +66,7 @@ pub enum Response {
     BecomeFollower { term: TermId, success: bool },
     SynchronizeLog { matched: RaftId },
     NeedUpdates { collections: Vec<UpdateCollection> },
+    Pong,
     Continue,
     None,
 }
@@ -217,30 +219,35 @@ pub fn spawn_peer_rpc(
     key: String,
     peer_id: PeerId,
     peer_addr: SocketAddr,
-) -> mpsc::Sender<RpcEvent> {
-    let (tx, mut rx) = mpsc::channel::<RpcEvent>(IPC_CHANNEL_BUFFER);
+) -> (mpsc::Sender<RpcEvent>, watch::Receiver<bool>) {
+    let (event_tx, mut event_rx) = mpsc::channel::<RpcEvent>(IPC_CHANNEL_BUFFER);
+    let (online_tx, online_rx) = watch::channel(false);
 
     tokio::spawn(async move {
         let mut conn_ = None;
+        let mut is_online = false;
 
         'main: loop {
-            let mut message =
-                match time::timeout(Duration::from_millis(RPC_INACTIVITY_TIMEOUT), rx.recv()).await
-                {
-                    Ok(Some(message)) => message,
-                    Ok(None) => {
-                        debug!("Peer RPC process with {} exiting.", peer_addr);
-                        break;
+            let mut message = match time::timeout(
+                Duration::from_millis(RPC_INACTIVITY_TIMEOUT),
+                event_rx.recv(),
+            )
+            .await
+            {
+                Ok(Some(message)) => message,
+                Ok(None) => {
+                    debug!("Peer RPC process with {} exiting.", peer_addr);
+                    break;
+                }
+                Err(_) => {
+                    // Close connection after the configured inactivity timeout.
+                    if conn_.is_some() {
+                        debug!("Closing inactive connection to peer {}.", peer_addr);
+                        conn_ = None;
                     }
-                    Err(_) => {
-                        // Close connection after the configured inactivity timeout.
-                        if conn_.is_some() {
-                            debug!("Closing inactive connection to peer {}.", peer_addr);
-                            conn_ = None;
-                        }
-                        continue;
-                    }
-                };
+                    continue;
+                }
+            };
 
             // Connect to peer if we are not already connected.
             let conn = if let Some(conn) = &mut conn_ {
@@ -252,15 +259,23 @@ pub fn spawn_peer_rpc(
                     // Connect and authenticate with peer.
                     match connect_peer(
                         peer_addr,
-                        Protocol::Request(Request::Auth {
+                        Request::Auth {
                             peer_id: local_peer_id,
                             key: key.clone(),
-                        }),
+                        },
                     )
                     .await
                     {
                         Ok(conn) => {
                             conn_ = conn.into();
+
+                            // Notify processes that the peer is online.
+                            if !is_online {
+                                is_online = true;
+                                if online_tx.send(true).is_err() {
+                                    debug!("Failed to send online status.");
+                                }
+                            }
 
                             if connection_attempts < RPC_MAX_CONNECT_ATTEMPTS {
                                 // Connection established, send message.
@@ -302,14 +317,14 @@ pub fn spawn_peer_rpc(
 
                                 match time::timeout(
                                     Duration::from_millis(next_attempt_ms),
-                                    rx.recv(),
+                                    event_rx.recv(),
                                 )
                                 .await
                                 {
                                     Ok(Some(new_message)) => {
                                         match new_message {
                                             new_message @ RpcEvent::FireAndForget {
-                                                request: Request::UpdatePeers { .. },
+                                                request: Request::UpdatePeers { .. } | Request::Ping,
                                             } => {
                                                 // Peer requested to update peer list via gossip, which means that
                                                 // it is probably back online, attempt to reconnect.
@@ -384,12 +399,18 @@ pub fn spawn_peer_rpc(
                 },
             };
 
-            error!("Failed to send RPC request to peer {}: {}", peer_addr, err);
+            debug!("Failed to send RPC request to peer {}: {}", peer_addr, err);
             conn_ = None;
+
+            // Notify processes that the peer is offline.
+            is_online = false;
+            if online_tx.send(false).is_err() {
+                debug!("Failed to send online status.");
+            }
         }
     });
 
-    tx
+    (event_tx, online_rx)
 }
 
 async fn handle_conn(
@@ -430,6 +451,11 @@ async fn handle_conn(
             return;
         }
     };
+
+    if let Err(err) = frames.send(Protocol::Response(Response::Continue)).await {
+        error!("Failed to send auth response: {}", err);
+        return;
+    }
 
     loop {
         tokio::select! {
@@ -488,12 +514,18 @@ async fn handle_conn(
 
 async fn connect_peer(
     addr: SocketAddr,
-    auth_frame: Protocol,
+    auth_frame: Request,
 ) -> std::io::Result<Framed<TcpStream, RpcEncoder>> {
     time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), async {
         let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcEncoder::default());
-        conn.send(auth_frame).await?;
-        Ok(conn)
+        if let Response::Continue = send_rpc(&mut conn, auth_frame).await? {
+            Ok(conn)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to authenticate peer.",
+            ))
+        }
     })
     .await
     .map_err(|_| {

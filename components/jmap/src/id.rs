@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use store::{blob::BlobIndex, leb128::Leb128, AccountId, DocumentId, Collection, JMAPId};
+use store::{blob::BlobIndex, leb128::Leb128, AccountId, Collection, DocumentId, JMAPId};
 
 pub trait JMAPIdSerialize {
     fn from_jmap_string(id: &str) -> Option<Self>

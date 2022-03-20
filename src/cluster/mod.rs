@@ -19,7 +19,7 @@ use store::{
     config::EnvSettings,
     tracing::{error, info},
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
 
@@ -105,6 +105,7 @@ pub struct Peer {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
     pub tx: mpsc::Sender<rpc::RpcEvent>,
+    pub online_rx: watch::Receiver<bool>,
 
     // Peer status
     pub epoch: EpochId,
@@ -307,16 +308,18 @@ impl Peer {
     where
         T: for<'x> Store<'x> + 'static,
     {
+        let (tx, online_rx) = spawn_peer_rpc(
+            cluster.tx.clone(),
+            cluster.peer_id,
+            cluster.key.clone(),
+            peer_id,
+            addr,
+        );
         Peer {
             peer_id,
             shard_id: 0,
-            tx: spawn_peer_rpc(
-                cluster.tx.clone(),
-                cluster.peer_id,
-                cluster.key.clone(),
-                peer_id,
-                addr,
-            ),
+            tx,
+            online_rx,
             epoch: 0,
             generation: 0,
             addr,
@@ -338,16 +341,18 @@ impl Peer {
     where
         T: for<'x> Store<'x> + 'static,
     {
+        let (tx, online_rx) = spawn_peer_rpc(
+            cluster.tx.clone(),
+            cluster.peer_id,
+            cluster.key.clone(),
+            peer.peer_id,
+            peer.addr,
+        );
         Peer {
             peer_id: peer.peer_id,
             shard_id: peer.shard_id,
-            tx: spawn_peer_rpc(
-                cluster.tx.clone(),
-                cluster.peer_id,
-                cluster.key.clone(),
-                peer.peer_id,
-                peer.addr,
-            ),
+            tx,
+            online_rx,
             epoch: peer.epoch,
             generation: peer.generation,
             addr: peer.addr,

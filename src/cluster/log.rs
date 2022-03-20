@@ -1,6 +1,5 @@
 use std::collections::{hash_map, HashMap};
 use std::task::Poll;
-use std::time::Duration;
 
 use actix_web::web;
 use futures::poll;
@@ -8,7 +7,7 @@ use jmap_mail::import::{Bincoded, JMAPMailImport};
 use jmap_mail::mailbox::{JMAPMailMailbox, JMAPMailboxProperties, Mailbox};
 use jmap_mail::query::MailboxId;
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
-use store::batch::WriteBatch;
+use store::batch::{Document, WriteBatch};
 use store::changes::ChangeId;
 use store::leb128::Leb128;
 use store::raft::{Entry, LogIndex, PendingChanges, RaftId, TermId};
@@ -19,10 +18,7 @@ use store::{
     ThreadId,
 };
 use store::{JMAPIdPrefix, WriteOperation};
-use tokio::{
-    sync::{mpsc, oneshot, watch},
-    time,
-};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::JMAPServer;
 
@@ -33,10 +29,6 @@ use super::{
 };
 use super::{Peer, PeerId, IPC_CHANNEL_BUFFER};
 
-#[cfg(test)]
-const RETRY_MS: u64 = 1000;
-#[cfg(not(test))]
-const RETRY_MS: u64 = 30 * 1000;
 const BATCH_MAX_ENTRIES: usize = 10;
 const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
 
@@ -63,6 +55,9 @@ pub enum Change {
         entry: Vec<u8>,
     },
     Delete {
+        document_id: DocumentId,
+    },
+    Tombstone {
         document_id: DocumentId,
     },
     Commit,
@@ -105,8 +100,9 @@ impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn spawn_raft_leader(&self, peer: &Peer, mut rx: watch::Receiver<LogIndex>) {
+    pub fn spawn_raft_leader(&self, peer: &Peer, mut log_index_rx: watch::Receiver<LogIndex>) {
         let peer_tx = peer.tx.clone();
+        let mut online_rx = peer.online_rx.clone();
         let peer_name = peer.to_string();
         let local_name = self.addr.to_string();
 
@@ -125,12 +121,12 @@ where
                 local_name, peer_name
             );
 
-            loop {
+            'main: loop {
                 // Poll the receiver to make sure this node is still the leader.
-                match poll!(Box::pin(rx.changed())) {
+                match poll!(Box::pin(log_index_rx.changed())) {
                     Poll::Ready(result) => match result {
                         Ok(_) => {
-                            last_log.index = *rx.borrow();
+                            last_log.index = *log_index_rx.borrow();
                             last_log.term = term;
                             if matches!(&state, State::Wait) {
                                 state = State::AppendEntries;
@@ -146,8 +142,6 @@ where
                     },
                     Poll::Pending => (),
                 }
-
-                //println!("{} -> State: {:#?}", peer_name, state);
 
                 let request = match &mut state {
                     State::BecomeLeader => {
@@ -172,8 +166,8 @@ where
                     }
                     State::Wait => {
                         // Wait for the next change
-                        if rx.changed().await.is_ok() {
-                            last_log.index = *rx.borrow();
+                        if log_index_rx.changed().await.is_ok() {
+                            last_log.index = *log_index_rx.borrow();
                             last_log.term = term;
                             debug!("[{}] Received new log index: {:?}", local_name, last_log);
                         } else {
@@ -226,7 +220,17 @@ where
                     }
                 };
 
-                match send_request(&peer_tx, request).await {
+                let response = if let Some(response) = send_request(&peer_tx, request).await {
+                    response
+                } else {
+                    debug!(
+                        "[{}] Raft leader process for {} exiting (peer_tx channel closed).",
+                        local_name, peer_name
+                    );
+                    break;
+                };
+
+                match response {
                     Response::BecomeFollower {
                         term: peer_term,
                         success,
@@ -272,25 +276,50 @@ where
                         state = State::AppendEntries;
                     }
                     Response::None => {
-                        // There was a problem delivering the message, wait 30 seconds or until
-                        // the next change is received.
-                        match time::timeout(Duration::from_millis(RETRY_MS), rx.changed()).await {
-                            Ok(Ok(())) => {
-                                last_log.index = *rx.borrow();
-                                last_log.term = term;
-                                debug!(
-                                    "[{}] Received new log index while waiting: {:?}",
-                                    local_name, last_log
-                                );
-                            }
-                            Ok(Err(_)) => {
-                                debug!(
-                                    "[{}] Raft leader process for {} exiting.",
-                                    local_name, peer_name
-                                );
-                                break;
-                            }
-                            Err(_) => (),
+                        // Wait until the peer is back online
+                        'online: loop {
+                            tokio::select! {
+                                changed = log_index_rx.changed() => {
+                                    match changed {
+                                        Ok(()) => {
+                                            last_log.index = *log_index_rx.borrow();
+                                            last_log.term = term;
+
+                                            debug!(
+                                                "[{}] Received new log index while waiting: {:?}",
+                                                local_name, last_log
+                                            );
+                                        }
+                                        Err(_) => {
+                                            debug!(
+                                                "[{}] Raft leader process for {} exiting.",
+                                                local_name, peer_name
+                                            );
+                                            break 'main;
+                                        }
+                                    }
+                                },
+                                online = online_rx.changed() => {
+                                    match online {
+                                        Ok(()) => {
+                                            if *online_rx.borrow() {
+                                                debug!("Peer {} is back online (rpc).", peer_name);
+                                                break 'online;
+                                            } else {
+                                                debug!("Peer {} is still offline (rpc).", peer_name);
+                                                continue 'online;
+                                            }
+                                        },
+                                        Err(_) => {
+                                            debug!(
+                                                "[{}] Raft leader process for {} exiting.",
+                                                local_name, peer_name
+                                            );
+                                            break 'main;
+                                        },
+                                    }
+                                }
+                            };
                         }
                         state = State::BecomeLeader;
                     }
@@ -312,7 +341,9 @@ where
                         _ => (),
                     },
 
-                    response @ (Response::UpdatePeers { .. } | Response::Vote { .. }) => {
+                    response @ (Response::UpdatePeers { .. }
+                    | Response::Vote { .. }
+                    | Response::Pong) => {
                         error!(
                             "Unexpected response from peer {}: {:?}",
                             peer_name, response
@@ -591,6 +622,10 @@ where
                     Change::Delete { document_id } => {
                         document_batch.delete_document(collection, document_id)
                     }
+                    Change::Tombstone { document_id } => {
+                        document_batch.insert_document(Document::new(collection, document_id));
+                        document_batch.delete_document(collection, document_id)
+                    }
                     Change::Commit => {
                         do_commit = true;
                     }
@@ -659,19 +694,16 @@ where
     true
 }
 
-async fn send_request(peer_tx: &mpsc::Sender<rpc::RpcEvent>, request: Request) -> Response {
+async fn send_request(peer_tx: &mpsc::Sender<rpc::RpcEvent>, request: Request) -> Option<Response> {
     let (response_tx, rx) = oneshot::channel();
-    if let Err(err) = peer_tx
+    peer_tx
         .send(RpcEvent::NeedResponse {
             request,
             response_tx,
         })
         .await
-    {
-        error!("Channel failed: {}", err);
-        return Response::None;
-    }
-    rx.await.unwrap_or(Response::None)
+        .ok()?;
+    rx.await.unwrap_or(Response::None).into()
 }
 
 async fn get_next_changes<T>(
@@ -702,6 +734,7 @@ where
     {
         Ok(changes) => {
             debug_assert!(!changes.is_empty(), "{:#?}", changes);
+            //println!("Changes: {:#?}", changes);
 
             State::PushChanges {
                 collections,
@@ -726,8 +759,6 @@ where
 {
     let mut batch_size = 0;
     let mut push_changes = Vec::new();
-
-    //println!("Changes: {:#?}", changes);
 
     loop {
         let item = if let Some(document_id) = changes.inserts.min() {
@@ -754,6 +785,12 @@ where
             changes.deletes.remove(document_id);
             Some((
                 Change::Delete { document_id },
+                std::mem::size_of::<Change>(),
+            ))
+        } else if let Some(document_id) = changes.tombstones.min() {
+            changes.tombstones.remove(document_id);
+            Some((
+                Change::Tombstone { document_id },
                 std::mem::size_of::<Change>(),
             ))
         } else if let Some(change_id) = changes.changes.min() {

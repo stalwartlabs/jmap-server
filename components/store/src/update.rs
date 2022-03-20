@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    iter::FromIterator,
+};
 
 use nlp::Language;
 
@@ -10,7 +13,7 @@ use crate::{
     leb128::Leb128,
     serialize::{BitmapKey, IndexKey, LogKey, StoreSerialize, ValueKey},
     term_index::TermIndexBuilder,
-    AccountId, Collection, ColumnFamily, JMAPId, JMAPStore, Store, WriteOperation,
+    AccountId, Collection, ColumnFamily, DocumentId, JMAPId, JMAPStore, Store, WriteOperation,
 };
 
 impl<T> JMAPStore<T>
@@ -93,28 +96,30 @@ where
                         let text = match t.value {
                             Text::Default(text) => text,
                             Text::Keyword(text) => {
-                                bitmap_list
-                                    .entry(BitmapKey::serialize_keyword(
+                                merge_bitmap_clear(
+                                    bitmap_list.entry(BitmapKey::serialize_keyword(
                                         batch.account_id,
                                         document.collection,
                                         t.field,
                                         &text,
-                                    ))
-                                    .or_insert_with(HashMap::new)
-                                    .insert(document.document_id, !is_clear);
+                                    )),
+                                    document.document_id,
+                                    !is_clear,
+                                );
                                 text
                             }
                             Text::Tokenized(text) => {
                                 for token in TokenIterator::new(&text, Language::English, false) {
-                                    bitmap_list
-                                        .entry(BitmapKey::serialize_keyword(
+                                    merge_bitmap_clear(
+                                        bitmap_list.entry(BitmapKey::serialize_keyword(
                                             batch.account_id,
                                             document.collection,
                                             t.field,
                                             &token.word,
-                                        ))
-                                        .or_insert_with(HashMap::new)
-                                        .insert(document.document_id, !is_clear);
+                                        )),
+                                        document.document_id,
+                                        !is_clear,
+                                    );
                                 }
                                 text
                             }
@@ -131,28 +136,30 @@ where
 
                                 if !terms.is_empty() {
                                     for term in &terms {
-                                        bitmap_list
-                                            .entry(BitmapKey::serialize_term(
+                                        merge_bitmap_clear(
+                                            bitmap_list.entry(BitmapKey::serialize_term(
                                                 batch.account_id,
                                                 document.collection,
                                                 t.field,
                                                 term.id,
                                                 true,
-                                            ))
-                                            .or_insert_with(HashMap::new)
-                                            .insert(document.document_id, !is_clear);
+                                            )),
+                                            document.document_id,
+                                            !is_clear,
+                                        );
 
                                         if term.id_stemmed != term.id {
-                                            bitmap_list
-                                                .entry(BitmapKey::serialize_term(
+                                            merge_bitmap_clear(
+                                                bitmap_list.entry(BitmapKey::serialize_term(
                                                     batch.account_id,
                                                     document.collection,
                                                     t.field,
                                                     term.id_stemmed,
                                                     false,
-                                                ))
-                                                .or_insert_with(HashMap::new)
-                                                .insert(document.document_id, !is_clear);
+                                                )),
+                                                document.document_id,
+                                                !is_clear,
+                                            );
                                         }
                                     }
 
@@ -483,5 +490,28 @@ where
 
         // Submit write batch
         self.db.write(write_batch)
+    }
+}
+
+fn merge_bitmap_clear(
+    entry: Entry<Vec<u8>, HashMap<DocumentId, bool>>,
+    document_id: DocumentId,
+    is_set: bool,
+) {
+    match entry {
+        Entry::Occupied(mut bitmap_entry) => match bitmap_entry.get_mut().entry(document_id) {
+            Entry::Occupied(mut document_entry) => {
+                let is_set_current = *document_entry.get();
+                if (is_set && !is_set_current) || (!is_set && is_set_current) {
+                    *document_entry.get_mut() = true;
+                }
+            }
+            Entry::Vacant(document_entry) => {
+                document_entry.insert(is_set);
+            }
+        },
+        Entry::Vacant(bitmap_entry) => {
+            bitmap_entry.insert(HashMap::from_iter([(document_id, is_set)]));
+        }
     }
 }

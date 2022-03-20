@@ -151,21 +151,29 @@ where
                                 assert_eq!(
                                     tagged_docs,
                                     other_tagged_docs,
-                                    "{:?}/{}/{:?}/{}",
+                                    "{:?}/{}/{:?}/{} -> used ids {:?}, tombstones: {:?}",
                                     cf,
                                     account_id,
                                     collection,
-                                    key.last().unwrap()
+                                    key.last().unwrap(),
+                                    //String::from_utf8_lossy(&key[1..key.len() - 3]),
+                                    self.get_document_ids_used(account_id, collection)
+                                        .unwrap()
+                                        .unwrap_or_default(),
+                                    self.get_tombstoned_ids(account_id, collection)
+                                        .unwrap()
+                                        .unwrap_or_default()
                                 );
                             } else if tagged_docs != other_tagged_docs {
                                 println!(
-                                    "{:?} != {:?} for {:?}/{}/{:?}/{}",
+                                    "{:?} != {:?} for {:?}/{}/{:?}/{} -> active ids {:?}",
                                     tagged_docs,
                                     other_tagged_docs,
                                     cf,
                                     account_id,
                                     collection,
-                                    key.last().unwrap()
+                                    key.last().unwrap(),
+                                    last_ids
                                 );
                             }
 

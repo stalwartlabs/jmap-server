@@ -325,6 +325,7 @@ pub enum Direction {
     Backward,
 }
 
+#[derive(Debug)]
 pub enum WriteOperation {
     Set {
         cf: ColumnFamily,

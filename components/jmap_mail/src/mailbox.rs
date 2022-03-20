@@ -1196,12 +1196,12 @@ where
             JMAPMailboxProperties::Id.into(),
         )? {
             if let Some(document) = build_changed_mailbox_document(
-                mailbox,
+                current_mailbox,
                 MailboxChanges {
-                    name: current_mailbox.name.into(),
-                    parent_id: current_mailbox.parent_id.into(),
-                    role: current_mailbox.role.into(),
-                    sort_order: current_mailbox.sort_order.into(),
+                    name: mailbox.name.into(),
+                    parent_id: mailbox.parent_id.into(),
+                    role: mailbox.role.into(),
+                    sort_order: mailbox.sort_order.into(),
                     is_subscribed: true.into(), //TODO implement
                 },
                 document_id,

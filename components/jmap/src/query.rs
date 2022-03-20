@@ -1,5 +1,5 @@
 use store::{
-    query::JMAPStoreQuery, Comparator, DocumentId, Filter, FilterOperator, Collection, JMAPId,
+    query::JMAPStoreQuery, Collection, Comparator, DocumentId, Filter, FilterOperator, JMAPId,
     LogicalOperator,
 };
 

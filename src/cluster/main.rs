@@ -72,11 +72,13 @@ pub async fn start_cluster<T>(
                         }
 
                         if !is_offline {
-                            cluster.ping_peers().await;
-                            last_ping = Instant::now();
+                            cluster.start_election_timer(true);
+                            //cluster.ping_peers().await;
+                            //last_ping = Instant::now();
+                        } else {
+                            cluster.start_election_timer(false);
+                            continue;
                         }
-                        cluster.start_election_timer(false);
-                        continue;
                     } else if is_offline {
                         continue;
                     }
@@ -154,7 +156,7 @@ where
                 response_tx,
             } => match request {
                 rpc::Request::UpdatePeers { peers } => {
-                    self.handle_update_peers(response_tx, peers);
+                    self.handle_update_peers(response_tx, peers).await;
                 }
                 rpc::Request::Vote { term, last } => {
                     self.handle_vote_request(peer_id, response_tx, term, last);
@@ -167,13 +169,16 @@ where
                     self.handle_append_entries(peer_id, response_tx, term, request)
                         .await;
                 }
+                rpc::Request::Ping => response_tx
+                    .send(rpc::Response::Pong)
+                    .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
                 _ => response_tx
                     .send(rpc::Response::None)
                     .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
             },
             Event::RpcResponse { peer_id, response } => match response {
                 rpc::Response::UpdatePeers { peers } => {
-                    self.sync_peer_info(peers);
+                    self.sync_peer_info(peers).await;
                 }
                 rpc::Response::Vote { term, vote_granted } => {
                     self.handle_vote_response(peer_id, term, vote_granted);

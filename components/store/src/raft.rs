@@ -99,6 +99,7 @@ pub struct PendingChanges {
     pub updates: RoaringBitmap,
     pub deletes: RoaringBitmap,
     pub changes: RoaringTreemap,
+    pub tombstones: RoaringBitmap,
 }
 
 impl PendingChanges {
@@ -109,6 +110,7 @@ impl PendingChanges {
             inserts: RoaringBitmap::new(),
             updates: RoaringBitmap::new(),
             deletes: RoaringBitmap::new(),
+            tombstones: RoaringBitmap::new(),
             changes: RoaringTreemap::new(),
         }
     }
@@ -117,10 +119,16 @@ impl PendingChanges {
         self.inserts.is_empty()
             && self.updates.is_empty()
             && self.deletes.is_empty()
+            && self.tombstones.is_empty()
             && self.changes.is_empty()
     }
 
-    pub fn deserialize(&mut self, change_id: ChangeId, bytes: &[u8]) -> Option<()> {
+    pub fn deserialize(
+        &mut self,
+        change_id: ChangeId,
+        bytes: &[u8],
+        tombstones: &RoaringBitmap,
+    ) -> Option<()> {
         let mut bytes_it = bytes.iter();
         let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
         let total_updates = usize::from_leb128_it(&mut bytes_it)?;
@@ -163,6 +171,9 @@ impl PendingChanges {
                 // This change is an actual deletion
                 if !self.inserts.remove(document_id) {
                     self.deletes.insert(document_id);
+                } else if tombstones.contains(document_id) {
+                    // Add tombstone
+                    self.tombstones.insert(document_id);
                 }
                 self.updates.remove(document_id);
             }
@@ -295,6 +306,12 @@ where
             (true, 0)
         };
 
+        let tombstones = if !only_ids {
+            self.get_tombstoned_ids(account, collection)?
+                .unwrap_or_default()
+        } else {
+            RoaringBitmap::new()
+        };
         let key = LogKey::serialize_change(account, collection, from_change_id);
         let prefix = &key[0..LogKey::CHANGE_ID_POS];
 
@@ -314,12 +331,14 @@ where
 
             if change_id > from_change_id || (is_inclusive && change_id == from_change_id) {
                 if !only_ids {
-                    changes.deserialize(change_id, &value).ok_or_else(|| {
-                        StoreError::InternalError(format!(
-                            "Failed to deserialize raft changes for [{}/{:?}]",
-                            account, collection
-                        ))
-                    })?;
+                    changes
+                        .deserialize(change_id, &value, &tombstones)
+                        .ok_or_else(|| {
+                            StoreError::InternalError(format!(
+                                "Failed to deserialize raft changes for [{}/{:?}]",
+                                account, collection
+                            ))
+                        })?;
                 } else {
                     changes.changes.insert(change_id);
                 }

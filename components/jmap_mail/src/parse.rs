@@ -1396,8 +1396,12 @@ fn parse_header(document: &mut Document, header_name: RfcHeader, header_value: &
             }
         }
         HeaderValue::DateTime(date_time) => {
-            if let Some(timestamp) = date_time.to_timestamp() {
-                document.long_int(header_name, timestamp as u64, FieldOptions::Sort);
+            if date_time.is_valid() {
+                document.long_int(
+                    header_name,
+                    date_time.to_timestamp().unwrap() as u64,
+                    FieldOptions::Sort,
+                );
             }
         }
         HeaderValue::ContentType(content_type) => {

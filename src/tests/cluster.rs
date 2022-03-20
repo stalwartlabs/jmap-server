@@ -1,13 +1,13 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use actix_web::web;
-use store::{raft::RaftId, JMAPStore, Store};
+use store::{parking_lot::Mutex, raft::RaftId, JMAPStore, Store};
 use store_rocksdb::RocksDB;
 use store_test::{
     destroy_temp_dir, init_settings,
     jmap_mail_merge_threads::build_thread_test_messages,
     jmap_mail_set::{delete_email, insert_email, update_email},
-    jmap_mailbox::{delete_mailbox, insert_mailbox, rename_mailbox},
+    jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
     StoreCompareWith,
 };
 use tokio::{sync::mpsc, time::sleep};
@@ -142,7 +142,21 @@ where
             return;
         }
     }
-    panic!("Some nodes are not up to date: {:?}", updated);
+    for peer in peers.iter() {
+        println!(
+            "{:?}: {:?} ({})",
+            if peer.is_offline() {
+                "offline"
+            } else if peer.is_leader() {
+                "leader"
+            } else {
+                "follower"
+            },
+            peer.get_last_log().await,
+            peer.is_up_to_date()
+        );
+    }
+    panic!("Some nodes are not up to date.");
 }
 
 async fn assert_mirrored_stores<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>, ignore_offline: bool)
@@ -161,12 +175,16 @@ where
                                 panic!("Follower {} is offline.", follower_pos);
                             }
                         }
+                        assert!(follower.is_up_to_date());
                         /*println!(
-                            "Comparing stores of leader {} with follower {}",
+                            "Comparing store of leader {} with follower {}",
                             leader_pos, follower_pos
                         );*/
-                        assert!(follower.is_up_to_date());
                         let keys_leader = leader.store.compare_with(&follower.store);
+                        /*println!(
+                            "Comparing store of follower {} with leader {}",
+                            follower_pos, leader_pos
+                        );*/
                         let keys_follower = follower.store.compare_with(&leader.store);
                         assert!(
                             keys_leader.iter().map(|(_, v)| *v).sum::<usize>() > 0,
@@ -190,7 +208,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     // Test election.
-    println!("Testing raft election...");
+    println!("Testing raft elections on with a 5 nodes cluster...");
     assert_cluster_updated(&peers).await;
     assert_leader_elected(&peers).await.set_offline(true).await;
     assert_leader_elected(&peers).await.set_offline(true).await;
@@ -281,6 +299,7 @@ async fn test_distruibuted_update_delete<T>(peers: Arc<Vec<web::Data<JMAPServer<
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Testing distributed update/delete operations...");
     let test_batches = vec![
         vec![
             Ac::InsertMailbox(1),
@@ -330,70 +349,77 @@ where
     // Keep one node offline
     assert_leader_elected(&peers).await.set_offline(true).await;
     let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
-    let mut mailbox_map = HashMap::new();
-    let mut email_map = HashMap::new();
+    let mailbox_map = Arc::new(Mutex::new(HashMap::new()));
+    let email_map = Arc::new(Mutex::new(HashMap::new()));
 
     for (batch_num, batch) in test_batches.into_iter().enumerate() {
-        println!("{:?}", batch);
         let leader = assert_leader_elected(&peers).await;
+        let store = leader.store.clone();
 
-        for action in batch {
-            match action {
-                Ac::NewEmail((local_id, mailbox_id)) => {
-                    email_map.insert(
-                        local_id,
-                        insert_email(
-                            &leader.store,
+        let mailbox_map = mailbox_map.clone();
+        let email_map = email_map.clone();
+
+        tokio::task::spawn_blocking(move || {
+            for action in batch {
+                match action {
+                    Ac::NewEmail((local_id, mailbox_id)) => {
+                        email_map.lock().insert(
+                            local_id,
+                            insert_email(
+                                &store,
+                                2,
+                                format!(
+                                    "From: test@test.com\nSubject: test {}\n\nTest message {}",
+                                    local_id, local_id
+                                )
+                                .into_bytes(),
+                                vec![*mailbox_map.lock().get(&mailbox_id).unwrap()],
+                                vec![],
+                                None,
+                            ),
+                        );
+                    }
+                    Ac::UpdateEmail(local_id) => {
+                        update_email(
+                            &store,
                             2,
-                            format!(
-                                "From: test@test.com\nSubject: test {}\n\nTest message {}",
-                                local_id, local_id
-                            )
-                            .into_bytes(),
-                            vec![*mailbox_map.get(&mailbox_id).unwrap()],
-                            vec![],
+                            *email_map.lock().get(&local_id).unwrap(),
                             None,
-                        ),
-                    );
-                }
-                Ac::UpdateEmail(local_id) => {
-                    update_email(
-                        &leader.store,
-                        2,
-                        *mailbox_map.get(&local_id).unwrap(),
-                        None,
-                        Some(vec![format!("tag_{}", batch_num)]),
-                    );
-                }
-                Ac::DeleteEmail(local_id) => {
-                    delete_email(&leader.store, 2, email_map.remove(&local_id).unwrap());
-                }
-                Ac::InsertMailbox(local_id) => {
-                    mailbox_map.insert(
-                        local_id,
-                        insert_mailbox(
-                            &leader.store,
+                            Some(vec![format!("tag_{}", batch_num)]),
+                        );
+                    }
+                    Ac::DeleteEmail(local_id) => {
+                        delete_email(&store, 2, email_map.lock().remove(&local_id).unwrap());
+                    }
+                    Ac::InsertMailbox(local_id) => {
+                        mailbox_map.lock().insert(
+                            local_id,
+                            insert_mailbox(
+                                &store,
+                                2,
+                                &format!("Mailbox {}", local_id),
+                                &format!("role_{}", local_id),
+                            ),
+                        );
+                    }
+                    Ac::UpdateMailbox(local_id) => {
+                        update_mailbox(
+                            &store,
                             2,
-                            &format!("Mailbox {}", local_id),
-                            &format!("role_{}", local_id),
-                        ),
-                    );
-                }
-                Ac::UpdateMailbox(local_id) => {
-                    rename_mailbox(
-                        &leader.store,
-                        2,
-                        *mailbox_map.get(&local_id).unwrap(),
-                        &format!("Mailbox {}_{}", local_id, batch_num),
-                    );
-                }
-                Ac::DeleteMailbox(local_id) => {
-                    delete_mailbox(&leader.store, 2, mailbox_map.remove(&local_id).unwrap());
+                            *mailbox_map.lock().get(&local_id).unwrap(),
+                            local_id,
+                            batch_num as u32,
+                        );
+                    }
+                    Ac::DeleteMailbox(local_id) => {
+                        delete_mailbox(&store, 2, mailbox_map.lock().remove(&local_id).unwrap());
+                    }
                 }
             }
+        })
+        .await
+        .unwrap();
 
-            println!("{:?}\n{:?}", mailbox_map, email_map);
-        }
         // Notify peers of changes
         leader.notify_changes().await;
         assert_cluster_updated(&peers).await;
@@ -420,8 +446,8 @@ where
 async fn test_cluster() {
     let (peers, temp_dirs) = build_cluster(5, true).await;
 
-    //test_election(peers.clone()).await;
-    //test_distruibuted_thread_merge(peers.clone()).await;
+    test_election(peers.clone()).await;
+    test_distruibuted_thread_merge(peers.clone()).await;
     test_distruibuted_update_delete(peers.clone()).await;
 
     for temp_dir in temp_dirs {

@@ -971,11 +971,12 @@ where
     .unwrap()
 }
 
-pub fn rename_mailbox<T>(
+pub fn update_mailbox<T>(
     mail_store: &JMAPStore<T>,
     account_id: AccountId,
     jmap_id: JMAPId,
-    new_name: &str,
+    ref_id: u32,
+    seq_id: u32,
 ) where
     T: for<'x> Store<'x> + 'static,
 {
@@ -987,7 +988,15 @@ pub fn rename_mailbox<T>(
                 create: JSONValue::Null,
                 update: HashMap::from_iter([(
                     jmap_id.to_jmap_string(),
-                    HashMap::from_iter([("name".to_string(), new_name.to_string().into())]).into(),
+                    HashMap::from_iter([
+                        (
+                            "name".to_string(),
+                            format!("Mailbox {}_{}", ref_id, seq_id).into()
+                        ),
+                        ("role".to_string(), format!("{}_{}", ref_id, seq_id).into()),
+                        ("sortOrder".to_string(), ((ref_id * 100) + seq_id).into())
+                    ])
+                    .into(),
                 )])
                 .into(),
                 destroy: JSONValue::Null,

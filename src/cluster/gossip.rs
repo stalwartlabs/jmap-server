@@ -294,9 +294,16 @@ where
                             local_peer.epoch = peer.epoch;
                             local_peer.last_log_index = peer.last_log_index;
                             local_peer.last_log_term = peer.last_log_term;
-                            local_peer.update_heartbeat();
+                            if local_peer.update_heartbeat() {
+                                // This peer reconnected
+                                if pos != 0 {
+                                    local_peer.dispatch_request(rpc::Request::Ping).await;
+                                } else {
+                                    do_full_sync = true;
+                                }
+                            }
 
-                            if local_peer.generation != peer.generation && !do_full_sync {
+                            if (local_peer.generation != peer.generation) && !do_full_sync {
                                 do_full_sync = true;
                             }
                         }
@@ -352,7 +359,7 @@ where
         }
     }
 
-    pub fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
+    pub async fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
         let mut remove_seeds = false;
         let mut peers_changed = false;
         let is_leading = self.is_leading();
@@ -372,7 +379,10 @@ where
                                 local_peer.epoch = peer.epoch;
                                 local_peer.last_log_index = peer.last_log_index;
                                 local_peer.last_log_term = peer.last_log_term;
-                                local_peer.update_heartbeat();
+                                if local_peer.update_heartbeat() {
+                                    // This peer reconnected
+                                    local_peer.dispatch_request(rpc::Request::Ping).await;
+                                }
                             }
 
                             // Update peer info if generationId has changed and
@@ -380,14 +390,16 @@ where
                             if update_peer_info {
                                 if local_peer.addr != peer.addr {
                                     // Peer changed its address, reconnect.
-                                    local_peer.addr = peer.addr;
-                                    local_peer.tx = spawn_peer_rpc(
+                                    let (tx, online_rx) = spawn_peer_rpc(
                                         self.tx.clone(),
                                         self.peer_id,
                                         self.key.clone(),
                                         peer.peer_id,
                                         peer.addr,
                                     );
+                                    local_peer.addr = peer.addr;
+                                    local_peer.tx = tx;
+                                    local_peer.online_rx = online_rx;
                                 }
                                 local_peer.generation = peer.generation;
                                 local_peer.shard_id = peer.shard_id;
@@ -463,12 +475,12 @@ where
         result
     }
 
-    pub fn handle_update_peers(
+    pub async fn handle_update_peers(
         &mut self,
         response_tx: oneshot::Sender<rpc::Response>,
         peers: Vec<PeerInfo>,
     ) {
-        self.sync_peer_info(peers);
+        self.sync_peer_info(peers).await;
         response_tx
             .send(rpc::Response::UpdatePeers {
                 peers: self.build_peer_info(),
@@ -478,11 +490,17 @@ where
 }
 
 impl Peer {
-    fn update_heartbeat(&mut self) {
+    fn update_heartbeat(&mut self) -> bool {
+        let hb_diff =
+            std::cmp::min(self.last_heartbeat.elapsed().as_millis(), 60 * 60 * 1000) as u64;
+        self.last_heartbeat = Instant::now();
+
         if !self.is_alive() {
             debug!("Peer {} is back online.", self.addr);
             self.state = State::Alive;
+            return true;
         }
+
         self.hb_window_pos = (self.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;
 
         if !self.hb_is_full && self.hb_window_pos == 0 && self.hb_sum > 0 {
@@ -495,13 +513,11 @@ impl Peer {
             self.hb_sq_sum -= hb_window.saturating_mul(hb_window);
         }
 
-        let hb_diff =
-            std::cmp::min(self.last_heartbeat.elapsed().as_millis(), 60 * 60 * 1000) as u64;
         self.hb_window[self.hb_window_pos] = hb_diff as u32;
         self.hb_sum += hb_diff;
         self.hb_sq_sum += hb_diff.saturating_mul(hb_diff);
 
-        self.last_heartbeat = Instant::now();
+        false
     }
 
     /*
