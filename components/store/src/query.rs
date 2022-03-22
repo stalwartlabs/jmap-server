@@ -111,17 +111,13 @@ where
     where
         U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
     {
-        let mut document_ids = self
-            .get_document_ids_used(request.account_id, request.collection)?
+        let document_ids = self
+            .get_document_ids(request.account_id, request.collection)?
             .unwrap_or_else(RoaringBitmap::new);
-        let tombstoned_ids = self.get_tombstoned_ids(request.account_id, request.collection)?;
 
         let filter = match request.filter {
             Filter::Operator(filter) => filter,
             Filter::None => {
-                if let Some(tombstoned_ids) = tombstoned_ids {
-                    document_ids.bitxor_assign(tombstoned_ids)
-                }
                 return Ok(StoreIterator::new(
                     self,
                     document_ids.clone(),
@@ -130,9 +126,6 @@ where
                 ));
             }
             Filter::DocumentSet(set) => {
-                if let Some(tombstoned_ids) = tombstoned_ids {
-                    document_ids.bitxor_assign(tombstoned_ids)
-                }
                 request.filter = Filter::None;
                 return Ok(StoreIterator::new(self, set, document_ids, request));
             }
@@ -402,15 +395,12 @@ where
             }
         }
 
-        let mut results = state.bm.unwrap_or_else(RoaringBitmap::new);
-        if let Some(tombstoned_ids) = tombstoned_ids {
-            document_ids.bitxor_assign(tombstoned_ids);
-            if !results.is_empty() {
-                results.bitand_assign(&document_ids);
-            }
-        }
-
-        Ok(StoreIterator::new(self, results, document_ids, request))
+        Ok(StoreIterator::new(
+            self,
+            state.bm.unwrap_or_else(RoaringBitmap::new),
+            document_ids,
+            request,
+        ))
     }
 }
 

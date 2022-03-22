@@ -7,7 +7,7 @@ use std::{
 use nlp::Language;
 use store::{
     batch::{Document, WriteBatch},
-    field::{FieldOptions, FullText, Text},
+    field::{FieldOptions, Text},
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     Collection, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
     TextQuery,
@@ -102,7 +102,7 @@ where
                                     if !field.is_empty() {
                                         builder.text(
                                             pos as u8,
-                                            Text::Tokenized(field.to_lowercase()),
+                                            Text::tokenized(field.to_lowercase()),
                                             FieldOptions::Sort,
                                         );
                                     }
@@ -111,16 +111,16 @@ where
                                     if !field.is_empty() {
                                         builder.text(
                                             pos as u8,
-                                            Text::Full(FullText::new_lang(
+                                            Text::fulltext_lang(
                                                 field.to_lowercase(),
                                                 Language::English,
-                                            )),
+                                            ),
                                             FieldOptions::Sort,
                                         );
                                     }
                                 }
                                 FieldType::Integer => {
-                                    builder.integer(
+                                    builder.number(
                                         pos as u8,
                                         field.parse::<u32>().unwrap_or(0),
                                         FieldOptions::StoreAndSort,
@@ -130,7 +130,7 @@ where
                                     if !field.is_empty() {
                                         builder.text(
                                             pos as u8,
-                                            Text::Keyword(field.to_lowercase()),
+                                            Text::keyword(field.to_lowercase()),
                                             FieldOptions::StoreAndSort,
                                         );
                                     }

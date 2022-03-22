@@ -11,12 +11,10 @@ use jmap::{
 };
 
 use crate::{
-    import::Bincoded,
     parse::{
         header_to_jmap_address, header_to_jmap_date, header_to_jmap_id, header_to_jmap_text,
         header_to_jmap_url,
     },
-    query::MailboxId,
     HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
     JMAPMailHeaders, JMAPMailProperties, MessageData, MessageField, MessageOutline, MimePart,
     MimePartType, MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
@@ -177,7 +175,7 @@ where
                 .iter()
                 .take(self.config.get_max_results)
                 .collect::<Vec<DocumentId>>();
-            self.get_multi_document_value(
+            self.get_multi_document_tag_id(
                 request.account_id,
                 Collection::Mail,
                 document_ids.iter().copied(),
@@ -186,7 +184,7 @@ where
             .into_iter()
             .zip(document_ids)
             .filter_map(|(thread_id, document_id)| {
-                JMAPId::from_parts(thread_id?, document_id).into()
+                JMAPId::from_parts(thread_id?.document_id, document_id).into()
             })
             .collect::<Vec<u64>>()
         } else {
@@ -384,21 +382,20 @@ where
                             JSONValue::String((jmap_id.get_prefix_id() as JMAPId).to_jmap_string())
                         }
                         JMAPMailProperties::MailboxIds => {
-                            if let Some(mailboxes) = self
-                                .get_document_value::<Bincoded<Vec<MailboxId>>>(
-                                    request.account_id,
-                                    Collection::Mail,
-                                    document_id,
-                                    MessageField::Mailbox.into(),
-                                )?
-                            {
+                            if let Some(mailboxes) = self.get_document_tags(
+                                request.account_id,
+                                Collection::Mail,
+                                document_id,
+                                MessageField::Mailbox.into(),
+                            )? {
                                 JSONValue::Object(
                                     mailboxes
                                         .items
                                         .into_iter()
-                                        .map(|mailbox_id| {
+                                        .map(|mailbox| {
                                             (
-                                                (mailbox_id as JMAPId).to_jmap_string(),
+                                                (mailbox.unwrap_id().unwrap() as JMAPId)
+                                                    .to_jmap_string(),
                                                 JSONValue::Bool(true),
                                             )
                                         })
@@ -409,7 +406,7 @@ where
                             }
                         }
                         JMAPMailProperties::Keywords => {
-                            if let Some(tags) = self.get_document_value::<Bincoded<Vec<Tag>>>(
+                            if let Some(tags) = self.get_document_tags(
                                 request.account_id,
                                 Collection::Mail,
                                 document_id,

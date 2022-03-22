@@ -572,6 +572,49 @@ impl TermIndex {
             None
         })
     }
+
+    pub fn uncompress_all_terms(&self) -> Result<Vec<UncompressedTerms>> {
+        let mut result = Vec::with_capacity(self.items.len());
+        for item in &self.items {
+            let mut term_pos = 0;
+            let mut byte_pos = 0;
+            let mut terms = UncompressedTerms {
+                field_id: item.field_id,
+                exact_terms: HashSet::new(),
+                stemmed_terms: HashSet::new(),
+            };
+
+            while term_pos < item.terms_len {
+                let (bytes_read, chunk) = self.uncompress_chunk(
+                    item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
+                    (item.terms_len * 4) - (term_pos * 4),
+                    None,
+                )?;
+
+                byte_pos += bytes_read;
+
+                for encoded_term in chunk.chunks_exact(4) {
+                    let term_id = ((encoded_term[0] as u64) << 32) | encoded_term[1] as u64;
+                    let term_id_stemmed = ((encoded_term[2] as u64) << 32) | encoded_term[3] as u64;
+
+                    terms.exact_terms.insert(term_id);
+                    if term_id != term_id_stemmed {
+                        terms.stemmed_terms.insert(term_id_stemmed);
+                    }
+                    term_pos += 1;
+                }
+            }
+            result.push(terms);
+        }
+        Ok(result)
+    }
+}
+
+#[derive(Default)]
+pub struct UncompressedTerms {
+    pub field_id: FieldId,
+    pub exact_terms: HashSet<TermId>,
+    pub stemmed_terms: HashSet<TermId>,
 }
 
 #[cfg(test)]
@@ -725,6 +768,8 @@ mod tests {
 
         let compressed_term_index = builder.compress();
         let term_index = TermIndex::deserialize(&compressed_term_index[..]).unwrap();
+
+        assert_eq!(15, term_index.uncompress_all_terms().unwrap().len());
 
         let tests = [
             (vec!["thomas", "clinton"], None, true, 4),

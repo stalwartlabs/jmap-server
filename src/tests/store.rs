@@ -42,15 +42,6 @@ fn term_id() {
 }
 
 #[test]
-fn tombstones() {
-    let (db, temp_dir) = init_db("strdb_tombstones", true);
-
-    store_test::db_tombstones::tombstones(db);
-
-    destroy_temp_dir(temp_dir);
-}
-
-#[test]
 fn blobs() {
     let (db, temp_dir) = init_db("strdb_blobs", true);
 

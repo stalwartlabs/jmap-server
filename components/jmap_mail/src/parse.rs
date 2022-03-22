@@ -24,7 +24,7 @@ use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
 use store::{
     batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
     blob::BlobIndex,
-    field::{FieldOptions, FullText, Text},
+    field::{FieldOptions, Text},
     leb128::Leb128,
     serialize::StoreSerialize,
     AccountId, Integer, JMAPStore, LongInteger, Store, StoreError, Tag,
@@ -702,7 +702,7 @@ pub fn build_message_document(
         .properties
         .insert(JMAPMailProperties::Size, message.raw_message.len().into());
 
-    document.integer(
+    document.number(
         MessageField::Size,
         message.raw_message.len() as Integer,
         FieldOptions::Sort,
@@ -717,7 +717,7 @@ pub fn build_message_document(
             JSONValue::Null
         },
     );
-    document.long_int(
+    document.number(
         MessageField::ReceivedAt,
         message_outline.received_at as LongInteger,
         FieldOptions::Sort,
@@ -864,7 +864,7 @@ pub fn build_message_document(
 
                     document.text(
                         RfcHeader::Subject,
-                        Text::Full(FullText::new_lang(subject.to_string(), language)),
+                        Text::fulltext_lang(subject.to_string(), language),
                         FieldOptions::None,
                     );
 
@@ -944,7 +944,7 @@ pub fn build_message_document(
 
                 document.text(
                     field.clone(),
-                    Text::Full(FullText::new(text, &mut language_detector)),
+                    Text::fulltext(text, &mut language_detector),
                     if field == MessageField::Body {
                         let blob_index = total_blobs;
                         total_blobs += 1;
@@ -956,7 +956,7 @@ pub fn build_message_document(
 
                 document.text(
                     field,
-                    Text::Default(html.body.into_owned()),
+                    Text::not_indexed(html.body.into_owned()),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
 
@@ -982,7 +982,7 @@ pub fn build_message_document(
                         let html_len = html.len();
                         document.text(
                             MessageField::Body,
-                            Text::Default(html),
+                            Text::not_indexed(html),
                             FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                         );
                         extra_mime_parts.push(MimePart::new_html(
@@ -1003,10 +1003,7 @@ pub fn build_message_document(
 
                 document.text(
                     field,
-                    Text::Full(FullText::new(
-                        text.body.into_owned(),
-                        &mut language_detector,
-                    )),
+                    Text::fulltext(text.body.into_owned(), &mut language_detector),
                     FieldOptions::StoreAsBlob(total_blobs + MESSAGE_PARTS),
                 );
 
@@ -1146,7 +1143,7 @@ pub fn build_message_document(
     );
 
     if has_attachments {
-        document.tag(MessageField::Attachment, Tag::Id(0), FieldOptions::None);
+        document.tag(MessageField::Attachment, Tag::Id(0));
     }
 
     document.binary(
@@ -1196,7 +1193,7 @@ fn parse_attached_message(
     if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
         document.text(
             MessageField::Attachment,
-            Text::Full(FullText::new(subject.into_owned(), language_detector)),
+            Text::fulltext(subject.into_owned(), language_detector),
             FieldOptions::None,
         );
     }
@@ -1205,14 +1202,14 @@ fn parse_attached_message(
             MessagePart::Text(text) => {
                 document.text(
                     MessageField::Attachment,
-                    Text::Full(FullText::new(text.body.into_owned(), language_detector)),
+                    Text::fulltext(text.body.into_owned(), language_detector),
                     FieldOptions::None,
                 );
             }
             MessagePart::Html(html) => {
                 document.text(
                     MessageField::Attachment,
-                    Text::Full(FullText::new(html_to_text(&html.body), language_detector)),
+                    Text::fulltext(html_to_text(&html.body), language_detector),
                     FieldOptions::None,
                 );
             }
@@ -1229,7 +1226,7 @@ fn parse_address(document: &mut Document, header_name: RfcHeader, address: &Addr
         if addr.len() <= MAX_TOKEN_LENGTH {
             document.text(
                 header_name,
-                Text::Keyword(addr.to_lowercase()),
+                Text::keyword(addr.to_lowercase()),
                 FieldOptions::None,
             );
         }
@@ -1258,7 +1255,7 @@ fn parse_text(document: &mut Document, header_name: RfcHeader, text: &str) {
             if text.len() <= MAX_TOKEN_LENGTH {
                 document.text(
                     header_name,
-                    Text::Keyword(text.to_lowercase()),
+                    Text::keyword(text.to_lowercase()),
                     FieldOptions::None,
                 );
             }
@@ -1269,7 +1266,7 @@ fn parse_text(document: &mut Document, header_name: RfcHeader, text: &str) {
         _ => {
             document.text(
                 header_name,
-                Text::Tokenized(text.to_string()),
+                Text::tokenized(text.to_string()),
                 FieldOptions::None,
             );
         }
@@ -1280,7 +1277,7 @@ fn parse_content_type(document: &mut Document, header_name: RfcHeader, content_t
     if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
         document.text(
             header_name,
-            Text::Keyword(content_type.c_type.to_string()),
+            Text::keyword(content_type.c_type.to_string()),
             FieldOptions::None,
         );
     }
@@ -1288,7 +1285,7 @@ fn parse_content_type(document: &mut Document, header_name: RfcHeader, content_t
         if subtype.len() <= MAX_TOKEN_LENGTH {
             document.text(
                 header_name,
-                Text::Keyword(subtype.to_string()),
+                Text::keyword(subtype.to_string()),
                 FieldOptions::None,
             );
         }
@@ -1298,13 +1295,13 @@ fn parse_content_type(document: &mut Document, header_name: RfcHeader, content_t
             if key == "name" || key == "filename" {
                 document.text(
                     header_name,
-                    Text::Tokenized(value.to_string()),
+                    Text::tokenized(value.to_string()),
                     FieldOptions::None,
                 );
             } else if value.len() <= MAX_TOKEN_LENGTH {
                 document.text(
                     header_name,
-                    Text::Keyword(value.to_lowercase()),
+                    Text::keyword(value.to_lowercase()),
                     FieldOptions::None,
                 );
             }
@@ -1365,7 +1362,7 @@ fn add_addr_sort(document: &mut Document, header_name: RfcHeader, header_value: 
                 }
             }
         }
-        document.text(header_name, Text::Tokenized(text), FieldOptions::Sort);
+        document.text(header_name, Text::tokenized(text), FieldOptions::Sort);
     };
 }
 
@@ -1397,7 +1394,7 @@ fn parse_header(document: &mut Document, header_name: RfcHeader, header_value: &
         }
         HeaderValue::DateTime(date_time) => {
             if date_time.is_valid() {
-                document.long_int(
+                document.number(
                     header_name,
                     date_time.to_timestamp().unwrap() as u64,
                     FieldOptions::Sort,

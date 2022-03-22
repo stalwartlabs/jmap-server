@@ -16,12 +16,10 @@ use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::batch::{Document, WriteBatch};
-use store::field::FieldOptions;
 use store::roaring::RoaringBitmap;
-use store::serialize::StoreSerialize;
-use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError, Tag};
+use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
 
-use crate::import::{Bincoded, JMAPMailImport};
+use crate::import::JMAPMailImport;
 use crate::parse::get_message_blob;
 use crate::query::MailboxId;
 use crate::{
@@ -224,8 +222,10 @@ where
                                                 value,
                                             ) {
                                                 (Some(mailbox_id), JSONValue::Bool(true)) => {
-                                                    mailbox_op_list
-                                                        .insert(mailbox_id.get_document_id(), true);
+                                                    mailbox_op_list.insert(
+                                                        Tag::Id(mailbox_id.get_document_id()),
+                                                        true,
+                                                    );
                                                 }
                                                 (None, _) => {
                                                     not_updated.insert(
@@ -292,8 +292,10 @@ where
                                             if let Some(mailbox_id) =
                                                 JMAPId::from_jmap_string(property.as_ref())
                                             {
-                                                mailbox_op_list
-                                                    .insert(mailbox_id.get_document_id(), false);
+                                                mailbox_op_list.insert(
+                                                    Tag::Id(mailbox_id.get_document_id()),
+                                                    false,
+                                                );
                                             }
                                         } else {
                                             keyword_op_list.insert(Tag::Text(property), false);
@@ -304,8 +306,10 @@ where
                                             if let Some(mailbox_id) =
                                                 JMAPId::from_jmap_string(property.as_ref())
                                             {
-                                                mailbox_op_list
-                                                    .insert(mailbox_id.get_document_id(), true);
+                                                mailbox_op_list.insert(
+                                                    Tag::Id(mailbox_id.get_document_id()),
+                                                    true,
+                                                );
                                             }
                                         } else {
                                             keyword_op_list.insert(Tag::Text(property), true);
@@ -358,7 +362,7 @@ where
 
                     // Deserialize mailbox list
                     let current_mailboxes = self
-                        .get_document_value::<Bincoded<Vec<MailboxId>>>(
+                        .get_document_tags(
                             request.account_id,
                             Collection::Mail,
                             document_id,
@@ -367,50 +371,36 @@ where
                         .map(|current_mailboxes| current_mailboxes.items)
                         .unwrap_or_default();
 
-                    let mut new_mailboxes = Vec::with_capacity(std::cmp::max(
-                        mailbox_op_list.len(),
-                        current_mailboxes.len(),
-                    ));
+                    let mut has_mailboxes = false;
 
-                    for mailbox_id in &current_mailboxes {
+                    for mailbox in &current_mailboxes {
                         if mailbox_op_clear_all {
                             // Untag mailbox unless it is in the list of mailboxes to tag
-                            if !mailbox_op_list.get(mailbox_id).unwrap_or(&false) {
-                                document.tag(
-                                    MessageField::Mailbox,
-                                    Tag::Id(*mailbox_id),
-                                    FieldOptions::Clear,
-                                );
-                                changed_mailboxes.insert(*mailbox_id);
+                            if !mailbox_op_list.get(mailbox).unwrap_or(&false) {
+                                document.untag(MessageField::Mailbox, mailbox.clone());
+                                changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                             }
-                        } else if !mailbox_op_list.get(mailbox_id).unwrap_or(&true) {
+                        } else if !mailbox_op_list.get(mailbox).unwrap_or(&true) {
                             // Untag mailbox if is marked for untagging
-                            document.tag(
-                                MessageField::Mailbox,
-                                Tag::Id(*mailbox_id),
-                                FieldOptions::Clear,
-                            );
-                            changed_mailboxes.insert(*mailbox_id);
+                            document.untag(MessageField::Mailbox, mailbox.clone());
+                            changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                         } else {
                             // Keep mailbox in the list
-                            new_mailboxes.push(*mailbox_id);
+                            has_mailboxes = true;
                         }
                     }
 
-                    for (mailbox_id, do_create) in mailbox_op_list {
+                    for (mailbox, do_create) in mailbox_op_list {
                         if do_create {
+                            let mailbox_id = mailbox.unwrap_id().unwrap_or_default();
                             // Make sure the mailbox exists
                             if mailbox_ids.contains(mailbox_id) {
                                 // Tag mailbox if it is not already tagged
-                                if !current_mailboxes.contains(&mailbox_id) {
-                                    document.tag(
-                                        MessageField::Mailbox,
-                                        Tag::Id(mailbox_id),
-                                        FieldOptions::None,
-                                    );
+                                if !current_mailboxes.contains(&mailbox) {
+                                    document.tag(MessageField::Mailbox, mailbox);
                                     changed_mailboxes.insert(mailbox_id);
                                 }
-                                new_mailboxes.push(mailbox_id);
+                                has_mailboxes = true;
                             } else {
                                 not_updated.insert(
                                     jmap_id_str,
@@ -425,7 +415,7 @@ where
                     }
 
                     // Messages have to be in at least one mailbox
-                    if new_mailboxes.is_empty() {
+                    if !has_mailboxes {
                         not_updated.insert(
                             jmap_id_str,
                             JSONValue::new_invalid_property(
@@ -435,21 +425,12 @@ where
                         );
                         continue 'main;
                     }
-
-                    // Serialize new mailbox list
-                    document.binary(
-                        MessageField::Mailbox,
-                        Bincoded::new(new_mailboxes).serialize().ok_or_else(|| {
-                            StoreError::SerializeError("Failed to serialize mailbox list".into())
-                        })?,
-                        FieldOptions::Store,
-                    );
                 }
 
                 if !keyword_op_list.is_empty() || keyword_op_clear_all {
                     // Deserialize current keywords
                     let current_keywords = self
-                        .get_document_value::<Bincoded<Vec<Tag>>>(
+                        .get_document_tags(
                             request.account_id,
                             Collection::Mail,
                             document_id,
@@ -458,21 +439,12 @@ where
                         .map(|tags| tags.items)
                         .unwrap_or_default();
 
-                    let mut new_keywords = Vec::with_capacity(std::cmp::max(
-                        keyword_op_list.len(),
-                        current_keywords.len(),
-                    ));
-
                     let mut unread_changed = false;
                     for keyword in &current_keywords {
                         if keyword_op_clear_all {
                             // Untag keyword unless it is in the list of keywords to tag
                             if !keyword_op_list.get(keyword).unwrap_or(&false) {
-                                document.tag(
-                                    MessageField::Keyword,
-                                    keyword.clone(),
-                                    FieldOptions::Clear,
-                                );
+                                document.untag(MessageField::Keyword, keyword.clone());
                                 if !unread_changed
                                     && matches!(keyword, Tag::Text(text) if text == "$seen" )
                                 {
@@ -482,20 +454,13 @@ where
                             }
                         } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
                             // Untag keyword if is marked for untagging
-                            document.tag(
-                                MessageField::Keyword,
-                                keyword.clone(),
-                                FieldOptions::Clear,
-                            );
+                            document.untag(MessageField::Keyword, keyword.clone());
                             if !unread_changed
                                 && matches!(keyword, Tag::Text(text) if text == "$seen" )
                             {
                                 //TODO use id
                                 unread_changed = true;
                             }
-                        } else {
-                            // Keep keyword in the list
-                            new_keywords.push(keyword.clone());
                         }
                     }
 
@@ -503,11 +468,7 @@ where
                         if do_create {
                             // Tag keyword if it is not already tagged
                             if !current_keywords.contains(&keyword) {
-                                document.tag(
-                                    MessageField::Keyword,
-                                    keyword.clone(),
-                                    FieldOptions::None,
-                                );
+                                document.tag(MessageField::Keyword, keyword.clone());
                                 if !unread_changed
                                     && matches!(&keyword, Tag::Text(text) if text == "$seen" )
                                 {
@@ -515,35 +476,22 @@ where
                                     unread_changed = true;
                                 }
                             }
-                            new_keywords.push(keyword);
                         }
                     }
 
                     // Mark mailboxes as changed if the message is tagged/untagged with $seen
                     if unread_changed {
-                        if let Some(current_mailboxes) = self
-                            .get_document_value::<Bincoded<Vec<MailboxId>>>(
-                                //TODO use StoreDeserialize
-                                request.account_id,
-                                Collection::Mail,
-                                document_id,
-                                MessageField::Mailbox.into(),
-                            )?
-                        {
-                            for mailbox_id in current_mailboxes.items {
-                                changed_mailboxes.insert(mailbox_id);
+                        if let Some(current_mailboxes) = self.get_document_tags(
+                            request.account_id,
+                            Collection::Mail,
+                            document_id,
+                            MessageField::Mailbox.into(),
+                        )? {
+                            for mailbox in current_mailboxes.items {
+                                changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                             }
                         }
                     }
-
-                    // Serialize new keywords list
-                    document.binary(
-                        MessageField::Keyword,
-                        Bincoded::new(new_keywords).serialize().ok_or_else(|| {
-                            StoreError::SerializeError("Failed to serialize keywords list".into())
-                        })?,
-                        FieldOptions::Store,
-                    );
                 }
 
                 // Log mailbox changes

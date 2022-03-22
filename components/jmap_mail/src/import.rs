@@ -9,56 +9,18 @@ use jmap::{
     JMAPError,
 };
 
-use serde::de::DeserializeOwned;
 use store::batch::Document;
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
-use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::tracing::debug;
 use store::{
     batch::WriteBatch,
-    bincode,
     field::{FieldOptions, Text},
     roaring::RoaringBitmap,
-    AccountId, Comparator, FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, ThreadId,
+    AccountId, Comparator, FieldValue, Filter, JMAPId, JMAPStore, Store, Tag, ThreadId,
 };
 use store::{Collection, JMAPIdPrefix};
 
 use crate::{parse::build_message_document, query::MailboxId, MessageField};
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Bincoded<T>
-where
-    T: Send + Sync,
-{
-    pub items: T,
-}
-
-impl<T> Bincoded<T>
-where
-    T: Send + Sync,
-{
-    pub fn new(items: T) -> Self {
-        Self { items }
-    }
-}
-
-impl<T> StoreSerialize for Bincoded<T>
-where
-    T: serde::Serialize + Send + Sync,
-{
-    fn serialize(&self) -> Option<Vec<u8>> {
-        bincode::serialize(&self).ok()
-    }
-}
-
-impl<T> StoreDeserialize for Bincoded<T>
-where
-    T: DeserializeOwned + Send + Sync,
-{
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        bincode::deserialize_from(bytes).ok()
-    }
-}
 
 pub struct JMAPMailImportRequest {
     pub account_id: AccountId,
@@ -115,8 +77,8 @@ pub trait JMAPMailImport {
         batch: &mut WriteBatch,
         account_id: AccountId,
         jmap_id: JMAPId,
-        mailbox_ids: Vec<MailboxId>,
-        keywords: Vec<Tag>,
+        mailbox_ids: HashSet<Tag>,
+        keywords: HashSet<Tag>,
         insert: Option<(Vec<u8>, i64)>,
     ) -> store::Result<()>;
 }
@@ -232,39 +194,15 @@ where
             build_message_document(&mut document, blob, received_at)?;
 
         // Add mailbox tags
-        if !mailbox_ids.is_empty() {
-            //TODO validate mailbox ids
-            let mailbox_ids = Bincoded::new(mailbox_ids);
-            document.binary(
-                MessageField::Mailbox,
-                mailbox_ids.serialize().ok_or_else(|| {
-                    StoreError::SerializeError("Failed to serialize mailbox list.".into())
-                })?,
-                FieldOptions::Store,
-            );
-            for mailbox_id in mailbox_ids.items {
-                document.tag(
-                    MessageField::Mailbox,
-                    Tag::Id(mailbox_id),
-                    FieldOptions::None,
-                );
-                batch.log_child_update(Collection::Mailbox, mailbox_id);
-            }
+        //TODO validate mailbox ids
+        for mailbox_id in mailbox_ids {
+            document.tag(MessageField::Mailbox, Tag::Id(mailbox_id));
+            batch.log_child_update(Collection::Mailbox, mailbox_id);
         }
 
         // Add keyword tags
-        if !keywords.is_empty() {
-            let keywords = Bincoded::new(keywords);
-            document.binary(
-                MessageField::Keyword,
-                keywords.serialize().ok_or_else(|| {
-                    StoreError::SerializeError("Failed to serialize keywords.".into())
-                })?,
-                FieldOptions::Store,
-            );
-            for keyword in keywords.items {
-                document.tag(MessageField::Keyword, keyword, FieldOptions::None);
-            }
+        for keyword in keywords {
+            document.tag(MessageField::Keyword, keyword);
         }
 
         // Lock account while threads are merged
@@ -274,7 +212,7 @@ where
         let thread_id = if !reference_ids.is_empty() {
             // Obtain thread ids for all matching document ids
             let thread_ids = self
-                .get_multi_document_value(
+                .get_multi_document_tag_id(
                     account_id,
                     Collection::Mail,
                     self.query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
@@ -306,7 +244,7 @@ where
                     MessageField::ThreadId.into(),
                 )?
                 .into_iter()
-                .flatten()
+                .filter_map(|id| Some(id?.document_id))
                 .collect::<HashSet<ThreadId>>();
 
             match thread_ids.len() {
@@ -340,21 +278,15 @@ where
         for reference_id in reference_ids {
             document.text(
                 MessageField::MessageIdRef,
-                Text::Keyword(reference_id),
+                Text::keyword(reference_id),
                 FieldOptions::None,
             );
         }
 
-        document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
-        document.tag(
-            MessageField::ThreadId,
-            Tag::Id(thread_id),
-            FieldOptions::None,
-        );
-
+        document.tag(MessageField::ThreadId, Tag::Id(thread_id));
         document.text(
             MessageField::ThreadName,
-            Text::Keyword(thread_name),
+            Text::keyword(thread_name),
             FieldOptions::Sort,
         );
 
@@ -422,17 +354,8 @@ where
         for (document_set, delete_thread_id) in document_sets {
             for document_id in document_set {
                 let mut document = Document::new(Collection::Mail, document_id);
-                document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
-                document.tag(
-                    MessageField::ThreadId,
-                    Tag::Id(thread_id),
-                    FieldOptions::None,
-                );
-                document.tag(
-                    MessageField::ThreadId,
-                    Tag::Id(delete_thread_id),
-                    FieldOptions::Clear,
-                );
+                document.tag(MessageField::ThreadId, Tag::Id(thread_id));
+                document.untag(MessageField::ThreadId, Tag::Id(delete_thread_id));
                 batch.log_move(
                     Collection::Mail,
                     JMAPId::from_parts(delete_thread_id, document_id),
@@ -452,68 +375,42 @@ where
         batch: &mut WriteBatch,
         account_id: AccountId,
         jmap_id: JMAPId,
-        mailbox_ids: Vec<MailboxId>,
-        keywords: Vec<Tag>,
+        mailboxes: HashSet<Tag>,
+        keywords: HashSet<Tag>,
         insert: Option<(Vec<u8>, i64)>,
     ) -> store::Result<()> {
         if let Some((raw_message, received_at)) = insert {
-            let mut document = Document::new(Collection::Mail, jmap_id.get_document_id());
+            let document_id = jmap_id.get_document_id();
+            let mut document = Document::new(Collection::Mail, document_id);
 
             // Parse and build message document
             let (reference_ids, thread_name) =
                 build_message_document(&mut document, raw_message, received_at.into())?;
 
             // Add mailbox tags
-            let mailbox_ids = Bincoded::new(mailbox_ids);
-            document.binary(
-                MessageField::Mailbox,
-                mailbox_ids.serialize().ok_or_else(|| {
-                    StoreError::SerializeError("Failed to serialize mailbox list.".into())
-                })?,
-                FieldOptions::Store,
-            );
-            for mailbox_id in mailbox_ids.items {
-                document.tag(
-                    MessageField::Mailbox,
-                    Tag::Id(mailbox_id),
-                    FieldOptions::None,
-                );
+            for mailbox in mailboxes {
+                document.tag(MessageField::Mailbox, mailbox);
             }
 
             // Add keyword tags
-            if !keywords.is_empty() {
-                let keywords = Bincoded::new(keywords);
-                document.binary(
-                    MessageField::Keyword,
-                    keywords.serialize().ok_or_else(|| {
-                        StoreError::SerializeError("Failed to serialize keywords.".into())
-                    })?,
-                    FieldOptions::Store,
-                );
-                for keyword in keywords.items {
-                    document.tag(MessageField::Keyword, keyword, FieldOptions::None);
-                }
+            for keyword in keywords {
+                document.tag(MessageField::Keyword, keyword);
             }
 
             for reference_id in reference_ids {
                 document.text(
                     MessageField::MessageIdRef,
-                    Text::Keyword(reference_id),
+                    Text::keyword(reference_id),
                     FieldOptions::None,
                 );
             }
 
             // Add thread id and name
             let thread_id = jmap_id.get_prefix_id();
-            document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
-            document.tag(
-                MessageField::ThreadId,
-                Tag::Id(thread_id),
-                FieldOptions::None,
-            );
+            document.tag(MessageField::ThreadId, Tag::Id(thread_id));
             document.text(
                 MessageField::ThreadName,
-                Text::Keyword(thread_name),
+                Text::keyword(thread_name),
                 FieldOptions::Sort,
             );
 
@@ -523,39 +420,24 @@ where
             let mut document = Document::new(Collection::Mail, document_id);
 
             // Process mailbox changes
-            if let Some(current_mailbox_ids) = self.get_document_value::<Bincoded<Vec<MailboxId>>>(
+            if let Some(current_mailboxes) = self.get_document_tags(
                 account_id,
                 Collection::Mail,
                 document_id,
                 MessageField::Mailbox.into(),
             )? {
-                if current_mailbox_ids.items != mailbox_ids {
-                    for current_mailbox_id in &current_mailbox_ids.items {
-                        if !mailbox_ids.contains(current_mailbox_id) {
-                            document.tag(
-                                MessageField::Mailbox,
-                                Tag::Id(*current_mailbox_id),
-                                FieldOptions::Clear,
-                            );
-                        }
-                    }
-                    for mailbox_id in &mailbox_ids {
-                        if !current_mailbox_ids.items.contains(mailbox_id) {
-                            document.tag(
-                                MessageField::Mailbox,
-                                Tag::Id(*mailbox_id),
-                                FieldOptions::None,
-                            );
+                if current_mailboxes.items != mailboxes {
+                    for current_mailbox in &current_mailboxes.items {
+                        if !mailboxes.contains(current_mailbox) {
+                            document.untag(MessageField::Mailbox, current_mailbox.clone());
                         }
                     }
 
-                    document.binary(
-                        MessageField::Mailbox,
-                        Bincoded::new(mailbox_ids).serialize().ok_or_else(|| {
-                            StoreError::SerializeError("Failed to serialize mailbox list.".into())
-                        })?,
-                        FieldOptions::Store,
-                    );
+                    for mailbox in mailboxes {
+                        if !current_mailboxes.contains(&mailbox) {
+                            document.tag(MessageField::Mailbox, mailbox);
+                        }
+                    }
                 }
             } else {
                 debug!(
@@ -566,45 +448,32 @@ where
             };
 
             // Process keyword changes
-            let current_keywords = if let Some(current_keywords) = self
-                .get_document_value::<Bincoded<Vec<Tag>>>(
-                    account_id,
-                    Collection::Mail,
-                    document_id,
-                    MessageField::Keyword.into(),
-                )? {
+            let current_keywords = if let Some(current_keywords) = self.get_document_tags(
+                account_id,
+                Collection::Mail,
+                document_id,
+                MessageField::Keyword.into(),
+            )? {
                 current_keywords.items
             } else {
-                vec![]
+                HashSet::new()
             };
             if current_keywords != keywords {
                 for current_keyword in &current_keywords {
                     if !keywords.contains(current_keyword) {
-                        document.tag(
-                            MessageField::Keyword,
-                            current_keyword.clone(),
-                            FieldOptions::Clear,
-                        );
+                        document.untag(MessageField::Keyword, current_keyword.clone());
                     }
                 }
-                let keywords = Bincoded::new(keywords);
-                document.binary(
-                    MessageField::Keyword,
-                    keywords.serialize().ok_or_else(|| {
-                        StoreError::SerializeError("Failed to serialize mailbox list.".into())
-                    })?,
-                    FieldOptions::Store,
-                );
 
-                for keyword in keywords.items {
+                for keyword in keywords {
                     if !current_keywords.contains(&keyword) {
-                        document.tag(MessageField::Keyword, keyword, FieldOptions::None);
+                        document.tag(MessageField::Keyword, keyword);
                     }
                 }
             }
 
             // Handle thread id changes
-            if let Some(current_thread_id) = self.get_document_value::<ThreadId>(
+            if let Some(current_thread_id) = self.get_document_tag_id(
                 account_id,
                 Collection::Mail,
                 document_id,
@@ -612,17 +481,8 @@ where
             )? {
                 let thread_id = jmap_id.get_prefix_id();
                 if thread_id != current_thread_id {
-                    document.integer(MessageField::ThreadId, thread_id, FieldOptions::Store);
-                    document.tag(
-                        MessageField::ThreadId,
-                        Tag::Id(thread_id),
-                        FieldOptions::None,
-                    );
-                    document.tag(
-                        MessageField::ThreadId,
-                        Tag::Id(current_thread_id),
-                        FieldOptions::Clear,
-                    );
+                    document.tag(MessageField::ThreadId, Tag::Id(thread_id));
+                    document.untag(MessageField::ThreadId, Tag::Id(current_thread_id));
                 }
             } else {
                 debug!(

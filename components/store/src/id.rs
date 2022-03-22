@@ -91,7 +91,7 @@ where
                 IdCacheKey::new(account_id, collection),
                 || {
                     Ok(Arc::new(Mutex::new(IdAssigner::new(
-                        self.get_document_ids_used(account_id, collection)?,
+                        self.get_document_ids(account_id, collection)?,
                         self.get_last_change_id(account_id, collection)?
                             .map(|id| id + 1)
                             .unwrap_or(0),
@@ -123,35 +123,12 @@ where
             .assign_document_id())
     }
 
-    pub fn get_document_ids_used(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-    ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(&BitmapKey::serialize_used_ids(account_id, collection))
-    }
-
-    pub fn get_tombstoned_ids(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-    ) -> crate::Result<Option<RoaringBitmap>> {
-        self.get_bitmap(&BitmapKey::serialize_tombstoned_ids(account_id, collection))
-    }
-
     pub fn get_document_ids(
         &self,
         account_id: AccountId,
         collection: Collection,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(mut docs) = self.get_document_ids_used(account_id, collection)? {
-            if let Some(tombstoned_docs) = self.get_tombstoned_ids(account_id, collection)? {
-                docs ^= tombstoned_docs;
-            }
-            Ok(Some(docs))
-        } else {
-            Ok(None)
-        }
+        self.get_bitmap(&BitmapKey::serialize_document_ids(account_id, collection))
     }
 }
 

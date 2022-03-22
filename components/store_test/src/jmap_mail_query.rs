@@ -19,7 +19,10 @@ use store::{
 };
 use store::{query::JMAPStoreQuery, JMAPIdPrefix};
 
-use crate::{db_insert_filter_sort::FIELDS, deflate_artwork_data};
+use crate::{
+    db_insert_filter_sort::FIELDS, deflate_artwork_data, jmap_mail_set::delete_email,
+    StoreCompareWith,
+};
 
 const MAX_THREADS: usize = 100;
 const MAX_MESSAGES: usize = 1000;
@@ -190,6 +193,20 @@ where
 
     println!("Running JMAP Mail query options tests...");
     test_query_options(mail_store, account_id);
+
+    println!("Deleting all messages...");
+    for message_id in mail_store
+        .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+            account_id,
+            Collection::Mail,
+            Filter::None,
+            Comparator::None,
+        ))
+        .unwrap()
+    {
+        delete_email(mail_store, account_id, message_id);
+    }
+    mail_store.assert_is_empty();
 }
 
 fn test_query<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
@@ -777,7 +794,7 @@ where
         .get_document_id();
 
     let thread_id = mail_store
-        .get_document_value(
+        .get_document_tag_id(
             account_id,
             Collection::Mail,
             doc_id,

@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use nlp::{
     lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
     stemmer::Stemmer,
@@ -6,51 +8,62 @@ use nlp::{
 };
 
 use crate::{
-    batch::MAX_TOKEN_LENGTH, blob::BlobIndex, DocumentId, FieldId, Float, Integer, LongInteger,
-    Tag, TagId,
+    batch::MAX_TOKEN_LENGTH,
+    blob::BlobIndex,
+    leb128::Leb128,
+    serialize::{StoreDeserialize, StoreSerialize, BM_TAG_ID, BM_TAG_STATIC, BM_TAG_TEXT},
+    DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
 };
 
 #[derive(Debug)]
 pub enum UpdateField {
     Text(Field<Text>),
     Binary(Field<Vec<u8>>),
-    Integer(Field<Integer>),
-    LongInteger(Field<LongInteger>),
+    Number(Field<Number>),
     Tag(Field<Tag>),
-    Float(Field<Float>),
 }
 
-impl UpdateField {
-    pub fn len(&self) -> usize {
+#[derive(Debug)]
+pub enum Number {
+    Integer(Integer),
+    LongInteger(LongInteger),
+    Float(Float),
+}
+
+impl Number {
+    pub fn to_be_bytes(&self) -> Vec<u8> {
         match self {
-            UpdateField::Text(t) => t.value.len(),
-            UpdateField::Binary(b) => b.value.len(),
-            UpdateField::Integer(i) => i.size_of(),
-            UpdateField::LongInteger(li) => li.size_of(),
-            UpdateField::Tag(t) => t.value.len(),
-            UpdateField::Float(f) => f.size_of(),
+            Number::Integer(i) => i.to_be_bytes().to_vec(),
+            Number::LongInteger(i) => i.to_be_bytes().to_vec(),
+            Number::Float(f) => f.to_be_bytes().to_vec(),
         }
     }
+}
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+impl From<LongInteger> for Number {
+    fn from(value: LongInteger) -> Self {
+        Number::LongInteger(value)
     }
+}
 
-    pub fn get_field(&self) -> &FieldId {
-        match self {
-            UpdateField::Text(t) => &t.field,
-            UpdateField::Binary(b) => &b.field,
-            UpdateField::Integer(i) => &i.field,
-            UpdateField::LongInteger(li) => &li.field,
-            UpdateField::Tag(t) => &t.field,
-            UpdateField::Float(f) => &f.field,
-        }
+impl From<Integer> for Number {
+    fn from(value: Integer) -> Self {
+        Number::Integer(value)
     }
+}
 
-    pub fn unwrap_text(&self) -> &Field<Text> {
+impl From<Float> for Number {
+    fn from(value: Float) -> Self {
+        Number::Float(value)
+    }
+}
+
+impl StoreSerialize for Number {
+    fn serialize(&self) -> Option<Vec<u8>> {
         match self {
-            UpdateField::Text(t) => t,
-            _ => panic!("unwrap_text called on non-text field"),
+            Number::Integer(i) => i.serialize(),
+            Number::LongInteger(i) => i.serialize(),
+            Number::Float(f) => f.serialize(),
         }
     }
 }
@@ -133,46 +146,252 @@ impl Tag {
         }
     }
 
+    pub fn unwrap_id(&self) -> Option<DocumentId> {
+        match self {
+            Tag::Id(id) => Some(*id),
+            _ => None,
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
-#[derive(Debug)]
-pub struct FullText {
-    pub text: String,
-    pub language: Language,
+#[derive(Default)]
+pub struct Tags {
+    pub items: HashSet<Tag>,
+    pub changed: bool,
 }
 
-impl FullText {
-    pub fn new(text: String, detector: &mut LanguageDetector) -> Self {
+impl Tags {
+    pub fn insert(&mut self, item: Tag) {
+        if self.items.insert(item) && !self.changed {
+            self.changed = true;
+        }
+    }
+
+    pub fn remove(&mut self, item: &Tag) {
+        if self.items.remove(item) && !self.changed {
+            self.changed = true;
+        }
+    }
+
+    pub fn contains(&self, item: &Tag) -> bool {
+        self.items.contains(item)
+    }
+
+    pub fn has_changed(&self) -> bool {
+        self.changed
+    }
+}
+
+impl StoreSerialize for Tags {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(self.items.len() * std::mem::size_of::<Tag>());
+        self.items.len().to_leb128_bytes(&mut bytes);
+        for tag in &self.items {
+            match tag {
+                Tag::Static(id) => {
+                    bytes.push(BM_TAG_STATIC);
+                    bytes.push(*id);
+                }
+                Tag::Id(id) => {
+                    bytes.push(BM_TAG_ID);
+                    (*id).to_leb128_bytes(&mut bytes);
+                }
+                Tag::Text(text) => {
+                    bytes.push(BM_TAG_TEXT);
+                    text.len().to_leb128_bytes(&mut bytes);
+                    bytes.extend_from_slice(text.as_bytes());
+                }
+            }
+        }
+        Some(bytes)
+    }
+}
+
+impl StoreDeserialize for Tags {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        let mut bytes_it = bytes.iter();
+        let total_tags = usize::from_leb128_it(&mut bytes_it)?;
+        let mut tags = HashSet::with_capacity(total_tags);
+        for _ in 0..total_tags {
+            match *bytes_it.next()? {
+                BM_TAG_STATIC => {
+                    tags.insert(Tag::Static(*bytes_it.next()?));
+                }
+                BM_TAG_ID => {
+                    tags.insert(Tag::Id(DocumentId::from_leb128_it(&mut bytes_it)?));
+                }
+                BM_TAG_TEXT => {
+                    let text_len = usize::from_leb128_it(&mut bytes_it)?;
+                    if text_len > 0 {
+                        let mut str_bytes = Vec::with_capacity(text_len);
+                        for _ in 0..text_len {
+                            str_bytes.push(*bytes_it.next()?);
+                        }
+                        tags.insert(Tag::Text(String::from_utf8(str_bytes).ok()?));
+                    } else {
+                        tags.insert(Tag::Text("".to_string()));
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        Some(Tags {
+            items: tags,
+            changed: false,
+        })
+    }
+}
+
+pub struct DocumentIdTag {
+    pub document_id: DocumentId,
+}
+
+impl StoreDeserialize for DocumentIdTag {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        debug_assert_eq!(bytes[1], BM_TAG_ID);
+        Some(DocumentIdTag {
+            document_id: DocumentId::from_leb128_bytes(bytes.get(2..)?)?.0,
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct Keywords {
+    pub items: HashMap<String, Vec<FieldId>>,
+    pub changed: bool,
+}
+
+impl Keywords {
+    pub fn insert(&mut self, keyword: String, field: FieldId) {
+        let fields = self.items.entry(keyword).or_insert_with(Vec::new);
+        if !fields.contains(&field) {
+            fields.push(field);
+            self.changed = true;
+        }
+    }
+
+    pub fn remove(&mut self, keyword: &str, field: &FieldId) {
+        if let Some(fields) = self.items.get_mut(keyword) {
+            if let Some(idx) = fields.iter().position(|f| *f == *field) {
+                if fields.len() > 1 {
+                    fields.remove(idx);
+                } else {
+                    self.items.remove(keyword);
+                }
+                self.changed = true;
+            }
+        }
+    }
+
+    pub fn has_changed(&self) -> bool {
+        self.changed
+    }
+}
+
+impl StoreSerialize for Keywords {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(self.items.len() * 10);
+        self.items.len().to_leb128_bytes(&mut bytes);
+        for (string, fields) in &self.items {
+            fields.len().to_leb128_bytes(&mut bytes);
+            for field in fields {
+                bytes.push(*field);
+            }
+            string.len().to_leb128_bytes(&mut bytes);
+            bytes.extend_from_slice(string.as_bytes());
+        }
+        Some(bytes)
+    }
+}
+
+impl StoreDeserialize for Keywords {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        let mut bytes_it = bytes.iter();
+        let total_strings = usize::from_leb128_it(&mut bytes_it)?;
+        let mut strings = HashMap::with_capacity(total_strings);
+        for _ in 0..total_strings {
+            let total_fields = usize::from_leb128_it(&mut bytes_it)?;
+            let mut fields = Vec::with_capacity(total_fields);
+            for _ in 0..total_fields {
+                fields.push(*bytes_it.next()?);
+            }
+            let text_len = usize::from_leb128_it(&mut bytes_it)?;
+            let text = if text_len > 0 {
+                let mut str_bytes = Vec::with_capacity(text_len);
+                for _ in 0..text_len {
+                    str_bytes.push(*bytes_it.next()?);
+                }
+                String::from_utf8(str_bytes).ok()?
+            } else {
+                "".to_string()
+            };
+            strings.insert(text, fields);
+        }
+
+        Some(Keywords {
+            items: strings,
+            changed: false,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum TextIndex {
+    None,
+    Keyword,
+    Tokenized,
+    Full(Language),
+}
+
+#[derive(Debug)]
+pub struct Text {
+    pub text: String,
+    pub index: TextIndex,
+}
+
+impl Text {
+    pub fn keyword(keyword: String) -> Self {
+        Text {
+            text: keyword,
+            index: TextIndex::Keyword,
+        }
+    }
+
+    pub fn tokenized(text: String) -> Self {
+        Text {
+            text,
+            index: TextIndex::Tokenized,
+        }
+    }
+
+    pub fn not_indexed(text: String) -> Self {
+        Text {
+            text,
+            index: TextIndex::None,
+        }
+    }
+
+    pub fn fulltext(text: String, detector: &mut LanguageDetector) -> Self {
         Self {
-            language: detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE),
+            index: TextIndex::Full(detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE)),
             text,
         }
     }
 
-    pub fn new_lang(text: String, language: Language) -> Self {
-        Self { text, language }
-    }
-}
-
-#[derive(Debug)]
-pub enum Text {
-    Default(String),
-    Keyword(String),
-    Tokenized(String),
-    Full(FullText),
-}
-
-impl Text {
-    pub fn len(&self) -> usize {
-        match self {
-            Text::Default(s) => s.len(),
-            Text::Keyword(s) => s.len(),
-            Text::Tokenized(s) => s.len(),
-            Text::Full(ft) => ft.text.len(),
+    pub fn fulltext_lang(text: String, language: Language) -> Self {
+        Self {
+            text,
+            index: TextIndex::Full(language),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.text.len()
     }
 
     pub fn is_empty(&self) -> bool {

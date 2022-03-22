@@ -453,7 +453,7 @@ where
 
                                 // Obtain thread ids for all messages to be deleted
                                 for (thread_id, message_doc_id) in self
-                                    .get_multi_document_value(
+                                    .get_multi_document_tag_id(
                                         request.account_id,
                                         Collection::Mail,
                                         message_doc_ids.iter().copied(),
@@ -466,7 +466,10 @@ where
                                         changes.delete_document(Collection::Mail, message_doc_id);
                                         changes.log_delete(
                                             Collection::Mail,
-                                            JMAPId::from_parts(thread_id, message_doc_id),
+                                            JMAPId::from_parts(
+                                                thread_id.document_id,
+                                                message_doc_id,
+                                            ),
                                         );
                                     }
                                 }
@@ -899,16 +902,16 @@ where
     ) -> store::Result<usize> {
         Ok(if let Some(document_ids) = document_ids {
             let mut thread_ids = HashSet::new();
-            self.get_multi_document_value(
+            self.get_multi_document_tag_id(
                 account_id,
                 Collection::Mail,
                 document_ids.into_iter(),
                 MessageField::ThreadId.into(),
             )?
             .into_iter()
-            .for_each(|thread_id: Option<DocumentId>| {
+            .for_each(|thread_id| {
                 if let Some(thread_id) = thread_id {
-                    thread_ids.insert(thread_id);
+                    thread_ids.insert(thread_id.document_id);
                 }
             });
             thread_ids.len()
@@ -1221,28 +1224,28 @@ fn build_mailbox_document(mailbox: Mailbox, document_id: DocumentId) -> store::R
 
     document.text(
         JMAPMailboxProperties::Name,
-        Text::Tokenized(mailbox.name.to_lowercase()),
+        Text::tokenized(mailbox.name.to_lowercase()),
         FieldOptions::Sort,
     );
 
     if let Some(mailbox_role) = mailbox.role.as_ref() {
         document.text(
             JMAPMailboxProperties::Role,
-            Text::Keyword(mailbox_role.clone()),
+            Text::keyword(mailbox_role.clone()),
             FieldOptions::None,
         );
         document.tag(
+            // TODO search by not empty, similarly to headers?
             JMAPMailboxProperties::Role,
             Tag::Static(0),
-            FieldOptions::None,
         );
     }
-    document.long_int(
+    document.number(
         JMAPMailboxProperties::ParentId,
         mailbox.parent_id,
         FieldOptions::Sort,
     );
-    document.integer(
+    document.number(
         JMAPMailboxProperties::SortOrder,
         mailbox.sort_order,
         FieldOptions::Sort,
@@ -1268,12 +1271,12 @@ fn build_changed_mailbox_document(
         if new_name != mailbox.name {
             document.text(
                 JMAPMailboxProperties::Name,
-                Text::Tokenized(mailbox.name.to_lowercase()),
+                Text::tokenized(mailbox.name.to_lowercase()),
                 FieldOptions::Clear,
             );
             document.text(
                 JMAPMailboxProperties::Name,
-                Text::Tokenized(new_name.to_lowercase()),
+                Text::tokenized(new_name.to_lowercase()),
                 FieldOptions::Sort,
             );
             mailbox.name = new_name;
@@ -1282,12 +1285,12 @@ fn build_changed_mailbox_document(
 
     if let Some(new_parent_id) = mailbox_changes.parent_id {
         if new_parent_id != mailbox.parent_id {
-            document.long_int(
+            document.number(
                 JMAPMailboxProperties::ParentId,
                 mailbox.parent_id,
                 FieldOptions::Clear,
             );
-            document.long_int(
+            document.number(
                 JMAPMailboxProperties::ParentId,
                 new_parent_id,
                 FieldOptions::Sort,
@@ -1301,7 +1304,7 @@ fn build_changed_mailbox_document(
             let has_role = if let Some(role) = mailbox.role {
                 document.text(
                     JMAPMailboxProperties::Role,
-                    Text::Keyword(role),
+                    Text::keyword(role),
                     FieldOptions::Clear,
                 );
                 true
@@ -1311,24 +1314,16 @@ fn build_changed_mailbox_document(
             if let Some(new_role) = &new_role {
                 document.text(
                     JMAPMailboxProperties::Role,
-                    Text::Keyword(new_role.clone()),
+                    Text::keyword(new_role.clone()),
                     FieldOptions::None,
                 );
                 if !has_role {
                     // New role was added, set tag.
-                    document.tag(
-                        JMAPMailboxProperties::Role,
-                        Tag::Static(0),
-                        FieldOptions::None,
-                    );
+                    document.tag(JMAPMailboxProperties::Role, Tag::Static(0));
                 }
             } else if has_role {
                 // Role was removed, clear tag.
-                document.tag(
-                    JMAPMailboxProperties::Role,
-                    Tag::Static(0),
-                    FieldOptions::Clear,
-                );
+                document.untag(JMAPMailboxProperties::Role, Tag::Static(0));
             }
             mailbox.role = new_role;
         }
@@ -1336,12 +1331,12 @@ fn build_changed_mailbox_document(
 
     if let Some(new_sort_order) = mailbox_changes.sort_order {
         if new_sort_order != mailbox.sort_order {
-            document.integer(
+            document.number(
                 JMAPMailboxProperties::SortOrder,
                 mailbox.sort_order,
                 FieldOptions::Clear,
             );
-            document.integer(
+            document.number(
                 JMAPMailboxProperties::SortOrder,
                 new_sort_order,
                 FieldOptions::Sort,

@@ -296,7 +296,8 @@ where
                             local_peer.last_log_term = peer.last_log_term;
                             if local_peer.update_heartbeat() {
                                 // This peer reconnected
-                                if pos != 0 {
+                                if pos != 0 && local_peer.is_in_shard(self.shard_id) {
+                                    // Wake up RPC process
                                     local_peer.dispatch_request(rpc::Request::Ping).await;
                                 } else {
                                     do_full_sync = true;
@@ -379,8 +380,10 @@ where
                                 local_peer.epoch = peer.epoch;
                                 local_peer.last_log_index = peer.last_log_index;
                                 local_peer.last_log_term = peer.last_log_term;
-                                if local_peer.update_heartbeat() {
-                                    // This peer reconnected
+                                if local_peer.update_heartbeat()
+                                    && local_peer.is_in_shard(self.shard_id)
+                                {
+                                    // Wake up RPC process
                                     local_peer.dispatch_request(rpc::Request::Ping).await;
                                 }
                             }
@@ -495,10 +498,19 @@ impl Peer {
             std::cmp::min(self.last_heartbeat.elapsed().as_millis(), 60 * 60 * 1000) as u64;
         self.last_heartbeat = Instant::now();
 
-        if !self.is_alive() {
-            debug!("Peer {} is back online.", self.addr);
-            self.state = State::Alive;
-            return true;
+        match self.state {
+            State::Seed | State::Offline | State::Leaving => {
+                debug!("Peer {} is back online.", self.addr);
+                self.state = State::Alive;
+
+                // Do not count stale heartbeats.
+                return true;
+            }
+            State::Suspected => {
+                debug!("Suspected peer {} was confirmed alive.", self.addr);
+                self.state = State::Alive;
+            }
+            State::Alive => (),
         }
 
         self.hb_window_pos = (self.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;

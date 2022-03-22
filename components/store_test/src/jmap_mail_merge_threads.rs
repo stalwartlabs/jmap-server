@@ -1,10 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use jmap_mail::{import::JMAPMailImport, MessageField};
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
 };
+
+use crate::{jmap_mail_set::delete_email, StoreCompareWith};
 
 pub enum ThreadTest {
     Message,
@@ -62,6 +64,8 @@ pub fn jmap_mail_merge_threads<T>(mail_store: &JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    let mut all_message_ids = HashMap::new();
+
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
         let base_test_num = ((base_test_num * 6) as u32) + 1;
         let mut messages = Vec::new();
@@ -154,6 +158,7 @@ where
                 ))
                 .unwrap()
                 .collect::<Vec<u64>>();
+            all_message_ids.insert(base_test_num + test_num, message_doc_ids.clone());
 
             assert_eq!(
                 message_doc_ids.len(),
@@ -168,7 +173,7 @@ where
             for message_doc_id in message_doc_ids {
                 thread_ids.insert(
                     mail_store
-                        .get_document_value(
+                        .get_document_tag_id(
                             base_test_num + test_num,
                             Collection::Mail,
                             message_doc_id.get_document_id(),
@@ -207,6 +212,15 @@ where
             assert_eq!(messages_per_thread_db, messages_per_thread);
         }
     }
+
+    // Delete all messages and make sure no keys are left in the store.
+    for (account_id, message_ids) in all_message_ids {
+        println!("Deleting messages from account {}...", account_id);
+        for message_id in message_ids {
+            delete_email(mail_store, account_id, message_id);
+        }
+    }
+    mail_store.assert_is_empty();
 }
 
 fn test_1() -> ThreadTest {

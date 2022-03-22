@@ -1,13 +1,13 @@
-use std::collections::{hash_map, HashMap};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::task::Poll;
 
 use actix_web::web;
 use futures::poll;
-use jmap_mail::import::{Bincoded, JMAPMailImport};
+use jmap_mail::import::JMAPMailImport;
 use jmap_mail::mailbox::{JMAPMailMailbox, JMAPMailboxProperties, Mailbox};
 use jmap_mail::query::MailboxId;
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
-use store::batch::{Document, WriteBatch};
+use store::batch::WriteBatch;
 use store::changes::ChangeId;
 use store::leb128::Leb128;
 use store::raft::{Entry, LogIndex, PendingChanges, RaftId, TermId};
@@ -15,7 +15,6 @@ use store::serialize::{LogKey, StoreDeserialize};
 use store::tracing::{debug, error};
 use store::{
     lz4_flex, AccountId, Collection, ColumnFamily, DocumentId, JMAPId, Store, StoreError, Tag,
-    ThreadId,
 };
 use store::{JMAPIdPrefix, WriteOperation};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -36,15 +35,15 @@ const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
 pub enum Change {
     InsertMail {
         jmap_id: JMAPId,
-        keywords: Vec<Tag>,
-        mailboxes: Vec<MailboxId>,
+        keywords: HashSet<Tag>,
+        mailboxes: HashSet<Tag>,
         received_at: i64,
         body: Vec<u8>,
     },
     UpdateMail {
         jmap_id: JMAPId,
-        keywords: Vec<Tag>,
-        mailboxes: Vec<MailboxId>,
+        keywords: HashSet<Tag>,
+        mailboxes: HashSet<Tag>,
     },
     UpdateMailbox {
         jmap_id: JMAPId,
@@ -55,9 +54,6 @@ pub enum Change {
         entry: Vec<u8>,
     },
     Delete {
-        document_id: DocumentId,
-    },
-    Tombstone {
         document_id: DocumentId,
     },
     Commit,
@@ -371,6 +367,13 @@ where
                             Response::SynchronizeLog {
                                 matched: match core.get_prev_raft_id(last_log).await {
                                     Ok(Some(matched)) => {
+                                        if commit_id != last_log {
+                                            println!(
+                                                "Commit index mismatch on sync: {:?} != {:?}",
+                                                commit_id, last_log
+                                            );
+                                        }
+
                                         core.set_up_to_date(matched == last_log);
                                         matched
                                     }
@@ -563,7 +566,6 @@ where
                 collection
             );
 
-            // TODO purge tombstones before reinserting id
             for change in changes {
                 match change {
                     Change::InsertMail {
@@ -622,10 +624,6 @@ where
                     Change::Delete { document_id } => {
                         document_batch.delete_document(collection, document_id)
                     }
-                    Change::Tombstone { document_id } => {
-                        document_batch.insert_document(Document::new(collection, document_id));
-                        document_batch.delete_document(collection, document_id)
-                    }
                     Change::Commit => {
                         do_commit = true;
                     }
@@ -679,6 +677,9 @@ where
                     core_.update_raft_index(last_log.index);
                     core_.store_changed(last_log).await;
 
+                    if commit_id != last_log {
+                        println!("Commit index mismatch: {:?} != {:?}", commit_id, last_log);
+                    }
                     if commit_id == last_log {
                         core_.set_up_to_date(true);
                     }
@@ -787,12 +788,6 @@ where
                 Change::Delete { document_id },
                 std::mem::size_of::<Change>(),
             ))
-        } else if let Some(document_id) = changes.tombstones.min() {
-            changes.tombstones.remove(document_id);
-            Some((
-                Change::Tombstone { document_id },
-                std::mem::size_of::<Change>(),
-            ))
         } else if let Some(change_id) = changes.changes.min() {
             changes.changes.remove(change_id);
             fetch_raw_change(core, changes.account_id, changes.collection, change_id).await?
@@ -862,32 +857,30 @@ where
     core.spawn_worker(move || {
         let mut item_size = std::mem::size_of::<Change>();
 
-        let mailboxes = if let Some(mailboxes) =
-            _core.store.get_document_value::<Bincoded<Vec<MailboxId>>>(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::Mailbox.into(),
-            )? {
+        let mailboxes = if let Some(mailboxes) = _core.store.get_document_tags(
+            account_id,
+            Collection::Mail,
+            document_id,
+            MessageField::Mailbox.into(),
+        )? {
             item_size += mailboxes.items.len() * std::mem::size_of::<MailboxId>();
             mailboxes.items
         } else {
             return Ok(None);
         };
-        let keywords = if let Some(keywords) =
-            _core.store.get_document_value::<Bincoded<Vec<Tag>>>(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::Keyword.into(),
-            )? {
+        let keywords = if let Some(keywords) = _core.store.get_document_tags(
+            account_id,
+            Collection::Mail,
+            document_id,
+            MessageField::Keyword.into(),
+        )? {
             item_size += keywords.items.iter().map(|tag| tag.len()).sum::<usize>();
             keywords.items
         } else {
-            vec![]
+            HashSet::new()
         };
 
-        let jmap_id = if let Some(thread_id) = _core.store.get_document_value::<ThreadId>(
+        let jmap_id = if let Some(thread_id) = _core.store.get_document_tag_id(
             account_id,
             Collection::Mail,
             document_id,

@@ -1,6 +1,7 @@
 use roaring::RoaringBitmap;
 
 use crate::{
+    field::{DocumentIdTag, Tags},
     serialize::{BitmapKey, StoreDeserialize, ValueKey},
     AccountId, Collection, ColumnFamily, DocumentId, FieldId, JMAPStore, Store, Tag,
 };
@@ -19,13 +20,10 @@ where
     where
         U: StoreDeserialize + 'static,
     {
-        match self.get_tombstoned_ids(account, collection)? {
-            Some(tombstoned_ids) if tombstoned_ids.contains(document) => Ok(None),
-            _ => self.db.get(
-                ColumnFamily::Values,
-                &ValueKey::serialize_value(account, collection, document, field),
-            ),
-        }
+        self.db.get(
+            ColumnFamily::Values,
+            &ValueKey::serialize_value(account, collection, document, field),
+        )
     }
 
     pub fn get_multi_document_value<U>(
@@ -95,5 +93,51 @@ where
         }
 
         Ok(result)
+    }
+
+    pub fn get_document_tags(
+        &self,
+        account: AccountId,
+        collection: Collection,
+        document: DocumentId,
+        field: FieldId,
+    ) -> crate::Result<Option<Tags>> {
+        self.db.get(
+            ColumnFamily::Values,
+            &ValueKey::serialize_document_tag_list(account, collection, document, field),
+        )
+    }
+
+    pub fn get_document_tag_id(
+        &self,
+        account: AccountId,
+        collection: Collection,
+        document: DocumentId,
+        field: FieldId,
+    ) -> crate::Result<Option<DocumentId>> {
+        Ok(self
+            .db
+            .get::<DocumentIdTag>(
+                ColumnFamily::Values,
+                &ValueKey::serialize_document_tag_list(account, collection, document, field),
+            )?
+            .map(|t| t.document_id))
+    }
+
+    pub fn get_multi_document_tag_id(
+        &self,
+        account: AccountId,
+        collection: Collection,
+        documents: impl Iterator<Item = DocumentId>,
+        field: FieldId,
+    ) -> crate::Result<Vec<Option<DocumentIdTag>>> {
+        self.db.multi_get(
+            ColumnFamily::Values,
+            documents
+                .map(|document| {
+                    ValueKey::serialize_document_tag_list(account, collection, document, field)
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }

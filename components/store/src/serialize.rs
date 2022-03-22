@@ -20,8 +20,7 @@ pub const BM_TERM_STEMMED: u8 = 2;
 pub const BM_TAG_ID: u8 = 3;
 pub const BM_TAG_TEXT: u8 = 4;
 pub const BM_TAG_STATIC: u8 = 5;
-pub const BM_USED_IDS: u8 = 6;
-pub const BM_TOMBSTONED_IDS: u8 = 7;
+pub const BM_DOCUMENT_IDS: u8 = 6;
 
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
 pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
@@ -34,6 +33,11 @@ pub struct IndexKey {}
 pub struct LogKey {}
 
 impl ValueKey {
+    pub const VALUE: u8 = 0;
+    pub const TAGS: u8 = 1;
+    pub const KEYWORDS: u8 = 2;
+    pub const BLOBS: u8 = 3;
+
     pub fn serialize_account(account: AccountId) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
         account.to_leb128_bytes(&mut bytes);
@@ -55,11 +59,40 @@ impl ValueKey {
         document: DocumentId,
         field: FieldId,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>());
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>() + 1);
         account.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
         document.to_leb128_bytes(&mut bytes);
         bytes.push(field);
+        bytes.push(ValueKey::VALUE);
+        bytes
+    }
+
+    pub fn serialize_document_tag_list(
+        account: AccountId,
+        collection: Collection,
+        document: DocumentId,
+        field: FieldId,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>() + 1);
+        account.to_leb128_bytes(&mut bytes);
+        bytes.push(collection.into());
+        document.to_leb128_bytes(&mut bytes);
+        bytes.push(field);
+        bytes.push(ValueKey::TAGS);
+        bytes
+    }
+
+    pub fn serialize_document_keywords_list(
+        account: AccountId,
+        collection: Collection,
+        document: DocumentId,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
+        account.to_leb128_bytes(&mut bytes);
+        bytes.push(collection.into());
+        document.to_leb128_bytes(&mut bytes);
+        bytes.push(ValueKey::KEYWORDS);
         bytes
     }
 
@@ -68,11 +101,11 @@ impl ValueKey {
         collection: Collection,
         document: DocumentId,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + BLOB_KEY.len());
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
         account.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
         document.to_leb128_bytes(&mut bytes);
-        bytes.extend_from_slice(BLOB_KEY);
+        bytes.push(ValueKey::BLOBS);
         bytes
     }
 
@@ -179,19 +212,11 @@ impl BitmapKey {
         bytes
     }
 
-    pub fn serialize_used_ids(account: AccountId, collection: Collection) -> Vec<u8> {
+    pub fn serialize_document_ids(account: AccountId, collection: Collection) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
         account.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
-        bytes.push(BM_USED_IDS);
-        bytes
-    }
-
-    pub fn serialize_tombstoned_ids(account: AccountId, collection: Collection) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
-        account.to_leb128_bytes(&mut bytes);
-        bytes.push(collection.into());
-        bytes.push(BM_TOMBSTONED_IDS);
+        bytes.push(BM_DOCUMENT_IDS);
         bytes
     }
 }

@@ -4,9 +4,11 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 use flate2::read::GzDecoder;
 use jmap_mail::{MessageData, MessageOutline, MESSAGE_DATA};
 use store::blob::BlobEntries;
+use store::field::Keywords;
 use store::leb128::Leb128;
 use store::serialize::{
-    DeserializeBigEndian, IndexKey, StoreDeserialize, BLOB_KEY, LAST_TERM_ID_KEY, TEMP_BLOB_KEY,
+    DeserializeBigEndian, IndexKey, StoreDeserialize, ValueKey, BLOB_KEY, LAST_TERM_ID_KEY,
+    TEMP_BLOB_KEY,
 };
 use store::{
     config::EnvSettings,
@@ -19,7 +21,6 @@ use store::{Collection, DocumentId};
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
 pub mod db_term_id;
-pub mod db_tombstones;
 pub mod jmap_changes;
 pub mod jmap_mail_get;
 pub mod jmap_mail_merge_threads;
@@ -93,6 +94,7 @@ pub fn destroy_temp_dir(temp_dir: PathBuf) {
 
 pub trait StoreCompareWith<T> {
     fn compare_with(&self, other: &JMAPStore<T>) -> BTreeMap<ColumnFamily, usize>;
+    fn assert_is_empty(&self);
 }
 
 const ASSERT: bool = true;
@@ -151,18 +153,15 @@ where
                                 assert_eq!(
                                     tagged_docs,
                                     other_tagged_docs,
-                                    "{:?}/{}/{:?}/{} -> used ids {:?}, tombstones: {:?}",
+                                    "{:?}/{}/{:?}/{} -> used ids {:?}",
                                     cf,
                                     account_id,
                                     collection,
                                     key.last().unwrap(),
                                     //String::from_utf8_lossy(&key[1..key.len() - 3]),
-                                    self.get_document_ids_used(account_id, collection)
+                                    self.get_document_ids(account_id, collection)
                                         .unwrap()
                                         .unwrap_or_default(),
-                                    self.get_tombstoned_ids(account_id, collection)
-                                        .unwrap()
-                                        .unwrap_or_default()
                                 );
                             } else if tagged_docs != other_tagged_docs {
                                 println!(
@@ -208,7 +207,7 @@ where
                                 let other_value =
                                     other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into();
                                 if value != other_value {
-                                    if key.ends_with(BLOB_KEY) {
+                                    if key.ends_with(&[ValueKey::BLOBS]) {
                                         let value = BlobEntries::deserialize(&value).unwrap();
                                         let other_value =
                                             BlobEntries::deserialize(&other_value).unwrap();
@@ -316,13 +315,19 @@ where
                                                 }
                                             }
                                         }
+                                    } else if key.ends_with(&[ValueKey::KEYWORDS]) {
+                                        let value = Keywords::deserialize(&value).unwrap();
+                                        let other_value =
+                                            Keywords::deserialize(&other_value).unwrap();
+                                        assert_eq!(value.items, other_value.items);
                                     } else {
                                         panic!(
-                                            "{:?}/{}/{:?}/{}, {:?} != {:?}",
+                                            "{:?}/{}/{:?}/{}, key[{:?}] {:?} != {:?}",
                                             cf,
                                             account_id,
                                             collection,
                                             document_id,
+                                            key,
                                             value,
                                             other_value,
                                         );
@@ -387,5 +392,53 @@ where
             }
         }
         total_keys
+    }
+
+    fn assert_is_empty(&self) {
+        let mut keys = BTreeMap::new();
+        for cf in [
+            ColumnFamily::Bitmaps,
+            ColumnFamily::Values,
+            ColumnFamily::Indexes,
+        ] {
+            let mut total_keys = 0;
+            for (key, value) in self
+                .db
+                .iterator(cf, &[0u8], store::Direction::Forward)
+                .unwrap()
+            {
+                total_keys += 1;
+                match cf {
+                    ColumnFamily::Bitmaps => {
+                        assert_eq!(
+                            RoaringBitmap::deserialize(&value).unwrap(),
+                            RoaringBitmap::new(),
+                            "{:?}",
+                            key
+                        );
+                    }
+                    ColumnFamily::Values
+                        if &key[..] != LAST_TERM_ID_KEY && (0..=9).contains(&key[0]) =>
+                    {
+                        if key.starts_with(BLOB_KEY) {
+                            assert_eq!(
+                                i64::deserialize(&value).unwrap(),
+                                0,
+                                "Blob key '{:?}' is not zero.",
+                                key
+                            );
+                        } else if !key.starts_with(TEMP_BLOB_KEY) {
+                            panic!("{:?} {:?}={:?}", cf, key, value);
+                        }
+                    }
+                    ColumnFamily::Indexes => {
+                        panic!("{:?} {:?}={:?}", cf, key, value);
+                    }
+                    _ => (),
+                }
+            }
+            keys.insert(cf, total_keys);
+        }
+        //println!("Store is empty: {:?}", keys);
     }
 }

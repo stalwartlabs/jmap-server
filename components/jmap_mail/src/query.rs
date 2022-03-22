@@ -6,7 +6,7 @@ use mail_parser::RfcHeader;
 use nlp::Language;
 use store::{
     roaring::RoaringBitmap, AccountId, Comparator, DocumentSetComparator, FieldComparator,
-    FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, TextQuery, ThreadId,
+    FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, TextQuery,
 };
 use store::{Collection, JMAPIdPrefix};
 
@@ -300,7 +300,7 @@ where
         let collapse_threads = request.arguments.collapse_threads;
         let filter_map_fnc = Some(|document_id| {
             Ok(
-                if let Some(thread_id) = self.get_document_value::<ThreadId>(
+                if let Some(thread_id) = self.get_document_tag_id(
                     account_id,
                     Collection::Mail,
                     document_id,
@@ -360,7 +360,7 @@ where
                     Collection::Mail,
                     MessageField::ThreadId.into(),
                     Tag::Id(
-                        self.get_document_value(
+                        self.get_document_tag_id(
                             account,
                             Collection::Mail,
                             tagged_doc_id,

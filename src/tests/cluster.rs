@@ -208,7 +208,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     // Test election.
-    println!("Testing raft elections on with a 5 nodes cluster...");
+    println!("Testing raft elections on a 5 nodes cluster...");
     assert_cluster_updated(&peers).await;
     assert_leader_elected(&peers).await.set_offline(true).await;
     assert_leader_elected(&peers).await.set_offline(true).await;
@@ -446,7 +446,7 @@ where
 async fn test_cluster() {
     let (peers, temp_dirs) = build_cluster(5, true).await;
 
-    test_election(peers.clone()).await;
+    //test_election(peers.clone()).await;
     test_distruibuted_thread_merge(peers.clone()).await;
     test_distruibuted_update_delete(peers.clone()).await;
 

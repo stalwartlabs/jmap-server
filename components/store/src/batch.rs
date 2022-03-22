@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use nlp::Language;
 
 use crate::{
-    field::{Field, FieldOptions, Text, UpdateField},
+    field::{Field, FieldOptions, Number, Text, TextIndex, UpdateField},
     leb128::Leb128,
-    AccountId, Collection, DocumentId, FieldId, Float, Integer, JMAPId, LongInteger, Tag,
+    AccountId, Collection, DocumentId, FieldId, JMAPId, Tag,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
@@ -18,6 +18,7 @@ pub struct Document {
     pub document_id: DocumentId,
     pub default_language: Language,
     pub fields: Vec<UpdateField>,
+    pub has_keywords: bool,
 }
 #[derive(Debug)]
 pub enum WriteAction {
@@ -50,6 +51,7 @@ impl Document {
             document_id,
             default_language: Language::English,
             fields: Vec::new(),
+            has_keywords: false,
         }
     }
 
@@ -58,6 +60,9 @@ impl Document {
     }
 
     pub fn text(&mut self, field: impl Into<FieldId>, value: Text, options: FieldOptions) {
+        if !self.has_keywords && matches!(value.index, TextIndex::Keyword | TextIndex::Tokenized) {
+            self.has_keywords = true;
+        }
         self.fields
             .push(UpdateField::Text(Field::new(field.into(), value, options)));
     }
@@ -70,35 +75,33 @@ impl Document {
         )));
     }
 
-    pub fn integer(&mut self, field: impl Into<FieldId>, value: Integer, options: FieldOptions) {
-        self.fields.push(UpdateField::Integer(Field::new(
-            field.into(),
-            value,
-            options,
-        )));
-    }
-
-    pub fn long_int(
+    pub fn number(
         &mut self,
         field: impl Into<FieldId>,
-        value: LongInteger,
+        value: impl Into<Number>,
         options: FieldOptions,
     ) {
-        self.fields.push(UpdateField::LongInteger(Field::new(
+        self.fields.push(UpdateField::Number(Field::new(
             field.into(),
-            value,
+            value.into(),
             options,
         )));
     }
 
-    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag, options: FieldOptions) {
-        self.fields
-            .push(UpdateField::Tag(Field::new(field.into(), value, options)));
+    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag) {
+        self.fields.push(UpdateField::Tag(Field::new(
+            field.into(),
+            value,
+            FieldOptions::None,
+        )));
     }
 
-    pub fn float(&mut self, field: impl Into<FieldId>, value: Float, options: FieldOptions) {
-        self.fields
-            .push(UpdateField::Float(Field::new(field.into(), value, options)));
+    pub fn untag(&mut self, field: impl Into<FieldId>, value: Tag) {
+        self.fields.push(UpdateField::Tag(Field::new(
+            field.into(),
+            value,
+            FieldOptions::Clear,
+        )));
     }
 
     pub fn is_empty(&self) -> bool {

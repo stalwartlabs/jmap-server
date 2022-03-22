@@ -378,6 +378,10 @@ impl Peer {
         self.state == gossip::State::Alive
     }
 
+    pub fn is_suspected(&self) -> bool {
+        self.state == gossip::State::Suspected
+    }
+
     pub fn is_healthy(&self) -> bool {
         matches!(self.state, gossip::State::Alive | gossip::State::Suspected)
     }
