@@ -1,13 +1,14 @@
+use std::convert::TryInto;
 use std::sync::atomic::Ordering;
 
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 use crate::leb128::{skip_leb128_it, Leb128};
-use crate::serialize::{LogKey, StoreSerialize};
+use crate::serialize::LogKey;
+use crate::{batch, Collections, JMAPId, JMAPIdPrefix, WriteOperation};
 use crate::{
     changes::ChangeId, AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
-use crate::{JMAPId, JMAPIdPrefix, WriteOperation};
 pub type TermId = u64;
 pub type LogIndex = u64;
 
@@ -35,59 +36,69 @@ impl RaftId {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct Entry {
-    pub raft_id: RaftId,
-    pub account_id: AccountId,
-    pub changes: Vec<Change>,
+pub struct RawEntry {
+    pub id: RaftId,
+    pub data: Vec<u8>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct Change {
-    pub change_id: ChangeId,
-    pub collection: Collection,
+#[derive(Debug)]
+pub enum Entry {
+    Item {
+        account_id: AccountId,
+        changed_collections: Collections,
+    },
+    Snapshot {
+        changed_accounts: RoaringBitmap,
+    },
 }
 
 impl Entry {
-    pub fn deserialize(value: &[u8], raft_id: RaftId) -> Option<Self> {
-        let mut value_it = value.iter();
-
-        let account_id = AccountId::from_leb128_it(&mut value_it)?;
-        let total_changes = usize::from_leb128_it(&mut value_it)?;
-        let mut changes = Vec::with_capacity(total_changes);
-
-        for _ in 0..total_changes {
-            changes.push(Change {
-                collection: (*value_it.next()?).into(),
-                change_id: ChangeId::from_leb128_it(&mut value_it)?,
-            });
-        }
-
-        Entry {
-            account_id,
-            raft_id,
-            changes,
+    pub fn deserialize(value: &[u8]) -> Option<Self> {
+        match *value.get(0)? {
+            batch::Change::ENTRY => Entry::Item {
+                account_id: AccountId::from_le_bytes(
+                    value
+                        .get(1..1 + std::mem::size_of::<AccountId>())?
+                        .try_into()
+                        .ok()?,
+                ),
+                changed_collections: u64::from_le_bytes(
+                    value
+                        .get(1 + std::mem::size_of::<AccountId>()..)?
+                        .try_into()
+                        .ok()?,
+                )
+                .into(),
+            },
+            batch::Change::SNAPSHOT => Entry::Snapshot {
+                changed_accounts: RoaringBitmap::deserialize_from(value.get(1..)?).ok()?,
+            },
+            _ => {
+                return None;
+            }
         }
         .into()
     }
-}
 
-impl StoreSerialize for Entry {
-    fn serialize(&self) -> Option<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(
-            std::mem::size_of::<AccountId>()
-                + std::mem::size_of::<usize>()
-                + (self.changes.len()
-                    * (std::mem::size_of::<ChangeId>() + std::mem::size_of::<Collection>())),
-        );
-        self.account_id.to_leb128_bytes(&mut bytes);
-        self.changes.len().to_leb128_bytes(&mut bytes);
+    pub fn next_account(&mut self) -> Option<(AccountId, Collections)> {
+        match self {
+            Entry::Item {
+                account_id,
+                changed_collections,
+            } => {
+                if !changed_collections.is_empty() {
+                    Some((*account_id, changed_collections.clear()))
+                } else {
+                    None
+                }
+            }
+            Entry::Snapshot { changed_accounts } => {
+                let account_id = changed_accounts.min()?;
+                changed_accounts.remove(account_id);
 
-        for change in &self.changes {
-            bytes.push(change.collection.into());
-            change.change_id.to_leb128_bytes(&mut bytes);
+                Some((account_id, Collections::all()))
+            }
         }
-
-        Some(bytes)
     }
 }
 
@@ -121,58 +132,74 @@ impl PendingChanges {
     }
 
     pub fn deserialize(&mut self, change_id: ChangeId, bytes: &[u8]) -> Option<()> {
-        let mut bytes_it = bytes.iter();
-        let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
-        let total_updates = usize::from_leb128_it(&mut bytes_it)?;
-        let total_child_updates = usize::from_leb128_it(&mut bytes_it)?;
-        let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
+        match *bytes.get(0)? {
+            batch::Change::ENTRY => {
+                let mut bytes_it = bytes.get(1..)?.iter();
+                let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
+                let total_updates = usize::from_leb128_it(&mut bytes_it)?;
+                let total_child_updates = usize::from_leb128_it(&mut bytes_it)?;
+                let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
 
-        let mut inserted_ids = Vec::with_capacity(total_inserts);
+                let mut inserted_ids = Vec::with_capacity(total_inserts);
 
-        for _ in 0..total_inserts {
-            inserted_ids.push(JMAPId::from_leb128_it(&mut bytes_it)?);
-        }
-
-        for _ in 0..total_updates {
-            let document_id = JMAPId::from_leb128_it(&mut bytes_it)?.get_document_id();
-            if !self.inserts.contains(document_id) {
-                self.updates.insert(document_id);
-            }
-        }
-
-        // Skip child updates
-        for _ in 0..total_child_updates {
-            skip_leb128_it(&mut bytes_it)?;
-        }
-
-        for _ in 0..total_deletes {
-            let deleted_id = JMAPId::from_leb128_it(&mut bytes_it)?;
-            let document_id = deleted_id.get_document_id();
-            let prefix_id = deleted_id.get_prefix_id();
-            if let Some(pos) = inserted_ids.iter().position(|&inserted_id| {
-                inserted_id.get_document_id() == document_id
-                    && inserted_id.get_prefix_id() != prefix_id
-            }) {
-                // There was a prefix change, count this change as an update.
-
-                inserted_ids.remove(pos);
-                if !self.inserts.contains(document_id) {
-                    self.updates.insert(document_id);
+                for _ in 0..total_inserts {
+                    inserted_ids.push(JMAPId::from_leb128_it(&mut bytes_it)?);
                 }
-            } else {
-                // This change is an actual deletion
-                if !self.inserts.remove(document_id) {
-                    self.deletes.insert(document_id);
-                }
-                self.updates.remove(document_id);
-            }
-        }
 
-        for inserted_id in inserted_ids {
-            let document_id = inserted_id.get_document_id();
-            self.inserts.insert(document_id);
-            // IDs can be reused
-            self.deletes.remove(document_id);
+                for _ in 0..total_updates {
+                    let document_id = JMAPId::from_leb128_it(&mut bytes_it)?.get_document_id();
+                    if !self.inserts.contains(document_id) {
+                        self.updates.insert(document_id);
+                    }
+                }
+
+                // Skip child updates
+                for _ in 0..total_child_updates {
+                    skip_leb128_it(&mut bytes_it)?;
+                }
+
+                for _ in 0..total_deletes {
+                    let deleted_id = JMAPId::from_leb128_it(&mut bytes_it)?;
+                    let document_id = deleted_id.get_document_id();
+                    let prefix_id = deleted_id.get_prefix_id();
+                    if let Some(pos) = inserted_ids.iter().position(|&inserted_id| {
+                        inserted_id.get_document_id() == document_id
+                            && inserted_id.get_prefix_id() != prefix_id
+                    }) {
+                        // There was a prefix change, count this change as an update.
+
+                        inserted_ids.remove(pos);
+                        if !self.inserts.contains(document_id) {
+                            self.updates.insert(document_id);
+                        }
+                    } else {
+                        // This change is an actual deletion
+                        if !self.inserts.remove(document_id) {
+                            self.deletes.insert(document_id);
+                        }
+                        self.updates.remove(document_id);
+                    }
+                }
+
+                for inserted_id in inserted_ids {
+                    let document_id = inserted_id.get_document_id();
+                    self.inserts.insert(document_id);
+                    // IDs can be reused
+                    self.deletes.remove(document_id);
+                }
+            }
+            batch::Change::SNAPSHOT => {
+                debug_assert!(self.is_empty());
+                RoaringTreemap::deserialize_unchecked_from(bytes.get(1..)?)
+                    .ok()?
+                    .into_iter()
+                    .for_each(|id| {
+                        self.inserts.insert(id.get_document_id());
+                    });
+            }
+            _ => {
+                return None;
+            }
         }
 
         self.changes.insert(change_id);
@@ -233,7 +260,7 @@ where
         &self,
         from_raft_id: RaftId,
         num_entries: usize,
-    ) -> crate::Result<Vec<Entry>> {
+    ) -> crate::Result<Vec<RawEntry>> {
         let mut entries = Vec::with_capacity(num_entries);
         let (is_inclusive, key) = if !from_raft_id.is_none() {
             (false, LogKey::serialize_raft(&from_raft_id))
@@ -251,9 +278,10 @@ where
                     StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
                 })?;
                 if is_inclusive || raft_id != from_raft_id {
-                    entries.push(Entry::deserialize(&value, raft_id).ok_or_else(|| {
-                        StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
-                    })?);
+                    entries.push(RawEntry {
+                        id: raft_id,
+                        data: value.to_vec(),
+                    });
                     if entries.len() == num_entries {
                         break;
                     }
@@ -265,15 +293,15 @@ where
         Ok(entries)
     }
 
-    pub fn insert_raft_entries(&self, entries: Vec<Entry>) -> crate::Result<()> {
+    pub fn insert_raft_entries(&self, entries: Vec<RawEntry>) -> crate::Result<()> {
         self.db.write(
             entries
                 .into_iter()
                 .map(|entry| {
                     WriteOperation::set(
                         ColumnFamily::Logs,
-                        LogKey::serialize_raft(&entry.raft_id),
-                        entry.serialize().unwrap(),
+                        LogKey::serialize_raft(&entry.id),
+                        entry.data,
                     )
                 })
                 .collect(),

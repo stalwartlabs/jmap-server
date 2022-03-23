@@ -466,10 +466,7 @@ where
                                         changes.delete_document(Collection::Mail, message_doc_id);
                                         changes.log_delete(
                                             Collection::Mail,
-                                            JMAPId::from_parts(
-                                                thread_id.document_id,
-                                                message_doc_id,
-                                            ),
+                                            JMAPId::from_parts(*thread_id, message_doc_id),
                                         );
                                     }
                                 }
@@ -911,7 +908,7 @@ where
             .into_iter()
             .for_each(|thread_id| {
                 if let Some(thread_id) = thread_id {
-                    thread_ids.insert(thread_id.document_id);
+                    thread_ids.insert(*thread_id);
                 }
             });
             thread_ids.len()

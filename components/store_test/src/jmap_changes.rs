@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use jmap::changes::{JMAPChanges, JMAPState};
 use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
 
+use crate::db_log::assert_compaction;
+
 #[derive(Debug, Clone, Copy)]
 pub enum LogAction {
     Insert(JMAPId),
@@ -131,12 +133,6 @@ where
         let mut documents = WriteBatch::new(account_id);
 
         for change in changes {
-            /*let mut document = Document::new(
-                Collection::Mail,
-                mail_store
-                    .assign_document_id(account_id, Collection::Mail)
-                    .unwrap(),
-            );*/
             match change {
                 LogAction::Insert(id) => documents.log_insert(Collection::Mail, id),
                 LogAction::Update(id) => documents.log_update(Collection::Mail, id),
@@ -146,7 +142,6 @@ where
                     documents.log_move(Collection::Mail, old_id, new_id)
                 }
             }
-            //documents.insert_document(document);
         }
 
         mail_store.write(documents).unwrap();
@@ -229,4 +224,14 @@ where
 
         states.push(new_state);
     }
+
+    assert_compaction(mail_store, 1);
+
+    let changes = mail_store
+        .get_jmap_changes(account_id, Collection::Mail, JMAPState::Initial, 0)
+        .unwrap();
+
+    assert_eq!(changes.created, vec![2, 3, 11, 12]);
+    assert_eq!(changes.updated, Vec::<u64>::new());
+    assert_eq!(changes.destroyed, Vec::<u64>::new());
 }

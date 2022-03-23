@@ -297,6 +297,8 @@ impl LogKey {
     pub const RAFT_KEY_LEN: usize = std::mem::size_of::<RaftId>() + 1;
     pub const CHANGE_ID_POS: usize =
         std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>() + 1;
+    pub const ACCOUNT_POS: usize = 1;
+    pub const COLLECTION_POS: usize = std::mem::size_of::<AccountId>() + 1;
 
     pub fn deserialize_raft(bytes: &[u8]) -> Option<RaftId> {
         RaftId {

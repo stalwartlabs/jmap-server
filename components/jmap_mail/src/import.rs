@@ -244,7 +244,7 @@ where
                     MessageField::ThreadId.into(),
                 )?
                 .into_iter()
-                .filter_map(|id| Some(id?.document_id))
+                .filter_map(|id| Some(*id?))
                 .collect::<HashSet<ThreadId>>();
 
             match thread_ids.len() {

@@ -121,7 +121,7 @@ where
                 ColumnFamily::Values,
                 &ValueKey::serialize_document_tag_list(account, collection, document, field),
             )?
-            .map(|t| t.document_id))
+            .map(|t| t.item))
     }
 
     pub fn get_multi_document_tag_id(

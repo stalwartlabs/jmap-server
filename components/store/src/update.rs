@@ -6,14 +6,14 @@ use std::{
 use nlp::Language;
 
 use crate::{
-    batch::{WriteAction, WriteBatch},
+    batch::{Change, WriteAction, WriteBatch},
     bitmap::{clear_bit, set_clear_bits},
     blob::BlobEntries,
     field::{FieldOptions, Keywords, Tags, TextIndex, TokenIterator, UpdateField},
     leb128::Leb128,
     serialize::{BitmapKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
     term_index::{TermIndex, TermIndexBuilder},
-    AccountId, Collection, ColumnFamily, Direction, DocumentId, FieldId, JMAPId, JMAPStore, Store,
+    AccountId, Collections, ColumnFamily, Direction, DocumentId, FieldId, JMAPStore, Store,
     StoreError, WriteOperation,
 };
 
@@ -575,32 +575,31 @@ where
 
         // Serialize Raft and change log
         if !batch.changes.is_empty() {
-            let mut raft_bytes = Vec::with_capacity(
-                std::mem::size_of::<AccountId>()
-                    + std::mem::size_of::<usize>()
-                    + (batch.changes.len()
-                        * (std::mem::size_of::<JMAPId>() + std::mem::size_of::<Collection>())),
-            );
-
-            batch.account_id.to_leb128_bytes(&mut raft_bytes);
-            batch.changes.len().to_leb128_bytes(&mut raft_bytes);
+            let raft_id = self.assign_raft_id();
+            let mut collections = Collections::default();
 
             for (collection, log_entry) in batch.changes {
-                let change_id = self.assign_change_id(batch.account_id, collection)?;
-                raft_bytes.push(collection.into());
-                change_id.to_leb128_bytes(&mut raft_bytes);
+                collections.insert(collection);
 
                 write_batch.push(WriteOperation::set(
                     ColumnFamily::Logs,
-                    LogKey::serialize_change(batch.account_id, collection, change_id),
+                    LogKey::serialize_change(batch.account_id, collection, raft_id.index),
                     log_entry.serialize(),
                 ));
             }
 
+            // Serialize raft entry
+            let mut bytes = Vec::with_capacity(
+                std::mem::size_of::<AccountId>() + std::mem::size_of::<u64>() + 1,
+            );
+            bytes.push(Change::ENTRY);
+            bytes.extend_from_slice(&batch.account_id.to_le_bytes());
+            bytes.extend_from_slice(&collections.to_le_bytes());
+
             write_batch.push(WriteOperation::set(
                 ColumnFamily::Logs,
-                LogKey::serialize_raft(&self.assign_raft_id()),
-                raft_bytes,
+                LogKey::serialize_raft(&raft_id),
+                bytes,
             ));
         }
 

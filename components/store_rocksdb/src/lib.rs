@@ -177,10 +177,8 @@ impl<'x> Store<'x> for RocksDB {
             .compact_range_cf(&self.cf_handle(cf)?, None::<&[u8]>, None::<&[u8]>);
         Ok(())
     }
-}
 
-impl RocksDB {
-    pub fn open(settings: &EnvSettings) -> Result<Self> {
+    fn open(settings: &EnvSettings) -> Result<Self> {
         // Create the database directory if it doesn't exist
         let path = PathBuf::from(
             &settings
@@ -253,7 +251,9 @@ impl RocksDB {
             .map_err(|e| StoreError::InternalError(e.into_string()))?,
         })
     }
+}
 
+impl RocksDB {
     #[inline(always)]
     fn cf_handle(&self, cf: store::ColumnFamily) -> Result<Arc<BoundColumnFamily>> {
         self.db

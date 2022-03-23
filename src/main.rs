@@ -10,7 +10,7 @@ use std::{
 };
 
 use actix_web::{middleware, web, App, HttpServer};
-use store::{config::EnvSettings, tracing::info, JMAPStore};
+use store::{config::EnvSettings, tracing::info, JMAPStore, Store};
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
 

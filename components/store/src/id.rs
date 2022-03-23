@@ -4,8 +4,7 @@ use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 
 use crate::{
-    changes::ChangeId, serialize::BitmapKey, AccountId, Collection, DocumentId, JMAPStore, Store,
-    StoreError,
+    serialize::BitmapKey, AccountId, Collection, DocumentId, JMAPStore, Store, StoreError,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -27,11 +26,10 @@ impl IdCacheKey {
 pub struct IdAssigner {
     pub freed_ids: Option<RoaringBitmap>,
     pub next_id: DocumentId,
-    pub next_change_id: ChangeId,
 }
 
 impl IdAssigner {
-    pub fn new(used_ids: Option<RoaringBitmap>, next_change_id: ChangeId) -> Self {
+    pub fn new(used_ids: Option<RoaringBitmap>) -> Self {
         let (next_id, freed_ids) = if let Some(used_ids) = used_ids {
             let next_id = used_ids.max().unwrap() + 1;
             //TODO test properly
@@ -48,11 +46,7 @@ impl IdAssigner {
         } else {
             (0, None)
         };
-        Self {
-            freed_ids,
-            next_id,
-            next_change_id,
-        }
+        Self { freed_ids, next_id }
     }
 
     pub fn assign_document_id(&mut self) -> DocumentId {
@@ -68,12 +62,6 @@ impl IdAssigner {
             self.next_id += 1;
             id
         }
-    }
-
-    pub fn assign_change_id(&mut self) -> ChangeId {
-        let id = self.next_change_id;
-        self.next_change_id += 1;
-        id
     }
 }
 
@@ -92,24 +80,10 @@ where
                 || {
                     Ok(Arc::new(Mutex::new(IdAssigner::new(
                         self.get_document_ids(account_id, collection)?,
-                        self.get_last_change_id(account_id, collection)?
-                            .map(|id| id + 1)
-                            .unwrap_or(0),
                     ))))
                 },
             )
             .map_err(|e| e.as_ref().clone())
-    }
-
-    pub fn assign_change_id(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-    ) -> crate::Result<ChangeId> {
-        Ok(self
-            .get_id_assigner(account_id, collection)?
-            .lock()
-            .assign_change_id())
     }
 
     pub fn assign_document_id(

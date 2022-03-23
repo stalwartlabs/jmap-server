@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+};
 
 use nlp::{
     lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
@@ -248,14 +251,28 @@ impl StoreDeserialize for Tags {
 }
 
 pub struct DocumentIdTag {
-    pub document_id: DocumentId,
+    pub item: DocumentId,
+}
+
+impl Deref for DocumentIdTag {
+    type Target = DocumentId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.item
+    }
+}
+
+impl AsRef<DocumentId> for DocumentIdTag {
+    fn as_ref(&self) -> &DocumentId {
+        &self.item
+    }
 }
 
 impl StoreDeserialize for DocumentIdTag {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
         debug_assert_eq!(bytes[1], BM_TAG_ID);
         Some(DocumentIdTag {
-            document_id: DocumentId::from_leb128_bytes(bytes.get(2..)?)?.0,
+            item: DocumentId::from_leb128_bytes(bytes.get(2..)?)?.0,
         })
     }
 }

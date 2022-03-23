@@ -20,6 +20,7 @@ use store::{Collection, DocumentId};
 
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
+pub mod db_log;
 pub mod db_term_id;
 pub mod jmap_changes;
 pub mod jmap_mail_get;

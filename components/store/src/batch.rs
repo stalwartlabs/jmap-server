@@ -215,21 +215,25 @@ impl From<Change> for Vec<u8> {
     }
 }
 
-//TODO delete old changelog entries
 impl Change {
+    pub const ENTRY: u8 = 0;
+    pub const SNAPSHOT: u8 = 1;
+
     pub fn new() -> Self {
         Change::default()
     }
 
     pub fn serialize(self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
-            (self.inserts.len()
+            1 + (self.inserts.len()
                 + self.updates.len()
                 + self.child_updates.len()
                 + self.deletes.len()
                 + 4)
                 * std::mem::size_of::<usize>(),
         );
+        buf.push(Change::ENTRY);
+
         self.inserts.len().to_leb128_bytes(&mut buf);
         self.updates.len().to_leb128_bytes(&mut buf);
         self.child_updates.len().to_leb128_bytes(&mut buf);

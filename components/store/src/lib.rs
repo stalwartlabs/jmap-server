@@ -18,6 +18,7 @@ pub mod term_index;
 pub mod update;
 
 use std::{
+    ops::Deref,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
@@ -99,7 +100,7 @@ pub enum Collection {
     Mail = 0,
     Mailbox = 1,
     Thread = 2,
-    None = 255,
+    None = 3,
 }
 
 impl From<u8> for Collection {
@@ -108,7 +109,10 @@ impl From<u8> for Collection {
             0 => Collection::Mail,
             1 => Collection::Mailbox,
             2 => Collection::Thread,
-            _ => Collection::None,
+            _ => {
+                debug_assert!(false, "Invalid collection value: {}", value);
+                Collection::None
+            }
         }
     }
 }
@@ -116,6 +120,78 @@ impl From<u8> for Collection {
 impl From<Collection> for u8 {
     fn from(collection: Collection) -> u8 {
         collection as u8
+    }
+}
+
+impl From<Collection> for u64 {
+    fn from(collection: Collection) -> u64 {
+        collection as u64
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize, Clone)]
+pub struct Collections {
+    pub collections: u64,
+}
+
+impl Collections {
+    pub fn all() -> Self {
+        Self {
+            collections: u64::MAX >> (64 - (Collection::None as u64)),
+        }
+    }
+
+    pub fn insert(&mut self, item: Collection) {
+        debug_assert_ne!(item, Collection::None);
+        self.collections |= 1 << item as u64;
+    }
+
+    pub fn contains(&self, item: Collection) -> bool {
+        self.collections & (1 << item as u64) != 0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.collections == 0
+    }
+
+    pub fn clear(&mut self) -> Self {
+        let collections = self.collections;
+        self.collections = 0;
+        Collections { collections }
+    }
+}
+
+impl From<u64> for Collections {
+    fn from(value: u64) -> Self {
+        Self { collections: value }
+    }
+}
+
+impl AsRef<u64> for Collections {
+    fn as_ref(&self) -> &u64 {
+        &self.collections
+    }
+}
+
+impl Deref for Collections {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.collections
+    }
+}
+
+impl Iterator for Collections {
+    type Item = Collection;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.collections != 0 {
+            let collection_id = 63 - self.collections.leading_zeros();
+            self.collections ^= 1 << collection_id;
+            Some(Collection::from(collection_id as u8))
+        } else {
+            None
+        }
     }
 }
 
@@ -363,6 +439,7 @@ where
 {
     type Iterator: Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'x;
 
+    fn open(settings: &EnvSettings) -> Result<Self>;
     fn delete(&self, cf: ColumnFamily, key: &[u8]) -> Result<()>;
     fn set(&self, cf: ColumnFamily, key: &[u8], value: &[u8]) -> Result<()>;
     fn get<U>(&self, cf: ColumnFamily, key: &[u8]) -> Result<Option<U>>

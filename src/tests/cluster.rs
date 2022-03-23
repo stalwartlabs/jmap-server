@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use actix_web::web;
+use futures::future::join_all;
 use store::{parking_lot::Mutex, raft::RaftId, JMAPStore, Store};
 use store_rocksdb::RocksDB;
 use store_test::{
@@ -18,16 +19,19 @@ use crate::{
     JMAPServer,
 };
 
-async fn build_peer(
+async fn build_peer<T>(
     peer_num: u32,
     num_peers: u32,
     delete_if_exists: bool,
-) -> (web::Data<JMAPServer<RocksDB>>, PathBuf) {
+) -> (web::Data<JMAPServer<T>>, PathBuf)
+where
+    T: for<'x> Store<'x> + 'static,
+{
     let (settings, temp_dir) = init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
 
     let (tx, rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
     let jmap_server = web::Data::new(JMAPServer {
-        store: JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings).into(),
+        store: JMAPStore::new(T::open(&settings).unwrap(), &settings).into(),
         worker_pool: rayon::ThreadPoolBuilder::new()
             .num_threads(num_cpus::get())
             .build()
@@ -44,10 +48,13 @@ async fn build_peer(
     (jmap_server, temp_dir)
 }
 
-async fn build_cluster(
+async fn build_cluster<T>(
     num_peers: u32,
     delete_if_exists: bool,
-) -> (Arc<Vec<web::Data<JMAPServer<RocksDB>>>>, Vec<PathBuf>) {
+) -> (Arc<Vec<web::Data<JMAPServer<T>>>>, Vec<PathBuf>)
+where
+    T: for<'x> Store<'x> + 'static,
+{
     tracing_subscriber::fmt::init();
     let mut servers = Vec::new();
     let mut paths = Vec::new();
@@ -176,10 +183,10 @@ where
                             }
                         }
                         assert!(follower.is_up_to_date());
-                        /*println!(
+                        println!(
                             "Comparing store of leader {} with follower {}",
                             leader_pos, follower_pos
-                        );*/
+                        );
                         let keys_leader = leader.store.compare_with(&follower.store);
                         /*println!(
                             "Comparing store of follower {} with leader {}",
@@ -203,7 +210,7 @@ where
     .unwrap();
 }
 
-async fn test_election<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
+async fn election<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -218,7 +225,7 @@ where
     assert_leader_elected(&peers).await;
 }
 
-async fn test_distruibuted_thread_merge<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
+async fn distruibuted_thread_merge<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -295,7 +302,7 @@ enum Ac {
     DeleteMailbox(u32),
 }
 
-async fn test_distruibuted_update_delete<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
+async fn distruibuted_update_delete<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -442,13 +449,45 @@ where
     assert_mirrored_stores(peers, false).await;
 }
 
+async fn snapshot<T>(
+    peers: Arc<Vec<web::Data<JMAPServer<T>>>>,
+) -> Arc<Vec<web::Data<JMAPServer<T>>>>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let last_log = peers.last().unwrap().get_last_log().await.unwrap().unwrap();
+
+    join_all(peers.iter().map(|peer| {
+        let store = peer.store.clone();
+        tokio::task::spawn_blocking(move || store.compact_log(last_log.index).unwrap())
+    }))
+    .await;
+
+    let mut peers = match Arc::try_unwrap(peers) {
+        Ok(peers) => peers,
+        Err(_) => panic!("Unable to unwrap peers"),
+    };
+
+    let (peer, temp_dir) = build_peer(6, 5, true).await;
+    peers.push(peer);
+    let peers = Arc::new(peers);
+
+    assert_cluster_updated(&peers).await;
+    assert_mirrored_stores(peers.clone(), true).await;
+    destroy_temp_dir(temp_dir);
+    peers
+}
+
 #[tokio::test]
 async fn test_cluster() {
-    let (peers, temp_dirs) = build_cluster(5, true).await;
+    let (peers, temp_dirs) = build_cluster::<RocksDB>(5, true).await;
 
-    //test_election(peers.clone()).await;
-    test_distruibuted_thread_merge(peers.clone()).await;
-    test_distruibuted_update_delete(peers.clone()).await;
+    election(peers.clone()).await;
+    distruibuted_thread_merge(peers.clone()).await;
+    distruibuted_update_delete(peers.clone()).await;
+
+    // Add a new peer and send a snapshot to it.
+    snapshot(peers).await;
 
     for temp_dir in temp_dirs {
         destroy_temp_dir(temp_dir);
@@ -458,7 +497,7 @@ async fn test_cluster() {
 #[test]
 fn test_coco() {
     let dbs = (1..=5)
-        .map(|n| init_db_params("st_cluster", n, 5, false).0)
+        .map(|n| init_db_params::<RocksDB>("st_cluster", n, 5, false).0)
         .collect::<Vec<_>>();
 
     for (pos1, db1) in dbs.iter().enumerate() {

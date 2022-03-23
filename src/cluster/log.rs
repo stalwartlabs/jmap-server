@@ -10,7 +10,7 @@ use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
 use store::batch::WriteBatch;
 use store::changes::ChangeId;
 use store::leb128::Leb128;
-use store::raft::{Entry, LogIndex, PendingChanges, RaftId, TermId};
+use store::raft::{Entry, LogIndex, PendingChanges, RaftId, RawEntry, TermId};
 use store::serialize::{LogKey, StoreDeserialize};
 use store::tracing::{debug, error};
 use store::{
@@ -78,7 +78,7 @@ pub enum AppendEntriesRequest {
     },
     UpdateLog {
         last_log: RaftId,
-        entries: Vec<store::raft::Entry>,
+        entries: Vec<store::raft::RawEntry>,
     },
     UpdateStore {
         account_id: AccountId,
@@ -188,7 +188,9 @@ where
                         {
                             Ok(entries) => {
                                 if !entries.is_empty() {
-                                    last_sent_id = entries.last().unwrap().raft_id;
+                                    last_sent_id = entries.last().unwrap().id;
+
+                                    println!("Sending updatelog {:?} {:?}", last_sent_id, last_log);
 
                                     Request::AppendEntries {
                                         term,
@@ -199,7 +201,7 @@ where
                                     }
                                 } else {
                                     debug!(
-                                        "[{}] No entries left to send to {} after {:?}.",
+                                        "[{}] Peer {} is up to date with {:?}.",
                                         local_name, peer_name, last_sent_id
                                     );
                                     state = State::Wait;
@@ -363,6 +365,7 @@ where
                     .response_tx
                     .send(match event.request {
                         AppendEntriesRequest::Synchronize { last_log } => {
+                            println!("Set commit id from sync {:?}", last_log);
                             commit_id = last_log;
                             Response::SynchronizeLog {
                                 matched: match core.get_prev_raft_id(last_log).await {
@@ -370,6 +373,11 @@ where
                                         if commit_id != last_log {
                                             println!(
                                                 "Commit index mismatch on sync: {:?} != {:?}",
+                                                commit_id, last_log
+                                            );
+                                        } else {
+                                            println!(
+                                                "OK commit (sync): {:?} == {:?}",
                                                 commit_id, last_log
                                             );
                                         }
@@ -391,6 +399,7 @@ where
                             }
                         }
                         AppendEntriesRequest::UpdateLog { last_log, entries } => {
+                            println!("Set commit id from update log {:?}", last_log);
                             commit_id = last_log;
                             handle_update_log(&core, last_log, entries, &mut pending_entries).await
                         }
@@ -478,8 +487,8 @@ where
 pub async fn handle_update_log<T>(
     core_: &web::Data<JMAPServer<T>>,
     commit_id: RaftId,
-    entries: Vec<Entry>,
-    pending_entries: &mut Vec<Entry>,
+    entries: Vec<RawEntry>,
+    pending_entries: &mut Vec<RawEntry>,
 ) -> Response
 where
     T: for<'x> Store<'x> + 'static,
@@ -489,33 +498,41 @@ where
     let core = core_.clone();
     match core_
         .spawn_worker(move || {
-            let mut collections = HashMap::new();
-            for entry in &entries {
-                for change in &entry.changes {
-                    if let hash_map::Entry::Vacant(e) =
-                        collections.entry((entry.account_id, change.collection))
-                    {
-                        e.insert(UpdateCollection {
-                            account_id: entry.account_id,
-                            collection: change.collection,
-                            from_change_id: if let Some(last_change_id) = core
-                                .store
-                                .get_last_change_id(entry.account_id, change.collection)?
-                            {
-                                if change.change_id <= last_change_id {
-                                    continue;
+            let mut update_collections = HashMap::new();
+            for raw_entry in &entries {
+                let mut entry = Entry::deserialize(&raw_entry.data).ok_or_else(|| {
+                    StoreError::InternalError(format!(
+                        "Failed to deserialize entry: {:?}",
+                        raw_entry
+                    ))
+                })?;
+
+                while let Some((account_id, collections)) = entry.next_account() {
+                    for collection in collections {
+                        if let hash_map::Entry::Vacant(e) =
+                            update_collections.entry((account_id, collection))
+                        {
+                            e.insert(UpdateCollection {
+                                account_id,
+                                collection,
+                                from_change_id: if let Some(last_change_id) =
+                                    core.store.get_last_change_id(account_id, collection)?
+                                {
+                                    if raw_entry.id.index <= last_change_id {
+                                        continue;
+                                    } else {
+                                        Some(last_change_id)
+                                    }
                                 } else {
-                                    Some(last_change_id)
-                                }
-                            } else {
-                                None
-                            },
-                        });
+                                    None
+                                },
+                            });
+                        }
                     }
                 }
             }
 
-            Ok((collections, entries))
+            Ok((update_collections, entries))
         })
         .await
     {
@@ -541,7 +558,7 @@ where
 
 pub async fn handle_update_store<T>(
     core_: &web::Data<JMAPServer<T>>,
-    pending_entries: &mut Vec<Entry>,
+    pending_entries: &mut Vec<RawEntry>,
     commit_id: RaftId,
     account_id: AccountId,
     collection: Collection,
@@ -656,7 +673,7 @@ where
 
 pub async fn commit_log<T>(
     core_: &web::Data<JMAPServer<T>>,
-    entries: Vec<Entry>,
+    entries: Vec<RawEntry>,
     commit_id: RaftId,
 ) -> bool
 where
@@ -664,7 +681,7 @@ where
 {
     if !entries.is_empty() {
         let core = core_.clone();
-        let last_log = entries.last().map(|e| e.raft_id);
+        let last_log = entries.last().map(|e| e.id);
 
         match core_
             .spawn_worker(move || core.store.insert_raft_entries(entries))
@@ -679,6 +696,8 @@ where
 
                     if commit_id != last_log {
                         println!("Commit index mismatch: {:?} != {:?}", commit_id, last_log);
+                    } else {
+                        println!("OK commit: {:?} == {:?}", commit_id, last_log);
                     }
                     if commit_id == last_log {
                         core_.set_up_to_date(true);
@@ -714,37 +733,39 @@ async fn get_next_changes<T>(
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let collection = if let Some(collection) = collections.pop() {
-        collection
-    } else {
-        error!("Received empty collections list.");
-        return State::AppendEntries;
-    };
+    loop {
+        let collection = if let Some(collection) = collections.pop() {
+            collection
+        } else {
+            return State::AppendEntries;
+        };
 
-    let _core = core.clone();
-    match core
-        .spawn_worker(move || {
-            _core.store.get_pending_changes(
-                collection.account_id,
-                collection.collection,
-                collection.from_change_id,
-                matches!(collection.collection, Collection::Thread),
-            )
-        })
-        .await
-    {
-        Ok(changes) => {
-            debug_assert!(!changes.is_empty(), "{:#?}", changes);
-            //println!("Changes: {:#?}", changes);
-
-            State::PushChanges {
-                collections,
-                changes,
+        let _core = core.clone();
+        match core
+            .spawn_worker(move || {
+                _core.store.get_pending_changes(
+                    collection.account_id,
+                    collection.collection,
+                    collection.from_change_id,
+                    matches!(collection.collection, Collection::Thread),
+                )
+            })
+            .await
+        {
+            Ok(changes) => {
+                //debug_assert!(!changes.is_empty(), "{:#?}", changes);
+                //println!("Changes: {:#?}", changes);
+                if !changes.is_empty() {
+                    return State::PushChanges {
+                        collections,
+                        changes,
+                    };
+                }
             }
-        }
-        Err(err) => {
-            error!("Error getting raft changes: {:?}", err);
-            State::Synchronize
+            Err(err) => {
+                error!("Error getting raft changes: {:?}", err);
+                return State::Synchronize;
+            }
         }
     }
 }

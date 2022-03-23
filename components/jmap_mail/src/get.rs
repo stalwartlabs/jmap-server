@@ -184,7 +184,7 @@ where
             .into_iter()
             .zip(document_ids)
             .filter_map(|(thread_id, document_id)| {
-                JMAPId::from_parts(thread_id?.document_id, document_id).into()
+                JMAPId::from_parts(*thread_id?, document_id).into()
             })
             .collect::<Vec<u64>>()
         } else {
