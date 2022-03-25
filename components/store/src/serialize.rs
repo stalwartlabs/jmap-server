@@ -290,11 +290,17 @@ impl IndexKey {
 impl LogKey {
     pub const CHANGE_KEY_PREFIX: u8 = 0;
     pub const RAFT_KEY_PREFIX: u8 = 1;
+    pub const ROLLBACK_KEY_PREFIX: u8 = 2;
+
     pub const CHANGE_KEY_LEN: usize = std::mem::size_of::<AccountId>()
         + std::mem::size_of::<Collection>()
         + std::mem::size_of::<ChangeId>()
         + 1;
     pub const RAFT_KEY_LEN: usize = std::mem::size_of::<RaftId>() + 1;
+    pub const ROLLBACK_KEY_LEN: usize =
+        std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>() + 1;
+
+    pub const RAFT_TERM_POS: usize = std::mem::size_of::<LogIndex>() + 1;
     pub const CHANGE_ID_POS: usize =
         std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>() + 1;
     pub const ACCOUNT_POS: usize = 1;
@@ -302,8 +308,8 @@ impl LogKey {
 
     pub fn deserialize_raft(bytes: &[u8]) -> Option<RaftId> {
         RaftId {
-            term: bytes.deserialize_be_u64(1)?,
-            index: bytes.deserialize_be_u64(1 + std::mem::size_of::<LogIndex>())?,
+            index: bytes.deserialize_be_u64(1)?,
+            term: bytes.deserialize_be_u64(1 + std::mem::size_of::<LogIndex>())?,
         }
         .into()
     }
@@ -311,8 +317,8 @@ impl LogKey {
     pub fn serialize_raft(id: &RaftId) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(LogKey::RAFT_KEY_LEN);
         bytes.push(LogKey::RAFT_KEY_PREFIX);
-        bytes.extend_from_slice(&id.term.to_be_bytes());
         bytes.extend_from_slice(&id.index.to_be_bytes());
+        bytes.extend_from_slice(&id.term.to_be_bytes());
         bytes
     }
 
@@ -326,6 +332,14 @@ impl LogKey {
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.push(collection.into());
         bytes.extend_from_slice(&change_id.to_be_bytes());
+        bytes
+    }
+
+    pub fn serialize_rollback(account: AccountId, collection: Collection) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(LogKey::ROLLBACK_KEY_LEN);
+        bytes.push(LogKey::ROLLBACK_KEY_PREFIX);
+        bytes.extend_from_slice(&account.to_be_bytes());
+        bytes.push(collection.into());
         bytes
     }
 

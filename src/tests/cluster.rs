@@ -2,7 +2,8 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use actix_web::web;
 use futures::future::join_all;
-use store::{parking_lot::Mutex, raft::RaftId, JMAPStore, Store};
+use rayon::vec;
+use store::{config::EnvSettings, parking_lot::Mutex, raft::RaftId, JMAPId, JMAPStore, Store};
 use store_rocksdb::RocksDB;
 use store_test::{
     destroy_temp_dir, init_settings,
@@ -19,51 +20,113 @@ use crate::{
     JMAPServer,
 };
 
-async fn build_peer<T>(
-    peer_num: u32,
-    num_peers: u32,
-    delete_if_exists: bool,
-) -> (web::Data<JMAPServer<T>>, PathBuf)
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    let (settings, temp_dir) = init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
-
-    let (tx, rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
-    let jmap_server = web::Data::new(JMAPServer {
-        store: JMAPStore::new(T::open(&settings).unwrap(), &settings).into(),
-        worker_pool: rayon::ThreadPoolBuilder::new()
-            .num_threads(num_cpus::get())
-            .build()
-            .unwrap(),
-        cluster_tx: tx.clone(),
-        is_cluster: true,
-        is_leader: false.into(),
-        is_up_to_date: false.into(),
-        #[cfg(test)]
-        is_offline: false.into(),
-    });
-    start_cluster(jmap_server.clone(), &settings, rx, tx).await;
-
-    (jmap_server, temp_dir)
+struct Peer<T> {
+    tx: mpsc::Sender<cluster::Event>,
+    rx: mpsc::Receiver<cluster::Event>,
+    settings: EnvSettings,
+    temp_dir: PathBuf,
+    jmap_server: web::Data<JMAPServer<T>>,
 }
 
-async fn build_cluster<T>(
-    num_peers: u32,
-    delete_if_exists: bool,
-) -> (Arc<Vec<web::Data<JMAPServer<T>>>>, Vec<PathBuf>)
+struct Cluster<T> {
+    peers: Vec<Peer<T>>,
+    temp_dirs: Vec<PathBuf>,
+}
+
+impl<T> Peer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    tracing_subscriber::fmt::init();
-    let mut servers = Vec::new();
-    let mut paths = Vec::new();
-    for peer_num in 1..=num_peers {
-        let (server, path) = build_peer(peer_num, num_peers, delete_if_exists).await;
-        servers.push(server);
-        paths.push(path);
+    pub fn new(peer_num: u32, num_peers: u32, delete_if_exists: bool) -> Self {
+        let (settings, temp_dir) =
+            init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
+
+        let (tx, rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
+        let jmap_server = web::Data::new(JMAPServer {
+            store: JMAPStore::new(T::open(&settings).unwrap(), &settings).into(),
+            worker_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(num_cpus::get())
+                .build()
+                .unwrap(),
+            cluster_tx: tx.clone(),
+            is_cluster: true,
+            is_leader: false.into(),
+            is_up_to_date: false.into(),
+            #[cfg(test)]
+            is_offline: false.into(),
+        });
+
+        Peer {
+            tx,
+            rx,
+            settings,
+            temp_dir,
+            jmap_server,
+        }
     }
-    (Arc::new(servers), paths)
+
+    pub async fn start_cluster(self) -> (web::Data<JMAPServer<T>>, PathBuf) {
+        start_cluster(self.jmap_server.clone(), &self.settings, self.rx, self.tx).await;
+        (self.jmap_server, self.temp_dir)
+    }
+}
+
+impl<T> Cluster<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub fn new(num_peers: u32, delete_if_exists: bool) -> Self {
+        Cluster {
+            peers: (1..=num_peers)
+                .into_iter()
+                .map(|peer_num| Peer::new(peer_num, num_peers, delete_if_exists))
+                .collect(),
+            temp_dirs: vec![],
+        }
+    }
+
+    pub async fn start_cluster(&mut self, n: usize) -> Arc<Vec<web::Data<JMAPServer<T>>>> {
+        let mut peers = Vec::new();
+
+        for peer in self
+            .peers
+            .drain(0..if n > 0 { n } else { self.peers.len() })
+        {
+            let (server, temp_dir) = peer.start_cluster().await;
+            self.temp_dirs.push(temp_dir);
+            peers.push(server);
+        }
+
+        Arc::new(peers)
+    }
+
+    pub async fn extend_cluster(
+        &mut self,
+        peers: Arc<Vec<web::Data<JMAPServer<T>>>>,
+        n: usize,
+    ) -> Arc<Vec<web::Data<JMAPServer<T>>>> {
+        let mut peers = match Arc::try_unwrap(peers) {
+            Ok(peers) => peers,
+            Err(_) => panic!("Unable to unwrap peers"),
+        };
+
+        for peer in self
+            .peers
+            .drain(0..if n > 0 { n } else { self.peers.len() })
+        {
+            let (server, temp_dir) = peer.start_cluster().await;
+            self.temp_dirs.push(temp_dir);
+            peers.push(server);
+        }
+
+        Arc::new(peers)
+    }
+
+    pub fn cleanup(self) {
+        for temp_dir in self.temp_dirs {
+            destroy_temp_dir(temp_dir);
+        }
+    }
 }
 
 async fn assert_leader_elected<T>(peers: &[web::Data<JMAPServer<T>>]) -> &web::Data<JMAPServer<T>>
@@ -79,6 +142,18 @@ where
         sleep(Duration::from_millis(100)).await;
     }
     panic!("No leader elected.");
+}
+
+fn get_any_follower<T>(peers: &[web::Data<JMAPServer<T>>]) -> &web::Data<JMAPServer<T>>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    for peer in peers.iter() {
+        if !peer.is_leader() {
+            return peer;
+        }
+    }
+    panic!("No follower found.");
 }
 
 async fn assert_no_quorum<T>(peers: &[web::Data<JMAPServer<T>>])
@@ -151,7 +226,7 @@ where
     }
     for peer in peers.iter() {
         println!(
-            "{:?}: {:?} ({})",
+            "{}: {:?} ({})",
             if peer.is_offline() {
                 "offline"
             } else if peer.is_leader() {
@@ -183,10 +258,10 @@ where
                             }
                         }
                         assert!(follower.is_up_to_date());
-                        println!(
+                        /*println!(
                             "Comparing store of leader {} with follower {}",
                             leader_pos, follower_pos
-                        );
+                        );*/
                         let keys_leader = leader.store.compare_with(&follower.store);
                         /*println!(
                             "Comparing store of follower {} with leader {}",
@@ -225,7 +300,7 @@ where
     assert_leader_elected(&peers).await;
 }
 
-async fn distruibuted_thread_merge<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
+async fn distributed_thread_merge<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -302,12 +377,75 @@ enum Ac {
     DeleteMailbox(u32),
 }
 
-async fn distruibuted_update_delete<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    println!("Testing distributed update/delete operations...");
-    let test_batches = vec![
+impl Ac {
+    pub fn execute<T>(
+        &self,
+        store: &Arc<JMAPStore<T>>,
+        mailbox_map: &Arc<Mutex<HashMap<u32, JMAPId>>>,
+        email_map: &Arc<Mutex<HashMap<u32, JMAPId>>>,
+        batch_num: usize,
+    ) where
+        T: for<'x> Store<'x> + 'static,
+    {
+        match self {
+            Ac::NewEmail((local_id, mailbox_id)) => {
+                email_map.lock().insert(
+                    *local_id,
+                    insert_email(
+                        store,
+                        2,
+                        format!(
+                            "From: test@test.com\nSubject: test {}\n\nTest message {}",
+                            local_id, local_id
+                        )
+                        .into_bytes(),
+                        vec![*mailbox_map.lock().get(mailbox_id).unwrap()],
+                        vec![],
+                        None,
+                    ),
+                );
+            }
+            Ac::UpdateEmail(local_id) => {
+                update_email(
+                    store,
+                    2,
+                    *email_map.lock().get(local_id).unwrap(),
+                    None,
+                    Some(vec![format!("tag_{}", batch_num)]),
+                );
+            }
+            Ac::DeleteEmail(local_id) => {
+                delete_email(store, 2, email_map.lock().remove(local_id).unwrap());
+            }
+            Ac::InsertMailbox(local_id) => {
+                mailbox_map.lock().insert(
+                    *local_id,
+                    insert_mailbox(
+                        store,
+                        2,
+                        &format!("Mailbox {}", local_id),
+                        &format!("role_{}", local_id),
+                    ),
+                );
+            }
+            Ac::UpdateMailbox(local_id) => {
+                update_mailbox(
+                    store,
+                    2,
+                    *mailbox_map.lock().get(local_id).unwrap(),
+                    *local_id,
+                    batch_num as u32,
+                );
+            }
+            Ac::DeleteMailbox(local_id) => {
+                delete_mailbox(store, 2, mailbox_map.lock().remove(local_id).unwrap());
+            }
+        }
+    }
+}
+
+fn test_batch() -> Vec<Vec<Ac>> {
+    vec![
         vec![
             Ac::InsertMailbox(1),
             Ac::NewEmail((1, 1)),
@@ -351,15 +489,23 @@ where
         vec![Ac::UpdateEmail(1)],
         vec![Ac::DeleteEmail(2)],
         vec![Ac::DeleteMailbox(2)],
-    ];
+    ]
+}
+
+async fn distributed_update_delete<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    println!("Testing distributed update/delete operations...");
 
     // Keep one node offline
     assert_leader_elected(&peers).await.set_offline(true).await;
+
     let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
     let mailbox_map = Arc::new(Mutex::new(HashMap::new()));
     let email_map = Arc::new(Mutex::new(HashMap::new()));
 
-    for (batch_num, batch) in test_batches.into_iter().enumerate() {
+    for (batch_num, batch) in test_batch().into_iter().enumerate() {
         let leader = assert_leader_elected(&peers).await;
         let store = leader.store.clone();
 
@@ -368,60 +514,7 @@ where
 
         tokio::task::spawn_blocking(move || {
             for action in batch {
-                match action {
-                    Ac::NewEmail((local_id, mailbox_id)) => {
-                        email_map.lock().insert(
-                            local_id,
-                            insert_email(
-                                &store,
-                                2,
-                                format!(
-                                    "From: test@test.com\nSubject: test {}\n\nTest message {}",
-                                    local_id, local_id
-                                )
-                                .into_bytes(),
-                                vec![*mailbox_map.lock().get(&mailbox_id).unwrap()],
-                                vec![],
-                                None,
-                            ),
-                        );
-                    }
-                    Ac::UpdateEmail(local_id) => {
-                        update_email(
-                            &store,
-                            2,
-                            *email_map.lock().get(&local_id).unwrap(),
-                            None,
-                            Some(vec![format!("tag_{}", batch_num)]),
-                        );
-                    }
-                    Ac::DeleteEmail(local_id) => {
-                        delete_email(&store, 2, email_map.lock().remove(&local_id).unwrap());
-                    }
-                    Ac::InsertMailbox(local_id) => {
-                        mailbox_map.lock().insert(
-                            local_id,
-                            insert_mailbox(
-                                &store,
-                                2,
-                                &format!("Mailbox {}", local_id),
-                                &format!("role_{}", local_id),
-                            ),
-                        );
-                    }
-                    Ac::UpdateMailbox(local_id) => {
-                        update_mailbox(
-                            &store,
-                            2,
-                            *mailbox_map.lock().get(&local_id).unwrap(),
-                            local_id,
-                            batch_num as u32,
-                        );
-                    }
-                    Ac::DeleteMailbox(local_id) => {
-                        delete_mailbox(&store, 2, mailbox_map.lock().remove(&local_id).unwrap());
-                    }
-                }
+                action.execute(&store, &mailbox_map, &email_map, batch_num);
             }
         })
         .await
@@ -449,9 +542,7 @@ where
     assert_mirrored_stores(peers, false).await;
 }
 
-async fn snapshot<T>(
-    peers: Arc<Vec<web::Data<JMAPServer<T>>>>,
-) -> Arc<Vec<web::Data<JMAPServer<T>>>>
+async fn compact_log<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -462,41 +553,76 @@ where
         tokio::task::spawn_blocking(move || store.compact_log(last_log.index).unwrap())
     }))
     .await;
+}
 
-    let mut peers = match Arc::try_unwrap(peers) {
-        Ok(peers) => peers,
-        Err(_) => panic!("Unable to unwrap peers"),
-    };
+#[allow(clippy::comparison_chain)]
+async fn resolve_log_conflict<T>(cluster: &mut Cluster<T>)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    println!("Testing log conflict resolution...");
 
-    let (peer, temp_dir) = build_peer(6, 5, true).await;
-    peers.push(peer);
-    let peers = Arc::new(peers);
+    let store1 = cluster.peers[0].jmap_server.store.clone();
+    let store2 = cluster.peers[1].jmap_server.store.clone();
+    let peer1 = cluster.peers[0].jmap_server.clone();
+    let peer2 = cluster.peers[1].jmap_server.clone();
 
+    let mailbox_map1 = Arc::new(Mutex::new(HashMap::new()));
+    let mailbox_map2 = Arc::new(Mutex::new(HashMap::new()));
+    let email_map1 = Arc::new(Mutex::new(HashMap::new()));
+    let email_map2 = Arc::new(Mutex::new(HashMap::new()));
+
+    let mut term_count = 0;
+
+    for (batch_num, batch) in test_batch().into_iter().enumerate() {
+        for action in batch {
+            term_count += 1;
+
+            peer1.set_leader(term_count);
+            if term_count <= 13 {
+                peer2.set_leader(term_count);
+            }
+
+            action.execute(&store1, &mailbox_map1, &email_map1, batch_num);
+            action.execute(&store2, &mailbox_map2, &email_map2, batch_num);
+        }
+    }
+
+    peer1.set_follower();
+    peer2.set_follower();
+
+    // Activate all nodes
+    let peers = cluster.start_cluster(2).await;
+    assert_leader_elected(&peers).await;
     assert_cluster_updated(&peers).await;
-    assert_mirrored_stores(peers.clone(), true).await;
-    destroy_temp_dir(temp_dir);
-    peers
+    assert_mirrored_stores(peers, true).await;
 }
 
 #[tokio::test]
 async fn test_cluster() {
-    let (peers, temp_dirs) = build_cluster::<RocksDB>(5, true).await;
+    tracing_subscriber::fmt::init();
 
-    election(peers.clone()).await;
-    distruibuted_thread_merge(peers.clone()).await;
-    distruibuted_update_delete(peers.clone()).await;
+    let mut cluster = Cluster::<RocksDB>::new(6, true);
+    //let peers = cluster.start_cluster(5).await;
+
+    //election(peers.clone()).await;
+    //distributed_thread_merge(peers.clone()).await;
+    //distributed_update_delete(peers.clone()).await;
+    resolve_log_conflict(&mut cluster).await;
 
     // Add a new peer and send a snapshot to it.
-    snapshot(peers).await;
+    /*compact_log(peers.clone()).await;
+        let peers = cluster.extend_cluster(peers, 0).await;
+        assert_cluster_updated(&peers).await;
+        assert_mirrored_stores(peers.clone(), true).await;
+    */
 
-    for temp_dir in temp_dirs {
-        destroy_temp_dir(temp_dir);
-    }
+    cluster.cleanup();
 }
 
 #[test]
-fn test_coco() {
-    let dbs = (1..=5)
+fn postmortem() {
+    let dbs = (1..=6)
         .map(|n| init_db_params::<RocksDB>("st_cluster", n, 5, false).0)
         .collect::<Vec<_>>();
 

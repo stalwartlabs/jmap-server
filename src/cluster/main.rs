@@ -196,6 +196,12 @@ where
                 self.last_log = last_log;
                 self.send_append_entries();
             }
+            Event::AdvanceCommitIndex {
+                peer_id,
+                commit_index,
+            } => {
+                self.advance_commit_index(peer_id, commit_index).await;
+            }
             Event::Shutdown => return false,
 
             #[cfg(test)]
@@ -230,7 +236,10 @@ where
 
         // Start a new election
         if leader_is_offline {
-            debug!("Leader is offline, starting a new election.");
+            debug!(
+                "[{}] Leader is offline, starting a new election.",
+                self.addr
+            );
             self.request_votes(true).await;
         }
 

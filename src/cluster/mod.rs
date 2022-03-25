@@ -71,6 +71,7 @@ where
     // Raft status
     pub term: TermId,
     pub last_log: RaftId,
+    pub commit_index: LogIndex,
     pub state: raft::State,
 }
 
@@ -94,6 +95,10 @@ pub enum Event {
     },
     StoreChanged {
         last_log: RaftId,
+    },
+    AdvanceCommitIndex {
+        peer_id: PeerId,
+        commit_index: LogIndex,
     },
     Shutdown,
 
@@ -127,6 +132,7 @@ pub struct Peer {
     // Raft state
     pub last_log_index: LogIndex,
     pub last_log_term: TermId,
+    pub commit_index: LogIndex,
     pub vote_granted: bool,
 }
 
@@ -252,6 +258,7 @@ where
             key,
             jmap_url: format!("{}/jmap", jmap_url),
             term: last_log.term,
+            commit_index: last_log.index,
             last_log,
             state: raft::State::default(),
             core,
@@ -333,6 +340,7 @@ impl Peer {
             hb_is_full: false,
             last_log_index: 0,
             last_log_term: 0,
+            commit_index: 0,
             vote_granted: false,
         }
     }
@@ -366,6 +374,7 @@ impl Peer {
             hb_is_full: false,
             last_log_index: peer.last_log_index,
             last_log_term: peer.last_log_term,
+            commit_index: peer.last_log_index,
             vote_granted: false,
         }
     }

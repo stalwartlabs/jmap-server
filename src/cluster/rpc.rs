@@ -18,7 +18,7 @@ use tokio::{
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-use super::log::AppendEntriesRequest;
+use super::log::{AppendEntriesRequest, AppendEntriesResponse};
 use super::{gossip::PeerInfo, Event, Peer, PeerId, IPC_CHANNEL_BUFFER};
 
 const RPC_TIMEOUT_MS: u64 = 1000;
@@ -63,11 +63,9 @@ pub struct UpdateCollection {
 pub enum Response {
     UpdatePeers { peers: Vec<PeerInfo> },
     Vote { term: TermId, vote_granted: bool },
-    BecomeFollower { term: TermId, success: bool },
-    SynchronizeLog { matched: RaftId },
-    NeedUpdates { collections: Vec<UpdateCollection> },
+    StepDown { term: TermId },
+    AppendEntries(AppendEntriesResponse),
     Pong,
-    Continue,
     None,
 }
 
@@ -452,7 +450,7 @@ async fn handle_conn(
         }
     };
 
-    if let Err(err) = frames.send(Protocol::Response(Response::Continue)).await {
+    if let Err(err) = frames.send(Protocol::Response(Response::Pong)).await {
         error!("Failed to send auth response: {}", err);
         return;
     }
@@ -518,7 +516,7 @@ async fn connect_peer(
 ) -> std::io::Result<Framed<TcpStream, RpcEncoder>> {
     time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), async {
         let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcEncoder::default());
-        if let Response::Continue = send_rpc(&mut conn, auth_frame).await? {
+        if let Response::Pong = send_rpc(&mut conn, auth_frame).await? {
             Ok(conn)
         } else {
             Err(std::io::Error::new(

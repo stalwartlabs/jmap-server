@@ -2,9 +2,10 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
-use store::raft::{LogIndex, RaftId, TermId};
+use store::raft::{LogIndex, MergedChanges, RaftId, TermId};
+use store::roaring::RoaringTreemap;
 use store::tracing::{debug, error, info};
-use store::Store;
+use store::{AccountId, Collection, Store};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::JMAPServer;
@@ -295,6 +296,30 @@ where
         }
     }
 
+    pub async fn advance_commit_index(&mut self, peer_id: PeerId, commit_index: LogIndex) {
+        let mut indexes = Vec::with_capacity(self.peers.len() + 1);
+        for peer in self.peers.iter_mut() {
+            if peer.is_in_shard(self.shard_id) {
+                if peer.peer_id == peer_id {
+                    peer.commit_index = commit_index;
+                }
+                indexes.push(peer.commit_index.wrapping_add(1));
+            }
+        }
+        indexes.push(self.last_log.index.wrapping_add(1));
+        indexes.sort_unstable();
+
+        // Use div_floor when stabilized.
+        let commit_index = indexes[((indexes.len() as f64) / 2.0).floor() as usize];
+        if commit_index > self.commit_index.wrapping_add(1) {
+            self.commit_index = commit_index.wrapping_sub(1);
+            debug!(
+                "Advancing commit index to {} [cluster: {:?}].",
+                self.commit_index, indexes
+            );
+        }
+    }
+
     pub fn handle_vote_request(
         &mut self,
         peer_id: PeerId,
@@ -401,6 +426,43 @@ where
     pub async fn get_next_raft_id(&self, key: RaftId) -> store::Result<Option<RaftId>> {
         let store = self.store.clone();
         self.spawn_worker(move || store.get_next_raft_id(key)).await
+    }
+
+    pub async fn get_raft_match_terms(&self) -> store::Result<Vec<RaftId>> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.get_raft_match_terms())
+            .await
+    }
+
+    pub async fn get_raft_match_indexes(
+        &self,
+        start_log_index: LogIndex,
+    ) -> store::Result<(TermId, RoaringTreemap)> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.get_raft_match_indexes(start_log_index))
+            .await
+    }
+
+    pub async fn prepare_rollback_changes(&self, after_log_index: LogIndex) -> store::Result<()> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.prepare_rollback_changes(after_log_index))
+            .await
+    }
+
+    pub async fn next_rollback_change(&self) -> store::Result<Option<MergedChanges>> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.next_rollback_change())
+            .await
+    }
+
+    pub async fn remove_rollback_change(
+        &self,
+        account_id: AccountId,
+        collection: Collection,
+    ) -> store::Result<()> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.remove_rollback_change(account_id, collection))
+            .await
     }
 
     pub async fn store_changed(&self, last_log: RaftId) {
