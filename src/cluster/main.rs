@@ -183,6 +183,14 @@ where
                 rpc::Response::Vote { term, vote_granted } => {
                     self.handle_vote_response(peer_id, term, vote_granted);
                 }
+                rpc::Response::UnregisteredPeer => {
+                    self.get_peer(peer_id)
+                        .unwrap()
+                        .dispatch_request(rpc::Request::UpdatePeers {
+                            peers: self.build_peer_info(),
+                        })
+                        .await;
+                }
                 _ => (),
             },
             Event::StepDown { term } => {

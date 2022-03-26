@@ -25,7 +25,9 @@ use crate::{JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
 
 use self::{gossip::PeerInfo, rpc::spawn_peer_rpc};
 
+pub mod follower;
 pub mod gossip;
+pub mod leader;
 pub mod log;
 pub mod main;
 pub mod raft;
@@ -106,6 +108,7 @@ pub enum Event {
     IsOffline(bool),
 }
 
+#[derive(Debug)]
 pub struct Peer {
     pub peer_id: PeerId,
     pub shard_id: ShardId,
@@ -172,6 +175,10 @@ where
 
     pub fn get_peer(&self, peer_id: PeerId) -> Option<&Peer> {
         self.peers.iter().find(|p| p.peer_id == peer_id)
+    }
+
+    pub fn is_known_peer(&self, peer_id: PeerId) -> bool {
+        self.peers.iter().any(|p| p.peer_id == peer_id)
     }
 
     pub fn get_peer_mut(&mut self, peer_id: PeerId) -> Option<&mut Peer> {

@@ -327,22 +327,25 @@ where
         term: TermId,
         last: RaftId,
     ) {
-        if self.term < term {
-            self.step_down(term);
-        }
-
         response_tx
-            .send(Response::Vote {
-                term: self.term,
-                vote_granted: if self.term == term
-                    && self.can_grant_vote(peer_id)
-                    && self.log_is_behind_or_eq(last.term, last.index)
-                {
-                    self.vote_for(peer_id);
-                    true
-                } else {
-                    false
-                },
+            .send(if self.is_known_peer(peer_id) {
+                if self.term < term {
+                    self.step_down(term);
+                }
+                Response::Vote {
+                    term: self.term,
+                    vote_granted: if self.term == term
+                        && self.can_grant_vote(peer_id)
+                        && self.log_is_behind_or_eq(last.term, last.index)
+                    {
+                        self.vote_for(peer_id);
+                        true
+                    } else {
+                        false
+                    },
+                }
+            } else {
+                rpc::Response::UnregisteredPeer
             })
             .unwrap_or_else(|_| error!("Oneshot response channel closed."));
     }
@@ -443,9 +446,9 @@ where
             .await
     }
 
-    pub async fn prepare_rollback_changes(&self, after_log_index: LogIndex) -> store::Result<()> {
+    pub async fn prepare_rollback_changes(&self, after_log: RaftId) -> store::Result<()> {
         let store = self.store.clone();
-        self.spawn_worker(move || store.prepare_rollback_changes(after_log_index))
+        self.spawn_worker(move || store.prepare_rollback_changes(after_log))
             .await
     }
 

@@ -489,7 +489,7 @@ where
         Ok(changes)
     }
 
-    pub fn prepare_rollback_changes(&self, after_log_index: LogIndex) -> crate::Result<()> {
+    pub fn prepare_rollback_changes(&self, after_log: RaftId) -> crate::Result<()> {
         let mut changes = MergedChanges::new(AccountId::MAX, Collection::None);
         let mut write_batch = Vec::new();
 
@@ -501,15 +501,18 @@ where
             if !key.starts_with(&[LogKey::CHANGE_KEY_PREFIX]) {
                 break;
             }
-            let change_id = LogKey::deserialize_change_id(&key).ok_or_else(|| {
-                StoreError::InternalError(format!(
-                    "Failed to deserialize changelog key : [{:?}]",
-                    key
-                ))
-            })?;
 
-            if change_id <= after_log_index {
-                continue;
+            if !after_log.is_none() {
+                let change_id = LogKey::deserialize_change_id(&key).ok_or_else(|| {
+                    StoreError::InternalError(format!(
+                        "Failed to deserialize changelog key : [{:?}]",
+                        key
+                    ))
+                })?;
+
+                if change_id <= after_log.index {
+                    continue;
+                }
             }
 
             let account_id = (&key[..])
@@ -577,12 +580,16 @@ where
             Direction::Forward,
         )? {
             if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
-                if LogKey::deserialize_raft(&key)
-                    .ok_or_else(|| {
-                        StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
-                    })?
-                    .index
-                    > after_log_index
+                if after_log.is_none()
+                    || LogKey::deserialize_raft(&key)
+                        .ok_or_else(|| {
+                            StoreError::InternalError(format!(
+                                "Corrupted raft entry for [{:?}]",
+                                key
+                            ))
+                        })?
+                        .index
+                        > after_log.index
                 {
                     write_batch.push(WriteOperation::delete(ColumnFamily::Logs, key.to_vec()));
                 }

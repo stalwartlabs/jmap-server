@@ -5,7 +5,7 @@ use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use store::{bincode, changes::ChangeId, leb128::Leb128, raft::RaftId, AccountId, Collection};
+use store::{bincode, leb128::Leb128, raft::RaftId};
 use store::{
     raft::TermId,
     tracing::{debug, error},
@@ -53,19 +53,13 @@ pub enum Request {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct UpdateCollection {
-    pub account_id: AccountId,
-    pub collection: Collection,
-    pub from_change_id: Option<ChangeId>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     UpdatePeers { peers: Vec<PeerInfo> },
     Vote { term: TermId, vote_granted: bool },
     StepDown { term: TermId },
     AppendEntries(AppendEntriesResponse),
     Pong,
+    UnregisteredPeer,
     None,
 }
 
