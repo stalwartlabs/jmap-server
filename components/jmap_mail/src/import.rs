@@ -10,15 +10,15 @@ use jmap::{
 };
 
 use store::batch::Document;
+use store::field::{DefaultOptions, Options};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
 use store::tracing::debug;
+use store::tracing::log::error;
 use store::{
-    batch::WriteBatch,
-    field::{FieldOptions, Text},
-    roaring::RoaringBitmap,
-    AccountId, Comparator, FieldValue, Filter, JMAPId, JMAPStore, Store, Tag, ThreadId,
+    batch::WriteBatch, field::Text, roaring::RoaringBitmap, AccountId, Comparator, FieldValue,
+    Filter, JMAPId, JMAPStore, Store, Tag, ThreadId,
 };
-use store::{Collection, JMAPIdPrefix};
+use store::{Collection, DocumentId, JMAPIdPrefix};
 
 use crate::{parse::build_message_document, query::MailboxId, MessageField};
 
@@ -72,11 +72,13 @@ pub trait JMAPMailImport {
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
 
+    #[allow(clippy::too_many_arguments)]
     fn raft_update_mail(
         &self,
         batch: &mut WriteBatch,
         account_id: AccountId,
-        jmap_id: JMAPId,
+        document_id: DocumentId,
+        thread_id: DocumentId,
         mailbox_ids: HashSet<Tag>,
         keywords: HashSet<Tag>,
         insert: Option<(Vec<u8>, i64)>,
@@ -196,13 +198,17 @@ where
         // Add mailbox tags
         //TODO validate mailbox ids
         for mailbox_id in mailbox_ids {
-            document.tag(MessageField::Mailbox, Tag::Id(mailbox_id));
+            document.tag(
+                MessageField::Mailbox,
+                Tag::Id(mailbox_id),
+                DefaultOptions::new(),
+            );
             batch.log_child_update(Collection::Mailbox, mailbox_id);
         }
 
         // Add keyword tags
         for keyword in keywords {
-            document.tag(MessageField::Keyword, keyword);
+            document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
         }
 
         // Lock account while threads are merged
@@ -279,15 +285,20 @@ where
             document.text(
                 MessageField::MessageIdRef,
                 Text::keyword(reference_id),
-                FieldOptions::None,
+                DefaultOptions::new(),
             );
         }
 
-        document.tag(MessageField::ThreadId, Tag::Id(thread_id));
+        document.tag(
+            MessageField::ThreadId,
+            Tag::Id(thread_id),
+            DefaultOptions::new(),
+        );
+
         document.text(
             MessageField::ThreadName,
             Text::keyword(thread_name),
-            FieldOptions::Sort,
+            DefaultOptions::new().sort(),
         );
 
         let jmap_mail_id = JMAPId::from_parts(thread_id, document_id);
@@ -341,8 +352,10 @@ where
                 debug_assert!(!document_set.is_empty());
                 document_sets.push((document_set, thread_ids[pos]));
             } else {
-                // TODO log this error instead
-                debug_assert!(false, "No tags found for thread id {}.", thread_ids[pos]);
+                error!(
+                    "No tags found for thread id {}, account: {}.",
+                    thread_ids[pos], account_id
+                );
             }
         }
 
@@ -354,8 +367,16 @@ where
         for (document_set, delete_thread_id) in document_sets {
             for document_id in document_set {
                 let mut document = Document::new(Collection::Mail, document_id);
-                document.tag(MessageField::ThreadId, Tag::Id(thread_id));
-                document.untag(MessageField::ThreadId, Tag::Id(delete_thread_id));
+                document.tag(
+                    MessageField::ThreadId,
+                    Tag::Id(thread_id),
+                    DefaultOptions::new(),
+                );
+                document.tag(
+                    MessageField::ThreadId,
+                    Tag::Id(delete_thread_id),
+                    DefaultOptions::new().clear(),
+                );
                 batch.log_move(
                     Collection::Mail,
                     JMAPId::from_parts(delete_thread_id, document_id),
@@ -374,13 +395,13 @@ where
         &self,
         batch: &mut WriteBatch,
         account_id: AccountId,
-        jmap_id: JMAPId,
+        document_id: DocumentId,
+        thread_id: DocumentId,
         mailboxes: HashSet<Tag>,
         keywords: HashSet<Tag>,
         insert: Option<(Vec<u8>, i64)>,
     ) -> store::Result<()> {
         if let Some((raw_message, received_at)) = insert {
-            let document_id = jmap_id.get_document_id();
             let mut document = Document::new(Collection::Mail, document_id);
 
             // Parse and build message document
@@ -389,34 +410,36 @@ where
 
             // Add mailbox tags
             for mailbox in mailboxes {
-                document.tag(MessageField::Mailbox, mailbox);
+                document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
             }
 
             // Add keyword tags
             for keyword in keywords {
-                document.tag(MessageField::Keyword, keyword);
+                document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
             }
 
             for reference_id in reference_ids {
                 document.text(
                     MessageField::MessageIdRef,
                     Text::keyword(reference_id),
-                    FieldOptions::None,
+                    DefaultOptions::new(),
                 );
             }
 
             // Add thread id and name
-            let thread_id = jmap_id.get_prefix_id();
-            document.tag(MessageField::ThreadId, Tag::Id(thread_id));
+            document.tag(
+                MessageField::ThreadId,
+                Tag::Id(thread_id),
+                DefaultOptions::new(),
+            );
             document.text(
                 MessageField::ThreadName,
                 Text::keyword(thread_name),
-                FieldOptions::Sort,
+                DefaultOptions::new().sort(),
             );
 
             batch.insert_document(document);
         } else {
-            let document_id = jmap_id.get_document_id();
             let mut document = Document::new(Collection::Mail, document_id);
 
             // Process mailbox changes
@@ -429,13 +452,17 @@ where
                 if current_mailboxes.items != mailboxes {
                     for current_mailbox in &current_mailboxes.items {
                         if !mailboxes.contains(current_mailbox) {
-                            document.untag(MessageField::Mailbox, current_mailbox.clone());
+                            document.tag(
+                                MessageField::Mailbox,
+                                current_mailbox.clone(),
+                                DefaultOptions::new().clear(),
+                            );
                         }
                     }
 
                     for mailbox in mailboxes {
                         if !current_mailboxes.contains(&mailbox) {
-                            document.tag(MessageField::Mailbox, mailbox);
+                            document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
                         }
                     }
                 }
@@ -461,13 +488,17 @@ where
             if current_keywords != keywords {
                 for current_keyword in &current_keywords {
                     if !keywords.contains(current_keyword) {
-                        document.untag(MessageField::Keyword, current_keyword.clone());
+                        document.tag(
+                            MessageField::Keyword,
+                            current_keyword.clone(),
+                            DefaultOptions::new().clear(),
+                        );
                     }
                 }
 
                 for keyword in keywords {
                     if !current_keywords.contains(&keyword) {
-                        document.tag(MessageField::Keyword, keyword);
+                        document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
                     }
                 }
             }
@@ -479,10 +510,17 @@ where
                 document_id,
                 MessageField::ThreadId.into(),
             )? {
-                let thread_id = jmap_id.get_prefix_id();
                 if thread_id != current_thread_id {
-                    document.tag(MessageField::ThreadId, Tag::Id(thread_id));
-                    document.untag(MessageField::ThreadId, Tag::Id(current_thread_id));
+                    document.tag(
+                        MessageField::ThreadId,
+                        Tag::Id(thread_id),
+                        DefaultOptions::new(),
+                    );
+                    document.tag(
+                        MessageField::ThreadId,
+                        Tag::Id(current_thread_id),
+                        DefaultOptions::new().clear(),
+                    );
                 }
             } else {
                 debug!(

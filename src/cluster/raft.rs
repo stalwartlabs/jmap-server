@@ -2,14 +2,16 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
-use store::raft::{LogIndex, MergedChanges, RaftId, TermId};
+use store::log::{LogIndex, RaftId, TermId};
 use store::roaring::RoaringTreemap;
 use store::tracing::{debug, error, info};
 use store::{AccountId, Collection, Store};
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::cluster::leader;
 use crate::JMAPServer;
 
+use super::log::{MergedChanges, RaftStore};
 use super::{log, rpc};
 use super::{
     rpc::{Request, Response},
@@ -23,8 +25,8 @@ pub const ELECTION_TIMEOUT_RAND_TO: u64 = 300;
 #[derive(Debug)]
 pub enum State {
     Leader {
-        tx: watch::Sender<LogIndex>,
-        rx: watch::Receiver<LogIndex>,
+        tx: watch::Sender<leader::Event>,
+        rx: watch::Receiver<leader::Event>,
     },
     Wait {
         election_due: Instant,
@@ -139,12 +141,12 @@ where
         self.state = State::Wait {
             election_due: election_timeout(now),
         };
+        self.reset_votes();
         self.core.set_follower();
-        self.reset();
     }
 
     pub fn step_down(&mut self, term: TermId) {
-        self.reset();
+        self.reset_votes();
         self.core.set_follower();
         self.term = term;
         self.state = State::Wait {
@@ -167,8 +169,8 @@ where
             peer_id,
             election_due: election_timeout(false),
         };
+        self.reset_votes();
         self.core.set_follower();
-        self.reset();
         debug!(
             "[{}] Voted for peer {} for term {}.",
             self.addr,
@@ -177,26 +179,32 @@ where
         );
     }
 
-    pub fn follow_leader(&mut self, peer_id: PeerId) -> mpsc::Sender<log::Event> {
+    pub async fn follow_leader(
+        &mut self,
+        peer_id: PeerId,
+    ) -> store::Result<mpsc::Sender<log::Event>> {
         let tx = self.spawn_raft_follower();
         self.state = State::Follower {
             peer_id,
             tx: tx.clone(),
         };
+        self.reset_votes();
         self.core.set_follower();
-        self.reset();
         debug!(
             "[{}] Following peer {} for term {}.",
             self.addr,
             self.get_peer(peer_id).unwrap(),
             self.term
         );
-        tx
+        Ok(tx)
     }
 
     pub fn send_append_entries(&self) {
         if let State::Leader { tx, .. } = &self.state {
-            if let Err(err) = tx.send(self.last_log.index) {
+            if let Err(err) = tx.send(leader::Event::new(
+                self.last_log.index,
+                self.uncommitted_index,
+            )) {
                 error!("Failed to broadcast append entries: {}", err);
             }
         }
@@ -207,27 +215,41 @@ where
             election_due: election_timeout(now),
         };
         self.term += 1;
+        self.reset_votes();
         self.core.set_follower();
-        self.reset();
         debug!(
             "[{}] Running for election for term {}.",
             self.addr, self.term
         );
     }
 
-    pub fn become_leader(&mut self) {
+    pub async fn become_leader(&mut self) -> store::Result<()> {
         debug!(
             "[{}] This node is the new leader for term {}.",
             self.addr, self.term
         );
-        let (tx, rx) = watch::channel(self.last_log.index);
+
+        // Rollback any uncommitted changes
+        self.core.reset_uncommitted_changes().await?;
+        self.last_log = self.core.get_last_log().await?.unwrap_or_else(RaftId::none);
+        self.uncommitted_index = self.last_log.index;
+        self.core.update_raft_index(self.last_log.index);
+
+        let (tx, rx) = watch::channel(leader::Event::new(
+            self.last_log.index,
+            self.uncommitted_index,
+        ));
         self.peers
             .iter()
             .filter(|p| p.is_in_shard(self.shard_id))
             .for_each(|p| self.spawn_raft_leader(p, rx.clone()));
         self.state = State::Leader { tx, rx };
+        self.reset_votes();
+        self.core
+            .set_leader_commit_index(self.last_log.index)
+            .await?;
         self.core.set_leader(self.term);
-        self.reset();
+        Ok(())
     }
 
     pub fn add_follower(&self, peer_id: PeerId) {
@@ -236,7 +258,7 @@ where
         }
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset_votes(&mut self) {
         self.peers.iter_mut().for_each(|peer| {
             peer.vote_granted = false;
         });
@@ -262,7 +284,7 @@ where
         votes > ((total_peers as f64 + 1.0) / 2.0).floor() as u32
     }
 
-    pub async fn request_votes(&mut self, now: bool) {
+    pub async fn request_votes(&mut self, now: bool) -> store::Result<()> {
         // Check if there is enough quorum for an election.
         if self.has_election_quorum() {
             // Assess whether this node could become the leader for the next term.
@@ -271,13 +293,19 @@ where
                     && !peer.is_offline()
                     && self.log_is_behind(peer.last_log_term, peer.last_log_index)
             }) {
-                // Increase term and start election
-                self.run_for_election(now);
-                for peer in &self.peers {
-                    if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
-                        peer.vote_for_me(self.term, self.last_log.index, self.last_log.term)
-                            .await;
+                // If this node requires a rollback, it won't be able to become a leader
+                // on the next election.
+                if !self.core.has_pending_rollback().await? {
+                    // Increase term and start election
+                    self.run_for_election(now);
+                    for peer in &self.peers {
+                        if peer.is_in_shard(self.shard_id) && !peer.is_offline() {
+                            peer.vote_for_me(self.term, self.last_log.index, self.last_log.term)
+                                .await;
+                        }
                     }
+                } else {
+                    self.start_election_timer(now);
                 }
             } else {
                 // Wait to receive a vote request from a more up-to-date peer.
@@ -294,9 +322,15 @@ where
                 self.shard_id
             );
         }
+
+        Ok(())
     }
 
-    pub async fn advance_commit_index(&mut self, peer_id: PeerId, commit_index: LogIndex) {
+    pub async fn advance_commit_index(
+        &mut self,
+        peer_id: PeerId,
+        commit_index: LogIndex,
+    ) -> store::Result<bool> {
         let mut indexes = Vec::with_capacity(self.peers.len() + 1);
         for peer in self.peers.iter_mut() {
             if peer.is_in_shard(self.shard_id) {
@@ -306,18 +340,23 @@ where
                 indexes.push(peer.commit_index.wrapping_add(1));
             }
         }
-        indexes.push(self.last_log.index.wrapping_add(1));
+        indexes.push(self.uncommitted_index.wrapping_add(1));
         indexes.sort_unstable();
 
         // Use div_floor when stabilized.
         let commit_index = indexes[((indexes.len() as f64) / 2.0).floor() as usize];
-        if commit_index > self.commit_index.wrapping_add(1) {
-            self.commit_index = commit_index.wrapping_sub(1);
+        if commit_index > self.last_log.index.wrapping_add(1) {
+            self.last_log.index = commit_index.wrapping_sub(1);
+            self.core
+                .set_leader_commit_index(self.last_log.index)
+                .await?;
+            self.send_append_entries();
             debug!(
                 "Advancing commit index to {} [cluster: {:?}].",
-                self.commit_index, indexes
+                self.last_log.index, indexes
             );
         }
+        Ok(true)
     }
 
     pub fn handle_vote_request(
@@ -350,17 +389,24 @@ where
             .unwrap_or_else(|_| error!("Oneshot response channel closed."));
     }
 
-    pub fn handle_vote_response(&mut self, peer_id: PeerId, term: TermId, vote_granted: bool) {
+    pub async fn handle_vote_response(
+        &mut self,
+        peer_id: PeerId,
+        term: TermId,
+        vote_granted: bool,
+    ) -> store::Result<()> {
         if self.term < term {
             self.step_down(term);
-            return;
+            return Ok(());
         } else if !self.is_candidate() || !vote_granted || self.term != term {
-            return;
+            return Ok(());
         }
 
         if self.count_vote(peer_id) {
-            self.become_leader();
+            self.become_leader().await?;
         }
+
+        Ok(())
     }
 }
 
@@ -446,13 +492,15 @@ where
             .await
     }
 
-    pub async fn prepare_rollback_changes(&self, after_log: RaftId) -> store::Result<()> {
+    pub async fn prepare_rollback_changes(&self, after_index: LogIndex) -> store::Result<()> {
         let store = self.store.clone();
-        self.spawn_worker(move || store.prepare_rollback_changes(after_log))
+        self.spawn_worker(move || store.prepare_rollback_changes(after_index))
             .await
     }
 
-    pub async fn next_rollback_change(&self) -> store::Result<Option<MergedChanges>> {
+    pub async fn next_rollback_change(
+        &self,
+    ) -> store::Result<Option<(AccountId, Collection, MergedChanges)>> {
         let store = self.store.clone();
         self.spawn_worker(move || store.next_rollback_change())
             .await
@@ -465,6 +513,21 @@ where
     ) -> store::Result<()> {
         let store = self.store.clone();
         self.spawn_worker(move || store.remove_rollback_change(account_id, collection))
+            .await
+    }
+
+    pub async fn reset_uncommitted_changes(&self) -> store::Result<bool> {
+        // Rollback uncommitted entries for a previous leader term.
+        self.rollback_uncommitted().await?;
+
+        // Apply committed updates and rollback uncommited ones for
+        // a previous follower term.
+        self.apply_committed_updates().await
+    }
+
+    pub async fn has_pending_rollback(&self) -> store::Result<bool> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.has_pending_rollback())
             .await
     }
 

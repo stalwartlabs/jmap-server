@@ -12,7 +12,7 @@ use std::{
 
 use crate::{leb128::Leb128, serialize::ValueKey};
 use crate::{
-    serialize::{StoreDeserialize, StoreSerialize, BLOB_KEY, TEMP_BLOB_KEY},
+    serialize::{StoreDeserialize, StoreSerialize, BLOB_KEY_PREFIX, TEMP_BLOB_KEY_PREFIX},
     AccountId, Collection, ColumnFamily, Direction, DocumentId, JMAPStore, Store, StoreError,
     WriteOperation,
 };
@@ -48,7 +48,7 @@ pub struct BlobEntry {
     pub size: u32,
 }
 
-pub type BlobIndex = usize;
+pub type BlobIndex = u32;
 
 impl StoreSerialize for BlobEntries {
     fn serialize(&self) -> Option<Vec<u8>> {
@@ -187,7 +187,7 @@ where
         };
 
         for (item_idx, item_range) in items {
-            let blob_entry = blob_entries.items.get(item_idx).ok_or_else(|| {
+            let blob_entry = blob_entries.items.get(item_idx as usize).ok_or_else(|| {
                 StoreError::InternalError(format!("Blob entry {} not found", item_idx))
             })?;
 
@@ -261,18 +261,19 @@ where
             .map_err(|_| StoreError::InternalError("Failed to get current timestamp".into()))?
             .as_secs();
 
-        for (key, value) in
-            self.db
-                .iterator(ColumnFamily::Values, TEMP_BLOB_KEY, Direction::Forward)?
-        {
-            if key.starts_with(TEMP_BLOB_KEY) {
-                let (timestamp, _) = u64::from_leb128_bytes(&value[TEMP_BLOB_KEY.len()..])
+        for (key, value) in self.db.iterator(
+            ColumnFamily::Values,
+            TEMP_BLOB_KEY_PREFIX,
+            Direction::Forward,
+        )? {
+            if key.starts_with(TEMP_BLOB_KEY_PREFIX) {
+                let (timestamp, _) = u64::from_leb128_bytes(&value[TEMP_BLOB_KEY_PREFIX.len()..])
                     .ok_or_else(|| {
-                        StoreError::InternalError(format!(
-                            "Failed to deserialize timestamp from key {:?}",
-                            key
-                        ))
-                    })?;
+                    StoreError::InternalError(format!(
+                        "Failed to deserialize timestamp from key {:?}",
+                        key
+                    ))
+                })?;
                 if (current_time >= timestamp
                     && current_time - timestamp > self.config.blob_temp_ttl)
                     || (current_time < timestamp
@@ -297,11 +298,11 @@ where
             self.db.write(batch)?;
         }
 
-        for (key, value) in self
-            .db
-            .iterator(ColumnFamily::Values, BLOB_KEY, Direction::Forward)?
+        for (key, value) in
+            self.db
+                .iterator(ColumnFamily::Values, BLOB_KEY_PREFIX, Direction::Forward)?
         {
-            if key.starts_with(BLOB_KEY) {
+            if key.starts_with(BLOB_KEY_PREFIX) {
                 let value = i64::deserialize(&value).ok_or_else(|| {
                     StoreError::InternalError("Failed to convert blob key to i64".to_string())
                 })?;
@@ -309,7 +310,7 @@ where
                 if value == 0 {
                     self.db.delete(ColumnFamily::Values, &key)?;
                     std::fs::remove_file(
-                        &BlobEntries::deserialize(&key[BLOB_KEY.len()..])
+                        &BlobEntries::deserialize(&key[BLOB_KEY_PREFIX.len()..])
                             .ok_or(StoreError::DataCorruption)?
                             .items
                             .get(0)

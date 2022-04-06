@@ -13,7 +13,7 @@ use jmap::{
 };
 
 use store::batch::Document;
-use store::field::{FieldOptions, Text};
+use store::field::{DefaultOptions, Options, Text};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
 use store::roaring::RoaringBitmap;
 use store::serialize::{StoreDeserialize, StoreSerialize};
@@ -88,13 +88,14 @@ pub enum JMAPMailboxProperties {
     Name = 1,
     ParentId = 2,
     Role = 3,
-    SortOrder = 4,
-    IsSubscribed = 5,
-    TotalEmails = 6,
-    UnreadEmails = 7,
-    TotalThreads = 8,
-    UnreadThreads = 9,
-    MyRights = 10,
+    HasRole = 4,
+    SortOrder = 5,
+    IsSubscribed = 6,
+    TotalEmails = 7,
+    UnreadEmails = 8,
+    TotalThreads = 9,
+    UnreadThreads = 10,
+    MyRights = 11,
 }
 
 impl JMAPMailboxProperties {
@@ -104,6 +105,7 @@ impl JMAPMailboxProperties {
             JMAPMailboxProperties::Name => "name",
             JMAPMailboxProperties::ParentId => "parentId",
             JMAPMailboxProperties::Role => "role",
+            JMAPMailboxProperties::HasRole => "hasRole",
             JMAPMailboxProperties::SortOrder => "sortOrder",
             JMAPMailboxProperties::IsSubscribed => "isSubscribed",
             JMAPMailboxProperties::TotalEmails => "totalEmails",
@@ -214,7 +216,7 @@ pub trait JMAPMailMailbox {
         &self,
         batch: &mut WriteBatch,
         account_id: AccountId,
-        mailbox_id: JMAPId,
+        document_id: DocumentId,
         mailbox: Mailbox,
     ) -> store::Result<()>;
 }
@@ -627,6 +629,7 @@ where
                                 self.get_mailbox_unread_tag(request.account_id, document_id)?,
                             )?
                             .into(),
+                        JMAPMailboxProperties::HasRole => JSONValue::Null,
                     };
 
                     entry.insert(value);
@@ -673,7 +676,7 @@ where
                     Filter::eq(JMAPMailboxProperties::Role.into(), FieldValue::Text(text))
                 }
                 JMAPMailboxFilterCondition::HasAnyRole => Filter::eq(
-                    JMAPMailboxProperties::Role.into(),
+                    JMAPMailboxProperties::HasRole.into(),
                     FieldValue::Tag(Tag::Static(0)),
                 ),
                 JMAPMailboxFilterCondition::IsSubscribed => todo!(), //TODO implement
@@ -1185,10 +1188,9 @@ where
         &self,
         batch: &mut WriteBatch,
         account_id: AccountId,
-        mailbox_id: JMAPId,
+        document_id: DocumentId,
         mailbox: Mailbox,
     ) -> store::Result<()> {
-        let document_id = mailbox_id.get_document_id();
         if let Some(current_mailbox) = self.get_document_value::<Mailbox>(
             account_id,
             Collection::Mailbox,
@@ -1221,38 +1223,39 @@ fn build_mailbox_document(mailbox: Mailbox, document_id: DocumentId) -> store::R
 
     document.text(
         JMAPMailboxProperties::Name,
-        Text::tokenized(mailbox.name.to_lowercase()),
-        FieldOptions::Sort,
+        Text::tokenized(mailbox.name.clone()),
+        DefaultOptions::new().sort(),
     );
 
     if let Some(mailbox_role) = mailbox.role.as_ref() {
         document.text(
             JMAPMailboxProperties::Role,
             Text::keyword(mailbox_role.clone()),
-            FieldOptions::None,
+            DefaultOptions::new(),
         );
         document.tag(
             // TODO search by not empty, similarly to headers?
-            JMAPMailboxProperties::Role,
+            JMAPMailboxProperties::HasRole,
             Tag::Static(0),
+            DefaultOptions::new(),
         );
     }
     document.number(
         JMAPMailboxProperties::ParentId,
         mailbox.parent_id,
-        FieldOptions::Sort,
+        DefaultOptions::new().sort(),
     );
     document.number(
         JMAPMailboxProperties::SortOrder,
         mailbox.sort_order,
-        FieldOptions::Sort,
+        DefaultOptions::new().sort(),
     );
     document.binary(
         JMAPMailboxProperties::Id,
         mailbox.serialize().ok_or_else(|| {
             StoreError::SerializeError("Failed to serialize mailbox.".to_string())
         })?,
-        FieldOptions::Store,
+        DefaultOptions::new().store(),
     );
     Ok(document)
 }
@@ -1268,13 +1271,13 @@ fn build_changed_mailbox_document(
         if new_name != mailbox.name {
             document.text(
                 JMAPMailboxProperties::Name,
-                Text::tokenized(mailbox.name.to_lowercase()),
-                FieldOptions::Clear,
+                Text::tokenized(mailbox.name),
+                DefaultOptions::new().sort().clear(),
             );
             document.text(
                 JMAPMailboxProperties::Name,
-                Text::tokenized(new_name.to_lowercase()),
-                FieldOptions::Sort,
+                Text::tokenized(new_name.clone()),
+                DefaultOptions::new().sort(),
             );
             mailbox.name = new_name;
         }
@@ -1285,12 +1288,12 @@ fn build_changed_mailbox_document(
             document.number(
                 JMAPMailboxProperties::ParentId,
                 mailbox.parent_id,
-                FieldOptions::Clear,
+                DefaultOptions::new().sort().clear(),
             );
             document.number(
                 JMAPMailboxProperties::ParentId,
                 new_parent_id,
-                FieldOptions::Sort,
+                DefaultOptions::new().sort(),
             );
             mailbox.parent_id = new_parent_id;
         }
@@ -1302,7 +1305,7 @@ fn build_changed_mailbox_document(
                 document.text(
                     JMAPMailboxProperties::Role,
                     Text::keyword(role),
-                    FieldOptions::Clear,
+                    DefaultOptions::new().clear(),
                 );
                 true
             } else {
@@ -1312,15 +1315,23 @@ fn build_changed_mailbox_document(
                 document.text(
                     JMAPMailboxProperties::Role,
                     Text::keyword(new_role.clone()),
-                    FieldOptions::None,
+                    DefaultOptions::new(),
                 );
                 if !has_role {
                     // New role was added, set tag.
-                    document.tag(JMAPMailboxProperties::Role, Tag::Static(0));
+                    document.tag(
+                        JMAPMailboxProperties::HasRole,
+                        Tag::Static(0),
+                        DefaultOptions::new(),
+                    );
                 }
             } else if has_role {
                 // Role was removed, clear tag.
-                document.untag(JMAPMailboxProperties::Role, Tag::Static(0));
+                document.tag(
+                    JMAPMailboxProperties::HasRole,
+                    Tag::Static(0),
+                    DefaultOptions::new().clear(),
+                );
             }
             mailbox.role = new_role;
         }
@@ -1331,12 +1342,12 @@ fn build_changed_mailbox_document(
             document.number(
                 JMAPMailboxProperties::SortOrder,
                 mailbox.sort_order,
-                FieldOptions::Clear,
+                DefaultOptions::new().sort().clear(),
             );
             document.number(
                 JMAPMailboxProperties::SortOrder,
                 new_sort_order,
-                FieldOptions::Sort,
+                DefaultOptions::new().sort(),
             );
             mailbox.sort_order = new_sort_order;
         }
@@ -1348,7 +1359,7 @@ fn build_changed_mailbox_document(
             mailbox.serialize().ok_or_else(|| {
                 StoreError::SerializeError("Failed to serialize mailbox.".to_string())
             })?,
-            FieldOptions::Store,
+            DefaultOptions::new().store(),
         );
         Ok(Some(document))
     } else {

@@ -1,20 +1,26 @@
-use std::collections::{hash_map, HashMap};
+use std::collections::HashMap;
 
 use jmap_mail::import::JMAPMailImport;
 use jmap_mail::mailbox::JMAPMailMailbox;
 
 use store::batch::WriteBatch;
-use store::raft::{Entry, MergedChanges, RaftId, RawEntry, TermId};
-use store::serialize::LogKey;
+use store::log::{Entry, LogIndex, RaftId, TermId};
+use store::roaring::RoaringBitmap;
+use store::serialize::{
+    DeserializeBigEndian, LogKey, StoreDeserialize, StoreSerialize, LAST_APPLIED_INDEX_KEY,
+};
 use store::tracing::{debug, error};
-use store::WriteOperation;
-use store::{lz4_flex, AccountId, Collection, ColumnFamily, JMAPStore, Store, StoreError};
+use store::{
+    bincode, lz4_flex, AccountId, Collection, ColumnFamily, Direction, DocumentId, JMAPStore,
+    Store, StoreError,
+};
+use store::{Collections, WriteOperation};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::cluster::log::{AppendEntriesResponse, UpdateCollection};
+use crate::cluster::log::{AppendEntriesResponse, DocumentUpdate};
 use crate::JMAPServer;
 
-use super::log::{AppendEntriesRequest, Change, Event};
+use super::log::{AppendEntriesRequest, Event, MergedChanges, RaftStore, Update};
 
 use super::{
     rpc::{self, Response},
@@ -24,21 +30,64 @@ use super::{PeerId, IPC_CHANNEL_BUFFER};
 
 #[derive(Debug)]
 enum State {
-    Append {
-        commit_id: RaftId,
-        pending_entries: Vec<RawEntry>,
+    Synchronize,
+    AppendEntries {
+        first_id: RaftId,
+        last_id: RaftId,
+        changed_accounts: HashMap<AccountId, Collections>,
+    },
+    AppendChanges {
+        first_id: RaftId,
+        last_id: RaftId,
+        changed_accounts: Vec<(AccountId, Collections)>,
     },
     Rollback {
+        account_id: AccountId,
+        collection: Collection,
         changes: MergedChanges,
     },
 }
 
 impl Default for State {
     fn default() -> Self {
-        State::Append {
-            commit_id: RaftId::none(),
-            pending_entries: Vec::new(),
-        }
+        State::Synchronize
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+enum PendingUpdate {
+    UpdateDocument {
+        account_id: AccountId,
+        document_id: DocumentId,
+        update: DocumentUpdate,
+    },
+    DeleteDocuments {
+        account_id: AccountId,
+        collection: Collection,
+        document_ids: Vec<DocumentId>,
+    },
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct PendingUpdates {
+    updates: Vec<PendingUpdate>,
+}
+
+impl PendingUpdates {
+    pub fn new(updates: Vec<PendingUpdate>) -> Self {
+        Self { updates }
+    }
+}
+
+impl StoreSerialize for PendingUpdates {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        bincode::serialize(self).ok()
+    }
+}
+
+impl StoreDeserialize for PendingUpdates {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        bincode::deserialize(bytes).ok()
     }
 }
 
@@ -54,8 +103,24 @@ where
         debug!("[{}] Starting raft follower process.", local_name);
 
         tokio::spawn(async move {
+            let mut change_seq = 0;
+
+            if let Err(err) = core.reset_uncommitted_changes().await {
+                error!("Failed to reset uncommitted changes: {:?}", err);
+                return;
+            }
+
+            if let Err(err) = core.init_last_applied_index().await {
+                error!("Failed to set last update key: {:?}", err);
+                return;
+            }
+
             let mut state = match core.next_rollback_change().await {
-                Ok(Some(changes)) => State::Rollback { changes },
+                Ok(Some((account_id, collection, changes))) => State::Rollback {
+                    account_id,
+                    collection,
+                    changes,
+                },
                 Ok(None) => State::default(),
                 Err(err) => {
                     error!("Failed to obtain rollback changes: {:?}", err);
@@ -66,114 +131,214 @@ where
             while let Some(event) = rx.recv().await {
                 //println!("Follower: {:?}", state);
 
-                let response = match (event.request, &mut state) {
-                    (AppendEntriesRequest::Match { last_log }, State::Append { commit_id, .. }) => {
-                        *commit_id = last_log;
+                let response = match (event.request, state) {
+                    (AppendEntriesRequest::Match { last_log }, State::Synchronize) => {
                         if let Some(response) = core.handle_match_log(last_log).await {
+                            state = State::Synchronize;
                             response
                         } else {
                             break;
                         }
                     }
 
-                    (
-                        AppendEntriesRequest::Synchronize {
-                            last_log,
-                            match_terms,
-                        },
-                        State::Append { commit_id, .. },
-                    ) => {
-                        *commit_id = last_log;
+                    (AppendEntriesRequest::Synchronize { match_terms }, State::Synchronize) => {
                         if let Some(response) = core.handle_synchronize_log(match_terms).await {
+                            state = State::Synchronize;
                             response
                         } else {
                             break;
                         }
                     }
 
-                    (AppendEntriesRequest::Merge { matched_log }, State::Append { .. }) => {
-                        if let Some(response) = core.handle_merge_log(&mut state, matched_log).await
+                    (AppendEntriesRequest::Merge { matched_log }, State::Synchronize) => {
+                        if let Some((next_state, response)) =
+                            core.handle_merge_log(matched_log).await
                         {
+                            state = next_state;
                             response
                         } else {
                             break;
                         }
                     }
                     (
-                        AppendEntriesRequest::UpdateLog { last_log, entries },
-                        State::Append {
-                            commit_id,
-                            pending_entries,
+                        AppendEntriesRequest::Update {
+                            commit_index,
+                            updates,
                         },
+                        State::Synchronize,
                     ) => {
-                        *commit_id = last_log;
-                        core.handle_update_log(last_log, entries, pending_entries)
+                        core.set_up_to_date(false);
+
+                        debug!(
+                            "[{}] Received {} log entries with commit index {} (sync state).",
+                            local_name,
+                            updates.len(),
+                            commit_index,
+                        );
+
+                        if let Some((next_state, response)) = core
+                            .handle_update_log(
+                                RaftId::none(),
+                                RaftId::none(),
+                                commit_index,
+                                HashMap::new(),
+                                &mut change_seq,
+                                updates,
+                            )
                             .await
+                        {
+                            state = next_state;
+                            response
+                        } else {
+                            break;
+                        }
                     }
 
                     (
-                        AppendEntriesRequest::UpdateStore {
-                            account_id,
-                            collection,
-                            changes,
+                        AppendEntriesRequest::Update {
+                            commit_index,
+                            updates,
                         },
-                        State::Append {
-                            commit_id,
-                            pending_entries,
+                        State::AppendEntries {
+                            first_id,
+                            last_id,
+                            changed_accounts,
                         },
                     ) => {
-                        core.handle_update_store(
-                            pending_entries,
-                            *commit_id,
-                            account_id,
-                            collection,
-                            changes,
-                        )
-                        .await
+                        debug!(
+                            concat!(
+                                "[{}] Received {} log entries with commit index {}: ",
+                                "first id {:?}, last id: {:?}, {} pending accounts."
+                            ),
+                            local_name,
+                            updates.len(),
+                            commit_index,
+                            first_id,
+                            last_id,
+                            changed_accounts.len()
+                        );
+
+                        core.set_up_to_date(false);
+
+                        if let Some((next_state, response)) = core
+                            .handle_update_log(
+                                first_id,
+                                last_id,
+                                commit_index,
+                                changed_accounts,
+                                &mut change_seq,
+                                updates,
+                            )
+                            .await
+                        {
+                            state = next_state;
+                            response
+                        } else {
+                            break;
+                        }
                     }
 
                     (
-                        AppendEntriesRequest::UpdateStore {
-                            account_id,
-                            collection,
-                            changes: requested_changes,
+                        AppendEntriesRequest::Update {
+                            commit_index,
+                            updates,
                         },
+                        State::AppendChanges {
+                            first_id,
+                            last_id,
+                            changed_accounts,
+                        },
+                    ) => {
+                        debug!(
+                            concat!(
+                                "[{}] Received {} changes with commit index {}: ",
+                                "first id {:?}, last id: {:?}, {} pending accounts."
+                            ),
+                            local_name,
+                            updates.len(),
+                            commit_index,
+                            first_id,
+                            last_id,
+                            changed_accounts.len()
+                        );
+
+                        if let Some((next_state, response)) = core
+                            .handle_pending_updates(
+                                first_id,
+                                last_id,
+                                commit_index,
+                                &mut change_seq,
+                                changed_accounts,
+                                updates,
+                            )
+                            .await
+                        {
+                            state = next_state;
+                            response
+                        } else {
+                            break;
+                        }
+                    }
+
+                    (
+                        AppendEntriesRequest::Update { updates, .. },
                         State::Rollback {
-                            changes: rollback_changes,
+                            account_id,
+                            collection,
+                            changes,
                         },
                     ) => {
-                        if account_id != rollback_changes.account_id
-                            || collection != rollback_changes.collection
-                        {
-                            error!(
-                                "Invalid updateStore request: {}/{:?} != {}/{:?}",
-                                rollback_changes.account_id,
-                                rollback_changes.collection,
-                                account_id,
-                                collection
-                            );
-                            break;
-                        }
+                        debug!(
+                            concat!(
+                                "[{}] Received {} rollback entries for account {}, ",
+                                "collection {:?}."
+                            ),
+                            local_name,
+                            updates.len(),
+                            account_id,
+                            collection
+                        );
 
-                        if let Some(response) = core
-                            .handle_rollback_changes(&mut state, requested_changes)
+                        if let Some((next_state, response)) = core
+                            .handle_rollback_updates(account_id, collection, changes, updates)
                             .await
                         {
+                            state = next_state;
                             response
                         } else {
                             break;
                         }
                     }
 
-                    (_, State::Rollback { .. }) => {
+                    (
+                        _,
+                        State::Rollback {
+                            account_id,
+                            collection,
+                            changes,
+                        },
+                    ) => {
+                        debug!(
+                            concat!(
+                                "[{}] Resuming rollback for account {}, ",
+                                "collection {:?}."
+                            ),
+                            local_name, account_id, collection
+                        );
+
                         // Resume rollback process when a new leader is elected.
-                        if let Some(response) =
-                            core.handle_rollback_changes(&mut state, vec![]).await
+                        if let Some((next_state, response)) = core
+                            .handle_rollback_updates(account_id, collection, changes, vec![])
+                            .await
                         {
+                            state = next_state;
                             response
                         } else {
                             break;
                         }
+                    }
+                    (_, _) => {
+                        unreachable!("Invalid state.");
                     }
                 };
 
@@ -194,7 +359,7 @@ where
         response_tx: oneshot::Sender<rpc::Response>,
         term: TermId,
         last_log: RaftId,
-    ) {
+    ) -> store::Result<()> {
         if self.is_known_peer(peer_id) {
             if self.term < term {
                 self.term = term;
@@ -202,6 +367,7 @@ where
 
             if self.term == term && self.log_is_behind_or_eq(last_log.term, last_log.index) {
                 self.follow_leader(peer_id)
+                    .await?
                     .send(Event {
                         response_tx,
                         request: AppendEntriesRequest::Match { last_log },
@@ -218,6 +384,7 @@ where
                 .send(rpc::Response::UnregisteredPeer)
                 .unwrap_or_else(|_| error!("Oneshot response channel closed."));
         }
+        Ok(())
     }
 
     pub async fn handle_append_entries(
@@ -253,135 +420,372 @@ where
 {
     async fn handle_update_log(
         &self,
-        commit_id: RaftId,
-        entries: Vec<RawEntry>,
-        pending_entries: &mut Vec<RawEntry>,
-    ) -> Response {
-        debug_assert!(!entries.is_empty());
-
+        mut first_id: RaftId,
+        mut last_id: RaftId,
+        leader_commit_index: LogIndex,
+        mut changed_accounts: HashMap<AccountId, Collections>,
+        change_seq: &mut u64,
+        updates: Vec<Update>,
+    ) -> Option<(State, Response)> {
         let store = self.store.clone();
         match self
             .spawn_worker(move || {
-                let mut update_collections = HashMap::new();
-                for raw_entry in &entries {
-                    let mut entry = Entry::deserialize(&raw_entry.data).ok_or_else(|| {
-                        StoreError::InternalError(format!(
-                            "Failed to deserialize entry: {:?}",
-                            raw_entry
-                        ))
-                    })?;
+                let mut log_batch = Vec::with_capacity(updates.len());
+                let mut is_done = updates.is_empty();
 
-                    while let Some((account_id, collections)) = entry.next_account() {
-                        for collection in collections {
-                            if let hash_map::Entry::Vacant(e) =
-                                update_collections.entry((account_id, collection))
+                for update in updates {
+                    match update {
+                        Update::Change {
+                            account_id,
+                            collection,
+                            change,
+                        } => {
+                            #[cfg(test)]
                             {
-                                e.insert(UpdateCollection {
-                                    account_id,
-                                    collection,
-                                    from_change_id: if let Some(last_change_id) =
-                                        store.get_last_change_id(account_id, collection)?
-                                    {
-                                        if raw_entry.id.index <= last_change_id {
-                                            continue;
-                                        } else {
-                                            Some(last_change_id)
-                                        }
-                                    } else {
-                                        None
-                                    },
-                                });
+                                assert!(!last_id.is_none());
+                                assert!(
+                                    store
+                                        .db
+                                        .get::<Vec<u8>>(
+                                            ColumnFamily::Logs,
+                                            &LogKey::serialize_change(
+                                                account_id,
+                                                collection,
+                                                last_id.index
+                                            )
+                                        )
+                                        .unwrap()
+                                        .is_none(),
+                                    "{:?}",
+                                    store
+                                        .db
+                                        .get::<Vec<u8>>(
+                                            ColumnFamily::Logs,
+                                            &LogKey::serialize_change(
+                                                account_id,
+                                                collection,
+                                                last_id.index
+                                            )
+                                        )
+                                        .unwrap()
+                                );
                             }
+
+                            log_batch.push(WriteOperation::set(
+                                ColumnFamily::Logs,
+                                LogKey::serialize_change(account_id, collection, last_id.index),
+                                change,
+                            ));
+                            changed_accounts
+                                .entry(account_id)
+                                .or_insert_with(Collections::default)
+                                .insert(collection);
+                        }
+                        Update::Log { raft_id, log } => {
+                            if first_id.is_none() {
+                                first_id = raft_id;
+                            }
+
+                            #[cfg(test)]
+                            {
+                                assert!(
+                                    store
+                                        .db
+                                        .get::<log::Entry>(
+                                            ColumnFamily::Logs,
+                                            &LogKey::serialize_raft(&raft_id)
+                                        )
+                                        .unwrap()
+                                        .is_none(),
+                                    "{:?}",
+                                    store
+                                        .db
+                                        .get::<log::Entry>(
+                                            ColumnFamily::Logs,
+                                            &LogKey::serialize_raft(&raft_id)
+                                        )
+                                        .unwrap()
+                                );
+                            }
+
+                            last_id = raft_id;
+                            log_batch.push(WriteOperation::set(
+                                ColumnFamily::Logs,
+                                LogKey::serialize_raft(&raft_id),
+                                log,
+                            ));
+                        }
+                        Update::Eof => {
+                            is_done = true;
+                        }
+                        _ => {
+                            debug_assert!(false, "Invalid update: {:?}", update);
                         }
                     }
                 }
 
-                Ok((update_collections, entries))
+                if !log_batch.is_empty() {
+                    store.db.write(log_batch)?;
+                }
+
+                Ok((first_id, last_id, changed_accounts, is_done))
             })
             .await
         {
-            Ok((collections, entries)) => {
-                if !collections.is_empty() {
-                    self.set_up_to_date(false);
-                    *pending_entries = entries;
-                    Response::AppendEntries(AppendEntriesResponse::Update {
-                        collections: collections.into_values().collect(),
-                    })
-                } else if self.commit_log(entries, commit_id).await {
-                    Response::AppendEntries(AppendEntriesResponse::Continue)
+            Ok((first_id, last_id, changed_accounts, is_done)) => {
+                if is_done {
+                    //println!("Changed accounts: {:?}", changed_accounts);
+                    self.request_updates(
+                        first_id,
+                        last_id,
+                        leader_commit_index,
+                        change_seq,
+                        changed_accounts.into_iter().collect::<Vec<_>>(),
+                    )
+                    .await
                 } else {
-                    Response::None
+                    (
+                        State::AppendEntries {
+                            first_id,
+                            last_id,
+                            changed_accounts,
+                        },
+                        Response::AppendEntries(AppendEntriesResponse::Continue),
+                    )
+                        .into()
                 }
             }
             Err(err) => {
-                debug!("Worker failed: {:?}", err);
-                Response::None
+                debug!("handle_update_log failed: {:?}", err);
+                None
             }
         }
     }
 
-    async fn handle_update_store(
+    async fn request_updates(
         &self,
-        pending_entries: &mut Vec<RawEntry>,
-        commit_id: RaftId,
-        account_id: AccountId,
-        collection: Collection,
-        changes: Vec<Change>,
-    ) -> Response {
-        //println!("{:#?}", changes);
-
-        let store = self.store.clone();
-        match self
-            .spawn_worker(move || store.process_changes(account_id, collection, changes))
-            .await
-        {
-            Ok(do_commit) => {
-                if do_commit
-                    && !self
-                        .commit_log(std::mem::take(pending_entries), commit_id)
-                        .await
-                {
-                    Response::None
+        first_id: RaftId,
+        last_id: RaftId,
+        leader_commit_index: LogIndex,
+        change_seq: &mut u64,
+        mut changed_accounts: Vec<(AccountId, Collections)>,
+    ) -> Option<(State, Response)> {
+        loop {
+            let (account_id, collection) =
+                if let Some((account_id, collections)) = changed_accounts.last_mut() {
+                    if let Some(collection) = collections.pop() {
+                        if matches!(collection, Collection::Thread) {
+                            continue;
+                        }
+                        (*account_id, collection)
+                    } else {
+                        changed_accounts.pop();
+                        continue;
+                    }
                 } else {
-                    Response::AppendEntries(AppendEntriesResponse::Continue)
-                }
-            }
-            Err(err) => {
-                debug!("Failed to update store: {:?}", err);
-                Response::None
-            }
-        }
-    }
+                    // Apply changes
+                    if last_id.index <= leader_commit_index {
+                        let store = self.store.clone();
+                        if let Err(err) = self
+                            .spawn_worker(move || store.apply_pending_updates(last_id.index, false))
+                            .await
+                        {
+                            error!("Failed to apply changes: {:?}", err);
+                            return None;
+                        }
 
-    async fn commit_log(&self, entries: Vec<RawEntry>, commit_id: RaftId) -> bool {
-        if !entries.is_empty() {
+                        // Set up to date
+                        if last_id.index == leader_commit_index {
+                            debug!(
+                                "This node is now up to date with the leader's commit index {}.",
+                                leader_commit_index
+                            );
+                            self.set_up_to_date(true);
+                            self.update_raft_index(last_id.index);
+                            self.store_changed(last_id).await;
+                        } else {
+                            debug!(
+                                concat!(
+                                    "This node is still behind the leader's commit index {}, ",
+                                    "local commit index is {}."
+                                ),
+                                leader_commit_index, last_id.index
+                            );
+                        }
+                    }
+
+                    return (
+                        State::Synchronize,
+                        Response::AppendEntries(AppendEntriesResponse::Commit {
+                            commit_index: last_id.index,
+                        }),
+                    )
+                        .into();
+                };
+
+            debug!(
+                "Merging changes for account {}, collection {:?} from index {} to {}.",
+                account_id, collection, first_id.index, last_id.index
+            );
+
             let store = self.store.clone();
-            let last_log = entries.last().map(|e| e.id);
-
             match self
-                .spawn_worker(move || store.insert_raft_entries(entries))
+                .spawn_worker(move || {
+                    store.merge_changes(account_id, collection, first_id.index, last_id.index)
+                })
                 .await
             {
-                Ok(_) => {
-                    // If this peer matches the leader's commit index,
-                    // read-only requests can be accepted on this node.
-                    if let Some(last_log) = last_log {
-                        self.update_raft_index(last_log.index);
-                        self.store_changed(last_log).await;
+                Ok(mut changes) => {
+                    if !changes.deletes.is_empty() {
+                        let pending_updates_key =
+                            LogKey::serialize_pending_update(last_id.index, *change_seq);
+                        let pending_updates =
+                            match PendingUpdates::new(vec![PendingUpdate::DeleteDocuments {
+                                account_id,
+                                collection,
+                                document_ids: changes.deletes.into_iter().collect(),
+                            }])
+                            .serialize()
+                            {
+                                Some(pending_updates) => pending_updates,
+                                None => {
+                                    error!("Failed to serialize pending updates.");
+                                    return None;
+                                }
+                            };
 
-                        if commit_id == last_log {
-                            self.set_up_to_date(true);
+                        let store = self.store.clone();
+                        if let Err(err) = self
+                            .spawn_worker(move || {
+                                store.db.set(
+                                    ColumnFamily::Logs,
+                                    &pending_updates_key,
+                                    &pending_updates,
+                                )
+                            })
+                            .await
+                        {
+                            error!("Failed to write pending update: {:?}", err);
+                            return None;
                         }
+
+                        *change_seq += 1;
+                        changes.deletes = RoaringBitmap::new();
+                    }
+
+                    if !changes.inserts.is_empty() || !changes.updates.is_empty() {
+                        return (
+                            State::AppendChanges {
+                                first_id,
+                                last_id,
+                                changed_accounts,
+                            },
+                            Response::AppendEntries(AppendEntriesResponse::Update {
+                                account_id,
+                                collection,
+                                changes: match changes.serialize() {
+                                    Some(changes) => changes,
+                                    None => {
+                                        error!("Failed to serialize bitmap.");
+                                        return None;
+                                    }
+                                },
+                            }),
+                        )
+                            .into();
+                    } else {
+                        continue;
                     }
                 }
                 Err(err) => {
-                    error!("Failed to commit pending changes: {:?}", err);
-                    return false;
+                    error!("Error getting raft changes: {:?}", err);
+                    return None;
+                }
+            }
+        }
+    }
+
+    async fn handle_pending_updates(
+        &self,
+        first_id: RaftId,
+        last_id: RaftId,
+        leader_commit_index: LogIndex,
+        change_seq: &mut u64,
+        changed_accounts: Vec<(AccountId, Collections)>,
+        updates: Vec<Update>,
+    ) -> Option<(State, Response)> {
+        //println!("{:#?}", updates);
+        let mut pending_updates = Vec::with_capacity(updates.len());
+        let mut is_done = false;
+
+        for update in updates {
+            match update {
+                Update::Document {
+                    account_id,
+                    document_id,
+                    update,
+                } => {
+                    pending_updates.push(PendingUpdate::UpdateDocument {
+                        account_id,
+                        document_id,
+                        update,
+                    });
+                }
+                Update::Eof => {
+                    is_done = true;
+                }
+                _ => {
+                    debug_assert!(false, "Invalid update: {:?}", update);
                 }
             }
         }
 
-        true
+        if !pending_updates.is_empty() {
+            //println!("Storing update: {:?}", pending_updates);
+            let pending_updates_key = LogKey::serialize_pending_update(last_id.index, *change_seq);
+            let pending_updates = match PendingUpdates::new(pending_updates).serialize() {
+                Some(pending_updates) => pending_updates,
+                None => {
+                    error!("Failed to serialize pending updates.");
+                    return None;
+                }
+            };
+            *change_seq += 1;
+
+            let store = self.store.clone();
+            if let Err(err) = self
+                .spawn_worker(move || {
+                    store
+                        .db
+                        .set(ColumnFamily::Logs, &pending_updates_key, &pending_updates)
+                })
+                .await
+            {
+                error!("Failed to write pending update: {:?}", err);
+                return None;
+            }
+        }
+
+        if !is_done {
+            (
+                State::AppendChanges {
+                    first_id,
+                    last_id,
+                    changed_accounts,
+                },
+                Response::AppendEntries(AppendEntriesResponse::Continue),
+            )
+                .into()
+        } else {
+            self.request_updates(
+                first_id,
+                last_id,
+                leader_commit_index,
+                change_seq,
+                changed_accounts,
+            )
+            .await
+        }
     }
 
     async fn handle_match_log(&self, last_log: RaftId) -> Option<Response>
@@ -389,7 +793,7 @@ where
         T: for<'x> Store<'x> + 'static,
     {
         Response::AppendEntries(AppendEntriesResponse::Match {
-            last_log: match self.get_prev_raft_id(last_log).await {
+            match_log: match self.get_prev_raft_id(last_log).await {
                 Ok(Some(matched)) => {
                     self.set_up_to_date(matched == last_log);
                     matched
@@ -467,84 +871,82 @@ where
         .into()
     }
 
-    async fn handle_merge_log(&self, state: &mut State, matched_log: RaftId) -> Option<Response> {
-        if let Err(err) = self.prepare_rollback_changes(matched_log).await {
+    async fn handle_merge_log(&self, matched_log: RaftId) -> Option<(State, Response)> {
+        if let Err(err) = self.prepare_rollback_changes(matched_log.index).await {
             error!("Failed to prepare rollback changes: {:?}", err);
             return None;
         }
 
-        *state = State::Rollback {
-            changes: match self.next_rollback_change().await {
-                Ok(Some(rollback_change)) => rollback_change,
-                Ok(None) => {
-                    error!("Failed to prepare rollback changes: No changes found.");
-                    return None;
-                }
-                Err(err) => {
-                    error!("Failed to obtain rollback changes: {:?}", err);
-                    return None;
-                }
-            },
+        let (account_id, collection, changes) = match self.next_rollback_change().await {
+            Ok(Some(rollback_change)) => rollback_change,
+            Ok(None) => {
+                error!("Failed to prepare rollback changes: No changes found.");
+                return None;
+            }
+            Err(err) => {
+                error!("Failed to obtain rollback changes: {:?}", err);
+                return None;
+            }
         };
 
-        self.handle_rollback_changes(state, vec![]).await
+        self.handle_rollback_updates(account_id, collection, changes, vec![])
+            .await
     }
 
-    async fn handle_rollback_changes(
+    async fn handle_rollback_updates(
         &self,
-        state: &mut State,
-        mut requested_changes: Vec<Change>,
-    ) -> Option<Response> {
+        mut account_id: AccountId,
+        mut collection: Collection,
+        mut changes: MergedChanges,
+        mut updates: Vec<Update>,
+    ) -> Option<(State, Response)> {
         loop {
-            let rollback_changes = if let State::Rollback { changes } = state {
-                changes
-            } else {
-                unreachable!();
-            };
-
             // Thread collection does not contain any actual records,
             // it exists solely for change tracking.
-            if let Collection::Thread = rollback_changes.collection {
-                println!("Skipping thread changes...");
-                rollback_changes.inserts.clear();
-                rollback_changes.updates.clear();
-                rollback_changes.deletes.clear();
+            if let Collection::Thread = collection {
+                //println!("Skipping thread changes...");
+                changes.inserts.clear();
+                changes.updates.clear();
+                changes.deletes.clear();
             }
 
-            if !rollback_changes.inserts.is_empty() {
-                println!(
+            if !changes.inserts.is_empty() {
+                /*println!(
                     "Deleting from collection {:?} items {:?}",
-                    rollback_changes.collection, rollback_changes.inserts
-                );
-                let mut batch = WriteBatch::new(rollback_changes.account_id);
-                for delete_id in &rollback_changes.inserts {
-                    batch.delete_document(rollback_changes.collection, delete_id);
+                    collection, changes.inserts
+                );*/
+                let mut batch = WriteBatch::new(account_id);
+                for delete_id in &changes.inserts {
+                    batch.delete_document(collection, delete_id);
                 }
                 let store = self.store.clone();
                 if let Err(err) = self.spawn_worker(move || store.write(batch)).await {
                     error!("Failed to delete documents: {:?}", err);
                     return None;
                 }
-                rollback_changes.inserts.clear();
+                changes.inserts.clear();
             }
 
-            let account_id = rollback_changes.account_id;
-            let collection = rollback_changes.collection;
-
-            if !requested_changes.is_empty() {
+            if !updates.is_empty() {
                 let store = self.store.clone();
                 match self
-                    .spawn_worker(move || {
-                        store.process_changes(account_id, collection, requested_changes)
-                    })
+                    .spawn_worker(move || store.apply_rollback_updates(updates))
                     .await
                 {
-                    Ok(do_commit) => {
-                        if do_commit {
-                            rollback_changes.updates.clear();
-                            rollback_changes.deletes.clear();
+                    Ok(is_done) => {
+                        if is_done {
+                            changes.updates.clear();
+                            changes.deletes.clear();
                         } else {
-                            return Response::AppendEntries(AppendEntriesResponse::Continue).into();
+                            return (
+                                State::Rollback {
+                                    account_id,
+                                    collection,
+                                    changes,
+                                },
+                                Response::AppendEntries(AppendEntriesResponse::Continue),
+                            )
+                                .into();
                         }
                     }
                     Err(err) => {
@@ -552,55 +954,62 @@ where
                         return None;
                     }
                 }
-                requested_changes = vec![];
+                updates = vec![];
             }
 
-            if !rollback_changes.deletes.is_empty() || !rollback_changes.updates.is_empty() {
-                return Response::AppendEntries(AppendEntriesResponse::Restore {
-                    account_id,
-                    collection,
-                    changes: match rollback_changes.serialize_rollback() {
-                        Some(changes) => changes,
-                        None => {
-                            error!("Failed to serialize bitmap.");
-                            return None;
-                        }
+            if !changes.deletes.is_empty() || !changes.updates.is_empty() {
+                let serialized_changes = match changes.serialize() {
+                    Some(changes) => changes,
+                    None => {
+                        error!("Failed to serialize bitmap.");
+                        return None;
+                    }
+                };
+
+                return (
+                    State::Rollback {
+                        account_id,
+                        collection,
+                        changes,
                     },
-                })
-                .into();
+                    Response::AppendEntries(AppendEntriesResponse::Update {
+                        account_id,
+                        collection,
+                        changes: serialized_changes,
+                    }),
+                )
+                    .into();
             } else {
-                if let Err(err) = self
-                    .remove_rollback_change(
-                        rollback_changes.account_id,
-                        rollback_changes.collection,
-                    )
-                    .await
-                {
+                if let Err(err) = self.remove_rollback_change(account_id, collection).await {
                     error!("Failed to remove rollback change key: {:?}", err);
                     return None;
                 }
 
                 match self.next_rollback_change().await {
-                    Ok(Some(changes)) => {
-                        *state = State::Rollback { changes };
+                    Ok(Some((next_account_id, next_collection, next_changes))) => {
+                        account_id = next_account_id;
+                        collection = next_collection;
+                        changes = next_changes;
                         continue;
                     }
                     Ok(None) => {
-                        *state = State::default();
-                        return Response::AppendEntries(AppendEntriesResponse::Match {
-                            last_log: match self.get_last_log().await {
-                                Ok(Some(last_log)) => last_log,
-                                Ok(None) => {
-                                    error!("Unexpected error: Last log not found.");
-                                    return None;
-                                }
-                                Err(err) => {
-                                    debug!("Failed to get prev raft id: {:?}", err);
-                                    return None;
-                                }
-                            },
-                        })
-                        .into();
+                        return (
+                            State::default(),
+                            Response::AppendEntries(AppendEntriesResponse::Match {
+                                match_log: match self.get_last_log().await {
+                                    Ok(Some(last_log)) => last_log,
+                                    Ok(None) => {
+                                        error!("Unexpected error: Last log not found.");
+                                        return None;
+                                    }
+                                    Err(err) => {
+                                        debug!("Failed to get prev raft id: {:?}", err);
+                                        return None;
+                                    }
+                                },
+                            }),
+                        )
+                            .into();
                     }
                     Err(err) => {
                         error!("Failed to obtain rollback changes: {:?}", err);
@@ -610,113 +1019,321 @@ where
             }
         }
     }
+
+    pub async fn init_last_applied_index(&self) -> store::Result<()> {
+        let store = self.store.clone();
+        self.spawn_worker(move || {
+            store.db.set(
+                ColumnFamily::Values,
+                LAST_APPLIED_INDEX_KEY,
+                &store
+                    .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))?
+                    .map(|v| v.index)
+                    .unwrap_or(LogIndex::MAX)
+                    .serialize()
+                    .unwrap(),
+            )
+        })
+        .await
+    }
+
+    pub async fn apply_committed_updates(&self) -> store::Result<bool> {
+        let store = self.store.clone();
+        self.spawn_worker(move || store.apply_pending_updates(LogIndex::MAX, true))
+            .await
+    }
 }
 
-pub trait JMAPStoreRaftChanges {
-    fn process_changes(
+pub trait JMAPStoreRaftUpdates {
+    fn apply_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool>;
+    fn apply_rollback_updates(&self, changes: Vec<Update>) -> store::Result<bool>;
+    fn apply_document_update(
         &self,
         account_id: AccountId,
-        collection: Collection,
-        changes: Vec<Change>,
-    ) -> store::Result<bool>;
+        document_id: DocumentId,
+        update: DocumentUpdate,
+        document_batch: &mut WriteBatch,
+    ) -> store::Result<()>;
 }
 
-impl<T> JMAPStoreRaftChanges for JMAPStore<T>
+impl<T> JMAPStoreRaftUpdates for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn process_changes(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-        changes: Vec<Change>,
-    ) -> store::Result<bool> {
-        let mut do_commit = false;
-        let mut document_batch = WriteBatch::new(account_id);
-        let mut log_batch = Vec::with_capacity(changes.len());
+    fn apply_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool> {
+        let apply_up_to: LogIndex = if apply_up_to != LogIndex::MAX {
+            self.db.set(
+                ColumnFamily::Values,
+                LAST_APPLIED_INDEX_KEY,
+                &apply_up_to.serialize().unwrap(),
+            )?;
+            apply_up_to
+        } else if let Some(apply_up_to) =
+            self.db.get(ColumnFamily::Values, LAST_APPLIED_INDEX_KEY)?
+        {
+            apply_up_to
+        } else {
+            return Ok(false);
+        };
 
-        debug!(
-            "Inserting {} changes in {}/{:?}...",
-            changes.len(),
-            account_id,
-            collection
-        );
+        debug!("Applying pending updates up to index {}.", apply_up_to);
 
-        let mut has_pending_deletions = false;
+        let mut log_batch = Vec::new();
+        for (key, value) in self.db.iterator(
+            ColumnFamily::Logs,
+            &[LogKey::PENDING_UPDATES_KEY_PREFIX],
+            Direction::Forward,
+        )? {
+            if !key.starts_with(&[LogKey::PENDING_UPDATES_KEY_PREFIX]) {
+                break;
+            }
+            let index = (&key[..]).deserialize_be_u64(1).ok_or_else(|| {
+                StoreError::InternalError(format!(
+                    "Failed to deserialize account id from changelog key: [{:?}]",
+                    key
+                ))
+            })?;
 
-        for change in changes {
-            if has_pending_deletions && !matches!(change, Change::Delete { .. }) {
-                // Deletions are done first to avoid reused ID collisions.
-                self.write(document_batch)?;
-                document_batch = WriteBatch::new(account_id);
-                has_pending_deletions = false;
+            if apply_up_to != LogIndex::MAX && index <= apply_up_to {
+                let mut document_batch = WriteBatch::new(AccountId::MAX);
+
+                for update in PendingUpdates::deserialize(&value)
+                    .ok_or_else(|| {
+                        StoreError::InternalError(format!(
+                            "Failed to deserialize pending updates for key [{:?}]",
+                            key
+                        ))
+                    })?
+                    .updates
+                {
+                    println!("Applying {:?}", update);
+                    match update {
+                        PendingUpdate::UpdateDocument {
+                            account_id,
+                            document_id,
+                            update,
+                        } => {
+                            if account_id != document_batch.account_id {
+                                if !document_batch.is_empty() {
+                                    self.write(document_batch)?;
+                                    document_batch = WriteBatch::new(account_id);
+                                } else {
+                                    document_batch.account_id = account_id;
+                                }
+                            }
+                            self.apply_document_update(
+                                account_id,
+                                document_id,
+                                update,
+                                &mut document_batch,
+                            )?;
+                        }
+                        PendingUpdate::DeleteDocuments {
+                            account_id,
+                            collection,
+                            document_ids,
+                        } => {
+                            if account_id != document_batch.account_id {
+                                if !document_batch.is_empty() {
+                                    self.write(document_batch)?;
+                                    document_batch = WriteBatch::new(account_id);
+                                } else {
+                                    document_batch.account_id = account_id;
+                                }
+                            }
+
+                            for document_id in document_ids {
+                                document_batch.delete_document(collection, document_id);
+                            }
+                        }
+                    }
+                }
+
+                if !document_batch.is_empty() {
+                    self.write(document_batch)?;
+                }
+
+                self.db.delete(ColumnFamily::Logs, &key)?;
+            } else if do_reset {
+                log_batch.push(WriteOperation::Delete {
+                    cf: ColumnFamily::Logs,
+                    key: key.to_vec(),
+                });
+            } else {
+                return Ok(true);
+            }
+        }
+
+        if do_reset {
+            let key = LogKey::serialize_raft(&RaftId::new(
+                0,
+                if apply_up_to != LogIndex::MAX {
+                    apply_up_to
+                } else {
+                    0
+                },
+            ));
+            log_batch.push(WriteOperation::Delete {
+                cf: ColumnFamily::Values,
+                key: LAST_APPLIED_INDEX_KEY.to_vec(),
+            });
+
+            for (key, value) in self
+                .db
+                .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
+            {
+                if !key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
+                    break;
+                }
+                let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
+                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                })?;
+                if apply_up_to == LogIndex::MAX || raft_id.index > apply_up_to {
+                    match Entry::deserialize(&value).ok_or_else(|| {
+                        StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
+                    })? {
+                        Entry::Item {
+                            account_id,
+                            changed_collections,
+                        } => {
+                            for changed_collection in changed_collections {
+                                log_batch.push(WriteOperation::Delete {
+                                    cf: ColumnFamily::Logs,
+                                    key: LogKey::serialize_change(
+                                        account_id,
+                                        changed_collection,
+                                        raft_id.index,
+                                    ),
+                                });
+                            }
+                        }
+                        Entry::Snapshot { changed_accounts } => {
+                            for (changed_collections, changed_accounts_ids) in changed_accounts {
+                                for changed_collection in changed_collections {
+                                    for changed_account_id in &changed_accounts_ids {
+                                        log_batch.push(WriteOperation::Delete {
+                                            cf: ColumnFamily::Logs,
+                                            key: LogKey::serialize_change(
+                                                *changed_account_id,
+                                                changed_collection,
+                                                raft_id.index,
+                                            ),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    log_batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Logs,
+                        key: key.to_vec(),
+                    });
+                }
             }
 
-            match change {
-                Change::InsertMail {
-                    jmap_id,
-                    keywords,
-                    mailboxes,
-                    received_at,
-                    body,
+            if !log_batch.is_empty() {
+                self.db.write(log_batch)?;
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn apply_rollback_updates(&self, updates: Vec<Update>) -> store::Result<bool> {
+        let mut document_batch = WriteBatch::new(AccountId::MAX);
+
+        debug!("Inserting {} rollback changes...", updates.len(),);
+        let mut is_done = false;
+
+        for update in updates {
+            match update {
+                Update::Document {
+                    account_id,
+                    document_id,
+                    update,
                 } => {
-                    self.raft_update_mail(
-                        &mut document_batch,
+                    if account_id != document_batch.account_id {
+                        if !document_batch.is_empty() {
+                            self.write(document_batch)?;
+                            document_batch = WriteBatch::new(account_id);
+                        } else {
+                            document_batch.account_id = account_id;
+                        }
+                    }
+
+                    self.apply_document_update(
                         account_id,
-                        jmap_id,
-                        mailboxes,
-                        keywords,
-                        Some((
-                            lz4_flex::decompress_size_prepended(&body).map_err(|err| {
-                                StoreError::InternalError(format!(
-                                    "Failed to decompress raft update: {}",
-                                    err
-                                ))
-                            })?,
-                            received_at,
-                        )),
+                        document_id,
+                        update,
+                        &mut document_batch,
                     )?;
                 }
-                Change::UpdateMail {
-                    jmap_id,
-                    keywords,
-                    mailboxes,
-                } => {
-                    self.raft_update_mail(
-                        &mut document_batch,
-                        account_id,
-                        jmap_id,
-                        mailboxes,
-                        keywords,
-                        None,
-                    )?;
+                Update::Eof => {
+                    is_done = true;
                 }
-                Change::UpdateMailbox { jmap_id, mailbox } => {
-                    self.raft_update_mailbox(&mut document_batch, account_id, jmap_id, mailbox)?;
-                }
-                Change::InsertChange { change_id, entry } => {
-                    log_batch.push(WriteOperation::set(
-                        ColumnFamily::Logs,
-                        LogKey::serialize_change(account_id, collection, change_id),
-                        entry,
-                    ));
-                }
-                Change::Delete { document_id } => {
-                    has_pending_deletions = true;
-                    document_batch.delete_document(collection, document_id)
-                }
-                Change::Commit => {
-                    do_commit = true;
-                }
+                _ => debug_assert!(false, "Invalid update type: {:?}", update),
             }
         }
         if !document_batch.is_empty() {
             self.write(document_batch)?;
         }
-        if !log_batch.is_empty() {
-            self.db.write(log_batch)?;
-        }
 
-        Ok(do_commit)
+        Ok(is_done)
+    }
+
+    fn apply_document_update(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+        update: DocumentUpdate,
+        document_batch: &mut WriteBatch,
+    ) -> store::Result<()> {
+        match update {
+            DocumentUpdate::InsertMail {
+                thread_id,
+                keywords,
+                mailboxes,
+                received_at,
+                body,
+            } => {
+                self.raft_update_mail(
+                    document_batch,
+                    account_id,
+                    document_id,
+                    thread_id,
+                    mailboxes,
+                    keywords,
+                    Some((
+                        lz4_flex::decompress_size_prepended(&body).map_err(|err| {
+                            StoreError::InternalError(format!(
+                                "Failed to decompress raft update: {}",
+                                err
+                            ))
+                        })?,
+                        received_at,
+                    )),
+                )?;
+            }
+            DocumentUpdate::UpdateMail {
+                thread_id,
+                keywords,
+                mailboxes,
+            } => {
+                self.raft_update_mail(
+                    document_batch,
+                    account_id,
+                    document_id,
+                    thread_id,
+                    mailboxes,
+                    keywords,
+                    None,
+                )?;
+            }
+            DocumentUpdate::UpdateMailbox { mailbox } => {
+                self.raft_update_mailbox(document_batch, account_id, document_id, mailbox)?
+            }
+        }
+        Ok(())
     }
 }

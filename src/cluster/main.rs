@@ -71,22 +71,25 @@ pub async fn start_cluster<T>(
                             };
                         }
 
-                        if !is_offline {
-                            cluster.start_election_timer(true);
-                            //cluster.ping_peers().await;
-                            //last_ping = Instant::now();
-                        } else {
-                            cluster.start_election_timer(false);
-                            continue;
-                        }
-                    } else if is_offline {
+                        cluster.start_election_timer(!is_offline);
+                    }
+                    #[cfg(test)]
+                    if is_offline {
                         continue;
                     }
 
-                    if !cluster.handle_message(message).await {
-                        debug!("Cluster shutting down.");
-                        shutdown_tx.send(false).ok();
-                        break;
+                    match cluster.handle_message(message).await {
+                        Ok(true) => (),
+                        Ok(false) => {
+                            debug!("Cluster shutting down.");
+                            shutdown_tx.send(false).ok();
+                            break;
+                        }
+                        Err(err) => {
+                            error!("Cluster process exiting due to error: {:?}", err);
+                            shutdown_tx.send(false).ok();
+                            break;
+                        }
                     }
                 }
                 Ok(None) => {
@@ -105,7 +108,10 @@ pub async fn start_cluster<T>(
             if !cluster.peers.is_empty() {
                 let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
                 let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
-                    cluster.ping_peers().await;
+                    if let Err(err) = cluster.ping_peers().await {
+                        debug!("Failed to ping peers: {:?}", err);
+                        break;
+                    }
                     last_ping = Instant::now();
                     PING_INTERVAL
                 } else {
@@ -115,7 +121,10 @@ pub async fn start_cluster<T>(
                 wait_timeout = Duration::from_millis(
                     if let Some(time_to_next_election) = cluster.time_to_next_election() {
                         if time_to_next_election == 0 {
-                            cluster.request_votes(false).await;
+                            if let Err(err) = cluster.request_votes(false).await {
+                                debug!("Failed to request votes: {:?}", err);
+                                break;
+                            }
                             time_to_next_ping
                         } else if time_to_next_election < time_to_next_ping {
                             time_to_next_election
@@ -135,7 +144,7 @@ impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn handle_message(&mut self, message: Event) -> bool {
+    pub async fn handle_message(&mut self, message: Event) -> store::Result<bool> {
         match message {
             Event::Gossip { request, addr } => match request {
                 // Join request, add node and perform full sync.
@@ -163,7 +172,7 @@ where
                 }
                 rpc::Request::BecomeFollower { term, last_log } => {
                     self.handle_become_follower(peer_id, response_tx, term, last_log)
-                        .await;
+                        .await?;
                 }
                 rpc::Request::AppendEntries { term, request } => {
                     self.handle_append_entries(peer_id, response_tx, term, request)
@@ -181,7 +190,8 @@ where
                     self.sync_peer_info(peers).await;
                 }
                 rpc::Response::Vote { term, vote_granted } => {
-                    self.handle_vote_response(peer_id, term, vote_granted);
+                    self.handle_vote_response(peer_id, term, vote_granted)
+                        .await?;
                 }
                 rpc::Response::UnregisteredPeer => {
                     self.get_peer(peer_id)
@@ -194,6 +204,10 @@ where
                 _ => (),
             },
             Event::StepDown { term } => {
+                //TODO use separate thread
+
+                self.core.reset_uncommitted_changes().await?;
+
                 if term > self.term {
                     self.step_down(term);
                 } else {
@@ -201,24 +215,31 @@ where
                 }
             }
             Event::StoreChanged { last_log } => {
-                self.last_log = last_log;
-                self.send_append_entries();
+                // When leading, last_log contains the last uncommited index.
+                // When following, last_log contains the last committed index.
+                if self.is_leading() {
+                    self.last_log.term = last_log.term;
+                    self.uncommitted_index = last_log.index;
+                    self.send_append_entries();
+                } else {
+                    self.last_log = last_log;
+                }
             }
             Event::AdvanceCommitIndex {
                 peer_id,
                 commit_index,
             } => {
-                self.advance_commit_index(peer_id, commit_index).await;
+                self.advance_commit_index(peer_id, commit_index).await?;
             }
-            Event::Shutdown => return false,
+            Event::Shutdown => return Ok(false),
 
             #[cfg(test)]
             Event::IsOffline(_) => (),
         }
-        true
+        Ok(true)
     }
 
-    pub async fn ping_peers(&mut self) {
+    pub async fn ping_peers(&mut self) -> store::Result<()> {
         // Total and alive peers in the cluster.
         let total_peers = self.peers.len();
         let mut alive_peers: u32 = 0;
@@ -248,7 +269,7 @@ where
                 "[{}] Leader is offline, starting a new election.",
                 self.addr
             );
-            self.request_votes(true).await;
+            self.request_votes(true).await?;
         }
 
         // Find next peer to ping
@@ -286,5 +307,7 @@ where
                 _ => (),
             }
         }
+
+        Ok(())
     }
 }

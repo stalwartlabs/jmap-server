@@ -112,7 +112,7 @@ impl BlobId {
         })
     }
 
-    pub fn new_inner(blob_id: BlobId, blob_index: usize) -> Option<Self> {
+    pub fn new_inner(blob_id: BlobId, blob_index: BlobIndex) -> Option<Self> {
         match blob_id {
             BlobId::Owned(blob_id) => BlobId::InnerOwned(InnerBlob {
                 blob_id,

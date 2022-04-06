@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use store::{
     batch::{Document, WriteBatch},
-    blob::BlobEntries,
-    field::FieldOptions,
-    serialize::{StoreDeserialize, BLOB_KEY},
+    blob::{BlobEntries, BlobIndex},
+    field::{DefaultOptions, Options},
+    serialize::{StoreDeserialize, BLOB_KEY_PREFIX},
     Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
 
@@ -19,17 +19,17 @@ where
     fn get_all_blobs(&self) -> store::Result<Vec<(std::path::PathBuf, i64)>> {
         let mut result = Vec::new();
 
-        for (key, value) in self
-            .db
-            .iterator(ColumnFamily::Values, BLOB_KEY, Direction::Forward)?
+        for (key, value) in
+            self.db
+                .iterator(ColumnFamily::Values, BLOB_KEY_PREFIX, Direction::Forward)?
         {
-            if key.starts_with(BLOB_KEY) {
+            if key.starts_with(BLOB_KEY_PREFIX) {
                 let value = i64::deserialize(&value).ok_or_else(|| {
                     StoreError::InternalError("Failed to convert blob key to i64".to_string())
                 })?;
 
                 result.push((
-                    BlobEntries::deserialize(&key[BLOB_KEY.len()..])
+                    BlobEntries::deserialize(&key[BLOB_KEY_PREFIX.len()..])
                         .ok_or(StoreError::DataCorruption)?
                         .items
                         .get(0)
@@ -70,7 +70,7 @@ where
         .scope_fifo(|s| {
             let db = Arc::new(&db);
             let blobs = Arc::new(&blobs);
-            for account in 0..100 {
+            for account in 1..=100 {
                 let db = db.clone();
                 let blobs = blobs.clone();
                 s.spawn_fifo(move |_| {
@@ -81,14 +81,18 @@ where
                     for (blob_index, blob) in
                         (&blobs[(account & 3) as usize]).iter().enumerate().rev()
                     {
-                        document.binary(0, blob.clone(), FieldOptions::StoreAsBlob(blob_index));
+                        document.binary(
+                            0,
+                            blob.clone(),
+                            DefaultOptions::new().store_blob(blob_index as BlobIndex),
+                        );
                     }
                     db.write(WriteBatch::insert(account, document)).unwrap();
                 });
             }
         });
 
-    for account in 0..100 {
+    for account in 1..=100 {
         db.get_blobs(
             account,
             Collection::Mail,
@@ -98,7 +102,7 @@ where
         .unwrap()
         .into_iter()
         .for_each(|entry| {
-            assert_eq!(entry.1, blobs[(account & 3) as usize][entry.0]);
+            assert_eq!(entry.1, blobs[(account & 3) as usize][entry.0 as usize]);
         });
 
         db.get_blobs(
@@ -110,14 +114,17 @@ where
         .unwrap()
         .into_iter()
         .for_each(|entry| {
-            assert_eq!(entry.1, blobs[(account & 3) as usize][entry.0][0..1]);
+            assert_eq!(
+                entry.1,
+                blobs[(account & 3) as usize][entry.0 as usize][0..1]
+            );
         });
     }
 
     let blobs = db.get_all_blobs().unwrap();
     assert_eq!(blobs.len(), 40);
 
-    for account in 0..100 {
+    for account in 1..=100 {
         db.write(WriteBatch::delete(account, Collection::Mail, 0))
             .unwrap();
     }

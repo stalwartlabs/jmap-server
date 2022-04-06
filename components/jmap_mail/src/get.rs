@@ -30,7 +30,9 @@ use mail_parser::{
     },
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{leb128::Leb128, roaring::RoaringBitmap, Collection, JMAPId, JMAPStore};
+use store::{
+    blob::BlobIndex, leb128::Leb128, roaring::RoaringBitmap, Collection, JMAPId, JMAPStore,
+};
 use store::{serialize::StoreDeserialize, JMAPIdPrefix};
 use store::{DocumentId, Store, StoreError, Tag};
 
@@ -44,11 +46,11 @@ pub struct JMAPMailGetArguments {
 }
 
 trait BlobIdClone {
-    fn clone_with_index(&self, blob_index: usize) -> Self;
+    fn clone_with_index(&self, blob_index: BlobIndex) -> Self;
 }
 
 impl BlobIdClone for BlobId {
-    fn clone_with_index(&self, blob_index: usize) -> Self {
+    fn clone_with_index(&self, blob_index: BlobIndex) -> Self {
         match self {
             BlobId::Owned(owned) => {
                 let mut owned = owned.clone();

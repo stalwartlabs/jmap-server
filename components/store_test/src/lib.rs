@@ -3,12 +3,12 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
 use jmap_mail::{MessageData, MessageOutline, MESSAGE_DATA};
-use store::blob::BlobEntries;
+use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;
 use store::leb128::Leb128;
 use store::serialize::{
-    DeserializeBigEndian, IndexKey, StoreDeserialize, ValueKey, BLOB_KEY, LAST_TERM_ID_KEY,
-    TEMP_BLOB_KEY,
+    DeserializeBigEndian, IndexKey, StoreDeserialize, ValueKey, BLOB_KEY_PREFIX,
+    LAST_APPLIED_INDEX_KEY, LAST_TERM_ID_KEY, LEADER_COMMIT_INDEX_KEY, TEMP_BLOB_KEY_PREFIX,
 };
 use store::{
     config::EnvSettings,
@@ -184,9 +184,11 @@ where
                     }
                     ColumnFamily::Values => {
                         if (0..=9).contains(&key[0])
-                            && !key.starts_with(BLOB_KEY)
-                            && !key.starts_with(TEMP_BLOB_KEY)
+                            && !key.starts_with(BLOB_KEY_PREFIX)
+                            && !key.starts_with(TEMP_BLOB_KEY_PREFIX)
                             && &key[..] != LAST_TERM_ID_KEY
+                            && &key[..] != LAST_APPLIED_INDEX_KEY
+                            && &key[..] != LEADER_COMMIT_INDEX_KEY
                         {
                             let (account_id, pos) = AccountId::from_leb128_bytes(&key).unwrap();
                             let collection = key[pos].into();
@@ -231,7 +233,7 @@ where
                                                         account_id,
                                                         Collection::Mail,
                                                         document_id,
-                                                        blob_index,
+                                                        blob_index as BlobIndex,
                                                     )
                                                     .unwrap()
                                                     .unwrap();
@@ -240,13 +242,13 @@ where
                                                         account_id,
                                                         Collection::Mail,
                                                         document_id,
-                                                        blob_index,
+                                                        blob_index as BlobIndex,
                                                     )
                                                     .unwrap()
                                                     .unwrap();
 
                                                 if collection == Collection::Mail
-                                                    && blob_index == MESSAGE_DATA
+                                                    && blob_index as BlobIndex == MESSAGE_DATA
                                                 {
                                                     let mut this_message_data = None;
                                                     let mut this_message_outline = None;
@@ -421,14 +423,14 @@ where
                     ColumnFamily::Values
                         if &key[..] != LAST_TERM_ID_KEY && (0..=9).contains(&key[0]) =>
                     {
-                        if key.starts_with(BLOB_KEY) {
+                        if key.starts_with(BLOB_KEY_PREFIX) {
                             assert_eq!(
                                 i64::deserialize(&value).unwrap(),
                                 0,
                                 "Blob key '{:?}' is not zero.",
                                 key
                             );
-                        } else if !key.starts_with(TEMP_BLOB_KEY) {
+                        } else if !key.starts_with(TEMP_BLOB_KEY_PREFIX) {
                             panic!("{:?} {:?}={:?}", cf, key, value);
                         }
                     }

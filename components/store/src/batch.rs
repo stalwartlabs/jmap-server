@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use nlp::Language;
 
 use crate::{
-    field::{Field, FieldOptions, Number, Text, TextIndex, UpdateField},
+    field::{Field, Number, Text, TextIndex, UpdateField},
     leb128::Leb128,
     AccountId, Collection, DocumentId, FieldId, JMAPId, Tag,
 };
@@ -59,7 +59,7 @@ impl Document {
         self.default_language = language;
     }
 
-    pub fn text(&mut self, field: impl Into<FieldId>, value: Text, options: FieldOptions) {
+    pub fn text(&mut self, field: impl Into<FieldId>, value: Text, options: u64) {
         if !self.has_keywords && matches!(value.index, TextIndex::Keyword | TextIndex::Tokenized) {
             self.has_keywords = true;
         }
@@ -67,7 +67,7 @@ impl Document {
             .push(UpdateField::Text(Field::new(field.into(), value, options)));
     }
 
-    pub fn binary(&mut self, field: impl Into<FieldId>, value: Vec<u8>, options: FieldOptions) {
+    pub fn binary(&mut self, field: impl Into<FieldId>, value: Vec<u8>, options: u64) {
         self.fields.push(UpdateField::Binary(Field::new(
             field.into(),
             value,
@@ -75,12 +75,7 @@ impl Document {
         )));
     }
 
-    pub fn number(
-        &mut self,
-        field: impl Into<FieldId>,
-        value: impl Into<Number>,
-        options: FieldOptions,
-    ) {
+    pub fn number(&mut self, field: impl Into<FieldId>, value: impl Into<Number>, options: u64) {
         self.fields.push(UpdateField::Number(Field::new(
             field.into(),
             value.into(),
@@ -88,20 +83,9 @@ impl Document {
         )));
     }
 
-    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag) {
-        self.fields.push(UpdateField::Tag(Field::new(
-            field.into(),
-            value,
-            FieldOptions::None,
-        )));
-    }
-
-    pub fn untag(&mut self, field: impl Into<FieldId>, value: Tag) {
-        self.fields.push(UpdateField::Tag(Field::new(
-            field.into(),
-            value,
-            FieldOptions::Clear,
-        )));
+    pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag, options: u64) {
+        self.fields
+            .push(UpdateField::Tag(Field::new(field.into(), value, options)));
     }
 
     pub fn is_empty(&self) -> bool {

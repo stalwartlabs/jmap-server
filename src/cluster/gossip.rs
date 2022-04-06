@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 
 use serde::{Deserialize, Serialize};
-use store::raft::{LogIndex, TermId};
+use store::log::{LogIndex, TermId};
 use store::tracing::{debug, error, info};
 use store::{leb128::Leb128, Store};
 use tokio::sync::{oneshot, watch};
@@ -298,6 +298,7 @@ where
                                 // This peer reconnected
                                 if pos != 0 && local_peer.is_in_shard(self.shard_id) {
                                     // Wake up RPC process
+                                    println!("Waking up RPC process");
                                     local_peer.dispatch_request(rpc::Request::Ping).await;
                                 } else {
                                     do_full_sync = true;

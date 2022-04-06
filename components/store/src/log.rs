@@ -1,15 +1,20 @@
-use roaring::{RoaringBitmap, RoaringTreemap};
+use std::collections::HashMap;
+use std::convert::TryInto;
+use std::sync::atomic::Ordering;
+
+use roaring::RoaringTreemap;
 
 use crate::leb128::{skip_leb128_it, Leb128};
 
-use crate::raft::{Entry, RaftId};
-use crate::serialize::{DeserializeBigEndian, LogKey};
+use crate::serialize::{DeserializeBigEndian, LogKey, StoreDeserialize, StoreSerialize};
 use crate::{
-    batch, AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError,
-    WriteOperation,
+    batch, AccountId, Collection, Collections, ColumnFamily, Direction, JMAPId, JMAPStore, Store,
+    StoreError, WriteOperation,
 };
 
 pub type ChangeId = u64;
+pub type TermId = u64;
+pub type LogIndex = u64;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Change {
@@ -134,10 +139,175 @@ impl Changes {
     }
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RaftId {
+    pub term: TermId,
+    pub index: LogIndex,
+}
+
+impl RaftId {
+    pub fn new(term: TermId, index: LogIndex) -> Self {
+        Self { term, index }
+    }
+
+    pub fn none() -> Self {
+        Self {
+            term: 0,
+            index: LogIndex::MAX,
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.index == LogIndex::MAX
+    }
+}
+
+impl StoreSerialize for RaftId {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(std::mem::size_of::<RaftId>());
+        self.term.to_leb128_writer(&mut bytes).ok()?;
+        self.index.to_leb128_writer(&mut bytes).ok()?;
+        bytes.into()
+    }
+}
+
+impl StoreDeserialize for RaftId {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        let (term, bytes_read) = TermId::from_leb128_bytes(bytes)?;
+        let (index, _) = TermId::from_leb128_bytes(bytes.get(bytes_read..)?)?;
+        Some(Self { term, index })
+    }
+}
+
+#[derive(Debug)]
+pub enum Entry {
+    Item {
+        account_id: AccountId,
+        changed_collections: Collections,
+    },
+    Snapshot {
+        changed_accounts: Vec<(Collections, Vec<AccountId>)>,
+    },
+}
+
+impl Entry {
+    pub fn next_account(&mut self) -> Option<(AccountId, Collections)> {
+        match self {
+            Entry::Item {
+                account_id,
+                changed_collections,
+            } => {
+                if !changed_collections.is_empty() {
+                    Some((*account_id, changed_collections.clear()))
+                } else {
+                    None
+                }
+            }
+            Entry::Snapshot { changed_accounts } => loop {
+                let (collections, account_ids) = changed_accounts.last_mut()?;
+                if let Some(account_id) = account_ids.pop() {
+                    return Some((account_id, collections.clone()));
+                } else {
+                    changed_accounts.pop();
+                }
+            },
+        }
+    }
+}
+
+impl StoreDeserialize for Entry {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        match *bytes.get(0)? {
+            batch::Change::ENTRY => Entry::Item {
+                account_id: AccountId::from_le_bytes(
+                    bytes
+                        .get(1..1 + std::mem::size_of::<AccountId>())?
+                        .try_into()
+                        .ok()?,
+                ),
+                changed_collections: u64::from_le_bytes(
+                    bytes
+                        .get(1 + std::mem::size_of::<AccountId>()..)?
+                        .try_into()
+                        .ok()?,
+                )
+                .into(),
+            },
+            batch::Change::SNAPSHOT => {
+                let mut bytes_it = bytes.get(1..)?.iter();
+                let total_collections = usize::from_leb128_it(&mut bytes_it)?;
+                let mut changed_accounts = Vec::with_capacity(total_collections);
+
+                for _ in 0..total_collections {
+                    let collections = u64::from_leb128_it(&mut bytes_it)?.into();
+                    let total_accounts = usize::from_leb128_it(&mut bytes_it)?;
+                    let mut accounts = Vec::with_capacity(total_accounts);
+
+                    for _ in 0..total_accounts {
+                        accounts.push(AccountId::from_leb128_it(&mut bytes_it)?);
+                    }
+
+                    changed_accounts.push((collections, accounts));
+                }
+
+                Entry::Snapshot { changed_accounts }
+            }
+            _ => {
+                return None;
+            }
+        }
+        .into()
+    }
+}
+
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
+    pub fn assign_raft_id(&self) -> RaftId {
+        RaftId {
+            term: self.raft_term.load(Ordering::Relaxed),
+            index: self
+                .raft_index
+                .fetch_add(1, Ordering::Relaxed)
+                .wrapping_add(1),
+        }
+    }
+
+    pub fn get_prev_raft_id(&self, key: RaftId) -> crate::Result<Option<RaftId>> {
+        let key = LogKey::serialize_raft(&key);
+
+        if let Some((key, _)) = self
+            .db
+            .iterator(ColumnFamily::Logs, &key, Direction::Backward)?
+            .next()
+        {
+            if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
+                return Ok(Some(LogKey::deserialize_raft(&key).ok_or_else(|| {
+                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                })?));
+            }
+        }
+        Ok(None)
+    }
+
+    pub fn get_next_raft_id(&self, key: RaftId) -> crate::Result<Option<RaftId>> {
+        let key = LogKey::serialize_raft(&key);
+
+        if let Some((key, _)) = self
+            .db
+            .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
+            .next()
+        {
+            if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
+                return Ok(Some(LogKey::deserialize_raft(&key).ok_or_else(|| {
+                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                })?));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn get_last_change_id(
         &self,
         account: AccountId,
@@ -314,7 +484,7 @@ where
 
         last_change_id = ChangeId::MAX;
         let mut last_term = 0;
-        let mut changed_accounts = RoaringBitmap::new();
+        let mut changed_accounts = HashMap::new();
 
         for (key, value) in self.db.iterator(
             ColumnFamily::Logs,
@@ -336,14 +506,27 @@ where
                 match Entry::deserialize(&value).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
                 })? {
-                    Entry::Item { account_id, .. } => {
-                        changed_accounts.insert(account_id);
+                    Entry::Item {
+                        account_id,
+                        changed_collections,
+                    } => {
+                        changed_accounts
+                            .entry(account_id)
+                            .or_insert_with(Collections::default)
+                            .union(&changed_collections);
                     }
                     Entry::Snapshot {
                         changed_accounts: new_changed_accounts,
                     } => {
                         debug_assert!(changed_accounts.is_empty());
-                        changed_accounts = new_changed_accounts;
+                        for (new_changed_collection, new_changed_accounts) in new_changed_accounts {
+                            for new_changed_account_id in new_changed_accounts {
+                                changed_accounts
+                                    .entry(new_changed_account_id)
+                                    .or_insert_with(Collections::default)
+                                    .union(&new_changed_collection);
+                            }
+                        }
                     }
                 };
 
@@ -356,14 +539,32 @@ where
         debug_assert_ne!(last_change_id, ChangeId::MAX);
 
         // Serialize raft snapshot
-        let mut bytes = Vec::with_capacity(changed_accounts.serialized_size() + 1);
+        let mut changed_collections = HashMap::new();
+        let total_accounts = changed_accounts.len();
+        for (account_id, collections) in changed_accounts {
+            for collection in collections {
+                changed_collections
+                    .entry(collection)
+                    .or_insert_with(Vec::new)
+                    .push(account_id);
+            }
+        }
+        let mut bytes = Vec::with_capacity(
+            (total_accounts * std::mem::size_of::<AccountId>())
+                + (changed_collections.len()
+                    * (std::mem::size_of::<Collection>() + std::mem::size_of::<usize>()))
+                + 1
+                + std::mem::size_of::<usize>(),
+        );
         bytes.push(batch::Change::SNAPSHOT);
-        changed_accounts.serialize_into(&mut bytes).map_err(|err| {
-            StoreError::InternalError(format!(
-                "Failed to serialize inserted ids for [{}/{:?}]: [{:?}]",
-                current_account_id, current_collection, err
-            ))
-        })?;
+        changed_collections.len().to_leb128_bytes(&mut bytes);
+        for (collection, account_ids) in changed_collections {
+            (collection as u64).to_leb128_bytes(&mut bytes);
+            account_ids.len().to_leb128_bytes(&mut bytes);
+            for account_id in account_ids {
+                account_id.to_leb128_bytes(&mut bytes);
+            }
+        }
         write_batch.pop();
         write_batch.push(WriteOperation::set(
             ColumnFamily::Logs,

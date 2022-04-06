@@ -9,7 +9,7 @@ use crate::{
     batch::{Change, WriteAction, WriteBatch},
     bitmap::{clear_bit, set_clear_bits},
     blob::BlobEntries,
-    field::{FieldOptions, Keywords, Tags, TextIndex, TokenIterator, UpdateField},
+    field::{Keywords, Tags, TextIndex, TokenIterator, UpdateField},
     leb128::Leb128,
     serialize::{BitmapKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
     term_index::{TermIndex, TermIndexBuilder},
@@ -233,16 +233,10 @@ where
                 // TODO improve code below
                 match field {
                     UpdateField::Text(t) => {
-                        let (is_stored, is_sorted, is_clear, blob_index) = match t.get_options() {
-                            FieldOptions::None => (false, false, false, None),
-                            FieldOptions::Store => (true, false, false, None),
-                            FieldOptions::Sort => (false, true, false, None),
-                            FieldOptions::StoreAndSort => (true, true, false, None),
-                            FieldOptions::StoreAsBlob(blob_index) => {
-                                (false, false, false, Some(blob_index))
-                            }
-                            FieldOptions::Clear => (false, false, true, None),
-                        };
+                        let is_stored = t.is_stored();
+                        let is_clear = t.is_clear();
+                        let is_sorted = t.is_sorted();
+                        let blob_index = t.get_blob_index();
 
                         match t.value.index {
                             TextIndex::Keyword => {
@@ -365,26 +359,30 @@ where
                                 ));
                             }
                         } else {
-                            write_batch.push(WriteOperation::delete(
-                                ColumnFamily::Values,
-                                ValueKey::serialize_value(
-                                    batch.account_id,
-                                    document.collection,
-                                    document.document_id,
-                                    t.field,
-                                ),
-                            ));
+                            if is_stored {
+                                write_batch.push(WriteOperation::delete(
+                                    ColumnFamily::Values,
+                                    ValueKey::serialize_value(
+                                        batch.account_id,
+                                        document.collection,
+                                        document.document_id,
+                                        t.field,
+                                    ),
+                                ));
+                            }
 
-                            write_batch.push(WriteOperation::delete(
-                                ColumnFamily::Indexes,
-                                IndexKey::serialize(
-                                    batch.account_id,
-                                    document.collection,
-                                    document.document_id,
-                                    t.field,
-                                    t.value.text.as_bytes(),
-                                ),
-                            ));
+                            if is_sorted {
+                                write_batch.push(WriteOperation::delete(
+                                    ColumnFamily::Indexes,
+                                    IndexKey::serialize(
+                                        batch.account_id,
+                                        document.collection,
+                                        document.document_id,
+                                        t.field,
+                                        t.value.text.as_bytes(),
+                                    ),
+                                ));
+                            }
                         }
                     }
                     UpdateField::Tag(tag) => {
@@ -431,7 +429,7 @@ where
                         }
                     }
                     UpdateField::Binary(b) => {
-                        if let FieldOptions::StoreAsBlob(blob_index) = b.get_options() {
+                        if let Some(blob_index) = b.get_blob_index() {
                             blob_fields.push((blob_index, b.value));
                         } else {
                             write_batch.push(WriteOperation::set(
@@ -475,26 +473,30 @@ where
                                 ));
                             }
                         } else {
-                            write_batch.push(WriteOperation::delete(
-                                ColumnFamily::Values,
-                                ValueKey::serialize_value(
-                                    batch.account_id,
-                                    document.collection,
-                                    document.document_id,
-                                    number.get_field(),
-                                ),
-                            ));
+                            if number.is_stored() {
+                                write_batch.push(WriteOperation::delete(
+                                    ColumnFamily::Values,
+                                    ValueKey::serialize_value(
+                                        batch.account_id,
+                                        document.collection,
+                                        document.document_id,
+                                        number.get_field(),
+                                    ),
+                                ));
+                            }
 
-                            write_batch.push(WriteOperation::delete(
-                                ColumnFamily::Indexes,
-                                IndexKey::serialize(
-                                    batch.account_id,
-                                    document.collection,
-                                    document.document_id,
-                                    number.get_field(),
-                                    &number.value.to_be_bytes(),
-                                ),
-                            ));
+                            if number.is_sorted() {
+                                write_batch.push(WriteOperation::delete(
+                                    ColumnFamily::Indexes,
+                                    IndexKey::serialize(
+                                        batch.account_id,
+                                        document.collection,
+                                        document.document_id,
+                                        number.get_field(),
+                                        &number.value.to_be_bytes(),
+                                    ),
+                                ));
+                            }
                         }
                     }
                 };

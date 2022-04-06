@@ -1,16 +1,15 @@
 pub mod batch;
 pub mod bitmap;
 pub mod blob;
-pub mod changes;
 pub mod config;
 pub mod delete;
 pub mod field;
 pub mod get;
 pub mod id;
 pub mod leb128;
+pub mod log;
 pub mod mutex_map;
 pub mod query;
-pub mod raft;
 pub mod search_snippet;
 pub mod serialize;
 pub mod term;
@@ -26,11 +25,11 @@ use std::{
 
 use config::EnvSettings;
 use id::{IdAssigner, IdCacheKey};
+use log::{LogIndex, RaftId};
 use moka::sync::Cache;
 use mutex_map::MutexMap;
 use nlp::Language;
 use parking_lot::{Mutex, MutexGuard};
-use raft::{LogIndex, RaftId};
 use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
 use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
@@ -141,9 +140,23 @@ impl Collections {
         }
     }
 
+    pub fn union(&mut self, items: &Collections) {
+        self.collections |= items.collections;
+    }
+
     pub fn insert(&mut self, item: Collection) {
         debug_assert_ne!(item, Collection::None);
         self.collections |= 1 << item as u64;
+    }
+
+    pub fn pop(&mut self) -> Option<Collection> {
+        if self.collections != 0 {
+            let collection_id = 63 - self.collections.leading_zeros();
+            self.collections ^= 1 << collection_id;
+            Some(Collection::from(collection_id as u8))
+        } else {
+            None
+        }
     }
 
     pub fn contains(&self, item: Collection) -> bool {

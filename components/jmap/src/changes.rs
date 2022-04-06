@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use store::{
-    changes::{Change, ChangeId, Query},
     leb128::Leb128,
+    log::{Change, ChangeId, Query},
     AccountId, Collection, JMAPId, JMAPStore, Store, StoreError,
 };
 
@@ -367,7 +367,7 @@ pub fn query_changes(
 #[cfg(test)]
 mod tests {
 
-    use store::changes::ChangeId;
+    use store::log::ChangeId;
 
     use crate::id::JMAPIdSerialize;
 

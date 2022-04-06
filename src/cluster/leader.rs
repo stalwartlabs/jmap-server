@@ -7,28 +7,26 @@ use jmap_mail::mailbox::{JMAPMailboxProperties, Mailbox};
 use jmap_mail::query::MailboxId;
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
 
-use store::changes::ChangeId;
 use store::leb128::Leb128;
-use store::raft::{LogIndex, MergedChanges, RaftId, TermId};
+use store::log::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
-use store::serialize::{LogKey, StoreDeserialize};
+use store::serialize::{StoreDeserialize, StoreSerialize, LEADER_COMMIT_INDEX_KEY};
 use store::tracing::{debug, error};
-use store::JMAPIdPrefix;
-use store::{lz4_flex, AccountId, Collection, ColumnFamily, DocumentId, JMAPId, Store, StoreError};
+use store::Collections;
+use store::{lz4_flex, AccountId, Collection, ColumnFamily, DocumentId, Store, StoreError};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse};
+use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse, RaftStore};
 use crate::JMAPServer;
 
-use super::log::{Change, UpdateCollection};
+use super::log::{DocumentUpdate, MergedChanges, Update};
 use super::Peer;
 use super::{
     rpc::{self, Request, Response, RpcEvent},
     Cluster,
 };
 
-const BATCH_MAX_ENTRIES: usize = 10; //TODO configure
-const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024;
+const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024; //TODO configure
 
 #[derive(Debug)]
 enum State {
@@ -37,19 +35,39 @@ enum State {
     Merge {
         matched_log: RaftId,
     },
-    AppendEntries,
-    PushChanges {
-        collections: Vec<UpdateCollection>,
+    AppendEntries {
+        from_index: LogIndex,
+        to_index: LogIndex,
+        pending_changes: Vec<(Collections, Vec<AccountId>)>,
+    },
+    AppendChanges {
+        account_id: AccountId,
+        collection: Collection,
         changes: MergedChanges,
     },
     Wait,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Event {
+    pub last_log_index: LogIndex,
+    pub uncommitted_index: LogIndex,
+}
+
+impl Event {
+    pub fn new(last_log_index: LogIndex, uncommitted_index: LogIndex) -> Self {
+        Self {
+            last_log_index,
+            uncommitted_index,
+        }
+    }
 }
 
 impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn spawn_raft_leader(&self, peer: &Peer, mut log_index_rx: watch::Receiver<LogIndex>) {
+    pub fn spawn_raft_leader(&self, peer: &Peer, mut log_index_rx: watch::Receiver<Event>) {
         let peer_tx = peer.tx.clone();
         let mut online_rx = peer.online_rx.clone();
         let peer_name = peer.to_string();
@@ -58,14 +76,15 @@ where
 
         let term = self.term;
         let mut last_log = self.last_log;
+        let mut uncommitted_index = self.uncommitted_index;
+
         let main_tx = self.tx.clone();
         let core = self.core.clone();
 
-        let mut state = State::BecomeLeader;
-        let mut last_committed_id = RaftId::none();
-        let mut last_sent_id = RaftId::none();
-
         tokio::spawn(async move {
+            let mut state = State::BecomeLeader;
+            let mut follower_commit_index = LogIndex::MAX;
+
             debug!(
                 "[{}] Starting raft leader process for peer {}.",
                 local_name, peer_name
@@ -76,10 +95,17 @@ where
                 match poll!(Box::pin(log_index_rx.changed())) {
                     Poll::Ready(result) => match result {
                         Ok(_) => {
-                            last_log.index = *log_index_rx.borrow();
+                            let log_index = *log_index_rx.borrow();
+                            last_log.index = log_index.last_log_index;
                             last_log.term = term;
+                            uncommitted_index = log_index.uncommitted_index;
+
                             if matches!(&state, State::Wait) {
-                                state = State::AppendEntries;
+                                state = State::AppendEntries {
+                                    from_index: follower_commit_index,
+                                    to_index: uncommitted_index,
+                                    pending_changes: vec![],
+                                };
                             }
                         }
                         Err(_) => {
@@ -95,53 +121,46 @@ where
 
                 //println!("Leader: {:?}", state);
 
-                let request = match &mut state {
-                    State::BecomeLeader => Request::BecomeFollower { term, last_log },
-                    State::Synchronize => Request::AppendEntries {
-                        term,
-                        request: AppendEntriesRequest::Synchronize {
-                            last_log,
-                            match_terms: {
-                                match core.get_raft_match_terms().await {
-                                    Ok(match_terms) => {
-                                        debug_assert!(!match_terms.is_empty());
-                                        match_terms
+                let request = match state {
+                    State::BecomeLeader => {
+                        state = State::BecomeLeader;
+                        Request::BecomeFollower { term, last_log }
+                    }
+                    State::Synchronize => {
+                        state = State::Synchronize;
+                        Request::AppendEntries {
+                            term,
+                            request: AppendEntriesRequest::Synchronize {
+                                match_terms: {
+                                    match core.get_raft_match_terms().await {
+                                        Ok(match_terms) => {
+                                            debug_assert!(!match_terms.is_empty());
+                                            match_terms
+                                        }
+                                        Err(err) => {
+                                            error!("Error getting raft match list: {:?}", err);
+                                            break;
+                                        }
                                     }
-                                    Err(err) => {
-                                        error!("Error getting raft match list: {:?}", err);
-                                        break;
-                                    }
-                                }
+                                },
                             },
-                        },
-                    },
-                    State::Merge { matched_log } => Request::AppendEntries {
-                        term,
-                        request: AppendEntriesRequest::Merge {
-                            matched_log: *matched_log,
-                        },
-                    },
-                    State::PushChanges {
-                        changes,
-                        collections,
-                    } => {
-                        match core
-                            .prepare_changes(term, changes, !collections.is_empty())
-                            .await
-                        {
-                            Ok(request) => request,
-                            Err(err) => {
-                                error!("Failed to prepare changes: {:?}", err);
-                                continue;
-                            }
+                        }
+                    }
+                    State::Merge { matched_log } => {
+                        state = State::Merge { matched_log };
+                        Request::AppendEntries {
+                            term,
+                            request: AppendEntriesRequest::Merge { matched_log },
                         }
                     }
                     State::Wait => {
                         // Wait for the next change
                         if log_index_rx.changed().await.is_ok() {
-                            last_log.index = *log_index_rx.borrow();
+                            let log_index = *log_index_rx.borrow();
+                            last_log.index = log_index.last_log_index;
                             last_log.term = term;
-                            debug!("[{}] Received new log index: {:?}", local_name, last_log);
+                            uncommitted_index = log_index.uncommitted_index;
+                            debug!("[{}] Received new log index: {:?}", local_name, log_index);
                         } else {
                             debug!(
                                 "[{}] Raft leader process for {} exiting.",
@@ -149,47 +168,77 @@ where
                             );
                             break;
                         }
-                        state = State::AppendEntries;
+                        state = State::AppendEntries {
+                            from_index: follower_commit_index,
+                            to_index: uncommitted_index,
+                            pending_changes: vec![],
+                        };
                         continue;
                     }
-                    State::AppendEntries => {
+                    State::AppendEntries {
+                        from_index,
+                        to_index,
+                        pending_changes,
+                    } => {
                         let _core = core.clone();
                         match core
                             .spawn_worker(move || {
-                                _core
-                                    .store
-                                    .get_raft_entries(last_committed_id, BATCH_MAX_ENTRIES)
+                                _core.store.get_log_entries(
+                                    from_index,
+                                    to_index,
+                                    pending_changes,
+                                    BATCH_MAX_SIZE,
+                                )
                             })
                             .await
                         {
-                            Ok(entries) => {
-                                if !entries.is_empty() {
-                                    last_sent_id = entries.last().unwrap().id;
-
-                                    if last_sent_id.index > last_log.index {
-                                        last_log = last_sent_id;
-                                    }
-
-                                    Request::AppendEntries {
-                                        term,
-                                        request: AppendEntriesRequest::UpdateLog {
-                                            last_log,
-                                            entries,
-                                        },
-                                    }
-                                } else {
-                                    debug!(
-                                        "[{}] Peer {} is up to date with {:?}.",
-                                        local_name, peer_name, last_committed_id
-                                    );
-                                    state = State::Wait;
-                                    continue;
+                            Ok((updates, pending_changes, last_id)) => {
+                                state = State::AppendEntries {
+                                    from_index: last_id,
+                                    to_index,
+                                    pending_changes,
+                                };
+                                Request::AppendEntries {
+                                    term,
+                                    request: AppendEntriesRequest::Update {
+                                        commit_index: last_log.index,
+                                        updates,
+                                    },
                                 }
                             }
                             Err(err) => {
-                                error!("Error getting raft entries: {:?}", err);
+                                error!("Error fetching log entries: {:?}", err);
                                 state = State::Wait;
                                 continue;
+                            }
+                        }
+                    }
+                    State::AppendChanges {
+                        account_id,
+                        collection,
+                        mut changes,
+                    } => {
+                        match core
+                            .prepare_changes(account_id, collection, &mut changes)
+                            .await
+                        {
+                            Ok(updates) => {
+                                state = State::AppendChanges {
+                                    account_id,
+                                    collection,
+                                    changes,
+                                };
+                                Request::AppendEntries {
+                                    term,
+                                    request: AppendEntriesRequest::Update {
+                                        commit_index: last_log.index,
+                                        updates,
+                                    },
+                                }
+                            }
+                            Err(err) => {
+                                error!("Failed to prepare changes: {:?}", err);
+                                break;
                             }
                         }
                     }
@@ -204,7 +253,10 @@ where
                             {
                                 error!("Error sending step down message: {}", err);
                             }
-                            debug!("Peer {} requested to step down.", peer_name);
+                            debug!(
+                                "[{}] Peer {} requested this node to step down.",
+                                local_name, peer_name
+                            );
                             break;
                         }
                         Response::None => {
@@ -214,12 +266,14 @@ where
                                     changed = log_index_rx.changed() => {
                                         match changed {
                                             Ok(()) => {
-                                                last_log.index = *log_index_rx.borrow();
+                                                let log_index = *log_index_rx.borrow();
+                                                last_log.index = log_index.last_log_index;
                                                 last_log.term = term;
+                                                uncommitted_index = log_index.uncommitted_index;
 
                                                 debug!(
-                                                    "[{}] Received new log index while waiting: {:?}",
-                                                    local_name, last_log
+                                                    "[{}] Received new log index {:?} while waiting for peer {}.",
+                                                    local_name, log_index, peer_name
                                                 );
                                             }
                                             Err(_) => {
@@ -235,10 +289,10 @@ where
                                         match online {
                                             Ok(()) => {
                                                 if *online_rx.borrow() {
-                                                    debug!("Peer {} is back online (rpc).", peer_name);
+                                                    debug!("[{}] Peer {} is back online (rpc).", local_name, peer_name);
                                                     break 'online;
                                                 } else {
-                                                    debug!("Peer {} is still offline (rpc).", peer_name);
+                                                    debug!("[{}] Peer {} is still offline (rpc).", local_name, peer_name);
                                                     continue 'online;
                                                 }
                                             },
@@ -257,7 +311,10 @@ where
                             continue;
                         }
                         Response::UnregisteredPeer => {
-                            println!("Peer does not know us, retrying");
+                            debug!(
+                                "[{}] Peer {} does not know this node, retrying...",
+                                local_name, peer_name
+                            );
                             state = State::BecomeLeader;
                             continue;
                         }
@@ -283,9 +340,9 @@ where
                 //println!("[{}] {:#?}", peer_name, response);
 
                 match response {
-                    AppendEntriesResponse::Match { last_log } => {
-                        if !last_log.is_none() {
-                            let local_match = match core.get_next_raft_id(last_log).await {
+                    AppendEntriesResponse::Match { match_log } => {
+                        if !match_log.is_none() {
+                            let local_match = match core.get_next_raft_id(match_log).await {
                                 Ok(Some(local_match)) => local_match,
                                 Ok(None) => {
                                     error!("Log sync failed: local match is null");
@@ -297,9 +354,8 @@ where
                                 }
                             };
 
-                            if local_match == last_log {
-                                last_committed_id = last_log;
-                                last_sent_id = last_log;
+                            if local_match == match_log {
+                                follower_commit_index = match_log.index;
 
                                 main_tx
                                     .send(super::Event::AdvanceCommitIndex {
@@ -314,14 +370,26 @@ where
                                     local_name, local_match, peer_name
                                 );
 
-                                state = State::AppendEntries;
+                                state = State::AppendEntries {
+                                    from_index: follower_commit_index,
+                                    to_index: uncommitted_index,
+                                    pending_changes: vec![],
+                                };
                             } else {
                                 state = State::Synchronize;
                             }
                         } else {
-                            last_committed_id = last_log;
-                            last_sent_id = last_log;
-                            state = State::AppendEntries;
+                            debug!(
+                                "[{}] Peer {} requested all log entries to be sent.",
+                                local_name, peer_name
+                            );
+
+                            follower_commit_index = match_log.index;
+                            state = State::AppendEntries {
+                                from_index: follower_commit_index,
+                                to_index: uncommitted_index,
+                                pending_changes: vec![],
+                            };
                         }
                     }
                     AppendEntriesResponse::Synchronize { match_indexes } => {
@@ -386,59 +454,53 @@ where
                             RaftId::none()
                         };
 
-                        last_committed_id = matched_log;
-                        last_sent_id = matched_log;
+                        follower_commit_index = matched_log.index;
                         state = State::Merge { matched_log };
                     }
+                    AppendEntriesResponse::Continue => (),
+                    AppendEntriesResponse::Commit { commit_index } => {
+                        // Advance commit index
+                        debug_assert!(
+                            follower_commit_index == LogIndex::MAX
+                                || commit_index >= follower_commit_index
+                        );
+                        follower_commit_index = commit_index;
+                        main_tx
+                            .send(super::Event::AdvanceCommitIndex {
+                                peer_id,
+                                commit_index: follower_commit_index,
+                            })
+                            .await
+                            .ok();
 
-                    AppendEntriesResponse::Update { collections } => {
-                        state = core.get_next_changes(collections).await;
-                    }
-                    AppendEntriesResponse::Continue => {
-                        let do_commit = match &mut state {
-                            State::PushChanges {
-                                changes,
-                                collections,
-                            } if changes.is_empty() => {
-                                if collections.is_empty() {
-                                    state = State::AppendEntries;
-                                    true
-                                } else {
-                                    state =
-                                        core.get_next_changes(std::mem::take(collections)).await;
-                                    false
-                                }
-                            }
-                            State::AppendEntries => true,
-                            _ => {
-                                debug_assert!(false, "Invalid state: {:?}", state);
-                                false
-                            }
-                        };
-
-                        if do_commit {
-                            // Advance commit index
-                            last_committed_id = last_sent_id;
-                            main_tx
-                                .send(super::Event::AdvanceCommitIndex {
-                                    peer_id,
-                                    commit_index: last_committed_id.index,
-                                })
-                                .await
-                                .ok();
+                        if follower_commit_index == uncommitted_index {
+                            debug!(
+                                "[{}] Peer {} is up to date with {:?}.",
+                                local_name, peer_name, follower_commit_index
+                            );
+                            state = State::Wait;
+                        } else {
+                            debug!(
+                                "[{}] Updating commit index for peer {} from {} to {}.",
+                                local_name, peer_name, follower_commit_index, commit_index
+                            );
+                            state = State::AppendEntries {
+                                from_index: follower_commit_index,
+                                to_index: uncommitted_index,
+                                pending_changes: vec![],
+                            };
                         }
                     }
-                    AppendEntriesResponse::Restore {
+                    AppendEntriesResponse::Update {
                         account_id,
                         collection,
                         changes,
                     } => {
-                        let mut changes = if let Some(changes) =
-                            MergedChanges::from_rollback_bytes(account_id, collection, &changes)
+                        let mut changes = if let Some(changes) = MergedChanges::from_bytes(&changes)
                         {
                             changes
                         } else {
-                            error!("Failed to deserialize rollback bitmaps.");
+                            error!("Failed to deserialize changes bitmap.");
                             break;
                         };
 
@@ -448,8 +510,14 @@ where
                             changes.deletes = RoaringBitmap::new();
                         }
 
-                        state = State::PushChanges {
-                            collections: vec![],
+                        debug!(
+                            "[{}] Peer {} requested {} insertions, {} updates for account {}, collection {:?}.",
+                            local_name, peer_name, changes.inserts.len(), changes.updates.len(), account_id, collection
+                        );
+
+                        state = State::AppendChanges {
+                            account_id,
+                            collection,
                             changes,
                         };
                     }
@@ -463,82 +531,41 @@ impl<T> JMAPServer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    async fn get_next_changes(&self, mut collections: Vec<UpdateCollection>) -> State {
-        loop {
-            let collection = if let Some(collection) = collections.pop() {
-                collection
-            } else {
-                return State::AppendEntries;
-            };
-
-            let store = self.store.clone();
-            match self
-                .spawn_worker(move || {
-                    store.merge_changes(
-                        collection.account_id,
-                        collection.collection,
-                        collection.from_change_id,
-                        matches!(collection.collection, Collection::Thread),
-                    )
-                })
-                .await
-            {
-                Ok(changes) => {
-                    if !changes.is_empty() {
-                        return State::PushChanges {
-                            collections,
-                            changes,
-                        };
-                    }
-                }
-                Err(err) => {
-                    error!("Error getting raft changes: {:?}", err);
-                    return State::Synchronize;
-                }
-            }
-        }
-    }
-
     async fn prepare_changes(
         &self,
-        term: TermId,
+        account_id: AccountId,
+        collection: Collection,
         changes: &mut MergedChanges,
-        has_more_changes: bool,
-    ) -> store::Result<Request> {
+    ) -> store::Result<Vec<Update>> {
         let mut batch_size = 0;
-        let mut push_changes = Vec::new();
+        let mut updates = Vec::new();
 
         loop {
-            let item = if let Some(document_id) = changes.deletes.min() {
-                // Deletions are always sent first, as IDs can be reused.
-                changes.deletes.remove(document_id);
-                Some((
-                    Change::Delete { document_id },
-                    std::mem::size_of::<Change>(),
-                ))
-            } else if let Some(document_id) = changes.inserts.min() {
+            let (document_id, is_insert) = if let Some(document_id) = changes.inserts.min() {
                 changes.inserts.remove(document_id);
-                self.fetch_item(changes.account_id, changes.collection, document_id, true)
-                    .await?
+                (document_id, true)
             } else if let Some(document_id) = changes.updates.min() {
                 changes.updates.remove(document_id);
-                self.fetch_item(changes.account_id, changes.collection, document_id, false)
-                    .await?
-            } else if let Some(change_id) = changes.changes.min() {
-                changes.changes.remove(change_id);
-                self.fetch_raw_change(changes.account_id, changes.collection, change_id)
-                    .await?
+                (document_id, false)
             } else {
                 break;
             };
 
-            if let Some((item, item_size)) = item {
-                push_changes.push(item);
+            if let Some((item, item_size)) = match collection {
+                Collection::Mail => self.fetch_email(account_id, document_id, is_insert).await?,
+                Collection::Mailbox => self.fetch_mailbox(account_id, document_id).await?,
+                _ => {
+                    return Err(StoreError::InternalError(
+                        "Unsupported collection for changes".into(),
+                    ))
+                }
+            } {
+                updates.push(item);
                 batch_size += item_size;
             } else {
                 debug!(
                     "Warning: Failed to fetch item in collection {:?}",
-                    changes.collection,
+                    collection,
                 );
             }
 
@@ -547,34 +574,11 @@ where
             }
         }
 
-        if changes.is_empty() && !has_more_changes {
-            push_changes.push(Change::Commit);
+        if changes.is_empty() {
+            updates.push(Update::Eof);
         }
 
-        Ok(Request::AppendEntries {
-            term,
-            request: AppendEntriesRequest::UpdateStore {
-                account_id: changes.account_id,
-                collection: changes.collection,
-                changes: push_changes,
-            },
-        })
-    }
-
-    async fn fetch_item(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-        document_id: DocumentId,
-        is_insert: bool,
-    ) -> store::Result<Option<(Change, usize)>> {
-        match collection {
-            Collection::Mail => self.fetch_email(account_id, document_id, is_insert).await,
-            Collection::Mailbox => self.fetch_mailbox(account_id, document_id).await,
-            _ => Err(StoreError::InternalError(
-                "Unsupported collection for changes".into(),
-            )),
-        }
+        Ok(updates)
     }
 
     async fn fetch_email(
@@ -582,10 +586,10 @@ where
         account_id: AccountId,
         document_id: DocumentId,
         is_insert: bool,
-    ) -> store::Result<Option<(Change, usize)>> {
+    ) -> store::Result<Option<(Update, usize)>> {
         let store = self.store.clone();
         self.spawn_worker(move || {
-            let mut item_size = std::mem::size_of::<Change>();
+            let mut item_size = std::mem::size_of::<Update>();
 
             let mailboxes = if let Some(mailboxes) = store.get_document_tags(
                 account_id,
@@ -610,13 +614,13 @@ where
                 HashSet::new()
             };
 
-            let jmap_id = if let Some(thread_id) = store.get_document_tag_id(
+            let thread_id = if let Some(thread_id) = store.get_document_tag_id(
                 account_id,
                 Collection::Mail,
                 document_id,
                 MessageField::ThreadId.into(),
             )? {
-                JMAPId::from_parts(thread_id, document_id)
+                thread_id
             } else {
                 return Ok(None);
             };
@@ -639,12 +643,16 @@ where
                     let body = lz4_flex::compress_prepend_size(&body);
                     item_size += body.len();
                     Some((
-                        Change::InsertMail {
-                            jmap_id,
-                            keywords,
-                            mailboxes,
-                            body,
-                            received_at: message_outline.received_at,
+                        Update::Document {
+                            account_id,
+                            document_id,
+                            update: DocumentUpdate::InsertMail {
+                                thread_id,
+                                keywords,
+                                mailboxes,
+                                body,
+                                received_at: message_outline.received_at,
+                            },
                         },
                         item_size,
                     ))
@@ -653,10 +661,14 @@ where
                 }
             } else {
                 Some((
-                    Change::UpdateMail {
-                        jmap_id,
-                        keywords,
-                        mailboxes,
+                    Update::Document {
+                        account_id,
+                        document_id,
+                        update: DocumentUpdate::UpdateMail {
+                            thread_id,
+                            keywords,
+                            mailboxes,
+                        },
                     },
                     item_size,
                 ))
@@ -669,7 +681,7 @@ where
         &self,
         account_id: AccountId,
         document_id: DocumentId,
-    ) -> store::Result<Option<(Change, usize)>> {
+    ) -> store::Result<Option<(Update, usize)>> {
         let store = self.store.clone();
         self.spawn_worker(move || {
             Ok(store
@@ -681,9 +693,10 @@ where
                 )?
                 .map(|mailbox| {
                     (
-                        Change::UpdateMailbox {
-                            jmap_id: document_id as JMAPId,
-                            mailbox,
+                        Update::Document {
+                            account_id,
+                            document_id,
+                            update: DocumentUpdate::UpdateMailbox { mailbox },
                         },
                         std::mem::size_of::<Mailbox>(),
                     )
@@ -692,26 +705,32 @@ where
         .await
     }
 
-    async fn fetch_raw_change(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-        change_id: ChangeId,
-    ) -> store::Result<Option<(Change, usize)>> {
+    pub async fn set_leader_commit_index(&self, commit_index: LogIndex) -> store::Result<()> {
         let store = self.store.clone();
         self.spawn_worker(move || {
-            Ok(store
+            store.db.set(
+                ColumnFamily::Values,
+                LEADER_COMMIT_INDEX_KEY,
+                &commit_index.serialize().unwrap(),
+            )
+        })
+        .await
+    }
+
+    pub async fn rollback_uncommitted(&self) -> store::Result<()> {
+        let store = self.store.clone();
+        self.spawn_worker(move || {
+            if let Some(commit_index) = store
                 .db
-                .get::<Vec<u8>>(
-                    ColumnFamily::Logs,
-                    &LogKey::serialize_change(account_id, collection, change_id),
-                )?
-                .map(|entry| {
-                    (
-                        Change::InsertChange { change_id, entry },
-                        std::mem::size_of::<Change>(),
-                    )
-                }))
+                .get(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)?
+            {
+                store.prepare_rollback_changes(commit_index)?;
+                store
+                    .db
+                    .delete(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)
+            } else {
+                Ok(())
+            }
         })
         .await
     }

@@ -11,7 +11,7 @@ use actix_web::web;
 use serde::{Deserialize, Serialize};
 use store::{
     bincode,
-    raft::{LogIndex, RaftId, TermId},
+    log::{LogIndex, RaftId, TermId},
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
@@ -73,7 +73,7 @@ where
     // Raft status
     pub term: TermId,
     pub last_log: RaftId,
-    pub commit_index: LogIndex,
+    pub uncommitted_index: LogIndex,
     pub state: raft::State,
 }
 
@@ -251,6 +251,13 @@ where
         addr.hash(&mut generation);
         jmap_url.hash(&mut generation);
 
+        // Rollback uncommitted entries for a previous leader term.
+        core.rollback_uncommitted().await.unwrap();
+
+        // Apply committed updates and rollback uncommited ones for
+        // a previous follower term.
+        core.apply_committed_updates().await.unwrap();
+
         let last_log = core
             .get_last_log()
             .await
@@ -265,7 +272,7 @@ where
             key,
             jmap_url: format!("{}/jmap", jmap_url),
             term: last_log.term,
-            commit_index: last_log.index,
+            uncommitted_index: last_log.index,
             last_log,
             state: raft::State::default(),
             core,

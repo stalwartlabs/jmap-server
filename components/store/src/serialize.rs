@@ -1,9 +1,9 @@
 use std::convert::TryInto;
 
 use crate::{
-    changes::ChangeId,
     leb128::Leb128,
-    raft::{LogIndex, RaftId},
+    log::ChangeId,
+    log::{LogIndex, RaftId},
     AccountId, Collection, DocumentId, FieldId, Float, Integer, LongInteger, Tag, TermId,
 };
 
@@ -23,9 +23,12 @@ pub const BM_TAG_STATIC: u8 = 5;
 pub const BM_DOCUMENT_IDS: u8 = 6;
 
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
-pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
-pub const BLOB_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
-pub const TEMP_BLOB_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
+pub const BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
+pub const TEMP_BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
+
+pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
+pub const LAST_APPLIED_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 3];
+pub const LEADER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 4];
 
 pub struct ValueKey {}
 pub struct BitmapKey {}
@@ -110,8 +113,8 @@ impl ValueKey {
     }
 
     pub fn serialize_temporary_blob(account: AccountId, hash: u64, timestamp: u64) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + TEMP_BLOB_KEY.len());
-        bytes.extend_from_slice(TEMP_BLOB_KEY);
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + TEMP_BLOB_KEY_PREFIX.len());
+        bytes.extend_from_slice(TEMP_BLOB_KEY_PREFIX);
         timestamp.to_leb128_bytes(&mut bytes);
         hash.to_leb128_bytes(&mut bytes);
         account.to_leb128_bytes(&mut bytes);
@@ -119,8 +122,8 @@ impl ValueKey {
     }
 
     pub fn serialize_blob(hash: &[u8]) -> Vec<u8> {
-        let mut key = Vec::with_capacity(hash.len() + BLOB_KEY.len());
-        key.extend_from_slice(BLOB_KEY);
+        let mut key = Vec::with_capacity(hash.len() + BLOB_KEY_PREFIX.len());
+        key.extend_from_slice(BLOB_KEY_PREFIX);
         key.extend_from_slice(hash);
         key
     }
@@ -291,6 +294,7 @@ impl LogKey {
     pub const CHANGE_KEY_PREFIX: u8 = 0;
     pub const RAFT_KEY_PREFIX: u8 = 1;
     pub const ROLLBACK_KEY_PREFIX: u8 = 2;
+    pub const PENDING_UPDATES_KEY_PREFIX: u8 = 3;
 
     pub const CHANGE_KEY_LEN: usize = std::mem::size_of::<AccountId>()
         + std::mem::size_of::<Collection>()
@@ -340,6 +344,14 @@ impl LogKey {
         bytes.push(LogKey::ROLLBACK_KEY_PREFIX);
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.push(collection.into());
+        bytes
+    }
+
+    pub fn serialize_pending_update(index: LogIndex, seq_id: LogIndex) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity((std::mem::size_of::<LogIndex>() * 2) + 1);
+        bytes.push(LogKey::PENDING_UPDATES_KEY_PREFIX);
+        bytes.extend_from_slice(&index.to_be_bytes());
+        bytes.extend_from_slice(&seq_id.to_be_bytes());
         bytes
     }
 

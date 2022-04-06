@@ -16,6 +16,7 @@ use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::batch::{Document, WriteBatch};
+use store::field::{DefaultOptions, Options};
 use store::roaring::RoaringBitmap;
 use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
 
@@ -377,12 +378,20 @@ where
                         if mailbox_op_clear_all {
                             // Untag mailbox unless it is in the list of mailboxes to tag
                             if !mailbox_op_list.get(mailbox).unwrap_or(&false) {
-                                document.untag(MessageField::Mailbox, mailbox.clone());
+                                document.tag(
+                                    MessageField::Mailbox,
+                                    mailbox.clone(),
+                                    DefaultOptions::new().clear(),
+                                );
                                 changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                             }
                         } else if !mailbox_op_list.get(mailbox).unwrap_or(&true) {
                             // Untag mailbox if is marked for untagging
-                            document.untag(MessageField::Mailbox, mailbox.clone());
+                            document.tag(
+                                MessageField::Mailbox,
+                                mailbox.clone(),
+                                DefaultOptions::new().clear(),
+                            );
                             changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                         } else {
                             // Keep mailbox in the list
@@ -397,7 +406,11 @@ where
                             if mailbox_ids.contains(mailbox_id) {
                                 // Tag mailbox if it is not already tagged
                                 if !current_mailboxes.contains(&mailbox) {
-                                    document.tag(MessageField::Mailbox, mailbox);
+                                    document.tag(
+                                        MessageField::Mailbox,
+                                        mailbox,
+                                        DefaultOptions::new(),
+                                    );
                                     changed_mailboxes.insert(mailbox_id);
                                 }
                                 has_mailboxes = true;
@@ -444,7 +457,11 @@ where
                         if keyword_op_clear_all {
                             // Untag keyword unless it is in the list of keywords to tag
                             if !keyword_op_list.get(keyword).unwrap_or(&false) {
-                                document.untag(MessageField::Keyword, keyword.clone());
+                                document.tag(
+                                    MessageField::Keyword,
+                                    keyword.clone(),
+                                    DefaultOptions::new().clear(),
+                                );
                                 if !unread_changed
                                     && matches!(keyword, Tag::Text(text) if text == "$seen" )
                                 {
@@ -454,7 +471,11 @@ where
                             }
                         } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
                             // Untag keyword if is marked for untagging
-                            document.untag(MessageField::Keyword, keyword.clone());
+                            document.tag(
+                                MessageField::Keyword,
+                                keyword.clone(),
+                                DefaultOptions::new().clear(),
+                            );
                             if !unread_changed
                                 && matches!(keyword, Tag::Text(text) if text == "$seen" )
                             {
@@ -468,7 +489,11 @@ where
                         if do_create {
                             // Tag keyword if it is not already tagged
                             if !current_keywords.contains(&keyword) {
-                                document.tag(MessageField::Keyword, keyword.clone());
+                                document.tag(
+                                    MessageField::Keyword,
+                                    keyword.clone(),
+                                    DefaultOptions::new(),
+                                );
                                 if !unread_changed
                                     && matches!(&keyword, Tag::Text(text) if text == "$seen" )
                                 {

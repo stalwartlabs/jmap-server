@@ -9,6 +9,7 @@ use jmap_mail::{
 };
 use store::{
     batch::{Document, WriteBatch},
+    field::DefaultOptions,
     AccountId, JMAPId, JMAPStore, Store, Tag,
 };
 use store::{Collection, JMAPIdPrefix};
@@ -115,7 +116,11 @@ where
 
                 let mut batch = WriteBatch::new(account_id);
                 let mut document = Document::new(Collection::Mail, id.get_document_id());
-                document.tag(MessageField::ThreadId, Tag::Id(thread_id));
+                document.tag(
+                    MessageField::ThreadId,
+                    Tag::Id(thread_id),
+                    DefaultOptions::new(),
+                );
                 batch.update_document(document);
                 batch.log_move(Collection::Mail, id, new_id);
                 mail_store.write(batch).unwrap();

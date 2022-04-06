@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use actix_web::web;
 use futures::future::join_all;
-use store::{config::EnvSettings, parking_lot::Mutex, raft::RaftId, JMAPId, JMAPStore, Store};
+use store::{config::EnvSettings, log::RaftId, parking_lot::Mutex, JMAPId, JMAPStore, Store};
 use store_rocksdb::RocksDB;
 use store_test::{
     destroy_temp_dir, init_settings,
@@ -44,7 +44,7 @@ enum Ac {
     DeleteMailbox(u32),
 }
 
-enum Cmd {
+/*enum Cmd {
     StopLeader,
     StopFollower,
     StartAnyOffline,
@@ -53,7 +53,7 @@ enum Cmd {
     CompactLogLeader,
     CompactLogFollower,
     CompactLogAll,
-}
+}*/
 
 impl<T> Peer<T>
 where
@@ -672,13 +672,13 @@ where
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
 
-    election::<RocksDB>().await;
-    distributed_thread_merge::<RocksDB>().await;
+    //election::<RocksDB>().await;
+    //distributed_thread_merge::<RocksDB>().await;
     distributed_update_delete::<RocksDB>().await;
-    resolve_log_conflict::<RocksDB>().await;
+    //resolve_log_conflict::<RocksDB>().await;
 }
 
-#[test]
+/*#[test]
 fn postmortem() {
     let dbs = (1..=6)
         .map(|n| init_db_params::<RocksDB>("st_cluster", n, 5, false).0)
@@ -692,4 +692,4 @@ fn postmortem() {
             }
         }
     }
-}
+}*/

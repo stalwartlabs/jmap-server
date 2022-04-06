@@ -1,10 +1,11 @@
+use std::collections::HashSet;
+
 use jmap::changes::{JMAPChanges, JMAPState};
 use store::{
     batch::WriteBatch,
-    raft::{Entry, LogIndex, RaftId, TermId},
-    roaring::RoaringBitmap,
-    serialize::LogKey,
-    AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store,
+    log::{Entry, LogIndex, RaftId, TermId},
+    serialize::{LogKey, StoreDeserialize},
+    AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
 
 pub fn compact_log<T>(mail_store: JMAPStore<T>)
@@ -13,7 +14,7 @@ where
 {
     const NUM_ACCOUNTS: usize = 100;
 
-    let mut expected_changed_accounts = RoaringBitmap::new();
+    let mut expected_changed_accounts = HashSet::new();
     let mut expected_inserted_ids = vec![Vec::new(); NUM_ACCOUNTS];
 
     for run in 0u64..10u64 {
@@ -38,17 +39,28 @@ where
 
     match Entry::deserialize(
         &mail_store
-            .get_raft_entries(RaftId::none(), 1)
+            .get_raft_raw_entries(RaftId::none(), 1)
             .unwrap()
             .pop()
             .unwrap()
-            .data,
+            .1,
     )
     .unwrap()
     {
         Entry::Item { .. } => panic!("Expected log entry to be a snapshot."),
-        Entry::Snapshot { changed_accounts } => {
-            assert_eq!(changed_accounts, expected_changed_accounts)
+        Entry::Snapshot {
+            mut changed_accounts,
+        } => {
+            assert_eq!(changed_accounts.len(), 1);
+            assert_eq!(
+                changed_accounts
+                    .pop()
+                    .unwrap()
+                    .1
+                    .into_iter()
+                    .collect::<HashSet<_>>(),
+                expected_changed_accounts
+            );
         }
     }
 
@@ -103,4 +115,51 @@ where
 
     assert_eq!(total_change_entries, num_accounts);
     assert_eq!(total_raft_entries, 1);
+}
+
+trait JMAPRaftRawEntries {
+    fn get_raft_raw_entries(
+        &self,
+        from_raft_id: RaftId,
+        num_entries: usize,
+    ) -> store::Result<Vec<(RaftId, Vec<u8>)>>;
+}
+
+impl<T> JMAPRaftRawEntries for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn get_raft_raw_entries(
+        &self,
+        from_raft_id: RaftId,
+        num_entries: usize,
+    ) -> store::Result<Vec<(RaftId, Vec<u8>)>> {
+        let mut entries = Vec::with_capacity(num_entries);
+        let (is_inclusive, key) = if !from_raft_id.is_none() {
+            (false, LogKey::serialize_raft(&from_raft_id))
+        } else {
+            (true, LogKey::serialize_raft(&RaftId::new(0, 0)))
+        };
+        let prefix = &[LogKey::RAFT_KEY_PREFIX];
+
+        for (key, value) in self
+            .db
+            .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
+        {
+            if key.starts_with(prefix) {
+                let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
+                    StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
+                })?;
+                if is_inclusive || raft_id != from_raft_id {
+                    entries.push((raft_id, value.to_vec()));
+                    if entries.len() == num_entries {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(entries)
+    }
 }

@@ -5,9 +5,9 @@ use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use store::{bincode, leb128::Leb128, raft::RaftId};
+use store::{bincode, leb128::Leb128, log::RaftId};
 use store::{
-    raft::TermId,
+    log::TermId,
     tracing::{debug, error},
 };
 use tokio::sync::watch;

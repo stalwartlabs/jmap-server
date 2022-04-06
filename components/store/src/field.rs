@@ -79,22 +79,80 @@ pub trait FieldLen {
 #[derive(Debug)]
 pub struct Field<T> {
     pub field: FieldId,
-    pub options: FieldOptions,
+    pub options: u64,
     pub value: T,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum FieldOptions {
-    None,
-    Store,
-    Sort,
-    StoreAndSort,
-    StoreAsBlob(BlobIndex),
-    Clear,
+pub struct DefaultOptions {}
+
+impl DefaultOptions {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> u64 {
+        0
+    }
+}
+
+pub trait Options {
+    fn store(self) -> Self;
+    fn store_blob(self, index: BlobIndex) -> Self;
+    fn sort(self) -> Self;
+    fn clear(self) -> Self;
+
+    fn is_store(&self) -> bool;
+    fn is_sort(&self) -> bool;
+    fn is_store_blob(&self) -> Option<BlobIndex>;
+    fn is_clear(&self) -> bool;
+}
+
+pub const F_STORE: u64 = 0x01 << 32;
+pub const F_SORT: u64 = 0x02 << 32;
+pub const F_CLEAR: u64 = 0x04 << 32;
+pub const F_STORE_BLOB: u64 = 0x08 << 32;
+
+impl Options for u64 {
+    fn store(mut self) -> Self {
+        self |= F_STORE;
+        self
+    }
+
+    fn store_blob(mut self, index: BlobIndex) -> Self {
+        self |= F_STORE_BLOB | (index as u64);
+        self
+    }
+
+    fn sort(mut self) -> Self {
+        self |= F_SORT;
+        self
+    }
+
+    fn clear(mut self) -> Self {
+        self |= F_CLEAR;
+        self
+    }
+
+    fn is_store(&self) -> bool {
+        self & F_STORE != 0
+    }
+
+    fn is_sort(&self) -> bool {
+        self & F_SORT != 0
+    }
+
+    fn is_store_blob(&self) -> Option<BlobIndex> {
+        if self & F_STORE_BLOB != 0 {
+            Some((self & 0xFFFFFFFF) as BlobIndex)
+        } else {
+            None
+        }
+    }
+
+    fn is_clear(&self) -> bool {
+        self & F_CLEAR != 0
+    }
 }
 
 impl<T> Field<T> {
-    pub fn new(field: FieldId, value: T, options: FieldOptions) -> Self {
+    pub fn new(field: FieldId, value: T, options: u64) -> Self {
         Self {
             field,
             value,
@@ -102,37 +160,34 @@ impl<T> Field<T> {
         }
     }
 
+    #[inline(always)]
     pub fn get_field(&self) -> FieldId {
         self.field
     }
 
-    pub fn get_options(&self) -> FieldOptions {
+    #[inline(always)]
+    pub fn get_options(&self) -> u64 {
         self.options
     }
 
+    #[inline(always)]
     pub fn get_blob_index(&self) -> Option<BlobIndex> {
-        match self.options {
-            FieldOptions::StoreAsBlob(idx) => Some(idx),
-            _ => None,
-        }
+        self.options.is_store_blob()
     }
 
+    #[inline(always)]
     pub fn is_sorted(&self) -> bool {
-        matches!(
-            self.options,
-            FieldOptions::Sort | FieldOptions::StoreAndSort
-        )
+        self.options.is_sort()
     }
 
+    #[inline(always)]
     pub fn is_stored(&self) -> bool {
-        matches!(
-            self.options,
-            FieldOptions::Store | FieldOptions::StoreAndSort
-        )
+        self.options.is_store()
     }
 
+    #[inline(always)]
     pub fn is_clear(&self) -> bool {
-        matches!(self.options, FieldOptions::Clear)
+        self.options.is_clear()
     }
 
     pub fn size_of(&self) -> usize {
