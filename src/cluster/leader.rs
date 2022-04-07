@@ -35,9 +35,7 @@ enum State {
     Merge {
         matched_log: RaftId,
     },
-    AppendEntries {
-        from_index: LogIndex,
-        to_index: LogIndex,
+    AppendLogs {
         pending_changes: Vec<(Collections, Vec<AccountId>)>,
     },
     AppendChanges {
@@ -83,7 +81,7 @@ where
 
         tokio::spawn(async move {
             let mut state = State::BecomeLeader;
-            let mut follower_commit_index = LogIndex::MAX;
+            let mut follower_last_index = LogIndex::MAX;
 
             debug!(
                 "[{}] Starting raft leader process for peer {}.",
@@ -101,9 +99,7 @@ where
                             uncommitted_index = log_index.uncommitted_index;
 
                             if matches!(&state, State::Wait) {
-                                state = State::AppendEntries {
-                                    from_index: follower_commit_index,
-                                    to_index: uncommitted_index,
+                                state = State::AppendLogs {
                                     pending_changes: vec![],
                                 };
                             }
@@ -168,48 +164,55 @@ where
                             );
                             break;
                         }
-                        state = State::AppendEntries {
-                            from_index: follower_commit_index,
-                            to_index: uncommitted_index,
+                        state = State::AppendLogs {
                             pending_changes: vec![],
                         };
                         continue;
                     }
-                    State::AppendEntries {
-                        from_index,
-                        to_index,
-                        pending_changes,
-                    } => {
-                        let _core = core.clone();
-                        match core
-                            .spawn_worker(move || {
-                                _core.store.get_log_entries(
-                                    from_index,
-                                    to_index,
-                                    pending_changes,
-                                    BATCH_MAX_SIZE,
-                                )
-                            })
-                            .await
-                        {
-                            Ok((updates, pending_changes, last_id)) => {
-                                state = State::AppendEntries {
-                                    from_index: last_id,
-                                    to_index,
-                                    pending_changes,
-                                };
-                                Request::AppendEntries {
-                                    term,
-                                    request: AppendEntriesRequest::Update {
-                                        commit_index: last_log.index,
-                                        updates,
-                                    },
+                    State::AppendLogs { pending_changes } => {
+                        debug_assert!(uncommitted_index != LogIndex::MAX);
+
+                        if !pending_changes.is_empty() || follower_last_index != uncommitted_index {
+                            let _core = core.clone();
+                            match core
+                                .spawn_worker(move || {
+                                    _core.store.get_log_entries(
+                                        follower_last_index,
+                                        uncommitted_index,
+                                        pending_changes,
+                                        BATCH_MAX_SIZE,
+                                    )
+                                })
+                                .await
+                            {
+                                Ok((updates, pending_changes, last_index)) => {
+                                    follower_last_index = last_index;
+                                    state = State::AppendLogs { pending_changes };
+                                    Request::AppendEntries {
+                                        term,
+                                        request: AppendEntriesRequest::Update {
+                                            commit_index: last_log.index,
+                                            updates,
+                                        },
+                                    }
+                                }
+                                Err(err) => {
+                                    error!("Error fetching log entries: {:?}", err);
+                                    break;
                                 }
                             }
-                            Err(err) => {
-                                error!("Error fetching log entries: {:?}", err);
-                                state = State::Wait;
-                                continue;
+                        } else {
+                            debug!(
+                                "[{}] No more entries left to send to peer {}.",
+                                local_name, peer_name
+                            );
+
+                            state = State::Wait;
+                            Request::AppendEntries {
+                                term,
+                                request: AppendEntriesRequest::AdvanceCommitIndex {
+                                    commit_index: last_log.index,
+                                },
                             }
                         }
                     }
@@ -261,6 +264,10 @@ where
                         }
                         Response::None => {
                             // Wait until the peer is back online
+                            debug!(
+                                "[{}] Could not send message to {}, waiting until it is confirmed online.",
+                                local_name, peer_name
+                            );
                             'online: loop {
                                 tokio::select! {
                                     changed = log_index_rx.changed() => {
@@ -341,6 +348,7 @@ where
 
                 match response {
                     AppendEntriesResponse::Match { match_log } => {
+                        follower_last_index = match_log.index;
                         if !match_log.is_none() {
                             let local_match = match core.get_next_raft_id(match_log).await {
                                 Ok(Some(local_match)) => local_match,
@@ -355,8 +363,6 @@ where
                             };
 
                             if local_match == match_log {
-                                follower_commit_index = match_log.index;
-
                                 main_tx
                                     .send(super::Event::AdvanceCommitIndex {
                                         peer_id,
@@ -370,9 +376,7 @@ where
                                     local_name, local_match, peer_name
                                 );
 
-                                state = State::AppendEntries {
-                                    from_index: follower_commit_index,
-                                    to_index: uncommitted_index,
+                                state = State::AppendLogs {
                                     pending_changes: vec![],
                                 };
                             } else {
@@ -384,11 +388,12 @@ where
                                 local_name, peer_name
                             );
 
-                            follower_commit_index = match_log.index;
-                            state = State::AppendEntries {
-                                from_index: follower_commit_index,
-                                to_index: uncommitted_index,
-                                pending_changes: vec![],
+                            state = if uncommitted_index != LogIndex::MAX {
+                                State::AppendLogs {
+                                    pending_changes: vec![],
+                                }
+                            } else {
+                                State::Wait
                             };
                         }
                     }
@@ -454,42 +459,46 @@ where
                             RaftId::none()
                         };
 
-                        follower_commit_index = matched_log.index;
+                        follower_last_index = matched_log.index;
                         state = State::Merge { matched_log };
                     }
                     AppendEntriesResponse::Continue => (),
-                    AppendEntriesResponse::Commit { commit_index } => {
+                    AppendEntriesResponse::Done { up_to_index } => {
                         // Advance commit index
-                        debug_assert!(
-                            follower_commit_index == LogIndex::MAX
-                                || commit_index >= follower_commit_index
-                        );
-                        follower_commit_index = commit_index;
-                        main_tx
-                            .send(super::Event::AdvanceCommitIndex {
-                                peer_id,
-                                commit_index: follower_commit_index,
-                            })
-                            .await
-                            .ok();
+                        if up_to_index != LogIndex::MAX {
+                            main_tx
+                                .send(super::Event::AdvanceCommitIndex {
+                                    peer_id,
+                                    commit_index: up_to_index,
+                                })
+                                .await
+                                .ok();
 
-                        if follower_commit_index == uncommitted_index {
-                            debug!(
-                                "[{}] Peer {} is up to date with {:?}.",
-                                local_name, peer_name, follower_commit_index
-                            );
-                            state = State::Wait;
+                            if up_to_index == last_log.index {
+                                debug!(
+                                    "[{}] Peer {} is up to date with index {}.",
+                                    local_name, peer_name, up_to_index
+                                );
+                            } else {
+                                debug!(
+                                    "[{}] Updating commit index to {} and resuming append logs for peer {}.",
+                                    local_name, up_to_index, peer_name, 
+                                );
+                            }
                         } else {
                             debug!(
-                                "[{}] Updating commit index for peer {} from {} to {}.",
-                                local_name, peer_name, follower_commit_index, commit_index
+                                "[{}] Resuming append logs for peer {}.",
+                                local_name, peer_name
                             );
-                            state = State::AppendEntries {
-                                from_index: follower_commit_index,
-                                to_index: uncommitted_index,
-                                pending_changes: vec![],
-                            };
                         }
+
+                        state = if up_to_index != uncommitted_index {
+                            State::AppendLogs {
+                                pending_changes: vec![],
+                            }
+                        } else {
+                            State::Wait
+                        };
                     }
                     AppendEntriesResponse::Update {
                         account_id,

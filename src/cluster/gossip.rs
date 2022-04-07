@@ -539,6 +539,7 @@ impl Peer {
     */
     pub fn check_heartbeat(&mut self) -> bool {
         if self.hb_sum == 0 {
+            println!("No pings received from {}.", self.addr);
             return false;
         }
 
@@ -560,11 +561,18 @@ impl Peer {
         };
 
         /*debug!(
-            "Heartbeat[{}]: mean={:.2}ms, variance={:.2}ms, std_dev={:.2}ms, phi={:.2}, status={:?}",
-            self.peer_id, hb_mean, hb_variance, hb_std_dev, phi, self.state
+            "Heartbeat from {}: mean={:.2}ms, variance={:.2}ms, std_dev={:.2}ms, phi={:.2}, samples={}, status={:?}",
+            self.addr, hb_mean, hb_variance, hb_std_dev, phi, sample_size, if phi > HB_PHI_CONVICT_THRESHOLD {
+                State::Offline
+            } else if phi > HB_PHI_SUSPECT_THRESHOLD {
+                State::Suspected
+            } else {
+                State::Alive
+            }
         );*/
 
         if phi > HB_PHI_CONVICT_THRESHOLD {
+            debug!("Peer {} is offline.", self.addr);
             self.state = State::Offline;
             false
         } else if phi > HB_PHI_SUSPECT_THRESHOLD {

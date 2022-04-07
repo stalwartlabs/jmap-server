@@ -7,7 +7,7 @@ use store::batch::WriteBatch;
 use store::log::{Entry, LogIndex, RaftId, TermId};
 use store::roaring::RoaringBitmap;
 use store::serialize::{
-    DeserializeBigEndian, LogKey, StoreDeserialize, StoreSerialize, LAST_APPLIED_INDEX_KEY,
+    DeserializeBigEndian, LogKey, StoreDeserialize, StoreSerialize, FOLLOWER_COMMIT_INDEX_KEY,
 };
 use store::tracing::{debug, error};
 use store::{
@@ -32,13 +32,9 @@ use super::{PeerId, IPC_CHANNEL_BUFFER};
 enum State {
     Synchronize,
     AppendEntries {
-        first_id: RaftId,
-        last_id: RaftId,
         changed_accounts: HashMap<AccountId, Collections>,
     },
     AppendChanges {
-        first_id: RaftId,
-        last_id: RaftId,
         changed_accounts: Vec<(AccountId, Collections)>,
     },
     Rollback {
@@ -91,6 +87,16 @@ impl StoreDeserialize for PendingUpdates {
     }
 }
 
+#[derive(Debug)]
+struct RaftIndexes {
+    leader_commit_index: LogIndex,
+    commit_index: LogIndex,
+    commit_term: TermId,
+    uncommitted_index: LogIndex,
+    merge_index: LogIndex,
+    sequence_id: u64,
+}
+
 impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -103,17 +109,28 @@ where
         debug!("[{}] Starting raft follower process.", local_name);
 
         tokio::spawn(async move {
-            let mut change_seq = 0;
-
             if let Err(err) = core.reset_uncommitted_changes().await {
                 error!("Failed to reset uncommitted changes: {:?}", err);
                 return;
             }
 
-            if let Err(err) = core.init_last_applied_index().await {
-                error!("Failed to set last update key: {:?}", err);
-                return;
-            }
+            let mut indexes = {
+                let commit_index = match core.init_follower_commit_index().await {
+                    Ok(commit_index) => commit_index,
+                    Err(err) => {
+                        error!("Failed to set follower commit index: {:?}", err);
+                        return;
+                    }
+                };
+                RaftIndexes {
+                    leader_commit_index: LogIndex::MAX,
+                    commit_index,
+                    uncommitted_index: commit_index,
+                    merge_index: LogIndex::MAX,
+                    sequence_id: 0,
+                    commit_term: TermId::MAX,
+                }
+            };
 
             let mut state = match core.next_rollback_change().await {
                 Ok(Some((account_id, collection, changes))) => State::Rollback {
@@ -129,7 +146,7 @@ where
             };
 
             while let Some(event) = rx.recv().await {
-                //println!("Follower: {:?}", state);
+                //println!("Follower: {:?}", event.request);
 
                 let response = match (event.request, state) {
                     (AppendEntriesRequest::Match { last_log }, State::Synchronize) => {
@@ -167,8 +184,6 @@ where
                         },
                         State::Synchronize,
                     ) => {
-                        core.set_up_to_date(false);
-
                         debug!(
                             "[{}] Received {} log entries with commit index {} (sync state).",
                             local_name,
@@ -176,15 +191,12 @@ where
                             commit_index,
                         );
 
+                        indexes.leader_commit_index = commit_index;
+                        indexes.merge_index = LogIndex::MAX;
+                        core.set_up_to_date(false);
+
                         if let Some((next_state, response)) = core
-                            .handle_update_log(
-                                RaftId::none(),
-                                RaftId::none(),
-                                commit_index,
-                                HashMap::new(),
-                                &mut change_seq,
-                                updates,
-                            )
+                            .handle_update_log(&mut indexes, HashMap::new(), updates)
                             .await
                         {
                             state = next_state;
@@ -199,36 +211,24 @@ where
                             commit_index,
                             updates,
                         },
-                        State::AppendEntries {
-                            first_id,
-                            last_id,
-                            changed_accounts,
-                        },
+                        State::AppendEntries { changed_accounts },
                     ) => {
                         debug!(
                             concat!(
                                 "[{}] Received {} log entries with commit index {}: ",
-                                "first id {:?}, last id: {:?}, {} pending accounts."
+                                "{} pending accounts."
                             ),
                             local_name,
                             updates.len(),
                             commit_index,
-                            first_id,
-                            last_id,
                             changed_accounts.len()
                         );
 
                         core.set_up_to_date(false);
+                        indexes.leader_commit_index = commit_index;
 
                         if let Some((next_state, response)) = core
-                            .handle_update_log(
-                                first_id,
-                                last_id,
-                                commit_index,
-                                changed_accounts,
-                                &mut change_seq,
-                                updates,
-                            )
+                            .handle_update_log(&mut indexes, changed_accounts, updates)
                             .await
                         {
                             state = next_state;
@@ -243,34 +243,21 @@ where
                             commit_index,
                             updates,
                         },
-                        State::AppendChanges {
-                            first_id,
-                            last_id,
-                            changed_accounts,
-                        },
+                        State::AppendChanges { changed_accounts },
                     ) => {
                         debug!(
                             concat!(
                                 "[{}] Received {} changes with commit index {}: ",
-                                "first id {:?}, last id: {:?}, {} pending accounts."
+                                "{} pending accounts."
                             ),
                             local_name,
                             updates.len(),
                             commit_index,
-                            first_id,
-                            last_id,
                             changed_accounts.len()
                         );
 
                         if let Some((next_state, response)) = core
-                            .handle_pending_updates(
-                                first_id,
-                                last_id,
-                                commit_index,
-                                &mut change_seq,
-                                changed_accounts,
-                                updates,
-                            )
+                            .handle_pending_updates(&mut indexes, changed_accounts, updates)
                             .await
                         {
                             state = next_state;
@@ -281,7 +268,10 @@ where
                     }
 
                     (
-                        AppendEntriesRequest::Update { updates, .. },
+                        AppendEntriesRequest::Update {
+                            updates,
+                            commit_index,
+                        },
                         State::Rollback {
                             account_id,
                             collection,
@@ -298,12 +288,23 @@ where
                             account_id,
                             collection
                         );
+                        indexes.leader_commit_index = commit_index;
 
                         if let Some((next_state, response)) = core
                             .handle_rollback_updates(account_id, collection, changes, updates)
                             .await
                         {
                             state = next_state;
+                            response
+                        } else {
+                            break;
+                        }
+                    }
+
+                    (AppendEntriesRequest::AdvanceCommitIndex { commit_index }, prev_state) => {
+                        indexes.leader_commit_index = commit_index;
+                        if let Some((_, response)) = core.commit_updates(&mut indexes).await {
+                            state = prev_state;
                             response
                         } else {
                             break;
@@ -420,18 +421,19 @@ where
 {
     async fn handle_update_log(
         &self,
-        mut first_id: RaftId,
-        mut last_id: RaftId,
-        leader_commit_index: LogIndex,
+        mut indexes: &mut RaftIndexes,
         mut changed_accounts: HashMap<AccountId, Collections>,
-        change_seq: &mut u64,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
         let store = self.store.clone();
+        let mut last_index = indexes.uncommitted_index;
+        let mut merge_index = indexes.merge_index;
+
         match self
             .spawn_worker(move || {
                 let mut log_batch = Vec::with_capacity(updates.len());
                 let mut is_done = updates.is_empty();
+                let mut last_term = TermId::MAX;
 
                 for update in updates {
                     match update {
@@ -442,38 +444,31 @@ where
                         } => {
                             #[cfg(test)]
                             {
-                                assert!(!last_id.is_none());
+                                assert!(last_index != LogIndex::MAX);
+                                let existing_change = store
+                                    .db
+                                    .get::<Vec<u8>>(
+                                        ColumnFamily::Logs,
+                                        &LogKey::serialize_change(
+                                            account_id, collection, last_index,
+                                        ),
+                                    )
+                                    .unwrap();
                                 assert!(
-                                    store
-                                        .db
-                                        .get::<Vec<u8>>(
-                                            ColumnFamily::Logs,
-                                            &LogKey::serialize_change(
-                                                account_id,
-                                                collection,
-                                                last_id.index
-                                            )
-                                        )
-                                        .unwrap()
-                                        .is_none(),
-                                    "{:?}",
-                                    store
-                                        .db
-                                        .get::<Vec<u8>>(
-                                            ColumnFamily::Logs,
-                                            &LogKey::serialize_change(
-                                                account_id,
-                                                collection,
-                                                last_id.index
-                                            )
-                                        )
-                                        .unwrap()
+                                    existing_change.is_none(),
+                                    "{} -> {:?}",
+                                    last_index,
+                                    existing_change
                                 );
                             }
+                            println!(
+                                "writing change {:?}",
+                                LogKey::serialize_change(account_id, collection, last_index,)
+                            );
 
                             log_batch.push(WriteOperation::set(
                                 ColumnFamily::Logs,
-                                LogKey::serialize_change(account_id, collection, last_id.index),
+                                LogKey::serialize_change(account_id, collection, last_index),
                                 change,
                             ));
                             changed_accounts
@@ -482,33 +477,33 @@ where
                                 .insert(collection);
                         }
                         Update::Log { raft_id, log } => {
-                            if first_id.is_none() {
-                                first_id = raft_id;
-                            }
-
                             #[cfg(test)]
                             {
+                                //println!("Adding raft id {:?}", raft_id,);
+
+                                use store::log::{self};
+                                let existing_log = store
+                                    .db
+                                    .get::<log::Entry>(
+                                        ColumnFamily::Logs,
+                                        &LogKey::serialize_raft(&raft_id),
+                                    )
+                                    .unwrap();
                                 assert!(
-                                    store
-                                        .db
-                                        .get::<log::Entry>(
-                                            ColumnFamily::Logs,
-                                            &LogKey::serialize_raft(&raft_id)
-                                        )
-                                        .unwrap()
-                                        .is_none(),
-                                    "{:?}",
-                                    store
-                                        .db
-                                        .get::<log::Entry>(
-                                            ColumnFamily::Logs,
-                                            &LogKey::serialize_raft(&raft_id)
-                                        )
-                                        .unwrap()
+                                    existing_log.is_none(),
+                                    "{} -> existing: {:?} new: {:?}",
+                                    raft_id.index,
+                                    existing_log.unwrap(),
+                                    Entry::deserialize(&log).unwrap()
                                 );
                             }
 
-                            last_id = raft_id;
+                            last_index = raft_id.index;
+                            last_term = raft_id.term;
+                            if merge_index == LogIndex::MAX {
+                                merge_index = raft_id.index;
+                            }
+
                             log_batch.push(WriteOperation::set(
                                 ColumnFamily::Logs,
                                 LogKey::serialize_raft(&raft_id),
@@ -528,28 +523,30 @@ where
                     store.db.write(log_batch)?;
                 }
 
-                Ok((first_id, last_id, changed_accounts, is_done))
+                Ok((
+                    last_index,
+                    last_term,
+                    merge_index,
+                    changed_accounts,
+                    is_done,
+                ))
             })
             .await
         {
-            Ok((first_id, last_id, changed_accounts, is_done)) => {
+            Ok((last_index, last_term, merge_index, changed_accounts, is_done)) => {
+                indexes.uncommitted_index = last_index;
+                indexes.merge_index = merge_index;
+                if last_term != TermId::MAX {
+                    indexes.commit_term = last_term;
+                }
+
                 if is_done {
                     //println!("Changed accounts: {:?}", changed_accounts);
-                    self.request_updates(
-                        first_id,
-                        last_id,
-                        leader_commit_index,
-                        change_seq,
-                        changed_accounts.into_iter().collect::<Vec<_>>(),
-                    )
-                    .await
+                    self.request_updates(indexes, changed_accounts.into_iter().collect::<Vec<_>>())
+                        .await
                 } else {
                     (
-                        State::AppendEntries {
-                            first_id,
-                            last_id,
-                            changed_accounts,
-                        },
+                        State::AppendEntries { changed_accounts },
                         Response::AppendEntries(AppendEntriesResponse::Continue),
                     )
                         .into()
@@ -562,12 +559,63 @@ where
         }
     }
 
+    async fn commit_updates(&self, indexes: &mut RaftIndexes) -> Option<(State, Response)> {
+        // Apply changes
+        if indexes.leader_commit_index != LogIndex::MAX
+            && indexes.uncommitted_index <= indexes.leader_commit_index
+        {
+            let store = self.store.clone();
+            let uncommitted_index = indexes.uncommitted_index;
+            if let Err(err) = self
+                .spawn_worker(move || store.commit_pending_updates(uncommitted_index, false))
+                .await
+            {
+                error!("Failed to apply changes: {:?}", err);
+                return None;
+            }
+
+            indexes.commit_index = indexes.uncommitted_index;
+            self.update_raft_index(indexes.commit_index);
+            self.store_changed(RaftId::new(indexes.commit_term, indexes.commit_index))
+                .await;
+
+            // Set up to date
+            if indexes.commit_index == indexes.leader_commit_index {
+                debug!(
+                    "This node is now up to date with the leader's commit index {}.",
+                    indexes.leader_commit_index
+                );
+                self.set_up_to_date(true);
+            } else {
+                debug!(
+                    concat!(
+                        "This node is still behind the leader's commit index {}, ",
+                        "local commit index is {}."
+                    ),
+                    indexes.leader_commit_index, indexes.commit_index
+                );
+            }
+        } else {
+            debug!(
+                concat!(
+                    "No changes to apply: leader commit index = {}, ",
+                    "local uncommitted index: {}, local committed index: {}."
+                ),
+                indexes.leader_commit_index, indexes.uncommitted_index, indexes.leader_commit_index
+            );
+        }
+        (
+            State::Synchronize,
+            Response::AppendEntries(AppendEntriesResponse::Done {
+                up_to_index: indexes.uncommitted_index,
+            }),
+        )
+            .into()
+    }
+
     async fn request_updates(
         &self,
-        first_id: RaftId,
-        last_id: RaftId,
-        leader_commit_index: LogIndex,
-        change_seq: &mut u64,
+        indexes: &mut RaftIndexes,
         mut changed_accounts: Vec<(AccountId, Collections)>,
     ) -> Option<(State, Response)> {
         loop {
@@ -583,62 +631,31 @@ where
                         continue;
                     }
                 } else {
-                    // Apply changes
-                    if last_id.index <= leader_commit_index {
-                        let store = self.store.clone();
-                        if let Err(err) = self
-                            .spawn_worker(move || store.apply_pending_updates(last_id.index, false))
-                            .await
-                        {
-                            error!("Failed to apply changes: {:?}", err);
-                            return None;
-                        }
-
-                        // Set up to date
-                        if last_id.index == leader_commit_index {
-                            debug!(
-                                "This node is now up to date with the leader's commit index {}.",
-                                leader_commit_index
-                            );
-                            self.set_up_to_date(true);
-                            self.update_raft_index(last_id.index);
-                            self.store_changed(last_id).await;
-                        } else {
-                            debug!(
-                                concat!(
-                                    "This node is still behind the leader's commit index {}, ",
-                                    "local commit index is {}."
-                                ),
-                                leader_commit_index, last_id.index
-                            );
-                        }
-                    }
-
-                    return (
-                        State::Synchronize,
-                        Response::AppendEntries(AppendEntriesResponse::Commit {
-                            commit_index: last_id.index,
-                        }),
-                    )
-                        .into();
+                    return self.commit_updates(indexes).await;
                 };
 
             debug!(
                 "Merging changes for account {}, collection {:?} from index {} to {}.",
-                account_id, collection, first_id.index, last_id.index
+                account_id, collection, indexes.merge_index, indexes.uncommitted_index
             );
+            debug_assert!(indexes.merge_index != LogIndex::MAX);
+            debug_assert!(indexes.uncommitted_index != LogIndex::MAX);
 
             let store = self.store.clone();
+            let merge_index = indexes.merge_index;
+            let uncommitted_index = indexes.uncommitted_index;
             match self
                 .spawn_worker(move || {
-                    store.merge_changes(account_id, collection, first_id.index, last_id.index)
+                    store.merge_changes(account_id, collection, merge_index, uncommitted_index)
                 })
                 .await
             {
                 Ok(mut changes) => {
                     if !changes.deletes.is_empty() {
-                        let pending_updates_key =
-                            LogKey::serialize_pending_update(last_id.index, *change_seq);
+                        let pending_updates_key = LogKey::serialize_pending_update(
+                            indexes.uncommitted_index,
+                            indexes.sequence_id,
+                        );
                         let pending_updates =
                             match PendingUpdates::new(vec![PendingUpdate::DeleteDocuments {
                                 account_id,
@@ -669,17 +686,13 @@ where
                             return None;
                         }
 
-                        *change_seq += 1;
+                        indexes.sequence_id += 1;
                         changes.deletes = RoaringBitmap::new();
                     }
 
                     if !changes.inserts.is_empty() || !changes.updates.is_empty() {
                         return (
-                            State::AppendChanges {
-                                first_id,
-                                last_id,
-                                changed_accounts,
-                            },
+                            State::AppendChanges { changed_accounts },
                             Response::AppendEntries(AppendEntriesResponse::Update {
                                 account_id,
                                 collection,
@@ -707,16 +720,13 @@ where
 
     async fn handle_pending_updates(
         &self,
-        first_id: RaftId,
-        last_id: RaftId,
-        leader_commit_index: LogIndex,
-        change_seq: &mut u64,
+        indexes: &mut RaftIndexes,
         changed_accounts: Vec<(AccountId, Collections)>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
         //println!("{:#?}", updates);
         let mut pending_updates = Vec::with_capacity(updates.len());
-        let mut is_done = false;
+        let mut is_done = updates.is_empty();
 
         for update in updates {
             match update {
@@ -742,7 +752,8 @@ where
 
         if !pending_updates.is_empty() {
             //println!("Storing update: {:?}", pending_updates);
-            let pending_updates_key = LogKey::serialize_pending_update(last_id.index, *change_seq);
+            let pending_updates_key =
+                LogKey::serialize_pending_update(indexes.uncommitted_index, indexes.sequence_id);
             let pending_updates = match PendingUpdates::new(pending_updates).serialize() {
                 Some(pending_updates) => pending_updates,
                 None => {
@@ -750,7 +761,7 @@ where
                     return None;
                 }
             };
-            *change_seq += 1;
+            indexes.sequence_id += 1;
 
             let store = self.store.clone();
             if let Err(err) = self
@@ -768,23 +779,12 @@ where
 
         if !is_done {
             (
-                State::AppendChanges {
-                    first_id,
-                    last_id,
-                    changed_accounts,
-                },
+                State::AppendChanges { changed_accounts },
                 Response::AppendEntries(AppendEntriesResponse::Continue),
             )
                 .into()
         } else {
-            self.request_updates(
-                first_id,
-                last_id,
-                leader_commit_index,
-                change_seq,
-                changed_accounts,
-            )
-            .await
+            self.request_updates(indexes, changed_accounts).await
         }
     }
 
@@ -1020,32 +1020,32 @@ where
         }
     }
 
-    pub async fn init_last_applied_index(&self) -> store::Result<()> {
+    pub async fn init_follower_commit_index(&self) -> store::Result<LogIndex> {
         let store = self.store.clone();
         self.spawn_worker(move || {
+            let last_index = store
+                .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))?
+                .map(|v| v.index)
+                .unwrap_or(LogIndex::MAX);
             store.db.set(
                 ColumnFamily::Values,
-                LAST_APPLIED_INDEX_KEY,
-                &store
-                    .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))?
-                    .map(|v| v.index)
-                    .unwrap_or(LogIndex::MAX)
-                    .serialize()
-                    .unwrap(),
-            )
+                FOLLOWER_COMMIT_INDEX_KEY,
+                &last_index.serialize().unwrap(),
+            )?;
+            Ok(last_index)
         })
         .await
     }
 
-    pub async fn apply_committed_updates(&self) -> store::Result<bool> {
+    pub async fn commit_pending_updates(&self) -> store::Result<bool> {
         let store = self.store.clone();
-        self.spawn_worker(move || store.apply_pending_updates(LogIndex::MAX, true))
+        self.spawn_worker(move || store.commit_pending_updates(LogIndex::MAX, true))
             .await
     }
 }
 
 pub trait JMAPStoreRaftUpdates {
-    fn apply_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool>;
+    fn commit_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool>;
     fn apply_rollback_updates(&self, changes: Vec<Update>) -> store::Result<bool>;
     fn apply_document_update(
         &self,
@@ -1060,16 +1060,17 @@ impl<T> JMAPStoreRaftUpdates for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn apply_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool> {
+    fn commit_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool> {
         let apply_up_to: LogIndex = if apply_up_to != LogIndex::MAX {
             self.db.set(
                 ColumnFamily::Values,
-                LAST_APPLIED_INDEX_KEY,
+                FOLLOWER_COMMIT_INDEX_KEY,
                 &apply_up_to.serialize().unwrap(),
             )?;
             apply_up_to
-        } else if let Some(apply_up_to) =
-            self.db.get(ColumnFamily::Values, LAST_APPLIED_INDEX_KEY)?
+        } else if let Some(apply_up_to) = self
+            .db
+            .get(ColumnFamily::Values, FOLLOWER_COMMIT_INDEX_KEY)?
         {
             apply_up_to
         } else {
@@ -1106,7 +1107,6 @@ where
                     })?
                     .updates
                 {
-                    println!("Applying {:?}", update);
                     match update {
                         PendingUpdate::UpdateDocument {
                             account_id,
@@ -1175,7 +1175,7 @@ where
             ));
             log_batch.push(WriteOperation::Delete {
                 cf: ColumnFamily::Values,
-                key: LAST_APPLIED_INDEX_KEY.to_vec(),
+                key: FOLLOWER_COMMIT_INDEX_KEY.to_vec(),
             });
 
             for (key, value) in self

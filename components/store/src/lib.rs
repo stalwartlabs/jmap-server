@@ -128,7 +128,7 @@ impl From<Collection> for u64 {
     }
 }
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct Collections {
     pub collections: u64,
 }

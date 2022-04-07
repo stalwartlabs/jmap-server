@@ -72,6 +72,9 @@ pub enum AppendEntriesRequest {
         commit_index: LogIndex,
         updates: Vec<Update>,
     },
+    AdvanceCommitIndex {
+        commit_index: LogIndex,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -88,8 +91,8 @@ pub enum AppendEntriesResponse {
         changes: Vec<u8>,
     },
     Continue,
-    Commit {
-        commit_index: LogIndex,
+    Done {
+        up_to_index: LogIndex,
     },
 }
 
@@ -646,6 +649,7 @@ where
                             )?;
                         }
                         Entry::Snapshot { changed_accounts } => {
+                            println!("changed accounts: {:?}", changed_accounts);
                             debug_assert!(pending_changes.is_empty());
                             pending_changes = changed_accounts;
                             break;
@@ -680,6 +684,8 @@ where
         if last_index == to_index && pending_changes.is_empty() {
             entries.push(Update::Eof);
         }
+
+        println!("Sending entries {:?}", entries);
 
         Ok((entries, pending_changes, last_index))
     }

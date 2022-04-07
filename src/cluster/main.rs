@@ -62,6 +62,11 @@ pub async fn start_cluster<T>(
                 Ok(Some(message)) => {
                     #[cfg(test)]
                     if let Event::IsOffline(status) = &message {
+                        if *status {
+                            debug!("[{}] Marked as offline.", cluster.addr);
+                        } else {
+                            debug!("[{}] Marked as online.", cluster.addr);
+                        }
                         is_offline = *status;
                         for peer in &mut cluster.peers {
                             peer.state = if is_offline {
@@ -146,19 +151,23 @@ where
 {
     pub async fn handle_message(&mut self, message: Event) -> store::Result<bool> {
         match message {
-            Event::Gossip { request, addr } => match request {
-                // Join request, add node and perform full sync.
-                gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
+            Event::Gossip { request, addr } => {
+                //println!("From {}: {:?}", addr, request);
 
-                // Join reply.
-                gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
+                match request {
+                    // Join request, add node and perform full sync.
+                    gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
 
-                // Hearbeat request, reply with the cluster status.
-                gossip::Request::Ping(peer_list) => self.handle_ping(peer_list, true).await,
+                    // Join reply.
+                    gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
 
-                // Heartbeat response, update the cluster status if needed.
-                gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
-            },
+                    // Hearbeat request, reply with the cluster status.
+                    gossip::Request::Ping(peer_list) => self.handle_ping(peer_list, true).await,
+
+                    // Heartbeat response, update the cluster status if needed.
+                    gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
+                }
+            }
             Event::RpcRequest {
                 peer_id,
                 request,

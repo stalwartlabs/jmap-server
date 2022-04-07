@@ -522,7 +522,7 @@ where
 
         // Apply committed updates and rollback uncommited ones for
         // a previous follower term.
-        self.apply_committed_updates().await
+        self.commit_pending_updates().await
     }
 
     pub async fn has_pending_rollback(&self) -> store::Result<bool> {

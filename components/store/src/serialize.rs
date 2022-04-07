@@ -27,7 +27,7 @@ pub const BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
 pub const TEMP_BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
 
 pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
-pub const LAST_APPLIED_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 3];
+pub const FOLLOWER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 3];
 pub const LEADER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 4];
 
 pub struct ValueKey {}

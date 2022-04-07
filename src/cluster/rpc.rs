@@ -263,6 +263,7 @@ pub fn spawn_peer_rpc(
 
                             // Notify processes that the peer is online.
                             if !is_online {
+                                println!("Notifying that peer {} is online.", peer_addr);
                                 is_online = true;
                                 if online_tx.send(true).is_err() {
                                     debug!("Failed to send online status.");

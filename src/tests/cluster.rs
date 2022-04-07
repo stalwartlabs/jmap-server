@@ -678,7 +678,7 @@ async fn test_cluster() {
     //resolve_log_conflict::<RocksDB>().await;
 }
 
-/*#[test]
+#[test]
 fn postmortem() {
     let dbs = (1..=6)
         .map(|n| init_db_params::<RocksDB>("st_cluster", n, 5, false).0)
@@ -692,4 +692,4 @@ fn postmortem() {
             }
         }
     }
-}*/
+}

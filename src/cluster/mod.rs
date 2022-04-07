@@ -256,7 +256,7 @@ where
 
         // Apply committed updates and rollback uncommited ones for
         // a previous follower term.
-        core.apply_committed_updates().await.unwrap();
+        core.commit_pending_updates().await.unwrap();
 
         let last_log = core
             .get_last_log()

@@ -404,8 +404,7 @@ where
 
         let mut inserted_ids = RoaringTreemap::new();
         let mut write_batch = Vec::new();
-
-        let mut last_change_id = ChangeId::MAX;
+        let mut has_changes = false;
 
         for (key, value) in self.db.iterator(
             ColumnFamily::Logs,
@@ -438,7 +437,7 @@ where
                         &mut inserted_ids,
                         current_account_id,
                         current_collection,
-                        last_change_id,
+                        up_to,
                     )?)?;
                     write_batch = Vec::new();
                 }
@@ -455,11 +454,11 @@ where
 
             if change_id > up_to {
                 continue;
+            } else if change_id != up_to {
+                write_batch.push(WriteOperation::delete(ColumnFamily::Logs, key.to_vec()));
+            } else {
+                has_changes = true;
             }
-
-            last_change_id = change_id;
-
-            write_batch.push(WriteOperation::delete(ColumnFamily::Logs, key.to_vec()));
 
             deserialize_inserts(&mut inserted_ids, &value).ok_or_else(|| {
                 StoreError::InternalError(format!(
@@ -469,7 +468,7 @@ where
             })?;
         }
 
-        if last_change_id == ChangeId::MAX {
+        if !has_changes {
             return Ok(());
         } else if !write_batch.is_empty() {
             self.db.write(serialize_snapshot(
@@ -477,13 +476,12 @@ where
                 &mut inserted_ids,
                 current_account_id,
                 current_collection,
-                last_change_id,
+                up_to,
             )?)?;
             write_batch = Vec::new();
         }
 
-        last_change_id = ChangeId::MAX;
-        let mut last_term = 0;
+        let mut last_term = TermId::MAX;
         let mut changed_accounts = HashMap::new();
 
         for (key, value) in self.db.iterator(
@@ -500,9 +498,6 @@ where
             })?;
 
             if raft_id.index <= up_to {
-                last_change_id = raft_id.index;
-                last_term = raft_id.term;
-
                 match Entry::deserialize(&value).ok_or_else(|| {
                     StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
                 })? {
@@ -530,24 +525,26 @@ where
                     }
                 };
 
-                write_batch.push(WriteOperation::delete(ColumnFamily::Logs, key.to_vec()));
+                if raft_id.index != up_to {
+                    write_batch.push(WriteOperation::delete(ColumnFamily::Logs, key.to_vec()));
+                } else {
+                    last_term = raft_id.term;
+                }
             } else {
                 break;
             }
         }
 
-        debug_assert_ne!(last_change_id, ChangeId::MAX);
+        debug_assert_ne!(last_term, ChangeId::MAX);
 
         // Serialize raft snapshot
         let mut changed_collections = HashMap::new();
         let total_accounts = changed_accounts.len();
         for (account_id, collections) in changed_accounts {
-            for collection in collections {
-                changed_collections
-                    .entry(collection)
-                    .or_insert_with(Vec::new)
-                    .push(account_id);
-            }
+            changed_collections
+                .entry(collections)
+                .or_insert_with(Vec::new)
+                .push(account_id);
         }
         let mut bytes = Vec::with_capacity(
             (total_accounts * std::mem::size_of::<AccountId>())
@@ -558,17 +555,16 @@ where
         );
         bytes.push(batch::Change::SNAPSHOT);
         changed_collections.len().to_leb128_bytes(&mut bytes);
-        for (collection, account_ids) in changed_collections {
-            (collection as u64).to_leb128_bytes(&mut bytes);
+        for (collections, account_ids) in changed_collections {
+            collections.to_leb128_bytes(&mut bytes);
             account_ids.len().to_leb128_bytes(&mut bytes);
             for account_id in account_ids {
                 account_id.to_leb128_bytes(&mut bytes);
             }
         }
-        write_batch.pop();
         write_batch.push(WriteOperation::set(
             ColumnFamily::Logs,
-            LogKey::serialize_raft(&RaftId::new(last_term, last_change_id)),
+            LogKey::serialize_raft(&RaftId::new(last_term, up_to)),
             bytes,
         ));
         self.db.write(write_batch)?;
@@ -592,7 +588,6 @@ fn serialize_snapshot(
             current_account_id, current_collection, err
         ))
     })?;
-    write_batch.pop();
     write_batch.push(WriteOperation::set(
         ColumnFamily::Logs,
         LogKey::serialize_change(current_account_id, current_collection, last_change_id),

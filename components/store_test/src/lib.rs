@@ -7,8 +7,8 @@ use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;
 use store::leb128::Leb128;
 use store::serialize::{
-    DeserializeBigEndian, IndexKey, StoreDeserialize, ValueKey, BLOB_KEY_PREFIX,
-    LAST_APPLIED_INDEX_KEY, LAST_TERM_ID_KEY, LEADER_COMMIT_INDEX_KEY, TEMP_BLOB_KEY_PREFIX,
+    DeserializeBigEndian, IndexKey, LogKey, StoreDeserialize, ValueKey, BLOB_KEY_PREFIX,
+    FOLLOWER_COMMIT_INDEX_KEY, LAST_TERM_ID_KEY, LEADER_COMMIT_INDEX_KEY, TEMP_BLOB_KEY_PREFIX,
 };
 use store::{
     config::EnvSettings,
@@ -16,7 +16,7 @@ use store::{
     serialize::{BM_KEYWORD, BM_TAG_ID, BM_TAG_STATIC, BM_TAG_TEXT},
     AccountId, ColumnFamily, JMAPStore, Store,
 };
-use store::{Collection, DocumentId};
+use store::{log, Collection, DocumentId};
 
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
@@ -98,7 +98,7 @@ pub trait StoreCompareWith<T> {
     fn assert_is_empty(&self);
 }
 
-const ASSERT: bool = true;
+const ASSERT: bool = false;
 
 impl<T> StoreCompareWith<T> for JMAPStore<T>
 where
@@ -187,7 +187,7 @@ where
                             && !key.starts_with(BLOB_KEY_PREFIX)
                             && !key.starts_with(TEMP_BLOB_KEY_PREFIX)
                             && &key[..] != LAST_TERM_ID_KEY
-                            && &key[..] != LAST_APPLIED_INDEX_KEY
+                            && &key[..] != FOLLOWER_COMMIT_INDEX_KEY
                             && &key[..] != LEADER_COMMIT_INDEX_KEY
                         {
                             let (account_id, pos) = AccountId::from_leb128_bytes(&key).unwrap();
@@ -368,27 +368,69 @@ where
                     }
                     ColumnFamily::Logs => {
                         *total_keys.get_mut(&cf).unwrap() += 1;
+                        if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap() {
+                            if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
+                                let entry = log::Entry::deserialize(&value).unwrap();
+                                let other_entry = log::Entry::deserialize(&other_value).unwrap();
+                                let mut do_panic = false;
+                                match (&entry, &other_entry) {
+                                    (
+                                        log::Entry::Snapshot { changed_accounts },
+                                        log::Entry::Snapshot {
+                                            changed_accounts: other_changed_accounts,
+                                        },
+                                    ) => {
+                                        for changed_account in changed_accounts {
+                                            if !other_changed_accounts.contains(changed_account) {
+                                                do_panic = true;
+                                                break;
+                                            }
+                                        }
+                                        if !do_panic {
+                                            for other_changed_account in other_changed_accounts {
+                                                if !changed_accounts.contains(other_changed_account)
+                                                {
+                                                    do_panic = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        do_panic = value[..] != other_value[..];
+                                    }
+                                }
+                                if do_panic {
+                                    if ASSERT {
+                                        panic!(
+                                            "Raft entry mismatch: {:?} -> {:?} != {:?}",
+                                            key, entry, other_entry
+                                        );
+                                    } else {
+                                        println!(
+                                            "Raft entry mismatch: {:?} -> {:?} != {:?}",
+                                            key, entry, other_entry
+                                        );
+                                    }
+                                }
+                            } else if ASSERT {
+                                assert_eq!(value, other_value.into(), "{:?} {:?}", cf, key);
+                            } else {
+                                //println!("Key: [{:?}]", key);
 
-                        if ASSERT {
-                            assert_eq!(
-                                value,
-                                other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into(),
-                                "{:?} {:?}",
-                                cf,
-                                key
-                            );
-                        } else if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap()
-                        {
-                            let other_value = other_value.into_boxed_slice();
-                            if value != other_value {
-                                println!(
-                                    "Value mismatch: {:?} -> {:?} != {:?}",
-                                    key, value, other_value
-                                );
+                                let other_value = other_value.into_boxed_slice();
+                                if value != other_value {
+                                    println!(
+                                        "Value mismatch: {:?} -> {:?} != {:?}",
+                                        key, value, other_value
+                                    );
+                                }
                             }
+                        } else if ASSERT {
+                            panic!("Missing log key: [{:?}]", key);
                         } else {
-                            println!("Missing key: {:?}", key);
-                        }
+                            println!("Missing log key: [{:?}]", key);
+                        };
                     }
                     _ => (),
                 }
