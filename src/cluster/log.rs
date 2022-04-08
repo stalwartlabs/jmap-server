@@ -289,7 +289,11 @@ pub trait RaftStore {
         from_id: ChangeId,
         to_id: ChangeId,
     ) -> store::Result<MergedChanges>;
-    fn prepare_rollback_changes(&self, after_index: LogIndex) -> store::Result<()>;
+    fn prepare_rollback_changes(
+        &self,
+        after_index: LogIndex,
+        restore_deletions: bool,
+    ) -> store::Result<()>;
     fn next_rollback_change(&self)
         -> store::Result<Option<(AccountId, Collection, MergedChanges)>>;
     fn remove_rollback_change(
@@ -419,7 +423,11 @@ where
         Ok(changes)
     }
 
-    fn prepare_rollback_changes(&self, after_index: LogIndex) -> store::Result<()> {
+    fn prepare_rollback_changes(
+        &self,
+        after_index: LogIndex,
+        restore_deletions: bool,
+    ) -> store::Result<()> {
         let mut current_account_id = AccountId::MAX;
         let mut current_collection = Collection::None;
         let mut changes = MergedChanges::new();
@@ -465,16 +473,21 @@ where
 
             if account_id != current_account_id || collection != current_collection {
                 if !write_batch.is_empty() {
-                    write_batch.push(WriteOperation::set(
-                        ColumnFamily::Logs,
-                        LogKey::serialize_rollback(current_account_id, current_collection),
-                        changes.serialize().ok_or_else(|| {
-                            StoreError::InternalError(format!(
-                                "Failed to serialized merged changes for [{}/{:?}]",
-                                account_id, collection
-                            ))
-                        })?,
-                    ));
+                    if !restore_deletions && !changes.deletes.is_empty() {
+                        changes.deletes.clear();
+                    }
+                    if !changes.is_empty() {
+                        write_batch.push(WriteOperation::set(
+                            ColumnFamily::Logs,
+                            LogKey::serialize_rollback(current_account_id, current_collection),
+                            changes.serialize().ok_or_else(|| {
+                                StoreError::InternalError(format!(
+                                    "Failed to serialized merged changes for [{}/{:?}]",
+                                    account_id, collection
+                                ))
+                            })?,
+                        ));
+                    }
                     self.db.write(write_batch)?;
                     write_batch = Vec::new();
                 }
@@ -494,16 +507,21 @@ where
         }
 
         if !write_batch.is_empty() {
-            write_batch.push(WriteOperation::set(
-                ColumnFamily::Logs,
-                LogKey::serialize_rollback(current_account_id, current_collection),
-                changes.serialize().ok_or_else(|| {
-                    StoreError::InternalError(format!(
-                        "Failed to serialized merged changes for [{}/{:?}]",
-                        current_account_id, current_collection
-                    ))
-                })?,
-            ));
+            if !restore_deletions && !changes.deletes.is_empty() {
+                changes.deletes.clear();
+            }
+            if !changes.is_empty() {
+                write_batch.push(WriteOperation::set(
+                    ColumnFamily::Logs,
+                    LogKey::serialize_rollback(current_account_id, current_collection),
+                    changes.serialize().ok_or_else(|| {
+                        StoreError::InternalError(format!(
+                            "Failed to serialized merged changes for [{}/{:?}]",
+                            current_account_id, current_collection
+                        ))
+                    })?,
+                ));
+            }
             self.db.write(write_batch)?;
             write_batch = Vec::new();
         }
@@ -649,7 +667,6 @@ where
                             )?;
                         }
                         Entry::Snapshot { changed_accounts } => {
-                            println!("changed accounts: {:?}", changed_accounts);
                             debug_assert!(pending_changes.is_empty());
                             pending_changes = changed_accounts;
                             break;
@@ -684,8 +701,6 @@ where
         if last_index == to_index && pending_changes.is_empty() {
             entries.push(Update::Eof);
         }
-
-        println!("Sending entries {:?}", entries);
 
         Ok((entries, pending_changes, last_index))
     }

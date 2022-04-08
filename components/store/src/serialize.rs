@@ -295,6 +295,7 @@ impl LogKey {
     pub const RAFT_KEY_PREFIX: u8 = 1;
     pub const ROLLBACK_KEY_PREFIX: u8 = 2;
     pub const PENDING_UPDATES_KEY_PREFIX: u8 = 3;
+    pub const TOMBSTONE_KEY_PREFIX: u8 = 3;
 
     pub const CHANGE_KEY_LEN: usize = std::mem::size_of::<AccountId>()
         + std::mem::size_of::<Collection>()
@@ -303,12 +304,19 @@ impl LogKey {
     pub const RAFT_KEY_LEN: usize = std::mem::size_of::<RaftId>() + 1;
     pub const ROLLBACK_KEY_LEN: usize =
         std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>() + 1;
+    pub const TOMBSTONE_KEY_LEN: usize = std::mem::size_of::<LogIndex>()
+        + std::mem::size_of::<AccountId>()
+        + std::mem::size_of::<Collection>()
+        + 1;
 
     pub const RAFT_TERM_POS: usize = std::mem::size_of::<LogIndex>() + 1;
     pub const CHANGE_ID_POS: usize =
         std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>() + 1;
     pub const ACCOUNT_POS: usize = 1;
     pub const COLLECTION_POS: usize = std::mem::size_of::<AccountId>() + 1;
+
+    pub const TOMBSTONE_INDEX_POS: usize = 1;
+    pub const TOMBSTONE_ACCOUNT_POS: usize = std::mem::size_of::<LogIndex>() + 1;
 
     pub fn deserialize_raft(bytes: &[u8]) -> Option<RaftId> {
         RaftId {
@@ -352,6 +360,14 @@ impl LogKey {
         bytes.push(LogKey::PENDING_UPDATES_KEY_PREFIX);
         bytes.extend_from_slice(&index.to_be_bytes());
         bytes.extend_from_slice(&seq_id.to_be_bytes());
+        bytes
+    }
+
+    pub fn serialize_tombstone(index: LogIndex, account: AccountId) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(LogKey::TOMBSTONE_KEY_LEN + 1);
+        bytes.push(LogKey::PENDING_UPDATES_KEY_PREFIX);
+        bytes.extend_from_slice(&index.to_be_bytes());
+        bytes.extend_from_slice(&account.to_be_bytes());
         bytes
     }
 

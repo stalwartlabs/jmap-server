@@ -28,12 +28,17 @@ pub enum WriteAction {
         collection: Collection,
         document_id: DocumentId,
     },
+    Tombstone {
+        collection: Collection,
+        document_id: DocumentId,
+    },
 }
 
 pub struct WriteBatch {
     pub account_id: AccountId,
     pub changes: HashMap<Collection, Change>,
     pub documents: Vec<WriteAction>,
+    pub set_tombstones: bool,
 }
 
 #[derive(Default)]
@@ -103,11 +108,12 @@ impl IntoIterator for Document {
 }
 
 impl WriteBatch {
-    pub fn new(account_id: AccountId) -> Self {
+    pub fn new(account_id: AccountId, set_tombstones: bool) -> Self {
         WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: Vec::new(),
+            set_tombstones,
         }
     }
 
@@ -116,10 +122,16 @@ impl WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: vec![WriteAction::Insert(document)],
+            set_tombstones: false,
         }
     }
 
-    pub fn delete(account_id: AccountId, collection: Collection, document_id: DocumentId) -> Self {
+    pub fn delete(
+        account_id: AccountId,
+        collection: Collection,
+        document_id: DocumentId,
+        set_tombstones: bool,
+    ) -> Self {
         WriteBatch {
             account_id,
             changes: HashMap::new(),
@@ -127,6 +139,7 @@ impl WriteBatch {
                 collection,
                 document_id,
             }],
+            set_tombstones,
         }
     }
 
@@ -143,9 +156,16 @@ impl WriteBatch {
     }
 
     pub fn delete_document(&mut self, collection: Collection, document_id: DocumentId) {
-        self.documents.push(WriteAction::Delete {
-            collection,
-            document_id,
+        self.documents.push(if self.set_tombstones {
+            WriteAction::Tombstone {
+                collection,
+                document_id,
+            }
+        } else {
+            WriteAction::Delete {
+                collection,
+                document_id,
+            }
         });
     }
 

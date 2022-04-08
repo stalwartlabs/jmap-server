@@ -81,7 +81,7 @@ where
     }
 
     pub async fn shutdown(&self) {
-        if self.is_cluster && self.cluster_tx.send(Event::Shutdown).await.is_err() {
+        if self.store.config.is_in_cluster && self.cluster_tx.send(Event::Shutdown).await.is_err() {
             error!("Failed to send shutdown event to cluster.");
         }
     }

@@ -21,13 +21,13 @@ where
         //println!("Run {}", run);
         for (num, expected_inserted_id) in expected_inserted_ids.iter_mut().enumerate() {
             let account_id = (num * 3) as AccountId;
-            let mut batch = WriteBatch::new(account_id);
+            let mut batch = WriteBatch::new(account_id, false);
             batch.log_insert(Collection::Mail, (run + 1) * 10);
             mail_store.write(batch).unwrap();
-            let mut batch = WriteBatch::new(account_id);
+            let mut batch = WriteBatch::new(account_id, false);
             batch.log_insert(Collection::Mail, run + 1);
             mail_store.write(batch).unwrap();
-            let mut batch = WriteBatch::new(account_id);
+            let mut batch = WriteBatch::new(account_id, false);
             batch.log_delete(Collection::Mail, (run + 1) * 10);
             mail_store.write(batch).unwrap();
 

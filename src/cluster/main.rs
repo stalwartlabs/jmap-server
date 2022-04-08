@@ -64,8 +64,10 @@ pub async fn start_cluster<T>(
                     if let Event::IsOffline(status) = &message {
                         if *status {
                             debug!("[{}] Marked as offline.", cluster.addr);
+                            cluster.broadcast_leave().await;
                         } else {
                             debug!("[{}] Marked as online.", cluster.addr);
+                            cluster.broadcast_ping().await;
                         }
                         is_offline = *status;
                         for peer in &mut cluster.peers {
@@ -86,7 +88,8 @@ pub async fn start_cluster<T>(
                     match cluster.handle_message(message).await {
                         Ok(true) => (),
                         Ok(false) => {
-                            debug!("Cluster shutting down.");
+                            debug!("Broadcasting leave request to peers and shutting down cluster services.");
+                            cluster.broadcast_leave().await;
                             shutdown_tx.send(false).ok();
                             break;
                         }
@@ -151,23 +154,23 @@ where
 {
     pub async fn handle_message(&mut self, message: Event) -> store::Result<bool> {
         match message {
-            Event::Gossip { request, addr } => {
-                //println!("From {}: {:?}", addr, request);
+            Event::Gossip { request, addr } => match request {
+                // Join request, add node and perform full sync.
+                gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
 
-                match request {
-                    // Join request, add node and perform full sync.
-                    gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
+                // Join reply.
+                gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
 
-                    // Join reply.
-                    gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
+                // Hearbeat request, reply with the cluster status.
+                gossip::Request::Ping(peer_list) => self.handle_ping(peer_list, true).await,
 
-                    // Hearbeat request, reply with the cluster status.
-                    gossip::Request::Ping(peer_list) => self.handle_ping(peer_list, true).await,
+                // Heartbeat response, update the cluster status if needed.
+                gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
 
-                    // Heartbeat response, update the cluster status if needed.
-                    gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
-                }
-            }
+                // Leave request.
+                gossip::Request::Leave(peer_list) => self.handle_leave(peer_list).await?,
+            },
+
             Event::RpcRequest {
                 peer_id,
                 request,
@@ -213,10 +216,6 @@ where
                 _ => (),
             },
             Event::StepDown { term } => {
-                //TODO use separate thread
-
-                self.core.reset_uncommitted_changes().await?;
-
                 if term > self.term {
                     self.step_down(term);
                 } else {
@@ -265,6 +264,7 @@ where
                     alive_peers += 1;
                 } else if !leader_is_offline
                     && leader_peer_id.map(|id| id == peer.peer_id).unwrap_or(false)
+                    && peer.hb_sum > 0
                 {
                     // Current leader is offline, start election
                     leader_is_offline = true;

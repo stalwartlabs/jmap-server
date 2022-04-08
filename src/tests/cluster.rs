@@ -71,7 +71,6 @@ where
                 .build()
                 .unwrap(),
             cluster_tx: tx.clone(),
-            is_cluster: true,
             is_leader: false.into(),
             is_up_to_date: false.into(),
             #[cfg(test)]
@@ -673,8 +672,8 @@ async fn test_cluster() {
     tracing_subscriber::fmt::init();
 
     //election::<RocksDB>().await;
-    //distributed_thread_merge::<RocksDB>().await;
-    distributed_update_delete::<RocksDB>().await;
+    distributed_thread_merge::<RocksDB>().await;
+    //distributed_update_delete::<RocksDB>().await;
     //resolve_log_conflict::<RocksDB>().await;
 }
 

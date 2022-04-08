@@ -7,13 +7,18 @@ use jmap_mail::mailbox::{JMAPMailboxProperties, Mailbox};
 use jmap_mail::query::MailboxId;
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
 
+use store::batch::WriteBatch;
 use store::leb128::Leb128;
 use store::log::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
-use store::serialize::{StoreDeserialize, StoreSerialize, LEADER_COMMIT_INDEX_KEY};
+use store::serialize::{
+    DeserializeBigEndian, LogKey, StoreDeserialize, StoreSerialize, LEADER_COMMIT_INDEX_KEY,
+};
 use store::tracing::{debug, error};
-use store::Collections;
-use store::{lz4_flex, AccountId, Collection, ColumnFamily, DocumentId, Store, StoreError};
+use store::{
+    lz4_flex, AccountId, Collection, ColumnFamily, DocumentId, Store, StoreError, WriteOperation,
+};
+use store::{Collections, Direction};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse, RaftStore};
@@ -65,7 +70,12 @@ impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn spawn_raft_leader(&self, peer: &Peer, mut log_index_rx: watch::Receiver<Event>) {
+    pub fn spawn_raft_leader(
+        &self,
+        peer: &Peer,
+        mut log_index_rx: watch::Receiver<Event>,
+        mut init_rx: Option<watch::Receiver<bool>>,
+    ) {
         let peer_tx = peer.tx.clone();
         let mut online_rx = peer.online_rx.clone();
         let peer_name = peer.to_string();
@@ -265,7 +275,10 @@ where
                         Response::None => {
                             // Wait until the peer is back online
                             debug!(
-                                "[{}] Could not send message to {}, waiting until it is confirmed online.",
+                                concat!(
+                                    "[{}] Could not send message to {}, ",
+                                    "waiting until it is confirmed online."
+                                ),
                                 local_name, peer_name
                             );
                             'online: loop {
@@ -348,12 +361,32 @@ where
 
                 match response {
                     AppendEntriesResponse::Match { match_log } => {
+                        if let Some(mut init_rx) = Option::take(&mut init_rx) {
+                            debug!(
+                                "[{}] Leader process for peer {} waiting for init...",
+                                local_name, peer_name
+                            );
+                            init_rx.changed().await.ok();
+                            if !*init_rx.borrow() {
+                                error!(
+                                    "[{}] Leader failed to init, exiting process for peer {}.",
+                                    local_name, peer_name
+                                );
+                                break;
+                            }
+                        }
+
                         follower_last_index = match_log.index;
                         if !match_log.is_none() {
                             let local_match = match core.get_next_raft_id(match_log).await {
                                 Ok(Some(local_match)) => local_match,
                                 Ok(None) => {
-                                    error!("Log sync failed: local match is null");
+                                    let last_log = core
+                                        .get_last_log()
+                                        .await
+                                        .unwrap_or(None)
+                                        .unwrap_or_else(RaftId::none);
+                                    error!("Log sync failed: could not match id {:?}, last local log: {:?}.", match_log, last_log);
                                     break;
                                 }
                                 Err(err) => {
@@ -482,7 +515,7 @@ where
                             } else {
                                 debug!(
                                     "[{}] Updating commit index to {} and resuming append logs for peer {}.",
-                                    local_name, up_to_index, peer_name, 
+                                    local_name, up_to_index, peer_name
                                 );
                             }
                         } else {
@@ -520,8 +553,16 @@ where
                         }
 
                         debug!(
-                            "[{}] Peer {} requested {} insertions, {} updates for account {}, collection {:?}.",
-                            local_name, peer_name, changes.inserts.len(), changes.updates.len(), account_id, collection
+                            concat!(
+                                "[{}] Peer {} requested {} insertions, ",
+                                "{} updates for account {}, collection {:?}."
+                            ),
+                            local_name,
+                            peer_name,
+                            changes.inserts.len(),
+                            changes.updates.len(),
+                            account_id,
+                            collection
                         );
 
                         state = State::AppendChanges {
@@ -533,6 +574,52 @@ where
                 }
             }
         });
+    }
+
+    pub fn spawn_raft_leader_init(
+        &self,
+        mut log_index_rx: watch::Receiver<Event>,
+    ) -> watch::Receiver<bool> {
+        let (tx, rx) = watch::channel(false);
+
+        let term = self.term;
+        let last_log_index = self.last_log.index;
+
+        let core = self.core.clone();
+        tokio::spawn(async move {
+            if let Err(err) = core.commit_leader(LogIndex::MAX, true).await {
+                error!("Failed to rollback uncommitted entries: {:?}", err);
+                return;
+            }
+            if let Err(err) = core.commit_follower(LogIndex::MAX, true).await {
+                error!("Failed to commit pending updates: {:?}", err);
+                return;
+            }
+
+            // Poll the receiver to make sure this node is still the leader.
+            match poll!(Box::pin(log_index_rx.changed())) {
+                Poll::Ready(result) => match result {
+                    Ok(_) => (),
+                    Err(_) => {
+                        debug!("This node was asked to step down during initialization.");
+                        return;
+                    }
+                },
+                Poll::Pending => (),
+            }
+
+            core.update_raft_index(last_log_index);
+            if let Err(err) = core.set_leader_commit_index(last_log_index).await {
+                error!("Failed to set leader commit index: {:?}", err);
+                return;
+            }
+            core.set_leader(term);
+
+            if tx.send(true).is_err() {
+                error!("Failed to send message to raft leader processes.");
+            }
+        });
+        rx
     }
 }
 
@@ -726,20 +813,112 @@ where
         .await
     }
 
-    pub async fn rollback_uncommitted(&self) -> store::Result<()> {
+    pub async fn commit_leader(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<()> {
         let store = self.store.clone();
         self.spawn_worker(move || {
-            if let Some(commit_index) = store
+            let apply_up_to: LogIndex = if apply_up_to != LogIndex::MAX {
+                store.db.set(
+                    ColumnFamily::Values,
+                    LEADER_COMMIT_INDEX_KEY,
+                    &apply_up_to.serialize().unwrap(),
+                )?;
+                apply_up_to
+            } else if let Some(apply_up_to) = store
                 .db
                 .get(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)?
             {
-                store.prepare_rollback_changes(commit_index)?;
-                store
-                    .db
-                    .delete(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)
+                apply_up_to
             } else {
-                Ok(())
+                return Ok(());
+            };
+
+            debug!(
+                "Applying pending leader changes up to index {}.",
+                apply_up_to
+            );
+
+            let mut log_batch = Vec::new();
+            for (key, value) in store.db.iterator(
+                ColumnFamily::Logs,
+                &[LogKey::TOMBSTONE_KEY_PREFIX],
+                Direction::Forward,
+            )? {
+                if !key.starts_with(&[LogKey::TOMBSTONE_KEY_PREFIX]) {
+                    break;
+                }
+                let index = (&key[..])
+                    .deserialize_be_u64(LogKey::TOMBSTONE_INDEX_POS)
+                    .ok_or_else(|| {
+                        StoreError::InternalError(format!(
+                            "Failed to deserialize index from tombstone key: [{:?}]",
+                            key
+                        ))
+                    })?;
+
+                if apply_up_to != LogIndex::MAX && index <= apply_up_to {
+                    let mut document_batch = WriteBatch::new(
+                        (&key[..])
+                            .deserialize_be_u32(LogKey::TOMBSTONE_ACCOUNT_POS)
+                            .ok_or_else(|| {
+                                StoreError::InternalError(format!(
+                                    "Failed to deserialize account id from tombstone key: [{:?}]",
+                                    key
+                                ))
+                            })?,
+                        false,
+                    );
+
+                    let mut bytes_it = value.iter();
+                    for _ in
+                        0..usize::from_leb128_it(&mut bytes_it).ok_or(StoreError::DataCorruption)?
+                    {
+                        let collection: Collection =
+                            (*bytes_it.next().ok_or(StoreError::DataCorruption)?).into();
+                        for _ in 0..usize::from_leb128_it(&mut bytes_it)
+                            .ok_or(StoreError::DataCorruption)?
+                        {
+                            let doc_id = DocumentId::from_leb128_it(&mut bytes_it)
+                                .ok_or(StoreError::DataCorruption)?;
+                            println!(
+                                "Committing delete document {} from account {}, {:?}",
+                                doc_id, document_batch.account_id, collection
+                            );
+                            document_batch.delete_document(collection, doc_id);
+                        }
+                    }
+
+                    if !document_batch.is_empty() {
+                        store.write(document_batch)?;
+                    }
+
+                    log_batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Logs,
+                        key: key.to_vec(),
+                    });
+                } else if do_reset {
+                    println!("Deleting uncommitted leader update: {}", index);
+                    log_batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Logs,
+                        key: key.to_vec(),
+                    });
+                } else {
+                    break;
+                }
             }
+
+            if !log_batch.is_empty() {
+                store.db.write(log_batch)?;
+            }
+
+            if !do_reset {
+                return Ok(());
+            }
+
+            store.prepare_rollback_changes(apply_up_to, false)?;
+            store
+                .db
+                .delete(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)?;
+            Ok(())
         })
         .await
     }

@@ -28,11 +28,11 @@ pub enum State {
     Seed,
     Alive,
     Suspected,
-    Leaving,
     Offline,
+    Left,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PeerStatus {
     pub peer_id: PeerId,
     pub epoch: EpochId,
@@ -119,21 +119,28 @@ pub enum Request {
     JoinReply { id: usize },
     Ping(Vec<PeerStatus>),
     Pong(Vec<PeerStatus>),
+    Leave(Vec<PeerStatus>),
 }
 
 impl Request {
+    const JOIN: usize = 0;
+    const JOIN_REPLY: usize = 1;
+    const PING: usize = 2;
+    const PONG: usize = 3;
+    const LEAVE: usize = 4;
+
     pub fn from_bytes(bytes: &[u8]) -> Option<Request> {
         let mut it = bytes.iter();
         match usize::from_leb128_it(&mut it)? {
-            0 => Request::Join {
+            Self::JOIN => Request::Join {
                 id: usize::from_leb128_it(&mut it)?,
                 port: u16::from_leb128_it(&mut it)?,
             },
-            1 => Request::JoinReply {
+            Self::JOIN_REPLY => Request::JoinReply {
                 id: usize::from_leb128_it(&mut it)?,
             },
             mut num_peers => {
-                num_peers -= 2;
+                num_peers -= Self::PING;
                 if num_peers > (UDP_MAX_PAYLOAD / std::mem::size_of::<PeerStatus>()) {
                     return None;
                 }
@@ -156,6 +163,7 @@ impl Request {
                 match num_peers {
                     0 => Request::Ping(peers),
                     1 => Request::Pong(peers),
+                    2 => Request::Leave(peers),
                     _ => return None,
                 }
             }
@@ -169,19 +177,20 @@ impl Request {
                 let mut bytes = Vec::with_capacity(
                     std::mem::size_of::<usize>() + std::mem::size_of::<u16>() + 1,
                 );
-                bytes.push(0);
+                bytes.push(Self::JOIN as u8);
                 id.to_leb128_bytes(&mut bytes);
                 port.to_leb128_bytes(&mut bytes);
                 return bytes;
             }
             Request::JoinReply { id } => {
                 let mut bytes = Vec::with_capacity(std::mem::size_of::<usize>() + 1);
-                bytes.push(1);
+                bytes.push(Self::JOIN_REPLY as u8);
                 id.to_leb128_bytes(&mut bytes);
                 return bytes;
             }
-            Request::Ping(peers) => (2, peers),
-            Request::Pong(peers) => (3, peers),
+            Request::Ping(peers) => (Self::PING, peers),
+            Request::Pong(peers) => (Self::PONG, peers),
+            Request::Leave(peers) => (Self::LEAVE, peers),
         };
 
         debug_assert!(!peers.is_empty());
@@ -274,6 +283,27 @@ where
         };
     }
 
+    pub async fn broadcast_leave(&self) {
+        let mut status: Vec<PeerStatus> = Vec::with_capacity(self.peers.len() + 1);
+        status.push(self.into());
+        for peer in &self.peers {
+            if !peer.is_offline() {
+                self.send_gossip(peer.addr, Request::Leave(status.clone()))
+                    .await;
+            }
+        }
+    }
+
+    pub async fn broadcast_ping(&self) {
+        let status = self.build_peer_status();
+        for peer in &self.peers {
+            if !peer.is_offline() {
+                self.send_gossip(peer.addr, Request::Pong(status.clone()))
+                    .await;
+            }
+        }
+    }
+
     pub async fn handle_ping(&mut self, peers: Vec<PeerStatus>, send_pong: bool) {
         if peers.is_empty() {
             debug!("Received empty ping packet.");
@@ -294,11 +324,10 @@ where
                             local_peer.epoch = peer.epoch;
                             local_peer.last_log_index = peer.last_log_index;
                             local_peer.last_log_term = peer.last_log_term;
-                            if local_peer.update_heartbeat() {
+                            if local_peer.update_heartbeat(pos == 0) {
                                 // This peer reconnected
                                 if pos != 0 && local_peer.is_in_shard(self.shard_id) {
                                     // Wake up RPC process
-                                    println!("Waking up RPC process");
                                     local_peer.dispatch_request(rpc::Request::Ping).await;
                                 } else {
                                     do_full_sync = true;
@@ -361,6 +390,35 @@ where
         }
     }
 
+    pub async fn handle_leave(&mut self, peers: Vec<PeerStatus>) -> store::Result<()> {
+        if let Some(peer) = peers.first() {
+            let is_leader_leaving =
+                matches!(self.leader_peer_id(), Some(leader_id) if peer.peer_id == leader_id);
+
+            for local_peer in self.peers.iter_mut() {
+                if local_peer.peer_id == peer.peer_id {
+                    debug!(
+                        "{} {} is leaving the cluster.",
+                        if is_leader_leaving { "Leader" } else { "Peer" },
+                        local_peer.addr
+                    );
+                    local_peer.state = State::Left;
+                    local_peer.epoch = peer.epoch;
+                    local_peer.last_log_index = peer.last_log_index;
+                    local_peer.last_log_term = peer.last_log_term;
+                    //TODO advance local commit index
+                    break;
+                }
+            }
+
+            if is_leader_leaving {
+                self.request_votes(true).await?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn sync_peer_info(&mut self, peers: Vec<PeerInfo>) {
         let mut remove_seeds = false;
         let mut peers_changed = false;
@@ -381,7 +439,7 @@ where
                                 local_peer.epoch = peer.epoch;
                                 local_peer.last_log_index = peer.last_log_index;
                                 local_peer.last_log_term = peer.last_log_term;
-                                if local_peer.update_heartbeat()
+                                if local_peer.update_heartbeat(pos == 0)
                                     && local_peer.is_in_shard(self.shard_id)
                                 {
                                     // Wake up RPC process
@@ -494,13 +552,13 @@ where
 }
 
 impl Peer {
-    fn update_heartbeat(&mut self) -> bool {
+    fn update_heartbeat(&mut self, is_direct: bool) -> bool {
         let hb_diff =
             std::cmp::min(self.last_heartbeat.elapsed().as_millis(), 60 * 60 * 1000) as u64;
         self.last_heartbeat = Instant::now();
 
         match self.state {
-            State::Seed | State::Offline | State::Leaving => {
+            State::Seed | State::Offline => {
                 debug!("Peer {} is back online.", self.addr);
                 self.state = State::Alive;
 
@@ -511,7 +569,17 @@ impl Peer {
                 debug!("Suspected peer {} was confirmed alive.", self.addr);
                 self.state = State::Alive;
             }
-            State::Alive => (),
+            State::Left if is_direct => {
+                debug!(
+                    "Peer {} is back online after leaving the cluster.",
+                    self.addr
+                );
+                self.state = State::Alive;
+
+                // Do not count stale heartbeats.
+                return true;
+            }
+            _ => (),
         }
 
         self.hb_window_pos = (self.hb_window_pos + 1) & HEARTBEAT_WINDOW_MASK;
@@ -539,7 +607,6 @@ impl Peer {
     */
     pub fn check_heartbeat(&mut self) -> bool {
         if self.hb_sum == 0 {
-            println!("No pings received from {}.", self.addr);
             return false;
         }
 
@@ -576,6 +643,7 @@ impl Peer {
             self.state = State::Offline;
             false
         } else if phi > HB_PHI_SUSPECT_THRESHOLD {
+            debug!("Peer {} is suspected to be offline.", self.addr);
             self.state = State::Suspected;
             true
         } else {

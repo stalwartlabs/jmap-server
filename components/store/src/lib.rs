@@ -493,6 +493,8 @@ pub struct JMAPStore<T> {
 }
 
 pub struct JMAPStoreConfig {
+    pub is_in_cluster: bool,
+
     pub blob_base_path: PathBuf,
     pub blob_hash_levels: Vec<usize>,
     pub blob_temp_ttl: u64,
@@ -529,6 +531,7 @@ impl From<&EnvSettings> for JMAPStoreConfig {
             mail_import_max_items: 2,
             mail_parse_max_items: 5,
             default_language: Language::English,
+            is_in_cluster: settings.get("cluster").is_some(),
         }
     }
 }

@@ -91,7 +91,6 @@ impl StoreDeserialize for PendingUpdates {
 struct RaftIndexes {
     leader_commit_index: LogIndex,
     commit_index: LogIndex,
-    commit_term: TermId,
     uncommitted_index: LogIndex,
     merge_index: LogIndex,
     sequence_id: u64,
@@ -109,8 +108,13 @@ where
         debug!("[{}] Starting raft follower process.", local_name);
 
         tokio::spawn(async move {
-            if let Err(err) = core.reset_uncommitted_changes().await {
-                error!("Failed to reset uncommitted changes: {:?}", err);
+            if let Err(err) = core.commit_leader(LogIndex::MAX, true).await {
+                error!("Failed to rollback uncommitted entries: {:?}", err);
+                return;
+            }
+
+            if let Err(err) = core.commit_follower(LogIndex::MAX, true).await {
+                error!("Failed to commit pending updates: {:?}", err);
                 return;
             }
 
@@ -128,7 +132,6 @@ where
                     uncommitted_index: commit_index,
                     merge_index: LogIndex::MAX,
                     sequence_id: 0,
-                    commit_term: TermId::MAX,
                 }
             };
 
@@ -433,7 +436,6 @@ where
             .spawn_worker(move || {
                 let mut log_batch = Vec::with_capacity(updates.len());
                 let mut is_done = updates.is_empty();
-                let mut last_term = TermId::MAX;
 
                 for update in updates {
                     match update {
@@ -461,10 +463,6 @@ where
                                     existing_change
                                 );
                             }
-                            println!(
-                                "writing change {:?}",
-                                LogKey::serialize_change(account_id, collection, last_index,)
-                            );
 
                             log_batch.push(WriteOperation::set(
                                 ColumnFamily::Logs,
@@ -499,7 +497,6 @@ where
                             }
 
                             last_index = raft_id.index;
-                            last_term = raft_id.term;
                             if merge_index == LogIndex::MAX {
                                 merge_index = raft_id.index;
                             }
@@ -523,22 +520,13 @@ where
                     store.db.write(log_batch)?;
                 }
 
-                Ok((
-                    last_index,
-                    last_term,
-                    merge_index,
-                    changed_accounts,
-                    is_done,
-                ))
+                Ok((last_index, merge_index, changed_accounts, is_done))
             })
             .await
         {
-            Ok((last_index, last_term, merge_index, changed_accounts, is_done)) => {
+            Ok((last_index, merge_index, changed_accounts, is_done)) => {
                 indexes.uncommitted_index = last_index;
                 indexes.merge_index = merge_index;
-                if last_term != TermId::MAX {
-                    indexes.commit_term = last_term;
-                }
 
                 if is_done {
                     //println!("Changed accounts: {:?}", changed_accounts);
@@ -564,20 +552,24 @@ where
         if indexes.leader_commit_index != LogIndex::MAX
             && indexes.uncommitted_index <= indexes.leader_commit_index
         {
-            let store = self.store.clone();
-            let uncommitted_index = indexes.uncommitted_index;
-            if let Err(err) = self
-                .spawn_worker(move || store.commit_pending_updates(uncommitted_index, false))
-                .await
-            {
-                error!("Failed to apply changes: {:?}", err);
-                return None;
-            }
+            let last_log = match self.commit_follower(indexes.uncommitted_index, false).await {
+                Ok(Some(last_log)) => last_log,
+                Ok(None) => {
+                    error!(
+                        "Raft entry {} not found while committing updates.",
+                        indexes.uncommitted_index
+                    );
+                    return None;
+                }
+                Err(err) => {
+                    error!("Failed to apply changes: {:?}", err);
+                    return None;
+                }
+            };
 
             indexes.commit_index = indexes.uncommitted_index;
             self.update_raft_index(indexes.commit_index);
-            self.store_changed(RaftId::new(indexes.commit_term, indexes.commit_index))
-                .await;
+            self.store_changed(last_log).await;
 
             // Set up to date
             if indexes.commit_index == indexes.leader_commit_index {
@@ -872,7 +864,7 @@ where
     }
 
     async fn handle_merge_log(&self, matched_log: RaftId) -> Option<(State, Response)> {
-        if let Err(err) = self.prepare_rollback_changes(matched_log.index).await {
+        if let Err(err) = self.prepare_rollback_changes(matched_log.index, true).await {
             error!("Failed to prepare rollback changes: {:?}", err);
             return None;
         }
@@ -915,7 +907,7 @@ where
                     "Deleting from collection {:?} items {:?}",
                     collection, changes.inserts
                 );*/
-                let mut batch = WriteBatch::new(account_id);
+                let mut batch = WriteBatch::new(account_id, false);
                 for delete_id in &changes.inserts {
                     batch.delete_document(collection, delete_id);
                 }
@@ -1037,15 +1029,23 @@ where
         .await
     }
 
-    pub async fn commit_pending_updates(&self) -> store::Result<bool> {
+    pub async fn commit_follower(
+        &self,
+        apply_up_to: LogIndex,
+        do_reset: bool,
+    ) -> store::Result<Option<RaftId>> {
         let store = self.store.clone();
-        self.spawn_worker(move || store.commit_pending_updates(LogIndex::MAX, true))
+        self.spawn_worker(move || store.commit_follower(apply_up_to, do_reset))
             .await
     }
 }
 
 pub trait JMAPStoreRaftUpdates {
-    fn commit_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool>;
+    fn commit_follower(
+        &self,
+        apply_up_to: LogIndex,
+        do_reset: bool,
+    ) -> store::Result<Option<RaftId>>;
     fn apply_rollback_updates(&self, changes: Vec<Update>) -> store::Result<bool>;
     fn apply_document_update(
         &self,
@@ -1060,7 +1060,11 @@ impl<T> JMAPStoreRaftUpdates for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn commit_pending_updates(&self, apply_up_to: LogIndex, do_reset: bool) -> store::Result<bool> {
+    fn commit_follower(
+        &self,
+        apply_up_to: LogIndex,
+        do_reset: bool,
+    ) -> store::Result<Option<RaftId>> {
         let apply_up_to: LogIndex = if apply_up_to != LogIndex::MAX {
             self.db.set(
                 ColumnFamily::Values,
@@ -1074,10 +1078,13 @@ where
         {
             apply_up_to
         } else {
-            return Ok(false);
+            return Ok(None);
         };
 
-        debug!("Applying pending updates up to index {}.", apply_up_to);
+        debug!(
+            "Applying pending follower updates up to index {}.",
+            apply_up_to
+        );
 
         let mut log_batch = Vec::new();
         for (key, value) in self.db.iterator(
@@ -1090,13 +1097,13 @@ where
             }
             let index = (&key[..]).deserialize_be_u64(1).ok_or_else(|| {
                 StoreError::InternalError(format!(
-                    "Failed to deserialize account id from changelog key: [{:?}]",
+                    "Failed to deserialize index from changelog key: [{:?}]",
                     key
                 ))
             })?;
 
             if apply_up_to != LogIndex::MAX && index <= apply_up_to {
-                let mut document_batch = WriteBatch::new(AccountId::MAX);
+                let mut document_batch = WriteBatch::new(AccountId::MAX, false);
 
                 for update in PendingUpdates::deserialize(&value)
                     .ok_or_else(|| {
@@ -1116,7 +1123,7 @@ where
                             if account_id != document_batch.account_id {
                                 if !document_batch.is_empty() {
                                     self.write(document_batch)?;
-                                    document_batch = WriteBatch::new(account_id);
+                                    document_batch = WriteBatch::new(account_id, false);
                                 } else {
                                     document_batch.account_id = account_id;
                                 }
@@ -1136,7 +1143,7 @@ where
                             if account_id != document_batch.account_id {
                                 if !document_batch.is_empty() {
                                     self.write(document_batch)?;
-                                    document_batch = WriteBatch::new(account_id);
+                                    document_batch = WriteBatch::new(account_id, false);
                                 } else {
                                     document_batch.account_id = account_id;
                                 }
@@ -1155,16 +1162,37 @@ where
 
                 self.db.delete(ColumnFamily::Logs, &key)?;
             } else if do_reset {
+                println!("Deleting uncommitted update: {}", index);
                 log_batch.push(WriteOperation::Delete {
                     cf: ColumnFamily::Logs,
                     key: key.to_vec(),
                 });
             } else {
-                return Ok(true);
+                break;
             }
         }
 
-        if do_reset {
+        if !do_reset {
+            debug_assert!(apply_up_to != LogIndex::MAX);
+            if let Some((key, _)) = self
+                .db
+                .iterator(
+                    ColumnFamily::Logs,
+                    &LogKey::serialize_raft(&RaftId::new(0, apply_up_to)),
+                    Direction::Forward,
+                )?
+                .next()
+            {
+                if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
+                    let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
+                        StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
+                    })?;
+                    if raft_id.index == apply_up_to {
+                        return Ok(raft_id.into());
+                    }
+                }
+            }
+        } else {
             let key = LogKey::serialize_raft(&RaftId::new(
                 0,
                 if apply_up_to != LogIndex::MAX {
@@ -1224,6 +1252,7 @@ where
                             }
                         }
                     };
+                    println!("Deleting raft entry: {}", raft_id.index);
 
                     log_batch.push(WriteOperation::Delete {
                         cf: ColumnFamily::Logs,
@@ -1237,11 +1266,11 @@ where
             }
         }
 
-        Ok(true)
+        Ok(None)
     }
 
     fn apply_rollback_updates(&self, updates: Vec<Update>) -> store::Result<bool> {
-        let mut document_batch = WriteBatch::new(AccountId::MAX);
+        let mut document_batch = WriteBatch::new(AccountId::MAX, false);
 
         debug!("Inserting {} rollback changes...", updates.len(),);
         let mut is_done = false;
@@ -1256,7 +1285,7 @@ where
                     if account_id != document_batch.account_id {
                         if !document_batch.is_empty() {
                             self.write(document_batch)?;
-                            document_batch = WriteBatch::new(account_id);
+                            document_batch = WriteBatch::new(account_id, false);
                         } else {
                             document_batch.account_id = account_id;
                         }

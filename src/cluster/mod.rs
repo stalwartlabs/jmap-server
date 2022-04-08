@@ -252,11 +252,11 @@ where
         jmap_url.hash(&mut generation);
 
         // Rollback uncommitted entries for a previous leader term.
-        core.rollback_uncommitted().await.unwrap();
+        core.commit_leader(LogIndex::MAX, true).await.unwrap();
 
         // Apply committed updates and rollback uncommited ones for
         // a previous follower term.
-        core.commit_pending_updates().await.unwrap();
+        core.commit_follower(LogIndex::MAX, true).await.unwrap();
 
         let last_log = core
             .get_last_log()
@@ -410,7 +410,7 @@ impl Peer {
     }
 
     pub fn is_offline(&self) -> bool {
-        self.state == gossip::State::Offline
+        matches!(self.state, gossip::State::Offline | gossip::State::Left)
     }
 
     pub fn is_in_shard(&self, shard_id: ShardId) -> bool {

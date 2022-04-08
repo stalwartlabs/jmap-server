@@ -189,7 +189,7 @@ where
     ) -> jmap::Result<JSONValue> {
         // Build message document
         let document_id = self.assign_document_id(account_id, Collection::Mail)?;
-        let mut batch = WriteBatch::new(account_id);
+        let mut batch = WriteBatch::new(account_id, self.config.is_in_cluster);
         let mut document = Document::new(Collection::Mail, document_id);
         let blob_len = blob.len();
         let (reference_ids, thread_name) =

@@ -243,7 +243,7 @@ where
             return Err(JMAPError::RequestTooLarge);
         }
 
-        let mut changes = WriteBatch::new(request.account_id);
+        let mut changes = WriteBatch::new(request.account_id, self.config.is_in_cluster);
         let mut response = JMAPSetResponse {
             old_state,
             ..Default::default()

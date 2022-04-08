@@ -125,7 +125,7 @@ where
     assert_eq!(blobs.len(), 40);
 
     for account in 1..=100 {
-        db.write(WriteBatch::delete(account, Collection::Mail, 0))
+        db.write(WriteBatch::delete(account, Collection::Mail, 0, false))
             .unwrap();
     }
 

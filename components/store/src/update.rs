@@ -1,5 +1,5 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     iter::FromIterator,
 };
 
@@ -24,6 +24,7 @@ where
     pub fn write(&self, batch: WriteBatch) -> crate::Result<()> {
         let mut write_batch = Vec::with_capacity(batch.documents.len());
         let mut bitmap_list = HashMap::new();
+        let mut tombstones = HashMap::new();
 
         for document in batch.documents {
             let (is_insert, document) = match document {
@@ -40,6 +41,18 @@ where
                     (true, document)
                 }
                 WriteAction::Update(document) => (false, document),
+                WriteAction::Tombstone {
+                    collection,
+                    document_id,
+                } => {
+                    debug_assert!(!batch.changes.is_empty());
+                    // Tombstone a document id
+                    tombstones
+                        .entry(collection)
+                        .or_insert_with(HashSet::new)
+                        .insert(document_id);
+                    continue;
+                }
                 WriteAction::Delete {
                     collection,
                     document_id,
@@ -597,12 +610,34 @@ where
             bytes.push(Change::ENTRY);
             bytes.extend_from_slice(&batch.account_id.to_le_bytes());
             bytes.extend_from_slice(&collections.to_le_bytes());
-
             write_batch.push(WriteOperation::set(
                 ColumnFamily::Logs,
                 LogKey::serialize_raft(&raft_id),
                 bytes,
             ));
+
+            // Serialize raft tombstones
+            if !tombstones.is_empty() {
+                let tombstones_len = tombstones.len();
+                let mut bytes = Vec::with_capacity(
+                    ((std::mem::size_of::<DocumentId>() + std::mem::size_of::<usize>() + 1)
+                        * tombstones_len)
+                        + std::mem::size_of::<usize>(),
+                );
+                tombstones_len.to_leb128_bytes(&mut bytes);
+                for (collection, document_ids) in tombstones {
+                    bytes.push(collection as u8);
+                    document_ids.len().to_leb128_bytes(&mut bytes);
+                    for document_id in document_ids {
+                        document_id.to_leb128_bytes(&mut bytes);
+                    }
+                }
+                write_batch.push(WriteOperation::set(
+                    ColumnFamily::Logs,
+                    LogKey::serialize_tombstone(raft_id.index, batch.account_id),
+                    bytes,
+                ));
+            }
         }
 
         // Update bitmaps

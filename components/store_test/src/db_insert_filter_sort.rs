@@ -161,7 +161,7 @@ where
                         s.spawn_fifo(move |_| {
                             let now = Instant::now();
                             let num_docs = chunk.len();
-                            let mut batch = WriteBatch::new(0);
+                            let mut batch = WriteBatch::new(0, false);
                             for document in chunk {
                                 batch.insert_document(document);
                             }

@@ -23,7 +23,6 @@ pub struct JMAPServer<T> {
     pub store: Arc<JMAPStore<T>>,
     pub cluster_tx: mpsc::Sender<cluster::Event>,
     pub worker_pool: rayon::ThreadPool,
-    pub is_cluster: bool,
     pub is_leader: AtomicBool,
     pub is_up_to_date: AtomicBool,
 
@@ -56,7 +55,6 @@ async fn main() -> std::io::Result<()> {
             .build()
             .unwrap(),
         cluster_tx: cluster_tx.clone(),
-        is_cluster,
         is_leader: (!is_cluster).into(),
         is_up_to_date: (!is_cluster).into(),
         #[cfg(test)]
