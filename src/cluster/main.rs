@@ -58,18 +58,31 @@ pub async fn start_cluster<T>(
         let mut is_offline = false;
 
         loop {
+            let went_to_bed = Instant::now();
             match time::timeout(wait_timeout, main_rx.recv()).await {
                 Ok(Some(message)) => {
                     #[cfg(test)]
-                    if let Event::IsOffline(status) = &message {
-                        if *status {
+                    if let Event::SetOffline {
+                        is_offline: set_offline,
+                        notify_peers,
+                    } = &message
+                    {
+                        if *set_offline {
                             debug!("[{}] Marked as offline.", cluster.addr);
-                            cluster.broadcast_leave().await;
+                            if *notify_peers {
+                                cluster.broadcast_leave().await;
+                            }
                         } else {
                             debug!("[{}] Marked as online.", cluster.addr);
-                            cluster.broadcast_ping().await;
+                            if *notify_peers {
+                                cluster.broadcast_ping().await;
+                                last_ping = Instant::now();
+                            } else {
+                                last_ping =
+                                    Instant::now() - Duration::from_millis(PING_INTERVAL + 50);
+                            }
                         }
-                        is_offline = *status;
+                        is_offline = *set_offline;
                         for peer in &mut cluster.peers {
                             peer.state = if is_offline {
                                 gossip::State::Offline
@@ -85,10 +98,21 @@ pub async fn start_cluster<T>(
                         continue;
                     }
 
+                    if went_to_bed.elapsed().as_millis() as u64 > PING_INTERVAL + 50 {
+                        println!(
+                            "[{}] Took too long ({}ms) to wake up!",
+                            cluster.addr,
+                            went_to_bed.elapsed().as_millis()
+                        );
+                    }
+
+                    let time = Instant::now();
+                    let exec = format!("{:?}", message);
+
                     match cluster.handle_message(message).await {
                         Ok(true) => (),
                         Ok(false) => {
-                            debug!("Broadcasting leave request to peers and shutting down cluster services.");
+                            debug!("Broadcasting leave request to peers and shutting down.");
                             cluster.broadcast_leave().await;
                             shutdown_tx.send(false).ok();
                             break;
@@ -98,6 +122,15 @@ pub async fn start_cluster<T>(
                             shutdown_tx.send(false).ok();
                             break;
                         }
+                    }
+
+                    if time.elapsed().as_millis() > 50 {
+                        println!(
+                            "{}ms [{}] Executing {}",
+                            time.elapsed().as_millis(),
+                            cluster.addr,
+                            exec,
+                        );
                     }
                 }
                 Ok(None) => {
@@ -116,6 +149,16 @@ pub async fn start_cluster<T>(
             if !cluster.peers.is_empty() {
                 let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
                 let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
+                    debug_assert!(
+                        time_since_last_ping <= (PING_INTERVAL + 200),
+                        "[{}] Possible event loop block: {}ms since last ping.",
+                        cluster.addr,
+                        time_since_last_ping
+                    );
+
+                    if cluster.is_leading() {
+                        print!("{}ms ", time_since_last_ping)
+                    }
                     if let Err(err) = cluster.ping_peers().await {
                         debug!("Failed to ping peers: {:?}", err);
                         break;
@@ -222,16 +265,21 @@ where
                     self.start_election_timer(false);
                 }
             }
-            Event::StoreChanged { last_log } => {
-                // When leading, last_log contains the last uncommited index.
-                // When following, last_log contains the last committed index.
-                if self.is_leading() {
-                    self.last_log.term = last_log.term;
-                    self.uncommitted_index = last_log.index;
-                    self.send_append_entries();
-                } else {
-                    self.last_log = last_log;
-                }
+            Event::UpdateLastLog { last_log } => {
+                println!(
+                    "[{}] Follower updated store to id {}, term {}.",
+                    self.addr, last_log.index, last_log.term
+                );
+                self.last_log = last_log;
+                self.core.update_raft_index(last_log.index);
+            }
+            Event::AdvanceUncommittedIndex { uncommitted_index } => {
+                println!(
+                    "[{}] Sending appendEntries request for id {}, term {}.",
+                    self.addr, uncommitted_index, self.term
+                );
+                self.uncommitted_index = uncommitted_index;
+                self.send_append_entries();
             }
             Event::AdvanceCommitIndex {
                 peer_id,
@@ -242,7 +290,7 @@ where
             Event::Shutdown => return Ok(false),
 
             #[cfg(test)]
-            Event::IsOffline(_) => (),
+            Event::SetOffline { .. } => (),
         }
         Ok(true)
     }
@@ -270,6 +318,20 @@ where
                     leader_is_offline = true;
                 }
             }
+        }
+
+        if self.is_leading() {
+            print!(
+                "Leader [{} = {}/{}]",
+                self.addr, self.last_log.index, self.last_log.term
+            );
+            for peer in &self.peers {
+                print!(
+                    " [{} = {:?}, {}/{}]",
+                    peer.addr, peer.state, peer.last_log_index, peer.last_log_term
+                );
+            }
+            println!();
         }
 
         // Start a new election

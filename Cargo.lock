@@ -1016,6 +1016,7 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "serde_json",
  "store",
  "store_rocksdb",
  "store_test",

@@ -28,9 +28,10 @@ where
                     StoreError::InternalError("Failed to convert blob key to i64".to_string())
                 })?;
 
+                let entries = BlobEntries::deserialize(&key[BLOB_KEY_PREFIX.len()..])
+                    .ok_or(StoreError::DataCorruption)?;
                 result.push((
-                    BlobEntries::deserialize(&key[BLOB_KEY_PREFIX.len()..])
-                        .ok_or(StoreError::DataCorruption)?
+                    entries
                         .items
                         .get(0)
                         .ok_or(StoreError::DataCorruption)?

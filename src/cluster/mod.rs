@@ -95,8 +95,11 @@ pub enum Event {
     StepDown {
         term: TermId,
     },
-    StoreChanged {
+    UpdateLastLog {
         last_log: RaftId,
+    },
+    AdvanceUncommittedIndex {
+        uncommitted_index: LogIndex,
     },
     AdvanceCommitIndex {
         peer_id: PeerId,
@@ -105,7 +108,10 @@ pub enum Event {
     Shutdown,
 
     #[cfg(test)]
-    IsOffline(bool),
+    SetOffline {
+        is_offline: bool,
+        notify_peers: bool,
+    },
 }
 
 #[derive(Debug)]

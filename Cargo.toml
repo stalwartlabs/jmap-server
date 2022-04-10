@@ -23,6 +23,7 @@ rayon = "1.5.1"
 
 [dev-dependencies]
 store_test = { path = "components/store_test" }
+serde_json = "1.0"
 
 [workspace]
 resolver = "2"

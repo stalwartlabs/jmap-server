@@ -43,6 +43,7 @@ pub struct TermIndexBuilder {
     items: Vec<TermIndexBuilderItem>,
 }
 
+#[derive(Debug)]
 pub struct TermIndexItem {
     pub field_id: FieldId,
     pub blob_id: BlobIndex,
@@ -50,8 +51,9 @@ pub struct TermIndexItem {
     pub terms: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub struct TermIndex {
-    items: Vec<TermIndexItem>,
+    pub items: Vec<TermIndexItem>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

@@ -299,6 +299,18 @@ where
     pub async fn request_votes(&mut self, now: bool) -> store::Result<()> {
         // Check if there is enough quorum for an election.
         if self.has_election_quorum() {
+            print!(
+                "[{} = {}/{}]",
+                self.addr, self.last_log.index, self.last_log.term
+            );
+            for peer in &self.peers {
+                print!(
+                    " [{} = {}/{}]",
+                    peer.addr, peer.last_log_index, peer.last_log_term
+                );
+            }
+            println!();
+
             // Assess whether this node could become the leader for the next term.
             if !self.peers.iter().any(|peer| {
                 peer.is_in_shard(self.shard_id)
@@ -359,6 +371,8 @@ where
         let commit_index = indexes[((indexes.len() as f64) / 2.0).floor() as usize];
         if commit_index > self.last_log.index.wrapping_add(1) {
             self.last_log.index = commit_index.wrapping_sub(1);
+            self.last_log.term = self.term;
+
             let last_log_index = self.last_log.index;
             let core = self.core.clone();
             tokio::spawn(async move {
@@ -542,11 +556,23 @@ where
             .await
     }
 
-    pub async fn store_changed(&self, last_log: RaftId) {
+    pub async fn update_last_log(&self, last_log: RaftId) {
         if self.store.config.is_in_cluster
             && self
                 .cluster_tx
-                .send(super::Event::StoreChanged { last_log })
+                .send(super::Event::UpdateLastLog { last_log })
+                .await
+                .is_err()
+        {
+            error!("Failed to send store changed event.");
+        }
+    }
+
+    pub async fn advance_uncommitted_index(&self, uncommitted_index: LogIndex) {
+        if self.store.config.is_in_cluster
+            && self
+                .cluster_tx
+                .send(super::Event::AdvanceUncommittedIndex { uncommitted_index })
                 .await
                 .is_err()
         {
@@ -555,12 +581,12 @@ where
     }
 
     #[cfg(test)]
-    pub async fn notify_changes(&self) {
+    pub async fn update_uncommitted_index(&self) -> LogIndex {
+        let uncommitted_index = self.get_last_log().await.unwrap().unwrap().index;
         self.cluster_tx
-            .send(super::Event::StoreChanged {
-                last_log: self.get_last_log().await.unwrap().unwrap(),
-            })
+            .send(super::Event::AdvanceUncommittedIndex { uncommitted_index })
             .await
             .unwrap();
+        uncommitted_index
     }
 }

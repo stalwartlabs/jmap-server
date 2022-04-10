@@ -552,14 +552,14 @@ where
 }
 
 impl Peer {
-    fn update_heartbeat(&mut self, is_direct: bool) -> bool {
+    fn update_heartbeat(&mut self, is_direct_ping: bool) -> bool {
         let hb_diff =
             std::cmp::min(self.last_heartbeat.elapsed().as_millis(), 60 * 60 * 1000) as u64;
         self.last_heartbeat = Instant::now();
 
         match self.state {
             State::Seed | State::Offline => {
-                debug!("Peer {} is back online.", self.addr);
+                debug!("Peer {} is now alive.", self.addr);
                 self.state = State::Alive;
 
                 // Do not count stale heartbeats.
@@ -569,7 +569,7 @@ impl Peer {
                 debug!("Suspected peer {} was confirmed alive.", self.addr);
                 self.state = State::Alive;
             }
-            State::Left if is_direct => {
+            State::Left if is_direct_ping => {
                 debug!(
                     "Peer {} is back online after leaving the cluster.",
                     self.addr

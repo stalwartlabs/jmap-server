@@ -1,23 +1,15 @@
 use std::collections::HashMap;
 
-use jmap_mail::import::JMAPMailImport;
-use jmap_mail::mailbox::JMAPMailMailbox;
-
 use store::batch::WriteBatch;
-use store::log::{Entry, LogIndex, RaftId, TermId};
+use store::log::{LogIndex, RaftId, TermId};
 use store::roaring::RoaringBitmap;
-use store::serialize::{
-    DeserializeBigEndian, LogKey, StoreDeserialize, StoreSerialize, FOLLOWER_COMMIT_INDEX_KEY,
-};
+use store::serialize::{LogKey, StoreSerialize};
 use store::tracing::{debug, error};
-use store::{
-    bincode, lz4_flex, AccountId, Collection, ColumnFamily, Direction, DocumentId, JMAPStore,
-    Store, StoreError,
-};
+use store::{AccountId, Collection, ColumnFamily, Store};
 use store::{Collections, WriteOperation};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::cluster::log::{AppendEntriesResponse, DocumentUpdate};
+use crate::cluster::log::{AppendEntriesResponse, PendingUpdate, PendingUpdates};
 use crate::JMAPServer;
 
 use super::log::{AppendEntriesRequest, Event, MergedChanges, RaftStore, Update};
@@ -47,43 +39,6 @@ enum State {
 impl Default for State {
     fn default() -> Self {
         State::Synchronize
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-enum PendingUpdate {
-    UpdateDocument {
-        account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-    },
-    DeleteDocuments {
-        account_id: AccountId,
-        collection: Collection,
-        document_ids: Vec<DocumentId>,
-    },
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct PendingUpdates {
-    updates: Vec<PendingUpdate>,
-}
-
-impl PendingUpdates {
-    pub fn new(updates: Vec<PendingUpdate>) -> Self {
-        Self { updates }
-    }
-}
-
-impl StoreSerialize for PendingUpdates {
-    fn serialize(&self) -> Option<Vec<u8>> {
-        bincode::serialize(self).ok()
-    }
-}
-
-impl StoreDeserialize for PendingUpdates {
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        bincode::deserialize(bytes).ok()
     }
 }
 
@@ -119,7 +74,7 @@ where
             }
 
             let mut indexes = {
-                let commit_index = match core.init_follower_commit_index().await {
+                let commit_index = match core.set_follower_commit_index().await {
                     Ok(commit_index) => commit_index,
                     Err(err) => {
                         error!("Failed to set follower commit index: {:?}", err);
@@ -147,6 +102,8 @@ where
                     return;
                 }
             };
+
+            println!("Starting follower with {:?}", indexes);
 
             while let Some(event) = rx.recv().await {
                 //println!("Follower: {:?}", event.request);
@@ -258,6 +215,7 @@ where
                             commit_index,
                             changed_accounts.len()
                         );
+                        indexes.leader_commit_index = commit_index;
 
                         if let Some((next_state, response)) = core
                             .handle_pending_updates(&mut indexes, changed_accounts, updates)
@@ -480,6 +438,7 @@ where
                                 //println!("Adding raft id {:?}", raft_id,);
 
                                 use store::log::{self};
+                                use store::serialize::StoreDeserialize;
                                 let existing_log = store
                                     .db
                                     .get::<log::Entry>(
@@ -492,7 +451,7 @@ where
                                     "{} -> existing: {:?} new: {:?}",
                                     raft_id.index,
                                     existing_log.unwrap(),
-                                    Entry::deserialize(&log).unwrap()
+                                    log::Entry::deserialize(&log).unwrap()
                                 );
                             }
 
@@ -552,6 +511,8 @@ where
         if indexes.leader_commit_index != LogIndex::MAX
             && indexes.uncommitted_index <= indexes.leader_commit_index
         {
+            println!("Follower committing updates with {:?}", indexes);
+
             let last_log = match self.commit_follower(indexes.uncommitted_index, false).await {
                 Ok(Some(last_log)) => last_log,
                 Ok(None) => {
@@ -568,8 +529,7 @@ where
             };
 
             indexes.commit_index = indexes.uncommitted_index;
-            self.update_raft_index(indexes.commit_index);
-            self.store_changed(last_log).await;
+            self.update_last_log(last_log).await;
 
             // Set up to date
             if indexes.commit_index == indexes.leader_commit_index {
@@ -920,11 +880,7 @@ where
             }
 
             if !updates.is_empty() {
-                let store = self.store.clone();
-                match self
-                    .spawn_worker(move || store.apply_rollback_updates(updates))
-                    .await
-                {
+                match self.apply_rollback_updates(updates).await {
                     Ok(is_done) => {
                         if is_done {
                             changes.updates.clear();
@@ -1010,359 +966,5 @@ where
                 }
             }
         }
-    }
-
-    pub async fn init_follower_commit_index(&self) -> store::Result<LogIndex> {
-        let store = self.store.clone();
-        self.spawn_worker(move || {
-            let last_index = store
-                .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))?
-                .map(|v| v.index)
-                .unwrap_or(LogIndex::MAX);
-            store.db.set(
-                ColumnFamily::Values,
-                FOLLOWER_COMMIT_INDEX_KEY,
-                &last_index.serialize().unwrap(),
-            )?;
-            Ok(last_index)
-        })
-        .await
-    }
-
-    pub async fn commit_follower(
-        &self,
-        apply_up_to: LogIndex,
-        do_reset: bool,
-    ) -> store::Result<Option<RaftId>> {
-        let store = self.store.clone();
-        self.spawn_worker(move || store.commit_follower(apply_up_to, do_reset))
-            .await
-    }
-}
-
-pub trait JMAPStoreRaftUpdates {
-    fn commit_follower(
-        &self,
-        apply_up_to: LogIndex,
-        do_reset: bool,
-    ) -> store::Result<Option<RaftId>>;
-    fn apply_rollback_updates(&self, changes: Vec<Update>) -> store::Result<bool>;
-    fn apply_document_update(
-        &self,
-        account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-        document_batch: &mut WriteBatch,
-    ) -> store::Result<()>;
-}
-
-impl<T> JMAPStoreRaftUpdates for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn commit_follower(
-        &self,
-        apply_up_to: LogIndex,
-        do_reset: bool,
-    ) -> store::Result<Option<RaftId>> {
-        let apply_up_to: LogIndex = if apply_up_to != LogIndex::MAX {
-            self.db.set(
-                ColumnFamily::Values,
-                FOLLOWER_COMMIT_INDEX_KEY,
-                &apply_up_to.serialize().unwrap(),
-            )?;
-            apply_up_to
-        } else if let Some(apply_up_to) = self
-            .db
-            .get(ColumnFamily::Values, FOLLOWER_COMMIT_INDEX_KEY)?
-        {
-            apply_up_to
-        } else {
-            return Ok(None);
-        };
-
-        debug!(
-            "Applying pending follower updates up to index {}.",
-            apply_up_to
-        );
-
-        let mut log_batch = Vec::new();
-        for (key, value) in self.db.iterator(
-            ColumnFamily::Logs,
-            &[LogKey::PENDING_UPDATES_KEY_PREFIX],
-            Direction::Forward,
-        )? {
-            if !key.starts_with(&[LogKey::PENDING_UPDATES_KEY_PREFIX]) {
-                break;
-            }
-            let index = (&key[..]).deserialize_be_u64(1).ok_or_else(|| {
-                StoreError::InternalError(format!(
-                    "Failed to deserialize index from changelog key: [{:?}]",
-                    key
-                ))
-            })?;
-
-            if apply_up_to != LogIndex::MAX && index <= apply_up_to {
-                let mut document_batch = WriteBatch::new(AccountId::MAX, false);
-
-                for update in PendingUpdates::deserialize(&value)
-                    .ok_or_else(|| {
-                        StoreError::InternalError(format!(
-                            "Failed to deserialize pending updates for key [{:?}]",
-                            key
-                        ))
-                    })?
-                    .updates
-                {
-                    match update {
-                        PendingUpdate::UpdateDocument {
-                            account_id,
-                            document_id,
-                            update,
-                        } => {
-                            if account_id != document_batch.account_id {
-                                if !document_batch.is_empty() {
-                                    self.write(document_batch)?;
-                                    document_batch = WriteBatch::new(account_id, false);
-                                } else {
-                                    document_batch.account_id = account_id;
-                                }
-                            }
-                            self.apply_document_update(
-                                account_id,
-                                document_id,
-                                update,
-                                &mut document_batch,
-                            )?;
-                        }
-                        PendingUpdate::DeleteDocuments {
-                            account_id,
-                            collection,
-                            document_ids,
-                        } => {
-                            if account_id != document_batch.account_id {
-                                if !document_batch.is_empty() {
-                                    self.write(document_batch)?;
-                                    document_batch = WriteBatch::new(account_id, false);
-                                } else {
-                                    document_batch.account_id = account_id;
-                                }
-                            }
-
-                            for document_id in document_ids {
-                                document_batch.delete_document(collection, document_id);
-                            }
-                        }
-                    }
-                }
-
-                if !document_batch.is_empty() {
-                    self.write(document_batch)?;
-                }
-
-                self.db.delete(ColumnFamily::Logs, &key)?;
-            } else if do_reset {
-                println!("Deleting uncommitted update: {}", index);
-                log_batch.push(WriteOperation::Delete {
-                    cf: ColumnFamily::Logs,
-                    key: key.to_vec(),
-                });
-            } else {
-                break;
-            }
-        }
-
-        if !do_reset {
-            debug_assert!(apply_up_to != LogIndex::MAX);
-            if let Some((key, _)) = self
-                .db
-                .iterator(
-                    ColumnFamily::Logs,
-                    &LogKey::serialize_raft(&RaftId::new(0, apply_up_to)),
-                    Direction::Forward,
-                )?
-                .next()
-            {
-                if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
-                    let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
-                        StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
-                    })?;
-                    if raft_id.index == apply_up_to {
-                        return Ok(raft_id.into());
-                    }
-                }
-            }
-        } else {
-            let key = LogKey::serialize_raft(&RaftId::new(
-                0,
-                if apply_up_to != LogIndex::MAX {
-                    apply_up_to
-                } else {
-                    0
-                },
-            ));
-            log_batch.push(WriteOperation::Delete {
-                cf: ColumnFamily::Values,
-                key: FOLLOWER_COMMIT_INDEX_KEY.to_vec(),
-            });
-
-            for (key, value) in self
-                .db
-                .iterator(ColumnFamily::Logs, &key, Direction::Forward)?
-            {
-                if !key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
-                    break;
-                }
-                let raft_id = LogKey::deserialize_raft(&key).ok_or_else(|| {
-                    StoreError::InternalError(format!("Corrupted raft key for [{:?}]", key))
-                })?;
-                if apply_up_to == LogIndex::MAX || raft_id.index > apply_up_to {
-                    match Entry::deserialize(&value).ok_or_else(|| {
-                        StoreError::InternalError(format!("Corrupted raft entry for [{:?}]", key))
-                    })? {
-                        Entry::Item {
-                            account_id,
-                            changed_collections,
-                        } => {
-                            for changed_collection in changed_collections {
-                                log_batch.push(WriteOperation::Delete {
-                                    cf: ColumnFamily::Logs,
-                                    key: LogKey::serialize_change(
-                                        account_id,
-                                        changed_collection,
-                                        raft_id.index,
-                                    ),
-                                });
-                            }
-                        }
-                        Entry::Snapshot { changed_accounts } => {
-                            for (changed_collections, changed_accounts_ids) in changed_accounts {
-                                for changed_collection in changed_collections {
-                                    for changed_account_id in &changed_accounts_ids {
-                                        log_batch.push(WriteOperation::Delete {
-                                            cf: ColumnFamily::Logs,
-                                            key: LogKey::serialize_change(
-                                                *changed_account_id,
-                                                changed_collection,
-                                                raft_id.index,
-                                            ),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    };
-                    println!("Deleting raft entry: {}", raft_id.index);
-
-                    log_batch.push(WriteOperation::Delete {
-                        cf: ColumnFamily::Logs,
-                        key: key.to_vec(),
-                    });
-                }
-            }
-
-            if !log_batch.is_empty() {
-                self.db.write(log_batch)?;
-            }
-        }
-
-        Ok(None)
-    }
-
-    fn apply_rollback_updates(&self, updates: Vec<Update>) -> store::Result<bool> {
-        let mut document_batch = WriteBatch::new(AccountId::MAX, false);
-
-        debug!("Inserting {} rollback changes...", updates.len(),);
-        let mut is_done = false;
-
-        for update in updates {
-            match update {
-                Update::Document {
-                    account_id,
-                    document_id,
-                    update,
-                } => {
-                    if account_id != document_batch.account_id {
-                        if !document_batch.is_empty() {
-                            self.write(document_batch)?;
-                            document_batch = WriteBatch::new(account_id, false);
-                        } else {
-                            document_batch.account_id = account_id;
-                        }
-                    }
-
-                    self.apply_document_update(
-                        account_id,
-                        document_id,
-                        update,
-                        &mut document_batch,
-                    )?;
-                }
-                Update::Eof => {
-                    is_done = true;
-                }
-                _ => debug_assert!(false, "Invalid update type: {:?}", update),
-            }
-        }
-        if !document_batch.is_empty() {
-            self.write(document_batch)?;
-        }
-
-        Ok(is_done)
-    }
-
-    fn apply_document_update(
-        &self,
-        account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-        document_batch: &mut WriteBatch,
-    ) -> store::Result<()> {
-        match update {
-            DocumentUpdate::InsertMail {
-                thread_id,
-                keywords,
-                mailboxes,
-                received_at,
-                body,
-            } => {
-                self.raft_update_mail(
-                    document_batch,
-                    account_id,
-                    document_id,
-                    thread_id,
-                    mailboxes,
-                    keywords,
-                    Some((
-                        lz4_flex::decompress_size_prepended(&body).map_err(|err| {
-                            StoreError::InternalError(format!(
-                                "Failed to decompress raft update: {}",
-                                err
-                            ))
-                        })?,
-                        received_at,
-                    )),
-                )?;
-            }
-            DocumentUpdate::UpdateMail {
-                thread_id,
-                keywords,
-                mailboxes,
-            } => {
-                self.raft_update_mail(
-                    document_batch,
-                    account_id,
-                    document_id,
-                    thread_id,
-                    mailboxes,
-                    keywords,
-                    None,
-                )?;
-            }
-            DocumentUpdate::UpdateMailbox { mailbox } => {
-                self.raft_update_mailbox(document_batch, account_id, document_id, mailbox)?
-            }
-        }
-        Ok(())
     }
 }

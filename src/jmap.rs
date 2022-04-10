@@ -87,13 +87,16 @@ where
     }
 
     #[cfg(test)]
-    pub async fn set_offline(&self, is_offline: bool) {
+    pub async fn set_offline(&self, is_offline: bool, notify_peers: bool) {
         self.is_offline
             .store(is_offline, std::sync::atomic::Ordering::Relaxed);
         self.set_follower();
         if self
             .cluster_tx
-            .send(Event::IsOffline(is_offline))
+            .send(Event::SetOffline {
+                is_offline,
+                notify_peers,
+            })
             .await
             .is_err()
         {

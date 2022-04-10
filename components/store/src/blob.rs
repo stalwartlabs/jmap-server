@@ -49,6 +49,7 @@ pub struct BlobEntry {
 }
 
 pub type BlobIndex = u32;
+pub const BLOB_HASH_LEN: usize = 32;
 
 impl StoreSerialize for BlobEntries {
     fn serialize(&self) -> Option<Vec<u8>> {
@@ -62,18 +63,29 @@ impl StoreSerialize for BlobEntries {
 
 impl StoreDeserialize for BlobEntries {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let num_entries = bytes.len() / (32 + std::mem::size_of::<u32>());
+        let num_entries = bytes.len() / (BLOB_HASH_LEN + std::mem::size_of::<u32>());
         let mut items = Vec::with_capacity(num_entries);
 
+        debug_assert!(num_entries != 0);
+        debug_assert_eq!(
+            bytes.len(),
+            num_entries * (BLOB_HASH_LEN + std::mem::size_of::<u32>()),
+            "bytes: {:?}",
+            bytes
+        );
+
         for pos in 0..num_entries {
-            let start_offset = pos * (32 + std::mem::size_of::<u32>());
-            let end_offset = (pos + 1) * (32 + std::mem::size_of::<u32>());
+            let start_offset = pos * (BLOB_HASH_LEN + std::mem::size_of::<u32>());
+            let end_offset = (pos + 1) * (BLOB_HASH_LEN + std::mem::size_of::<u32>());
 
             items.push(BlobEntry {
                 hash: bytes.get(start_offset..end_offset)?.to_vec(),
                 size: u32::from_le_bytes(
                     bytes
-                        .get(start_offset + 32..start_offset + 32 + std::mem::size_of::<u32>())?
+                        .get(
+                            (start_offset + BLOB_HASH_LEN)
+                                ..(start_offset + BLOB_HASH_LEN + std::mem::size_of::<u32>()),
+                        )?
                         .try_into()
                         .ok()?,
                 ),
@@ -124,9 +136,11 @@ impl From<&[u8]> for BlobEntry {
         // Create blob key
         let mut hasher = Sha256::new();
         hasher.update(bytes);
-        let mut hash = Vec::with_capacity(32 + std::mem::size_of::<u32>());
+        let mut hash = Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<u32>());
         hash.extend_from_slice(&hasher.finalize());
         hash.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+
+        debug_assert_eq!(hash.len(), BLOB_HASH_LEN + std::mem::size_of::<u32>());
 
         BlobEntry {
             hash,

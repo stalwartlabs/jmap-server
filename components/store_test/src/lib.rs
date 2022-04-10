@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
+use jmap_mail::mailbox::Mailbox;
 use jmap_mail::{MessageData, MessageOutline, MESSAGE_DATA};
 use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;
@@ -10,13 +11,14 @@ use store::serialize::{
     DeserializeBigEndian, IndexKey, LogKey, StoreDeserialize, ValueKey, BLOB_KEY_PREFIX,
     FOLLOWER_COMMIT_INDEX_KEY, LAST_TERM_ID_KEY, LEADER_COMMIT_INDEX_KEY, TEMP_BLOB_KEY_PREFIX,
 };
+use store::term_index::TermIndex;
 use store::{
     config::EnvSettings,
     roaring::RoaringBitmap,
     serialize::{BM_KEYWORD, BM_TAG_ID, BM_TAG_STATIC, BM_TAG_TEXT},
     AccountId, ColumnFamily, JMAPStore, Store,
 };
-use store::{log, Collection, DocumentId};
+use store::{log, Collection, DocumentId, LongInteger};
 
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
@@ -98,7 +100,7 @@ pub trait StoreCompareWith<T> {
     fn assert_is_empty(&self);
 }
 
-const ASSERT: bool = false;
+const ASSERT: bool = true;
 
 impl<T> StoreCompareWith<T> for JMAPStore<T>
 where
@@ -151,6 +153,28 @@ where
                             other_tagged_docs &= &last_ids;
 
                             if ASSERT {
+                                /*if tagged_docs != other_tagged_docs {
+                                    let m1 = self
+                                        .db
+                                        .get::<Mailbox>(
+                                            ColumnFamily::Values,
+                                            &ValueKey::serialize_value(
+                                                account_id, collection, 0, 0,
+                                            ),
+                                        )
+                                        .unwrap();
+                                    let m2 = other
+                                        .db
+                                        .get::<Mailbox>(
+                                            ColumnFamily::Values,
+                                            &ValueKey::serialize_value(
+                                                account_id, collection, 0, 0,
+                                            ),
+                                        )
+                                        .unwrap();
+
+                                    println!("{:?}\n{:?}", m1, m2);
+                                }*/
                                 assert_eq!(
                                     tagged_docs,
                                     other_tagged_docs,
@@ -210,7 +234,44 @@ where
                                 let other_value =
                                     other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into();
                                 if value != other_value {
-                                    if key.ends_with(&[ValueKey::BLOBS]) {
+                                    if key
+                                        == ValueKey::serialize_term_index(
+                                            account_id,
+                                            collection,
+                                            document_id,
+                                        )
+                                        .into_boxed_slice()
+                                    {
+                                        let value = TermIndex::deserialize(&value).unwrap();
+                                        let other_value =
+                                            TermIndex::deserialize(&other_value).unwrap();
+                                        assert_eq!(
+                                            value.items.len(),
+                                            other_value.items.len(),
+                                            "{:?} != {:?}",
+                                            value,
+                                            other_value
+                                        );
+                                        for (item, other_item) in
+                                            value.items.iter().zip(other_value.items.iter())
+                                        {
+                                            assert_eq!(
+                                                item.field_id, other_item.field_id,
+                                                "{:?} != {:?}",
+                                                value, other_value
+                                            );
+                                            assert_eq!(
+                                                item.blob_id, other_item.blob_id,
+                                                "{:?} != {:?}",
+                                                value, other_value
+                                            );
+                                            assert_eq!(
+                                                item.terms_len, other_item.terms_len,
+                                                "{:?} != {:?}",
+                                                value, other_value
+                                            );
+                                        }
+                                    } else if key.ends_with(&[ValueKey::BLOBS]) {
                                         let value = BlobEntries::deserialize(&value).unwrap();
                                         let other_value =
                                             BlobEntries::deserialize(&other_value).unwrap();
@@ -221,11 +282,54 @@ where
                                             .zip(other_value.items)
                                             .enumerate()
                                         {
-                                            assert_eq!(
-                                                entry.size, other_entry.size,
-                                                "{:?}/{}/{:?}/{}, blob index {}",
-                                                cf, account_id, collection, document_id, blob_index
-                                            );
+                                            if ASSERT {
+                                                assert_eq!(
+                                                    entry.size,
+                                                    other_entry.size,
+                                                    "{:?}/{}/{:?}/{}, blob index {}",
+                                                    cf,
+                                                    account_id,
+                                                    collection,
+                                                    document_id,
+                                                    blob_index
+                                                );
+                                            } else if entry.size != other_entry.size {
+                                                /*let blob = self
+                                                    .get_blob(
+                                                        account_id,
+                                                        Collection::Mail,
+                                                        document_id,
+                                                        blob_index as BlobIndex,
+                                                    )
+                                                    .unwrap()
+                                                    .unwrap();
+                                                let other_blob = other
+                                                    .get_blob(
+                                                        account_id,
+                                                        Collection::Mail,
+                                                        document_id,
+                                                        blob_index as BlobIndex,
+                                                    )
+                                                    .unwrap()
+                                                    .unwrap();
+                                                panic!(
+                                                    "{:?} -> '{}'\n{:?} -> '{}'",
+                                                    entry,
+                                                    String::from_utf8(blob).unwrap(),
+                                                    other_entry,
+                                                    String::from_utf8(other_blob).unwrap()
+                                                );*/
+                                                println!(
+                                                    "{} != {}, {:?}/{}/{:?}/{}, blob index {}",
+                                                    entry.size,
+                                                    other_entry.size,
+                                                    cf,
+                                                    account_id,
+                                                    collection,
+                                                    document_id,
+                                                    blob_index
+                                                );
+                                            }
 
                                             if entry.hash != other_entry.hash {
                                                 let blob = self
@@ -237,7 +341,7 @@ where
                                                     )
                                                     .unwrap()
                                                     .unwrap();
-                                                let other_blob = self
+                                                let other_blob = other
                                                     .get_blob(
                                                         account_id,
                                                         Collection::Mail,
@@ -323,8 +427,19 @@ where
                                         let other_value =
                                             Keywords::deserialize(&other_value).unwrap();
                                         assert_eq!(value.items, other_value.items);
-                                    } else {
+                                    } else if ASSERT {
                                         panic!(
+                                            "{:?}/{}/{:?}/{}, key[{:?}] {:?} != {:?}",
+                                            cf,
+                                            account_id,
+                                            collection,
+                                            document_id,
+                                            key,
+                                            value,
+                                            other_value,
+                                        );
+                                    } else {
+                                        println!(
                                             "{:?}/{}/{:?}/{}, key[{:?}] {:?} != {:?}",
                                             cf,
                                             account_id,
