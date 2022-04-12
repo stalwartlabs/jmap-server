@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap::{changes::JMAPState, JMAPComparator, JMAPFilter, JMAPQueryChangesRequest};
+use jmap::{
+    changes::JMAPState, id::JMAPIdSerialize, json::JSONValue, JMAPComparator, JMAPFilter,
+    JMAPQueryChangesRequest,
+};
 use jmap_mail::{
     changes::JMAPMailChanges,
     import::JMAPMailImport,
@@ -83,12 +86,7 @@ where
                         Some(*id as i64),
                     )
                     .unwrap()
-                    .unwrap_object()
-                    .unwrap()
-                    .get("id")
-                    .unwrap()
-                    .to_jmap_id()
-                    .unwrap();
+                    .eval_unwrap_jmap_id("/id");
 
                 id_map.insert(*id, jmap_id);
                 if change_num % 2 == 0 {
@@ -144,7 +142,7 @@ where
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
                     max_changes: 0,
-                    up_to_id: None,
+                    up_to_id: JSONValue::Null,
                     calculate_total: false,
                     arguments: JMAPMailQueryArguments {
                         collapse_threads: false,
@@ -156,7 +154,7 @@ where
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
                     max_changes: 0,
-                    up_to_id: None,
+                    up_to_id: JSONValue::Null,
                     calculate_total: false,
                     arguments: JMAPMailQueryArguments {
                         collapse_threads: false,
@@ -168,7 +166,7 @@ where
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
                     max_changes: 0,
-                    up_to_id: None,
+                    up_to_id: JSONValue::Null,
                     calculate_total: false,
                     arguments: JMAPMailQueryArguments {
                         collapse_threads: false,
@@ -180,7 +178,10 @@ where
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
                     since_query_state: state.clone(),
                     max_changes: 0,
-                    up_to_id: id_map.get(&7).copied(),
+                    up_to_id: id_map
+                        .get(&7)
+                        .map(|id| id.to_jmap_string().into())
+                        .unwrap_or(JSONValue::Null),
                     calculate_total: false,
                     arguments: JMAPMailQueryArguments {
                         collapse_threads: false,
@@ -190,45 +191,48 @@ where
             .into_iter()
             .enumerate()
             {
-                if test_num == 3 && query.up_to_id.is_none() {
+                if test_num == 3 && query.up_to_id.is_null() {
                     continue;
                 }
                 let changes = mail_store.mail_query_changes(query.clone()).unwrap();
 
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.
-                    for id in &changes.removed {
+                    for id in changes.eval_unwrap_array("/removed") {
+                        let id = id.to_jmap_id().unwrap();
                         assert!(
-                            removed_ids.contains(id),
+                            removed_ids.contains(&id),
                             "{:?} = {:?} (id: {})",
                             query,
                             changes,
-                            id_map.iter().find(|(_, v)| **v == *id).unwrap().0
+                            id_map.iter().find(|(_, v)| **v == id).unwrap().0
                         );
                     }
                 }
                 if test_num == 1 || test_num == 2 {
                     // Only type 1 results should be added to the list.
-                    for item in &changes.added {
+                    for item in changes.eval_unwrap_array("/added") {
+                        let id = item.eval_unwrap_jmap_id("/id");
                         assert!(
-                            type1_ids.contains(&item.id),
+                            type1_ids.contains(&id),
                             "{:?} = {:?} (id: {})",
                             query,
                             changes,
-                            id_map.iter().find(|(_, v)| **v == item.id).unwrap().0
+                            id_map.iter().find(|(_, v)| **v == id).unwrap().0
                         );
                     }
                 }
                 if test_num == 3 {
                     // Only ids up to 7 should be added to the list.
-                    for item in &changes.added {
-                        let id = id_map.iter().find(|(_, v)| **v == item.id).unwrap().0;
+                    for item in changes.eval_unwrap_array("/added") {
+                        let item_id = item.eval_unwrap_jmap_id("/id");
+                        let id = id_map.iter().find(|(_, v)| **v == item_id).unwrap().0;
                         assert!(id < &7, "{:?} = {:?} (id: {})", query, changes, id);
                     }
                 }
 
                 if let JMAPState::Initial = state {
-                    new_state = changes.new_query_state;
+                    new_state = changes.eval_unwrap_jmap_state("/newQueryState");
                 }
             }
         }

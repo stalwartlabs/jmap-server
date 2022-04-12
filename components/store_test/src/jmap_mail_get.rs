@@ -150,7 +150,8 @@ where
                     },
                 })
                 .unwrap()
-                .list
+                .eval("/list")
+                .unwrap()
         } else {
             let mut properties = vec![
                 JMAPMailProperties::Id,
@@ -369,13 +370,7 @@ where
                             },
                         })
                         .unwrap()
-                        .list
-                        .unwrap_array()
-                        .unwrap()
-                        .pop()
-                        .unwrap()
-                        .unwrap_object()
-                        .unwrap(),
+                        .eval_unwrap_object("/list/0"),
                 );
             }
             JSONValue::Array(vec![JSONValue::Object(result)])

@@ -10,7 +10,7 @@ where
     let mut thread_id = 0;
 
     for num in [5, 3, 1, 2, 4] {
-        let mut result = mail_store
+        let result = mail_store
             .mail_import_blob(
                 account_id,
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
@@ -18,11 +18,9 @@ where
                 vec![],
                 Some(10000i64 + num as i64),
             )
-            .unwrap()
-            .unwrap_object()
             .unwrap();
-        thread_id = result.remove("threadId").unwrap().to_jmap_id().unwrap();
-        expected_result[num - 1] = result.remove("id").unwrap();
+        thread_id = result.eval_unwrap_jmap_id("/threadId");
+        expected_result[num - 1] = result.eval("/id").unwrap();
     }
 
     assert_eq!(
@@ -34,17 +32,7 @@ where
                 arguments: ()
             })
             .unwrap()
-            .list
-            .unwrap_array()
-            .unwrap()
-            .pop()
-            .unwrap()
-            .unwrap_object()
-            .unwrap()
-            .remove("emailIds")
-            .unwrap()
-            .unwrap_array()
-            .unwrap(),
+            .eval_unwrap_array("/list/0/emailIds"),
         expected_result
     );
 }

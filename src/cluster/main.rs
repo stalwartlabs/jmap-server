@@ -71,6 +71,9 @@ pub async fn start_cluster<T>(
                             debug!("[{}] Marked as offline.", cluster.addr);
                             if *notify_peers {
                                 cluster.broadcast_leave().await;
+                                for peer in &mut cluster.peers {
+                                    peer.state = gossip::State::Offline;
+                                }
                             }
                         } else {
                             debug!("[{}] Marked as online.", cluster.addr);
@@ -80,16 +83,12 @@ pub async fn start_cluster<T>(
                             } else {
                                 last_ping =
                                     Instant::now() - Duration::from_millis(PING_INTERVAL + 50);
+                                for peer in &mut cluster.peers {
+                                    peer.state = gossip::State::Suspected;
+                                }
                             }
                         }
                         is_offline = *set_offline;
-                        for peer in &mut cluster.peers {
-                            peer.state = if is_offline {
-                                gossip::State::Offline
-                            } else {
-                                gossip::State::Suspected
-                            };
-                        }
 
                         cluster.start_election_timer(!is_offline);
                     }
@@ -149,12 +148,13 @@ pub async fn start_cluster<T>(
             if !cluster.peers.is_empty() {
                 let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
                 let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
-                    debug_assert!(
-                        time_since_last_ping <= (PING_INTERVAL + 200),
-                        "[{}] Possible event loop block: {}ms since last ping.",
-                        cluster.addr,
-                        time_since_last_ping
-                    );
+                    #[cfg(test)]
+                    if time_since_last_ping > (PING_INTERVAL + 200) {
+                        error!(
+                            "[{}] Possible event loop block: {}ms since last ping.",
+                            cluster.addr, time_since_last_ping
+                        );
+                    }
 
                     if cluster.is_leading() {
                         print!("{}ms ", time_since_last_ping)
@@ -169,6 +169,7 @@ pub async fn start_cluster<T>(
                     PING_INTERVAL - time_since_last_ping
                 };
 
+                let time = Instant::now();
                 wait_timeout = Duration::from_millis(
                     if let Some(time_to_next_election) = cluster.time_to_next_election() {
                         if time_to_next_election == 0 {
@@ -186,6 +187,14 @@ pub async fn start_cluster<T>(
                         time_to_next_ping
                     },
                 );
+
+                if time.elapsed().as_millis() > 50 {
+                    panic!(
+                        "{}ms [{}] Request votes took too long!",
+                        time.elapsed().as_millis(),
+                        cluster.addr,
+                    );
+                }
             }
         }
     });

@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 
-use jmap::changes::{JMAPChanges, JMAPState};
+use jmap::{
+    changes::{JMAPChanges, JMAPState},
+    id::JMAPIdSerialize,
+    json::JSONValue,
+};
 use store::{
     batch::WriteBatch,
     log::{Entry, LogIndex, RaftId, TermId},
@@ -32,7 +36,7 @@ where
             mail_store.write(batch).unwrap();
 
             expected_changed_accounts.insert(account_id);
-            expected_inserted_id.push(run + 1);
+            expected_inserted_id.push((run + 1).to_jmap_string().into());
         }
         assert_compaction(&mail_store, NUM_ACCOUNTS);
     }
@@ -69,11 +73,18 @@ where
 
         let changes = mail_store
             .get_jmap_changes(account_id, Collection::Mail, JMAPState::Initial, 0)
-            .unwrap();
+            .unwrap()
+            .result;
 
-        assert_eq!(changes.created, expected_inserted_id);
-        assert_eq!(changes.updated, Vec::<u64>::new());
-        assert_eq!(changes.destroyed, Vec::<u64>::new());
+        assert_eq!(
+            changes.eval("/created").unwrap(),
+            JSONValue::Array(expected_inserted_id),
+        );
+        assert_eq!(changes.eval("/updated").unwrap(), JSONValue::Array(vec![]));
+        assert_eq!(
+            changes.eval("/destroyed").unwrap(),
+            JSONValue::Array(vec![])
+        );
     }
 }
 

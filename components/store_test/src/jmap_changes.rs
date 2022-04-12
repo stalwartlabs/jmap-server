@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use jmap::changes::{JMAPChanges, JMAPState};
+use jmap::{
+    changes::{JMAPChanges, JMAPState},
+    json::JSONValue,
+};
 use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
 
 use crate::db_log::assert_compaction;
@@ -150,25 +153,33 @@ where
         for (test_num, state) in (&states).iter().enumerate() {
             let changes = mail_store
                 .get_jmap_changes(account_id, Collection::Mail, state.clone(), 0)
-                .unwrap();
+                .unwrap()
+                .result;
 
             assert_eq!(
                 expected_changelog[test_num],
-                vec![changes.created, changes.updated, changes.destroyed]
-                    .into_iter()
-                    .map(|list| {
-                        let mut list = list.into_iter().collect::<Vec<_>>();
-                        list.sort_unstable();
-                        list
-                    })
-                    .collect::<Vec<Vec<_>>>(),
+                vec![
+                    changes.eval_unwrap_array("/created"),
+                    changes.eval_unwrap_array("/updated"),
+                    changes.eval_unwrap_array("/destroyed")
+                ]
+                .into_iter()
+                .map(|list| {
+                    let mut list = list
+                        .into_iter()
+                        .map(|i| i.to_jmap_id().unwrap())
+                        .collect::<Vec<_>>();
+                    list.sort_unstable();
+                    list
+                })
+                .collect::<Vec<Vec<_>>>(),
                 "test_num: {}, state: {:?}",
                 test_num,
                 state
             );
 
             if let JMAPState::Initial = state {
-                new_state = changes.new_state;
+                new_state = changes.eval_unwrap_jmap_state("/newState");
             }
 
             for max_changes in 1..=8 {
@@ -190,28 +201,32 @@ where
                 for _ in 0..100 {
                     let changes = mail_store
                         .get_jmap_changes(account_id, Collection::Mail, int_state, max_changes)
-                        .unwrap();
+                        .unwrap()
+                        .result;
 
                     assert!(
-                        changes.total_changes <= max_changes,
+                        changes.eval_unwrap_unsigned_int("/totalChanges") <= max_changes as u64,
                         "{} > {}",
-                        changes.total_changes,
+                        changes.eval_unwrap_unsigned_int("/totalChanges"),
                         max_changes
                     );
 
-                    changes.created.iter().for_each(|id| {
-                        assert!(insertions.remove(id));
+                    changes.eval_unwrap_array("/created").iter().for_each(|id| {
+                        assert!(insertions.remove(&id.to_jmap_id().unwrap()));
                     });
-                    changes.updated.iter().for_each(|id| {
-                        assert!(updates.remove(id));
+                    changes.eval_unwrap_array("/updated").iter().for_each(|id| {
+                        assert!(updates.remove(&id.to_jmap_id().unwrap()));
                     });
-                    changes.destroyed.iter().for_each(|id| {
-                        assert!(deletions.remove(id));
-                    });
+                    changes
+                        .eval_unwrap_array("/destroyed")
+                        .iter()
+                        .for_each(|id| {
+                            assert!(deletions.remove(&id.to_jmap_id().unwrap()));
+                        });
 
-                    int_state = changes.new_state;
+                    int_state = changes.eval("/newState").unwrap().to_jmap_state().unwrap();
 
-                    if !changes.has_more_changes {
+                    if !changes.eval_unwrap_bool("/hasMoreChanges") {
                         break;
                     }
                 }
@@ -229,9 +244,23 @@ where
 
     let changes = mail_store
         .get_jmap_changes(account_id, Collection::Mail, JMAPState::Initial, 0)
-        .unwrap();
+        .unwrap()
+        .result;
 
-    assert_eq!(changes.created, vec![2, 3, 11, 12]);
-    assert_eq!(changes.updated, Vec::<u64>::new());
-    assert_eq!(changes.destroyed, Vec::<u64>::new());
+    assert_eq!(
+        changes
+            .eval_unwrap_array("/created")
+            .into_iter()
+            .map(|i| i.to_jmap_id().unwrap())
+            .collect::<Vec<_>>(),
+        vec![2, 3, 11, 12]
+    );
+    assert_eq!(
+        changes.eval_unwrap_array("/updated"),
+        Vec::<JSONValue>::new()
+    );
+    assert_eq!(
+        changes.eval_unwrap_array("/destroyed"),
+        Vec::<JSONValue>::new()
+    );
 }

@@ -4,7 +4,7 @@ use jmap::changes::JMAPChanges;
 use jmap::id::{BlobId, JMAPIdSerialize};
 use jmap::json::JSONValue;
 
-use jmap::{json::JSONPointer, JMAPError, JMAPSet, JMAPSetErrorType, JMAPSetResponse};
+use jmap::{json::JSONPointer, JMAPError, JMAPSet, JMAPSetErrorType};
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
 use mail_builder::headers::date::Date;
@@ -35,7 +35,7 @@ pub struct MessageItem {
 }
 
 pub trait JMAPMailSet {
-    fn mail_set(&self, request: JMAPSet<()>) -> jmap::Result<JMAPSetResponse>;
+    fn mail_set(&self, request: JMAPSet<()>) -> jmap::Result<JSONValue>;
     fn build_message(
         &self,
         account: AccountId,
@@ -70,7 +70,7 @@ impl<T> JMAPMailSet for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_set(&self, request: JMAPSet<()>) -> jmap::Result<JMAPSetResponse> {
+    fn mail_set(&self, request: JMAPSet<()>) -> jmap::Result<JSONValue> {
         let old_state = self.get_state(request.account_id, Collection::Mail)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -86,14 +86,11 @@ where
         }
 
         let mut changes = WriteBatch::new(request.account_id, self.config.is_in_cluster);
-        let mut response = JMAPSetResponse {
-            old_state,
-            ..Default::default()
-        };
         let document_ids = self
             .get_document_ids(request.account_id, Collection::Mail)?
             .unwrap_or_else(RoaringBitmap::new);
         let mut mailbox_ids = None;
+        let mut response = HashMap::new();
 
         if let JSONValue::Object(create) = request.create {
             let mut created = HashMap::with_capacity(create.len());
@@ -129,13 +126,25 @@ where
                 }
             }
 
-            if !created.is_empty() {
-                response.created = created.into();
-            }
-
-            if !not_created.is_empty() {
-                response.not_created = not_created.into();
-            }
+            response.insert(
+                "created".to_string(),
+                if !created.is_empty() {
+                    created.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+            response.insert(
+                "notCreated".to_string(),
+                if !not_created.is_empty() {
+                    not_created.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+        } else {
+            response.insert("created".to_string(), JSONValue::Null);
+            response.insert("notCreated".to_string(), JSONValue::Null);
         }
 
         if let JSONValue::Object(update) = request.update {
@@ -541,12 +550,25 @@ where
                 }
             }
 
-            if !updated.is_empty() {
-                response.updated = updated.into();
-            }
-            if !not_updated.is_empty() {
-                response.not_updated = not_updated.into();
-            }
+            response.insert(
+                "updated".to_string(),
+                if !updated.is_empty() {
+                    updated.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+            response.insert(
+                "notUpdated".to_string(),
+                if !not_updated.is_empty() {
+                    not_updated.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+        } else {
+            response.insert("updated".to_string(), JSONValue::Null);
+            response.insert("notUpdated".to_string(), JSONValue::Null);
         }
 
         if let JSONValue::Array(destroy_ids) = request.destroy {
@@ -571,23 +593,40 @@ where
                 }
             }
 
-            if !destroyed.is_empty() {
-                response.destroyed = destroyed.into();
-            }
-
-            if !not_destroyed.is_empty() {
-                response.not_destroyed = not_destroyed.into();
-            }
-        }
-
-        if !changes.is_empty() {
-            self.write(changes)?;
-            response.new_state = self.get_state(request.account_id, Collection::Mail)?;
+            response.insert(
+                "destroyed".to_string(),
+                if !destroyed.is_empty() {
+                    destroyed.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+            response.insert(
+                "notDestroyed".to_string(),
+                if !not_destroyed.is_empty() {
+                    not_destroyed.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
         } else {
-            response.new_state = response.old_state.clone();
+            response.insert("destroyed".to_string(), JSONValue::Null);
+            response.insert("notDestroyed".to_string(), JSONValue::Null);
         }
 
-        Ok(response)
+        response.insert(
+            "newState".to_string(),
+            if !changes.is_empty() {
+                self.write(changes)?;
+                self.get_state(request.account_id, Collection::Mail)?
+            } else {
+                old_state.clone()
+            }
+            .into(),
+        );
+        response.insert("oldState".to_string(), old_state.into());
+
+        Ok(response.into())
     }
 
     #[allow(clippy::blocks_in_if_conditions)]

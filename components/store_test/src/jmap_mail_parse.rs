@@ -44,12 +44,7 @@ where
                             None,
                         )
                         .unwrap()
-                        .unwrap_object()
-                        .unwrap()
-                        .get("id")
-                        .unwrap()
-                        .to_jmap_id()
-                        .unwrap()]
+                        .eval_unwrap_jmap_id("/id")]
                     .into(),
                     properties: vec![JMAPMailProperties::Attachments].into(),
                     arguments: JMAPMailGetArguments {
@@ -61,25 +56,7 @@ where
                     },
                 })
                 .unwrap()
-                .list
-                .unwrap_array()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .unwrap_object()
-                .unwrap()
-                .remove("attachments")
-                .unwrap()
-                .unwrap_array()
-                .unwrap()
-                .pop()
-                .unwrap()
-                .unwrap_object()
-                .unwrap()
-                .remove("blobId")
-                .unwrap()
-                .unwrap_string()
-                .unwrap(),
+                .eval_unwrap_string("/list/0/attachments/0/blobId"),
         )
         .unwrap();
 

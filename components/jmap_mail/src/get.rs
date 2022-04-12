@@ -7,7 +7,7 @@ use jmap::{
     changes::JMAPChanges,
     id::{BlobId, JMAPIdSerialize},
     json::JSONValue,
-    JMAPError, JMAPGet, JMAPGetResponse,
+    JMAPError, JMAPGet,
 };
 
 use crate::{
@@ -76,7 +76,7 @@ pub trait JMAPMailGet {
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties, JMAPMailGetArguments>,
-    ) -> jmap::Result<jmap::JMAPGetResponse>;
+    ) -> jmap::Result<JSONValue>;
 }
 
 impl<T> JMAPMailGet for JMAPStore<T>
@@ -86,7 +86,7 @@ where
     fn mail_get(
         &self,
         request: JMAPGet<JMAPMailProperties, JMAPMailGetArguments>,
-    ) -> jmap::Result<jmap::JMAPGetResponse> {
+    ) -> jmap::Result<JSONValue> {
         let properties = request.properties.unwrap_or_else(|| {
             vec![
                 JMAPMailProperties::Id,
@@ -199,7 +199,7 @@ where
         for jmap_id in request_ids {
             let document_id = jmap_id.get_document_id();
             if !document_ids.contains(document_id) {
-                not_found.push(jmap_id);
+                not_found.push(jmap_id.to_jmap_string().into());
                 continue;
             }
 
@@ -636,19 +636,28 @@ where
             results.push(result.into());
         }
 
-        Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, Collection::Mail)?,
-            list: if !results.is_empty() {
+        let mut obj = HashMap::new();
+        obj.insert(
+            "state".to_string(),
+            self.get_state(request.account_id, Collection::Mail)?.into(),
+        );
+        obj.insert(
+            "list".to_string(),
+            if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
                 JSONValue::Null
             },
-            not_found: if not_found.is_empty() {
-                None
-            } else {
+        );
+        obj.insert(
+            "notFound".to_string(),
+            if !not_found.is_empty() {
                 not_found.into()
+            } else {
+                JSONValue::Null
             },
-        })
+        );
+        Ok(obj.into())
     }
 }
 

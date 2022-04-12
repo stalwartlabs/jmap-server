@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
-use jmap_mail::mailbox::Mailbox;
 use jmap_mail::{MessageData, MessageOutline, MESSAGE_DATA};
 use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;
@@ -18,7 +17,7 @@ use store::{
     serialize::{BM_KEYWORD, BM_TAG_ID, BM_TAG_STATIC, BM_TAG_TEXT},
     AccountId, ColumnFamily, JMAPStore, Store,
 };
-use store::{log, Collection, DocumentId, LongInteger};
+use store::{log, Collection, DocumentId};
 
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
@@ -60,32 +59,44 @@ pub fn init_settings(
         std::fs::remove_dir_all(&temp_dir).unwrap();
     }
     (
-        EnvSettings {
-            args: HashMap::from_iter(
-                vec![
-                    (
+        if total_peers > 1 {
+            EnvSettings {
+                args: HashMap::from_iter(
+                    vec![
+                        (
+                            "db-path".to_string(),
+                            temp_dir.to_str().unwrap().to_string(),
+                        ),
+                        ("cluster".to_string(), "secret_key".to_string()),
+                        ("http-port".to_string(), (8000 + peer_num).to_string()),
+                        ("rpc-port".to_string(), (9000 + peer_num).to_string()),
+                        (
+                            "seed-nodes".to_string(),
+                            (1..=total_peers)
+                                .filter_map(|i| {
+                                    if i == peer_num {
+                                        None
+                                    } else {
+                                        Some(format!("127.0.0.1:{}", (9000 + i)))
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join(";"),
+                        ),
+                    ]
+                    .into_iter(),
+                ),
+            }
+        } else {
+            EnvSettings {
+                args: HashMap::from_iter(
+                    vec![(
                         "db-path".to_string(),
                         temp_dir.to_str().unwrap().to_string(),
-                    ),
-                    ("cluster".to_string(), "secret_key".to_string()),
-                    ("http-port".to_string(), (8000 + peer_num).to_string()),
-                    ("rpc-port".to_string(), (9000 + peer_num).to_string()),
-                    (
-                        "seed-nodes".to_string(),
-                        (1..=total_peers)
-                            .filter_map(|i| {
-                                if i == peer_num {
-                                    None
-                                } else {
-                                    Some(format!("127.0.0.1:{}", (9000 + i)))
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(";"),
-                    ),
-                ]
-                .into_iter(),
-            ),
+                    )]
+                    .into_iter(),
+                ),
+            }
         },
         temp_dir,
     )

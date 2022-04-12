@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+
 use store::{
     query::JMAPStoreQuery, Collection, Comparator, DocumentId, Filter, FilterOperator, JMAPId,
     LogicalOperator,
 };
 
 use crate::{
-    changes::JMAPState, JMAPComparator, JMAPError, JMAPFilter, JMAPLogicalOperator,
-    JMAPQueryRequest, JMAPQueryResponse,
+    changes::JMAPState, id::JMAPIdSerialize, json::JSONValue, JMAPComparator, JMAPError,
+    JMAPFilter, JMAPLogicalOperator, JMAPQueryRequest,
 };
 
 struct QueryState<T> {
@@ -109,8 +111,7 @@ impl<T, U, V> JMAPQueryRequest<T, U, V> {
         mut self,
         jmap_ids: W,
         query_state: JMAPState,
-        is_immutable: bool,
-    ) -> crate::Result<JMAPQueryResponse>
+    ) -> crate::Result<JSONValue>
     where
         W: Iterator<Item = JMAPId>,
     {
@@ -129,13 +130,13 @@ impl<T, U, V> JMAPQueryRequest<T, U, V> {
                     if self.position > 0 {
                         self.position -= 1;
                     } else {
-                        results.push(jmap_id);
+                        results.push(jmap_id.to_jmap_string().into());
                         if self.limit > 0 && results.len() == self.limit {
                             break;
                         }
                     }
                 } else {
-                    results.push(jmap_id);
+                    results.push(jmap_id.to_jmap_string().into());
                 }
             } else if self.anchor_offset >= 0 {
                 if !anchor_found {
@@ -148,14 +149,14 @@ impl<T, U, V> JMAPQueryRequest<T, U, V> {
                 if self.anchor_offset > 0 {
                     self.anchor_offset -= 1;
                 } else {
-                    results.push(jmap_id);
+                    results.push(jmap_id.to_jmap_string().into());
                     if self.limit > 0 && results.len() == self.limit {
                         break;
                     }
                 }
             } else {
                 anchor_found = &jmap_id == self.anchor.as_ref().unwrap();
-                results.push(jmap_id);
+                results.push(jmap_id.to_jmap_string().into());
 
                 if !anchor_found {
                     continue;
@@ -192,15 +193,27 @@ impl<T, U, V> JMAPQueryRequest<T, U, V> {
             return Err(JMAPError::AnchorNotFound);
         };
 
-        Ok(JMAPQueryResponse {
-            account_id: self.account_id,
-            include_total: self.calculate_total,
-            query_state,
-            position: start_position,
-            total: total_results,
-            limit: self.limit,
-            ids: results,
-            is_immutable,
-        })
+        let mut response = HashMap::new();
+        response.insert(
+            "accountId".to_string(),
+            (self.account_id as JMAPId).to_jmap_string().into(),
+        );
+        response.insert("position".to_string(), start_position.into());
+        response.insert("queryState".to_string(), query_state.into());
+        if self.calculate_total {
+            response.insert("total".to_string(), total_results.into());
+        }
+        if self.limit > 0 && self.limit < total_results {
+            response.insert("limit".to_string(), self.limit.into());
+        }
+        response.insert("ids".to_string(), results.into());
+
+        Ok(response.into())
     }
+}
+
+#[derive(Debug)]
+pub struct JMAPQueryResult {
+    pub is_immutable: bool,
+    pub result: JSONValue,
 }

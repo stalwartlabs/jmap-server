@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
+use jmap::json::JSONValue;
+use jmap::query::JMAPQueryResult;
 use jmap::JMAPComparator;
-use jmap::{changes::JMAPChanges, JMAPQueryRequest, JMAPQueryResponse};
+use jmap::{changes::JMAPChanges, JMAPQueryRequest};
 use mail_parser::RfcHeader;
 use nlp::Language;
 use store::{
@@ -64,7 +66,16 @@ pub trait JMAPMailQuery {
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryResponse>;
+    ) -> jmap::Result<JSONValue>;
+
+    fn mail_query_ext(
+        &self,
+        request: JMAPQueryRequest<
+            JMAPMailFilterCondition,
+            JMAPMailComparator,
+            JMAPMailQueryArguments,
+        >,
+    ) -> jmap::Result<JMAPQueryResult>;
 
     fn get_thread_keywords(
         &self,
@@ -80,12 +91,23 @@ where
 {
     fn mail_query(
         &self,
+        request: JMAPQueryRequest<
+            JMAPMailFilterCondition,
+            JMAPMailComparator,
+            JMAPMailQueryArguments,
+        >,
+    ) -> jmap::Result<JSONValue> {
+        self.mail_query_ext(request).map(|r| r.result)
+    }
+
+    fn mail_query_ext(
+        &self,
         mut request: JMAPQueryRequest<
             JMAPMailFilterCondition,
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryResponse> {
+    ) -> jmap::Result<JMAPQueryResult> {
         let mut is_immutable_filter = true;
         let mut is_immutable_sort = true;
         let account_id = request.account_id;
@@ -321,18 +343,15 @@ where
             request.limit = self.config.query_max_results;
         }
 
-        let results = self.query(request.build_query(
-            Collection::Mail,
-            cond_fnc,
-            sort_fnc,
-            filter_map_fnc,
-        )?)?;
+        let query = request.build_query(Collection::Mail, cond_fnc, sort_fnc, filter_map_fnc)?;
 
-        request.into_response(
-            results,
-            self.get_state(account_id, Collection::Mail)?,
-            is_immutable_filter && is_immutable_sort,
-        )
+        Ok(JMAPQueryResult {
+            is_immutable: is_immutable_filter && is_immutable_sort,
+            result: request.into_response(
+                self.query(query)?,
+                self.get_state(account_id, Collection::Mail)?,
+            )?,
+        })
     }
 
     fn get_thread_keywords(

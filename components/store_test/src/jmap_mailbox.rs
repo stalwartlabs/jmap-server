@@ -152,9 +152,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         [
             "drafts",
@@ -194,9 +194,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         [
             "drafts",
@@ -237,9 +237,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         [
             "1",
@@ -272,9 +272,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         ["spam", "spam1", "spam2"]
     );
@@ -295,7 +295,7 @@ where
             },
         })
         .unwrap()
-        .ids
+        .eval_unwrap_array("/ids")
         .is_empty());
 
     // Role filters
@@ -318,9 +318,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         ["inbox"]
     );
@@ -342,9 +342,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         ["drafts", "inbox", "sent", "spam", "trash"]
     );
@@ -366,9 +366,7 @@ where
             },
         })
         .unwrap()
-        .not_updated
-        .unwrap_object()
-        .unwrap()
+        .eval_unwrap_object("/notUpdated")
         .remove(&get_mailbox_id(&id_map, "sent"))
         .is_some());
 
@@ -389,9 +387,7 @@ where
             },
         })
         .unwrap()
-        .not_updated
-        .unwrap_object()
-        .unwrap()
+        .eval_unwrap_object("/notUpdated")
         .remove(&get_mailbox_id(&id_map, "2"))
         .is_some());
 
@@ -416,9 +412,7 @@ where
             },
         })
         .unwrap()
-        .not_updated
-        .unwrap_object()
-        .unwrap()
+        .eval_unwrap_object("/notUpdated")
         .remove(&get_mailbox_id(&id_map, "1"))
         .is_some());
 
@@ -439,9 +433,7 @@ where
             },
         })
         .unwrap()
-        .not_updated
-        .unwrap_object()
-        .unwrap()
+        .eval_unwrap_object("/notUpdated")
         .remove(&get_mailbox_id(&id_map, "1"))
         .is_some());
 
@@ -463,9 +455,7 @@ where
             },
         })
         .unwrap()
-        .not_updated
-        .unwrap_object()
-        .unwrap()
+        .eval_unwrap_object("/notUpdated")
         .remove(&get_mailbox_id(&id_map, "1"))
         .is_some());
 
@@ -477,7 +467,7 @@ where
             max_changes: 0,
         })
         .unwrap()
-        .new_state;
+        .eval_unwrap_jmap_state("/newState");
 
     // Rename and move mailbox
     assert_eq!(
@@ -501,7 +491,8 @@ where
                 },
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 
@@ -513,14 +504,14 @@ where
             max_changes: 0,
         })
         .unwrap();
-    assert_eq!(state.total_changes, 1);
-    assert!(state.updated.len() == 1);
+    assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 1);
+    assert!(state.eval_unwrap_array("/updated").len() == 1);
     assert!(
-        state.arguments.updated_properties.is_empty(),
+        state.eval("/updatedProperties").is_err(),
         "{:?}",
-        state.arguments.updated_properties
+        state.eval("/updatedProperties").unwrap()
     );
-    let state = state.new_state;
+    let state = state.eval_unwrap_jmap_state("/newState");
 
     // Insert email into Inbox
     let message_id = mail_store
@@ -534,12 +525,7 @@ where
             None,
         )
         .unwrap()
-        .unwrap_object()
-        .unwrap()
-        .remove("id")
-        .unwrap()
-        .unwrap_string()
-        .unwrap();
+        .eval_unwrap_string("/id");
 
     // Only email properties must have changed
     let state = mail_store
@@ -549,21 +535,21 @@ where
             max_changes: 0,
         })
         .unwrap();
-    assert_eq!(state.total_changes, 1);
+    assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 1);
     assert_eq!(
-        state.updated,
-        vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox")).unwrap()]
+        state.eval("/updated").unwrap(),
+        vec![get_mailbox_id(&id_map, "inbox").into()].into()
     );
     assert_eq!(
-        state.arguments.updated_properties,
-        vec![
-            JMAPMailboxProperties::TotalEmails,
-            JMAPMailboxProperties::UnreadEmails,
-            JMAPMailboxProperties::TotalThreads,
-            JMAPMailboxProperties::UnreadThreads,
-        ]
+        state.eval("/updatedProperties").unwrap(),
+        JSONValue::Array(vec![
+            JMAPMailboxProperties::TotalEmails.into(),
+            JMAPMailboxProperties::UnreadEmails.into(),
+            JMAPMailboxProperties::TotalThreads.into(),
+            JMAPMailboxProperties::UnreadThreads.into(),
+        ])
     );
-    let state = state.new_state;
+    let state = state.eval_unwrap_jmap_state("/newState");
 
     // Move email from Inbox to Trash
     assert_eq!(
@@ -586,34 +572,40 @@ where
                 arguments: (),
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 
     // E-mail properties of both Inbox and Trash must have changed
-    let mut state = mail_store
+    let state = mail_store
         .mailbox_changes(JMAPChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
         })
         .unwrap();
-    assert_eq!(state.total_changes, 2);
+    assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 2);
     let mut folder_ids = vec![
         JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "trash")).unwrap(),
         JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox")).unwrap(),
     ];
-    state.updated.sort_unstable();
+    let mut updated_ids = state
+        .eval_unwrap_array("/updated")
+        .into_iter()
+        .map(|i| i.to_jmap_id().unwrap())
+        .collect::<Vec<_>>();
+    updated_ids.sort_unstable();
     folder_ids.sort_unstable();
-    assert_eq!(state.updated, folder_ids,);
+    assert_eq!(updated_ids, folder_ids);
     assert_eq!(
-        state.arguments.updated_properties,
-        vec![
-            JMAPMailboxProperties::TotalEmails,
-            JMAPMailboxProperties::UnreadEmails,
-            JMAPMailboxProperties::TotalThreads,
-            JMAPMailboxProperties::UnreadThreads,
-        ]
+        state.eval("/updatedProperties").unwrap(),
+        JSONValue::Array(vec![
+            JMAPMailboxProperties::TotalEmails.into(),
+            JMAPMailboxProperties::UnreadEmails.into(),
+            JMAPMailboxProperties::TotalThreads.into(),
+            JMAPMailboxProperties::UnreadThreads.into(),
+        ])
     );
 
     // Deleting folders with children is not allowed
@@ -630,7 +622,8 @@ where
                 },
             })
             .unwrap()
-            .destroyed,
+            .eval("/destroyed")
+            .unwrap(),
         JSONValue::Null,
     );
 
@@ -648,7 +641,8 @@ where
                 },
             })
             .unwrap()
-            .destroyed,
+            .eval("/destroyed")
+            .unwrap(),
         JSONValue::Null,
     );
 
@@ -666,8 +660,9 @@ where
                 },
             })
             .unwrap()
-            .not_destroyed,
-        JSONValue::Null,
+            .eval("/destroyed/0")
+            .unwrap(),
+        get_mailbox_id(&id_map, "trash").into(),
     );
 
     // Verify that Trash folder and its contents are gone
@@ -681,8 +676,9 @@ where
                 arguments: (),
             })
             .unwrap()
-            .not_found,
-        vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "trash")).unwrap()].into()
+            .eval("/notFound")
+            .unwrap(),
+        vec![get_mailbox_id(&id_map, "trash").into()].into()
     );
     assert_eq!(
         mail_store
@@ -693,8 +689,9 @@ where
                 arguments: JMAPMailGetArguments::default(),
             })
             .unwrap()
-            .not_found,
-        vec![JMAPId::from_jmap_string(&message_id).unwrap()].into()
+            .eval("/notFound")
+            .unwrap(),
+        vec![message_id.into()].into()
     );
 
     // Check search results after changing folder properties
@@ -721,7 +718,8 @@ where
                 },
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 
@@ -752,9 +750,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         ["drafts",]
     );
@@ -775,7 +773,7 @@ where
             },
         })
         .unwrap()
-        .ids
+        .eval_unwrap_array("/ids")
         .is_empty());
 
     assert!(mail_store
@@ -794,7 +792,7 @@ where
             },
         })
         .unwrap()
-        .ids
+        .eval_unwrap_array("/ids")
         .is_empty());
 
     assert_eq!(
@@ -814,9 +812,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         ["inbox", "sent", "spam",]
     );
@@ -838,9 +836,9 @@ where
                 },
             })
             .unwrap()
-            .ids
+            .eval_unwrap_array("/ids")
             .into_iter()
-            .map(|id| id_map.get(&id).unwrap())
+            .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
         ["inbox", "sent", "spam",]
     );
@@ -876,7 +874,7 @@ fn create_nested_mailboxes<T>(
                 mailbox.insert("parentId".to_string(), parent_id.to_jmap_string().into());
             }
         }
-        let mailbox_num = mailbox_num.to_string();
+        let mailbox_num = format!("b{}", mailbox_num);
         let result = mail_store
             .mailbox_set(JMAPSet {
                 account_id,
@@ -890,23 +888,9 @@ fn create_nested_mailboxes<T>(
             })
             .unwrap();
 
-        assert_eq!(result.not_created, JSONValue::Null);
+        assert_eq!(result.eval("/notCreated").unwrap(), JSONValue::Null);
 
-        let mailbox_id = JMAPId::from_jmap_string(
-            &result
-                .created
-                .unwrap_object()
-                .unwrap()
-                .remove(&mailbox_num)
-                .unwrap()
-                .unwrap_object()
-                .unwrap()
-                .remove("id")
-                .unwrap()
-                .unwrap_string()
-                .unwrap(),
-        )
-        .unwrap();
+        let mailbox_id = result.eval_unwrap_jmap_id(&format!("/created/{}/id", mailbox_num));
 
         if let Some(children) = children {
             create_nested_mailboxes(
@@ -952,23 +936,9 @@ where
         })
         .unwrap();
 
-    assert_eq!(result.not_created, JSONValue::Null);
+    assert_eq!(result.eval("/notCreated").unwrap(), JSONValue::Null);
 
-    JMAPId::from_jmap_string(
-        &result
-            .created
-            .unwrap_object()
-            .unwrap()
-            .remove("my_id")
-            .unwrap()
-            .unwrap_object()
-            .unwrap()
-            .remove("id")
-            .unwrap()
-            .unwrap_string()
-            .unwrap(),
-    )
-    .unwrap()
+    result.eval_unwrap_jmap_id("/created/my_id/id")
 }
 
 pub fn update_mailbox<T>(
@@ -1005,7 +975,8 @@ pub fn update_mailbox<T>(
                 },
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 }
@@ -1027,7 +998,8 @@ where
                 },
             })
             .unwrap()
-            .not_destroyed,
+            .eval("/notDestroyed")
+            .unwrap(),
         JSONValue::Null
     );
 }

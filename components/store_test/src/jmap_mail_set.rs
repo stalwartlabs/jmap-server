@@ -2,7 +2,7 @@ use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap::{
     blob::JMAPBlobStore,
-    id::{BlobId, JMAPIdSerialize},
+    id::JMAPIdSerialize,
     json::{JSONNumber, JSONValue},
     JMAPGet, JMAPSet,
 };
@@ -137,7 +137,7 @@ where
                 account_id,
                 if_in_state: None,
                 create: HashMap::from_iter(
-                    vec![("1".to_string(), {
+                    vec![("m1".to_string(), {
                         let mut result: HashMap<String, JSONValue> = HashMap::new();
                         for (k, mut v) in JSONValue::from(
                             serde_json::from_slice::<SortedJSONValue>(
@@ -162,28 +162,20 @@ where
             })
             .unwrap();
 
-        assert_eq!(result.not_created, JSONValue::Null);
+        assert_eq!(result.eval("/notCreated").unwrap(), JSONValue::Null);
 
-        let mut values = result
-            .created
-            .unwrap_object()
-            .unwrap()
-            .remove("1")
-            .unwrap()
-            .unwrap_object()
-            .unwrap();
+        let values = result.eval("/created/m1").unwrap();
 
         let raw_message = mail_store
             .download_blob(
                 account_id,
-                &BlobId::from_jmap_string(values.get("blobId").unwrap().to_string().unwrap())
-                    .unwrap(),
+                &values.eval_unwrap_blob_id("/blobId"),
                 get_message_blob,
             )
             .unwrap()
             .unwrap();
 
-        let jmap_id_str = values.remove("id").unwrap().unwrap_string().unwrap();
+        let jmap_id_str = values.eval_unwrap_string("/id");
         let jmap_id = JMAPId::from_jmap_string(&jmap_id_str).unwrap();
         message_ids.push(jmap_id_str);
 
@@ -240,7 +232,8 @@ where
                     },
                 })
                 .unwrap()
-                .list,
+                .eval("/list")
+                .unwrap(),
         );
 
         file_name.set_extension("jmap");
@@ -310,13 +303,7 @@ where
             },
         })
         .unwrap()
-        .list
-        .unwrap_array()
-        .unwrap()
-        .pop()
-        .unwrap()
-        .unwrap_object()
-        .unwrap();
+        .eval_unwrap_object("/list/0");
 
     let mut mailboxes = Vec::new();
     let mut keywords = Vec::new();
@@ -369,7 +356,8 @@ fn jmap_mail_update<T>(
                 arguments: (),
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 
@@ -400,7 +388,8 @@ fn jmap_mail_update<T>(
                 arguments: (),
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 
@@ -428,18 +417,7 @@ fn jmap_mail_update<T>(
                 arguments: (),
             })
             .unwrap()
-            .not_updated
-            .unwrap_object()
-            .unwrap()
-            .into_values()
-            .next()
-            .unwrap()
-            .unwrap_object()
-            .unwrap()
-            .remove("description")
-            .unwrap()
-            .unwrap_string()
-            .unwrap(),
+            .eval_unwrap_string(&format!("/notUpdated/{}/description", message_id_1)),
         "Message must belong to at least one mailbox."
     );
 
@@ -455,22 +433,11 @@ fn jmap_mail_update<T>(
                 }"#,
                 )]),
                 create: JSONValue::Null,
-                destroy: vec![message_id_1.into()].into(),
+                destroy: vec![message_id_1.clone().into()].into(),
                 arguments: (),
             })
             .unwrap()
-            .not_updated
-            .unwrap_object()
-            .unwrap()
-            .into_values()
-            .next()
-            .unwrap()
-            .unwrap_object()
-            .unwrap()
-            .remove("error_type")
-            .unwrap()
-            .unwrap_string()
-            .unwrap(),
+            .eval_unwrap_string(&format!("/notUpdated/{}/error_type", message_id_1)),
         "willDestroy"
     );
 
@@ -485,15 +452,16 @@ fn jmap_mail_update<T>(
                 arguments: (),
             })
             .unwrap()
-            .not_destroyed,
+            .eval("/notDestroyed")
+            .unwrap(),
         JSONValue::Null
     );
 
     assert_eq!(
-        vec![
-            JMAPId::from_jmap_string(&message_id_2).unwrap(),
-            JMAPId::from_jmap_string(&message_id_3).unwrap()
-        ],
+        JSONValue::Array(vec![
+            message_id_2.clone().into(),
+            message_id_3.clone().into()
+        ]),
         mail_store
             .mail_get(JMAPGet {
                 account_id,
@@ -513,7 +481,7 @@ fn jmap_mail_update<T>(
                 }
             },)
             .unwrap()
-            .not_found
+            .eval("/notFound")
             .unwrap()
     )
 }
@@ -541,12 +509,7 @@ where
             received_at,
         )
         .unwrap()
-        .unwrap_object()
-        .unwrap()
-        .get("id")
-        .unwrap()
-        .to_jmap_id()
-        .unwrap()
+        .eval_unwrap_jmap_id("/id")
 }
 
 pub fn update_email<T>(
@@ -589,7 +552,8 @@ pub fn update_email<T>(
                 arguments: (),
             })
             .unwrap()
-            .not_updated,
+            .eval("/notUpdated")
+            .unwrap(),
         JSONValue::Null
     );
 }
@@ -609,7 +573,8 @@ where
                 arguments: (),
             })
             .unwrap()
-            .not_destroyed,
+            .eval("/notDestroyed")
+            .unwrap(),
         JSONValue::Null
     );
 }

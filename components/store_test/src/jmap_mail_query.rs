@@ -453,9 +453,9 @@ where
                     }
                 })
                 .unwrap()
-                .ids
+                .eval_unwrap_array("/ids")
                 .into_iter()
-                .map(|id| get_message_id(mail_store, id, account_id))
+                .map(|id| get_message_id(mail_store, id.to_jmap_id().unwrap(), account_id))
                 .collect::<Vec<String>>(),
             expected_results
         );
@@ -754,9 +754,9 @@ where
             mail_store
                 .mail_query(query.clone())
                 .unwrap()
-                .ids
+                .eval_unwrap_array("/ids")
                 .into_iter()
-                .map(|id| { get_message_id(mail_store, id, account_id) })
+                .map(|id| get_message_id(mail_store, id.to_jmap_id().unwrap(), account_id))
                 .collect::<Vec<String>>(),
             expected_results
         );
@@ -765,9 +765,9 @@ where
             mail_store
                 .mail_query(query)
                 .unwrap()
-                .ids
+                .eval_unwrap_array("/ids")
                 .into_iter()
-                .map(|id| { get_message_id(mail_store, id, account_id) })
+                .map(|id| get_message_id(mail_store, id.to_jmap_id().unwrap(), account_id))
                 .collect::<Vec<String>>(),
             expected_results_collapsed
         );
@@ -818,19 +818,5 @@ where
             arguments: JMAPMailGetArguments::default(),
         })
         .unwrap()
-        .list
-        .unwrap_array()
-        .unwrap()
-        .pop()
-        .unwrap()
-        .unwrap_object()
-        .unwrap()
-        .remove("messageId")
-        .unwrap()
-        .unwrap_array()
-        .unwrap()
-        .pop()
-        .unwrap()
-        .unwrap_string()
-        .unwrap()
+        .eval_unwrap_string("/list/0/messageId/0")
 }

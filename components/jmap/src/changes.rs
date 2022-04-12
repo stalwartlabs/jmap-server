@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::FromIterator};
 
 use store::{
     leb128::Leb128,
     log::{Change, ChangeId, Query},
-    AccountId, Collection, JMAPId, JMAPStore, Store, StoreError,
+    AccountId, Collection, JMAPStore, Store, StoreError,
 };
 
 use crate::{
     id::{hex_reader, HexWriter, JMAPIdSerialize},
     json::JSONValue,
-    JMAPQueryResponse,
+    query::JMAPQueryResult,
 };
 
 #[derive(Debug)]
@@ -19,71 +19,10 @@ pub struct JMAPChangesRequest {
     pub max_changes: usize,
 }
 
-#[derive(Debug)]
-pub struct JMAPQueryChangesResponseItem {
-    pub id: JMAPId,
-    pub index: usize,
-}
-
-#[derive(Debug)]
-pub struct JMAPQueryChangesResponse {
-    pub old_query_state: JMAPState,
-    pub new_query_state: JMAPState,
-    pub total: usize,
-    pub removed: Vec<JMAPId>,
-    pub added: Vec<JMAPQueryChangesResponseItem>,
-}
-
-#[derive(Debug)]
-pub struct JMAPChangesResponse<T> {
-    pub old_state: JMAPState,
-    pub new_state: JMAPState,
-    pub has_more_changes: bool,
+pub struct JMAPChangesResult {
     pub total_changes: usize,
-    pub created: Vec<ChangeId>,
-    pub updated: Vec<ChangeId>,
-    pub destroyed: Vec<ChangeId>,
-    pub arguments: T,
-}
-
-impl<T> From<JMAPChangesResponse<T>> for JSONValue
-where
-    T: Into<JSONValue>,
-{
-    fn from(r: JMAPChangesResponse<T>) -> Self {
-        let mut obj = HashMap::new();
-        obj.insert("oldState".to_string(), r.old_state.into());
-        obj.insert("newState".to_string(), r.new_state.into());
-        obj.insert("hasMoreChanges".to_string(), r.has_more_changes.into());
-        obj.insert(
-            "created".to_string(),
-            r.created
-                .into_iter()
-                .map(|id| id.to_jmap_string().into())
-                .collect::<Vec<JSONValue>>()
-                .into(),
-        );
-        obj.insert(
-            "updated".to_string(),
-            r.updated
-                .into_iter()
-                .map(|id| id.to_jmap_string().into())
-                .collect::<Vec<JSONValue>>()
-                .into(),
-        );
-        obj.insert(
-            "destroyed".to_string(),
-            r.destroyed
-                .into_iter()
-                .map(|id| id.to_jmap_string().into())
-                .collect::<Vec<JSONValue>>()
-                .into(),
-        );
-        if let JSONValue::Object(arguments) = r.arguments.into() {
-            obj.extend(arguments);
-        }
-        obj.into()
-    }
+    pub has_children_changes: bool,
+    pub result: JSONValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,7 +128,7 @@ pub trait JMAPChanges {
         collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse<Vec<JMAPId>>>;
+    ) -> store::Result<JMAPChangesResult>;
 }
 
 impl<T> JMAPChanges for JMAPStore<T>
@@ -209,20 +148,24 @@ where
         collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResponse<Vec<JMAPId>>> {
+    ) -> store::Result<JMAPChangesResult> {
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self.get_changes(account, collection, Query::All)?.unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
-                    return Ok(JMAPChangesResponse {
-                        new_state: since_state.clone(),
-                        old_state: since_state,
-                        has_more_changes: false,
+                    return Ok(JMAPChangesResult {
                         total_changes: 0,
-                        created: Vec::new(),
-                        updated: Vec::new(),
-                        destroyed: Vec::new(),
-                        arguments: Vec::new(),
+                        has_children_changes: false,
+                        result: HashMap::from_iter([
+                            ("hasMoreChanges".to_string(), false.into()),
+                            ("totalChanges".to_string(), 0u64.into()),
+                            ("newState".to_string(), since_state.clone().into()),
+                            ("oldState".to_string(), since_state.into()),
+                            ("created".to_string(), vec![].into()),
+                            ("updated".to_string(), vec![].into()),
+                            ("destroyed".to_string(), vec![].into()),
+                        ])
+                        .into(),
                     });
                 }
 
@@ -272,95 +215,139 @@ where
 
         let mut created = Vec::new();
         let mut updated = Vec::new();
-        let mut child_updated = Vec::new();
         let mut destroyed = Vec::new();
+        let mut items_changed = false;
 
         let total_changes = changelog.changes.len();
         if total_changes > 0 {
             for change in changelog.changes {
                 match change {
-                    Change::Insert(item) => created.push(item),
-                    Change::Update(item) => updated.push(item),
-                    Change::Delete(item) => destroyed.push(item),
-                    Change::ChildUpdate(item) => child_updated.push(item),
+                    Change::Insert(item) => created.push(item.to_jmap_string().into()),
+                    Change::Update(item) => {
+                        items_changed = true;
+                        updated.push(item.to_jmap_string().into())
+                    }
+                    Change::Delete(item) => destroyed.push(item.to_jmap_string().into()),
+                    Change::ChildUpdate(item) => updated.push(item.to_jmap_string().into()),
                 };
             }
         }
 
-        Ok(JMAPChangesResponse {
-            old_state: since_state,
-            new_state: (if has_more_changes {
-                JMAPState::new_intermediate(
-                    changelog.from_change_id,
-                    changelog.to_change_id,
-                    items_sent + max_changes,
-                )
-            } else {
-                JMAPState::new_exact(changelog.to_change_id)
-            }),
-            has_more_changes,
+        Ok(JMAPChangesResult {
             total_changes,
-            created,
-            updated,
-            destroyed,
-            arguments: child_updated,
+            has_children_changes: !updated.is_empty() && !items_changed,
+            result: HashMap::from_iter([
+                ("hasMoreChanges".to_string(), has_more_changes.into()),
+                ("totalChanges".to_string(), total_changes.into()),
+                (
+                    "newState".to_string(),
+                    if has_more_changes {
+                        JMAPState::new_intermediate(
+                            changelog.from_change_id,
+                            changelog.to_change_id,
+                            items_sent + max_changes,
+                        )
+                    } else {
+                        JMAPState::new_exact(changelog.to_change_id)
+                    }
+                    .into(),
+                ),
+                ("oldState".to_string(), since_state.into()),
+                ("created".to_string(), created.into()),
+                ("updated".to_string(), updated.into()),
+                ("destroyed".to_string(), destroyed.into()),
+            ])
+            .into(),
         })
     }
 }
 
-pub fn query_changes(
-    changes: JMAPChangesResponse<Vec<JMAPId>>,
-    query_results: Option<JMAPQueryResponse>,
-    up_to_id: Option<JMAPId>,
-) -> JMAPQueryChangesResponse {
-    let mut removed;
-    let mut added;
+impl JMAPChangesResult {
+    pub fn query(mut self, query_result: JMAPQueryResult, up_to_id: JSONValue) -> JSONValue {
+        let mut result = HashMap::new();
+        let changes = self.result.as_object_mut();
 
-    let total = if let Some(query_results) = query_results {
-        removed = Vec::with_capacity(changes.total_changes);
-        added = Vec::with_capacity(changes.total_changes);
+        if let JSONValue::Object(mut query_results) = query_result.result {
+            let mut removed = Vec::with_capacity(self.total_changes);
+            let mut added = Vec::with_capacity(self.total_changes);
 
-        if changes.total_changes > 0 {
-            if !query_results.is_immutable {
-                for updated_id in &changes.updated {
-                    removed.push(*updated_id);
-                }
-                for (index, id) in query_results.ids.into_iter().enumerate() {
-                    if changes.created.contains(&id) || changes.updated.contains(&id) {
-                        added.push(JMAPQueryChangesResponseItem { id, index });
-                    }
-                }
-            } else {
-                for (index, id) in query_results.ids.into_iter().enumerate() {
-                    //TODO test up to id properly
-                    if let Some(up_to_id) = up_to_id.as_ref() {
-                        if &id == up_to_id {
+            if self.total_changes > 0 {
+                let changes_updated = changes.remove("updated").unwrap().unwrap_array().unwrap();
+                let changes_created = changes.remove("created").unwrap().unwrap_array().unwrap();
+                let changes_destroyed =
+                    changes.remove("destroyed").unwrap().unwrap_array().unwrap();
+
+                if !query_result.is_immutable {
+                    for (index, id) in query_results
+                        .remove("ids")
+                        .unwrap()
+                        .unwrap_array()
+                        .unwrap()
+                        .into_iter()
+                        .enumerate()
+                    {
+                        if id == up_to_id {
                             break;
+                        } else if changes_created.contains(&id) || changes_updated.contains(&id) {
+                            added.push(
+                                HashMap::from_iter([
+                                    ("index".to_string(), index.into()),
+                                    ("id".to_string(), id),
+                                ])
+                                .into(),
+                            );
                         }
                     }
-                    if changes.created.contains(&id) {
-                        added.push(JMAPQueryChangesResponseItem { id, index });
+
+                    removed = changes_updated;
+                } else {
+                    for (index, id) in query_results
+                        .remove("ids")
+                        .unwrap()
+                        .unwrap_array()
+                        .unwrap()
+                        .into_iter()
+                        .enumerate()
+                    {
+                        //TODO test up to id properly
+                        if id == up_to_id {
+                            break;
+                        } else if changes_created.contains(&id) {
+                            added.push(
+                                HashMap::from_iter([
+                                    ("index".to_string(), index.into()),
+                                    ("id".to_string(), id),
+                                ])
+                                .into(),
+                            );
+                        }
                     }
                 }
-            }
-            for deleted_id in changes.destroyed {
-                removed.push(deleted_id);
-            }
-        }
 
-        query_results.total
-    } else {
-        removed = Vec::new();
-        added = Vec::new();
-        0
-    };
+                if !changes_destroyed.is_empty() {
+                    removed.extend(changes_destroyed);
+                }
+            }
 
-    JMAPQueryChangesResponse {
-        old_query_state: changes.old_state,
-        new_query_state: changes.new_state,
-        total,
-        removed,
-        added,
+            if let Some(total) = query_results.remove("total") {
+                result.insert("total".to_string(), total);
+            }
+            result.insert("added".to_string(), added.into());
+            result.insert("removed".to_string(), removed.into());
+        } else {
+            result.insert("added".to_string(), vec![].into());
+            result.insert("removed".to_string(), vec![].into());
+        };
+
+        result.insert(
+            "oldQueryState".to_string(),
+            changes.remove("oldState").unwrap(),
+        );
+        result.insert(
+            "newQueryState".to_string(),
+            changes.remove("newState").unwrap(),
+        );
+        result.into()
     }
 }
 

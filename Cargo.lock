@@ -998,6 +998,7 @@ version = "0.1.0"
 dependencies = [
  "nlp",
  "serde",
+ "serde_json",
  "store",
 ]
 

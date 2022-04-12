@@ -2,15 +2,11 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
-use jmap::changes::{
-    query_changes, JMAPChanges, JMAPChangesRequest, JMAPChangesResponse, JMAPQueryChangesResponse,
-};
+use jmap::changes::{JMAPChanges, JMAPChangesRequest};
 use jmap::id::JMAPIdSerialize;
-use jmap::{json::JSONValue, JMAPError, JMAPSet, JMAPSetErrorType, JMAPSetResponse};
-use jmap::{
-    JMAPComparator, JMAPGet, JMAPGetResponse, JMAPQueryChangesRequest, JMAPQueryRequest,
-    JMAPQueryResponse,
-};
+use jmap::query::JMAPQueryResult;
+use jmap::{json::JSONValue, JMAPError, JMAPSet, JMAPSetErrorType};
+use jmap::{JMAPComparator, JMAPGet, JMAPQueryChangesRequest, JMAPQueryRequest};
 
 use store::batch::Document;
 use store::field::{DefaultOptions, Options, Text};
@@ -58,10 +54,6 @@ pub struct JMAPMailboxSetArguments {
     pub remove_emails: bool,
 }
 
-#[derive(Debug)]
-pub struct JMAPMailboxChangesResponse {
-    pub updated_properties: Vec<JMAPMailboxProperties>,
-}
 pub enum JMAPMailboxFilterCondition {
     ParentId(JMAPId),
     Name(String),
@@ -129,6 +121,12 @@ impl From<JMAPMailboxProperties> for FieldId {
     }
 }
 
+impl From<JMAPMailboxProperties> for JSONValue {
+    fn from(value: JMAPMailboxProperties) -> Self {
+        JSONValue::String(value.as_str().to_string())
+    }
+}
+
 impl JMAPMailboxProperties {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -149,15 +147,9 @@ impl JMAPMailboxProperties {
 }
 
 pub trait JMAPMailMailbox {
-    fn mailbox_set(
-        &self,
-        request: JMAPSet<JMAPMailboxSetArguments>,
-    ) -> jmap::Result<JMAPSetResponse>;
+    fn mailbox_set(&self, request: JMAPSet<JMAPMailboxSetArguments>) -> jmap::Result<JSONValue>;
 
-    fn mailbox_get(
-        &self,
-        request: JMAPGet<JMAPMailboxProperties, ()>,
-    ) -> jmap::Result<jmap::JMAPGetResponse>;
+    fn mailbox_get(&self, request: JMAPGet<JMAPMailboxProperties, ()>) -> jmap::Result<JSONValue>;
 
     fn mailbox_query(
         &self,
@@ -166,12 +158,9 @@ pub trait JMAPMailMailbox {
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryResponse>;
+    ) -> jmap::Result<JSONValue>;
 
-    fn mailbox_changes(
-        &self,
-        request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<JMAPMailboxChangesResponse>>;
+    fn mailbox_changes(&self, request: JMAPChangesRequest) -> jmap::Result<JSONValue>;
 
     fn mailbox_query_changes(
         &self,
@@ -180,7 +169,7 @@ pub trait JMAPMailMailbox {
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryChangesResponse>;
+    ) -> jmap::Result<JSONValue>;
 
     fn count_threads(
         &self,
@@ -226,10 +215,7 @@ impl<T> JMAPMailMailbox for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mailbox_set(
-        &self,
-        request: JMAPSet<JMAPMailboxSetArguments>,
-    ) -> jmap::Result<JMAPSetResponse> {
+    fn mailbox_set(&self, request: JMAPSet<JMAPMailboxSetArguments>) -> jmap::Result<JSONValue> {
         let old_state = self.get_state(request.account_id, Collection::Mailbox)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
@@ -244,10 +230,7 @@ where
         }
 
         let mut changes = WriteBatch::new(request.account_id, self.config.is_in_cluster);
-        let mut response = JMAPSetResponse {
-            old_state,
-            ..Default::default()
-        };
+        let mut response = HashMap::new();
         let document_ids = self
             .get_document_ids(request.account_id, Collection::Mailbox)?
             .unwrap_or_default();
@@ -305,13 +288,25 @@ where
                 created.insert(create_id, values.into());
             }
 
-            if !created.is_empty() {
-                response.created = created.into();
-            }
-
-            if !not_created.is_empty() {
-                response.not_created = not_created.into();
-            }
+            response.insert(
+                "created".to_string(),
+                if !created.is_empty() {
+                    created.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+            response.insert(
+                "notCreated".to_string(),
+                if !not_created.is_empty() {
+                    not_created.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+        } else {
+            response.insert("created".to_string(), JSONValue::Null);
+            response.insert("notCreated".to_string(), JSONValue::Null);
         }
 
         if let JSONValue::Object(update) = request.update {
@@ -390,12 +385,25 @@ where
                 updated.insert(jmap_id_str, JSONValue::Null);
             }
 
-            if !updated.is_empty() {
-                response.updated = updated.into();
-            }
-            if !not_updated.is_empty() {
-                response.not_updated = not_updated.into();
-            }
+            response.insert(
+                "updated".to_string(),
+                if !updated.is_empty() {
+                    updated.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+            response.insert(
+                "notUpdated".to_string(),
+                if !not_updated.is_empty() {
+                    not_updated.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+        } else {
+            response.insert("updated".to_string(), JSONValue::Null);
+            response.insert("notUpdated".to_string(), JSONValue::Null);
         }
 
         if let JSONValue::Array(destroy_ids) = request.destroy {
@@ -489,29 +497,43 @@ where
                 }
             }
 
-            if !destroyed.is_empty() {
-                response.destroyed = destroyed.into();
-            }
-
-            if !not_destroyed.is_empty() {
-                response.not_destroyed = not_destroyed.into();
-            }
-        }
-
-        if !changes.is_empty() {
-            self.write(changes)?;
-            response.new_state = self.get_state(request.account_id, Collection::Mailbox)?;
+            response.insert(
+                "destroyed".to_string(),
+                if !destroyed.is_empty() {
+                    destroyed.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
+            response.insert(
+                "notDestroyed".to_string(),
+                if !not_destroyed.is_empty() {
+                    not_destroyed.into()
+                } else {
+                    JSONValue::Null
+                },
+            );
         } else {
-            response.new_state = response.old_state.clone();
+            response.insert("destroyed".to_string(), JSONValue::Null);
+            response.insert("notDestroyed".to_string(), JSONValue::Null);
         }
 
-        Ok(response)
+        response.insert(
+            "newState".to_string(),
+            if !changes.is_empty() {
+                self.write(changes)?;
+                self.get_state(request.account_id, Collection::Mailbox)?
+            } else {
+                old_state.clone()
+            }
+            .into(),
+        );
+        response.insert("oldState".to_string(), old_state.into());
+
+        Ok(response.into())
     }
 
-    fn mailbox_get(
-        &self,
-        request: JMAPGet<JMAPMailboxProperties, ()>,
-    ) -> jmap::Result<jmap::JMAPGetResponse> {
+    fn mailbox_get(&self, request: JMAPGet<JMAPMailboxProperties, ()>) -> jmap::Result<JSONValue> {
         let properties = request.properties.unwrap_or_else(|| {
             vec![
                 JMAPMailboxProperties::Id,
@@ -552,7 +574,7 @@ where
         for jmap_id in request_ids {
             let document_id = jmap_id.get_document_id();
             if !document_ids.contains(document_id) {
-                not_found.push(jmap_id);
+                not_found.push(jmap_id.to_jmap_string().into());
                 continue;
             }
             let mut mailbox = if properties.iter().any(|p| {
@@ -639,19 +661,29 @@ where
             results.push(result.into());
         }
 
-        Ok(JMAPGetResponse {
-            state: self.get_state(request.account_id, Collection::Mailbox)?,
-            list: if !results.is_empty() {
+        let mut obj = HashMap::new();
+        obj.insert(
+            "state".to_string(),
+            self.get_state(request.account_id, Collection::Mailbox)?
+                .into(),
+        );
+        obj.insert(
+            "list".to_string(),
+            if !results.is_empty() {
                 JSONValue::Array(results)
             } else {
                 JSONValue::Null
             },
-            not_found: if not_found.is_empty() {
-                None
-            } else {
+        );
+        obj.insert(
+            "notFound".to_string(),
+            if !not_found.is_empty() {
                 not_found.into()
+            } else {
+                JSONValue::Null
             },
-        })
+        );
+        Ok(obj.into())
     }
 
     fn mailbox_query(
@@ -661,7 +693,7 @@ where
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryResponse> {
+    ) -> jmap::Result<JSONValue> {
         let cond_fnc = |cond| {
             Ok(match cond {
                 JMAPMailboxFilterCondition::ParentId(parent_id) => Filter::eq(
@@ -806,14 +838,10 @@ where
         request.into_response(
             results.into_iter(),
             self.get_state(account_id, Collection::Mailbox)?,
-            false,
         )
     }
 
-    fn mailbox_changes(
-        &self,
-        request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<JMAPMailboxChangesResponse>> {
+    fn mailbox_changes(&self, request: JMAPChangesRequest) -> jmap::Result<JSONValue> {
         let mut changes = self.get_jmap_changes(
             request.account_id,
             Collection::Mailbox,
@@ -821,37 +849,20 @@ where
             request.max_changes,
         )?;
 
-        let mut updated_properties = None;
-        if !changes.arguments.is_empty() {
-            if changes.updated.is_empty() {
-                updated_properties = vec![
-                    JMAPMailboxProperties::TotalEmails,
-                    JMAPMailboxProperties::UnreadEmails,
-                    JMAPMailboxProperties::TotalThreads,
-                    JMAPMailboxProperties::UnreadThreads,
+        if changes.has_children_changes {
+            changes.result.as_object_mut().insert(
+                "updatedProperties".to_string(),
+                vec![
+                    JMAPMailboxProperties::TotalEmails.into(),
+                    JMAPMailboxProperties::UnreadEmails.into(),
+                    JMAPMailboxProperties::TotalThreads.into(),
+                    JMAPMailboxProperties::UnreadThreads.into(),
                 ]
-                .into();
-                changes.updated = changes.arguments;
-            } else {
-                for jmap_id in changes.arguments {
-                    debug_assert!(!changes.updated.contains(&jmap_id));
-                    changes.updated.push(jmap_id);
-                }
-            }
+                .into(),
+            );
         }
 
-        Ok(JMAPChangesResponse {
-            old_state: changes.old_state,
-            new_state: changes.new_state,
-            has_more_changes: changes.has_more_changes,
-            total_changes: changes.total_changes,
-            created: changes.created,
-            updated: changes.updated,
-            destroyed: changes.destroyed,
-            arguments: JMAPMailboxChangesResponse {
-                updated_properties: updated_properties.unwrap_or_default(),
-            },
-        })
+        Ok(changes.result)
     }
 
     fn mailbox_query_changes(
@@ -861,23 +872,16 @@ where
             JMAPMailboxComparator,
             JMAPMailboxQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryChangesResponse> {
-        let mut changes = self.get_jmap_changes(
+    ) -> jmap::Result<JSONValue> {
+        let changes = self.get_jmap_changes(
             request.account_id,
             Collection::Mailbox,
             request.since_query_state,
             request.max_changes,
         )?;
 
-        if !changes.arguments.is_empty() {
-            for jmap_id in &changes.arguments {
-                debug_assert!(!changes.updated.contains(jmap_id));
-                changes.updated.push(*jmap_id);
-            }
-        }
-
-        let query_results = if changes.total_changes > 0 || request.calculate_total {
-            Some(self.mailbox_query(JMAPQueryRequest {
+        let result = if changes.total_changes > 0 || request.calculate_total {
+            self.mailbox_query(JMAPQueryRequest {
                 account_id: request.account_id,
                 filter: request.filter,
                 sort: request.sort,
@@ -887,12 +891,18 @@ where
                 limit: 0,
                 calculate_total: true,
                 arguments: request.arguments,
-            })?)
+            })?
         } else {
-            None
+            JSONValue::Null
         };
 
-        Ok(query_changes(changes, query_results, request.up_to_id))
+        Ok(changes.query(
+            JMAPQueryResult {
+                is_immutable: false,
+                result,
+            },
+            request.up_to_id,
+        ))
     }
 
     fn count_threads(

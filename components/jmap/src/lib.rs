@@ -7,7 +7,6 @@ pub mod query;
 use std::collections::HashMap;
 
 use changes::JMAPState;
-use id::JMAPIdSerialize;
 use json::JSONValue;
 use store::{AccountId, JMAPId, StoreError};
 
@@ -20,6 +19,7 @@ pub enum JMAPError {
     UnsupportedFilter,
     UnsupportedSort,
     InternalError(StoreError),
+    ParseError(String),
 }
 
 impl From<StoreError> for JMAPError {
@@ -53,11 +53,12 @@ pub struct JMAPQueryChangesRequest<T, U, V> {
     pub sort: Vec<JMAPComparator<U>>,
     pub since_query_state: JMAPState,
     pub max_changes: usize,
-    pub up_to_id: Option<JMAPId>,
+    pub up_to_id: JSONValue,
     pub calculate_total: bool,
     pub arguments: V,
 }
 
+/*
 #[derive(Debug)]
 pub struct JMAPQueryResponse {
     pub account_id: AccountId,
@@ -101,6 +102,7 @@ impl From<JMAPQueryResponse> for JSONValue {
         obj.into()
     }
 }
+*/
 
 #[derive(Debug, Clone)]
 pub struct JMAPComparator<T> {
@@ -225,33 +227,6 @@ impl JMAPSetErrorType {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct JMAPSetResponse {
-    pub old_state: JMAPState,
-    pub new_state: JMAPState,
-    pub created: JSONValue,
-    pub updated: JSONValue,
-    pub destroyed: JSONValue,
-    pub not_created: JSONValue,
-    pub not_updated: JSONValue,
-    pub not_destroyed: JSONValue,
-}
-
-impl From<JMAPSetResponse> for JSONValue {
-    fn from(value: JMAPSetResponse) -> Self {
-        let mut obj = HashMap::new();
-        obj.insert("oldState".to_string(), value.old_state.into());
-        obj.insert("newState".to_string(), value.new_state.into());
-        obj.insert("created".to_string(), value.created);
-        obj.insert("updated".to_string(), value.updated);
-        obj.insert("destroyed".to_string(), value.destroyed);
-        obj.insert("notCreated".to_string(), value.not_created);
-        obj.insert("notUpdated".to_string(), value.not_updated);
-        obj.insert("notDestroyed".to_string(), value.not_destroyed);
-        obj.into()
-    }
-}
-
 impl JSONValue {
     pub fn new_error(error_type: JMAPSetErrorType, description: impl Into<String>) -> Self {
         let mut o = HashMap::with_capacity(2);
@@ -289,32 +264,4 @@ pub struct JMAPGet<T, U> {
     pub ids: Option<Vec<JMAPId>>,
     pub properties: Option<Vec<T>>,
     pub arguments: U,
-}
-
-#[derive(Debug)]
-pub struct JMAPGetResponse {
-    pub state: JMAPState,
-    pub list: JSONValue,
-    pub not_found: Option<Vec<JMAPId>>,
-}
-
-impl From<JMAPGetResponse> for JSONValue {
-    fn from(value: JMAPGetResponse) -> Self {
-        let mut obj = HashMap::new();
-        obj.insert("state".to_string(), value.state.into());
-        obj.insert("list".to_string(), value.list);
-        obj.insert(
-            "notFound".to_string(),
-            if let Some(not_found) = value.not_found {
-                not_found
-                    .into_iter()
-                    .map(|id| id.to_jmap_string().into())
-                    .collect::<Vec<JSONValue>>()
-                    .into()
-            } else {
-                JSONValue::Null
-            },
-        );
-        obj.into()
-    }
 }

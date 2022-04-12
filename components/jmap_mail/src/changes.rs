@@ -1,18 +1,16 @@
 use crate::query::JMAPMailQuery;
 use crate::query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments};
-use jmap::changes::query_changes;
-use jmap::JMAPQueryRequest;
+use jmap::json::JSONValue;
+use jmap::query::JMAPQueryResult;
 use jmap::{
-    changes::{JMAPChanges, JMAPChangesRequest, JMAPChangesResponse, JMAPQueryChangesResponse},
+    changes::{JMAPChanges, JMAPChangesRequest},
     JMAPQueryChangesRequest,
 };
-use store::{Collection, JMAPId, JMAPStore, Store};
+use jmap::{JMAPError, JMAPQueryRequest};
+use store::{Collection, JMAPStore, Store};
 
 pub trait JMAPMailChanges {
-    fn mail_changes(
-        &self,
-        request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<Vec<JMAPId>>>;
+    fn mail_changes(&self, request: JMAPChangesRequest) -> jmap::Result<JSONValue>;
 
     fn mail_query_changes(
         &self,
@@ -21,24 +19,22 @@ pub trait JMAPMailChanges {
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryChangesResponse>;
+    ) -> jmap::Result<JSONValue>;
 }
 
 impl<T> JMAPMailChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_changes(
-        &self,
-        request: JMAPChangesRequest,
-    ) -> jmap::Result<JMAPChangesResponse<Vec<JMAPId>>> {
+    fn mail_changes(&self, request: JMAPChangesRequest) -> jmap::Result<JSONValue> {
         self.get_jmap_changes(
             request.account_id,
             Collection::Mail,
             request.since_state,
             request.max_changes,
         )
-        .map_err(|e| e.into())
+        .map(|r| r.result)
+        .map_err(JMAPError::InternalError)
     }
 
     fn mail_query_changes(
@@ -48,7 +44,7 @@ where
             JMAPMailComparator,
             JMAPMailQueryArguments,
         >,
-    ) -> jmap::Result<JMAPQueryChangesResponse> {
+    ) -> jmap::Result<JSONValue> {
         let changes = self.get_jmap_changes(
             query.account_id,
             Collection::Mail,
@@ -56,8 +52,8 @@ where
             query.max_changes,
         )?;
 
-        let query_results = if changes.total_changes > 0 || query.calculate_total {
-            Some(self.mail_query(JMAPQueryRequest {
+        let query_result = if changes.total_changes > 0 || query.calculate_total {
+            self.mail_query_ext(JMAPQueryRequest {
                 account_id: query.account_id,
                 filter: query.filter,
                 sort: query.sort,
@@ -67,11 +63,14 @@ where
                 limit: 0,
                 calculate_total: true,
                 arguments: query.arguments,
-            })?)
+            })?
         } else {
-            None
+            JMAPQueryResult {
+                is_immutable: false,
+                result: JSONValue::Null,
+            }
         };
 
-        Ok(query_changes(changes, query_results, query.up_to_id))
+        Ok(changes.query(query_result, query.up_to_id))
     }
 }
