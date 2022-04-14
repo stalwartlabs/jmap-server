@@ -4,18 +4,18 @@ use jmap::{
     blob::JMAPBlobStore,
     id::JMAPIdSerialize,
     json::{JSONNumber, JSONValue},
-    JMAPGet, JMAPSet,
+    request::{GetRequest, SetRequest},
 };
 use jmap_mail::{
-    get::{JMAPMailGet, JMAPMailGetArguments},
-    import::JMAPMailImport,
-    parse::get_message_blob,
-    set::JMAPMailSet,
-    JMAPMailBodyProperties, JMAPMailProperties,
+    get::JMAPMailGet, import::JMAPMailImport, parse::get_message_blob, set::JMAPMailSet,
+    MailBodyProperties, MailProperties,
 };
 use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
 
-use crate::{jmap_mail_get::SortedJSONValue, jmap_mailbox::insert_mailbox};
+use crate::{
+    jmap_mail_get::{build_mail_get_arguments, SortedJSONValue},
+    jmap_mailbox::insert_mailbox,
+};
 
 impl<'x> From<SortedJSONValue> for JSONValue {
     fn from(value: SortedJSONValue) -> Self {
@@ -133,7 +133,7 @@ where
         }
 
         let result = mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: HashMap::from_iter(
@@ -158,7 +158,7 @@ where
                 .into(),
                 update: JSONValue::Null,
                 destroy: JSONValue::Null,
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap();
 
@@ -181,55 +181,58 @@ where
 
         let parsed_message = SortedJSONValue::from(
             mail_store
-                .mail_get(JMAPGet {
+                .mail_get(GetRequest {
                     account_id,
                     ids: vec![jmap_id].into(),
                     properties: vec![
-                        JMAPMailProperties::Id,
-                        JMAPMailProperties::BlobId,
-                        JMAPMailProperties::ThreadId,
-                        JMAPMailProperties::MailboxIds,
-                        JMAPMailProperties::Keywords,
-                        JMAPMailProperties::ReceivedAt,
-                        JMAPMailProperties::MessageId,
-                        JMAPMailProperties::InReplyTo,
-                        JMAPMailProperties::References,
-                        JMAPMailProperties::Sender,
-                        JMAPMailProperties::From,
-                        JMAPMailProperties::To,
-                        JMAPMailProperties::Cc,
-                        JMAPMailProperties::Bcc,
-                        JMAPMailProperties::ReplyTo,
-                        JMAPMailProperties::Subject,
-                        JMAPMailProperties::SentAt,
-                        JMAPMailProperties::HasAttachment,
-                        JMAPMailProperties::Preview,
-                        JMAPMailProperties::BodyValues,
-                        JMAPMailProperties::TextBody,
-                        JMAPMailProperties::HtmlBody,
-                        JMAPMailProperties::Attachments,
-                        JMAPMailProperties::BodyStructure,
+                        MailProperties::Id,
+                        MailProperties::BlobId,
+                        MailProperties::ThreadId,
+                        MailProperties::MailboxIds,
+                        MailProperties::Keywords,
+                        MailProperties::ReceivedAt,
+                        MailProperties::MessageId,
+                        MailProperties::InReplyTo,
+                        MailProperties::References,
+                        MailProperties::Sender,
+                        MailProperties::From,
+                        MailProperties::To,
+                        MailProperties::Cc,
+                        MailProperties::Bcc,
+                        MailProperties::ReplyTo,
+                        MailProperties::Subject,
+                        MailProperties::SentAt,
+                        MailProperties::HasAttachment,
+                        MailProperties::Preview,
+                        MailProperties::BodyValues,
+                        MailProperties::TextBody,
+                        MailProperties::HtmlBody,
+                        MailProperties::Attachments,
+                        MailProperties::BodyStructure,
                     ]
+                    .into_iter()
+                    .map(|p| p.to_string().into())
+                    .collect::<Vec<_>>()
                     .into(),
-                    arguments: JMAPMailGetArguments {
-                        body_properties: vec![
-                            JMAPMailBodyProperties::PartId,
-                            JMAPMailBodyProperties::BlobId,
-                            JMAPMailBodyProperties::Size,
-                            JMAPMailBodyProperties::Name,
-                            JMAPMailBodyProperties::Type,
-                            JMAPMailBodyProperties::Charset,
-                            JMAPMailBodyProperties::Headers,
-                            JMAPMailBodyProperties::Disposition,
-                            JMAPMailBodyProperties::Cid,
-                            JMAPMailBodyProperties::Language,
-                            JMAPMailBodyProperties::Location,
+                    arguments: build_mail_get_arguments(
+                        vec![
+                            MailBodyProperties::PartId,
+                            MailBodyProperties::BlobId,
+                            MailBodyProperties::Size,
+                            MailBodyProperties::Name,
+                            MailBodyProperties::Type,
+                            MailBodyProperties::Charset,
+                            MailBodyProperties::Headers,
+                            MailBodyProperties::Disposition,
+                            MailBodyProperties::Cid,
+                            MailBodyProperties::Language,
+                            MailBodyProperties::Location,
                         ],
-                        fetch_text_body_values: true,
-                        fetch_html_body_values: true,
-                        fetch_all_body_values: true,
-                        max_body_value_bytes: 100,
-                    },
+                        true,
+                        true,
+                        true,
+                        100,
+                    ),
                 })
                 .unwrap()
                 .eval("/list")
@@ -290,17 +293,15 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let mut result = mail_store
-        .mail_get(JMAPGet {
+        .mail_get(GetRequest {
             account_id,
             ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
-            properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords].into(),
-            arguments: JMAPMailGetArguments {
-                body_properties: vec![],
-                fetch_text_body_values: false,
-                fetch_html_body_values: false,
-                fetch_all_body_values: false,
-                max_body_value_bytes: 100,
-            },
+            properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
+                .into_iter()
+                .map(|p| p.to_string().into())
+                .collect::<Vec<_>>()
+                .into(),
+            arguments: build_mail_get_arguments(vec![], false, false, false, 100),
         })
         .unwrap()
         .eval_unwrap_object("/list/0");
@@ -341,7 +342,7 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
@@ -353,7 +354,7 @@ fn jmap_mail_update<T>(
                 )]),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -371,7 +372,7 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
@@ -385,7 +386,7 @@ fn jmap_mail_update<T>(
                 )]),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -403,7 +404,7 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
@@ -414,7 +415,7 @@ fn jmap_mail_update<T>(
                 )]),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval_unwrap_string(&format!("/notUpdated/{}/description", message_id_1)),
@@ -423,7 +424,7 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
@@ -434,7 +435,7 @@ fn jmap_mail_update<T>(
                 )]),
                 create: JSONValue::Null,
                 destroy: vec![message_id_1.clone().into()].into(),
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval_unwrap_string(&format!("/notUpdated/{}/error_type", message_id_1)),
@@ -443,13 +444,13 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: JSONValue::Null,
                 create: JSONValue::Null,
                 destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()].into(),
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notDestroyed")
@@ -463,22 +464,19 @@ fn jmap_mail_update<T>(
             message_id_3.clone().into()
         ]),
         mail_store
-            .mail_get(JMAPGet {
+            .mail_get(GetRequest {
                 account_id,
                 ids: vec![
                     JMAPId::from_jmap_string(&message_id_2).unwrap(),
                     JMAPId::from_jmap_string(&message_id_3).unwrap()
                 ]
                 .into(),
-                properties: vec![JMAPMailProperties::MailboxIds, JMAPMailProperties::Keywords]
+                properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
+                    .into_iter()
+                    .map(|p| p.to_string().into())
+                    .collect::<Vec<_>>()
                     .into(),
-                arguments: JMAPMailGetArguments {
-                    body_properties: vec![],
-                    fetch_text_body_values: false,
-                    fetch_html_body_values: false,
-                    fetch_all_body_values: false,
-                    max_body_value_bytes: 100,
-                }
+                arguments: build_mail_get_arguments(vec![], false, false, false, 100,)
             },)
             .unwrap()
             .eval("/notFound")
@@ -542,14 +540,14 @@ pub fn update_email<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: HashMap::from_iter([(jmap_id.to_jmap_string(), update_values.into())])
                     .into(),
                 create: JSONValue::Null,
                 destroy: JSONValue::Null,
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -564,13 +562,13 @@ where
 {
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: JSONValue::Null,
                 create: JSONValue::Null,
                 destroy: vec![jmap_id.to_jmap_string().into()].into(),
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notDestroyed")

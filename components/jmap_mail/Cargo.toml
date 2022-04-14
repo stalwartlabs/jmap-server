@@ -10,6 +10,5 @@ jmap = { path = "../jmap" }
 store = { path = "../store" }
 mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
 mail-builder = { git = "https://github.com/stalwartlabs/mail-builder" }
-chrono = "0.4"
 serde = { version = "1.0", features = ["derive"]}
 rmp-serde = "1.0.0"

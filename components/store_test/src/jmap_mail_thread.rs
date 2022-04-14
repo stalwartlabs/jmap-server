@@ -1,4 +1,6 @@
-use jmap::{json::JSONValue, JMAPGet};
+use std::collections::HashMap;
+
+use jmap::{json::JSONValue, request::GetRequest};
 use jmap_mail::{import::JMAPMailImport, thread::JMAPMailThread};
 use store::{AccountId, JMAPStore, Store};
 
@@ -25,11 +27,11 @@ where
 
     assert_eq!(
         mail_store
-            .thread_get(JMAPGet {
+            .thread_get(GetRequest {
                 account_id,
                 ids: Some(vec![thread_id]),
-                properties: None,
-                arguments: ()
+                properties: JSONValue::Null,
+                arguments: HashMap::new()
             })
             .unwrap()
             .eval_unwrap_array("/list/0/emailIds"),

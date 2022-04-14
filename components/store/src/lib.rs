@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
 
 pub use bincode;
+pub use chrono;
 pub use lz4_flex;
 pub use parking_lot;
 pub use roaring;

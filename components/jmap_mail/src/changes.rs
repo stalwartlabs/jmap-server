@@ -1,32 +1,22 @@
 use crate::query::JMAPMailQuery;
-use crate::query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments};
+use jmap::changes::JMAPChanges;
 use jmap::json::JSONValue;
-use jmap::query::JMAPQueryResult;
-use jmap::{
-    changes::{JMAPChanges, JMAPChangesRequest},
-    JMAPQueryChangesRequest,
-};
-use jmap::{JMAPError, JMAPQueryRequest};
+use jmap::query::QueryResult;
+use jmap::request::{ChangesRequest, QueryChangesRequest, QueryRequest};
+use jmap::JMAPError;
 use store::{Collection, JMAPStore, Store};
 
 pub trait JMAPMailChanges {
-    fn mail_changes(&self, request: JMAPChangesRequest) -> jmap::Result<JSONValue>;
+    fn mail_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue>;
 
-    fn mail_query_changes(
-        &self,
-        query: JMAPQueryChangesRequest<
-            JMAPMailFilterCondition,
-            JMAPMailComparator,
-            JMAPMailQueryArguments,
-        >,
-    ) -> jmap::Result<JSONValue>;
+    fn mail_query_changes(&self, query: QueryChangesRequest) -> jmap::Result<JSONValue>;
 }
 
 impl<T> JMAPMailChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_changes(&self, request: JMAPChangesRequest) -> jmap::Result<JSONValue> {
+    fn mail_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue> {
         self.get_jmap_changes(
             request.account_id,
             Collection::Mail,
@@ -34,17 +24,10 @@ where
             request.max_changes,
         )
         .map(|r| r.result)
-        .map_err(JMAPError::InternalError)
+        .map_err(JMAPError::ServerFail)
     }
 
-    fn mail_query_changes(
-        &self,
-        query: JMAPQueryChangesRequest<
-            JMAPMailFilterCondition,
-            JMAPMailComparator,
-            JMAPMailQueryArguments,
-        >,
-    ) -> jmap::Result<JSONValue> {
+    fn mail_query_changes(&self, query: QueryChangesRequest) -> jmap::Result<JSONValue> {
         let changes = self.get_jmap_changes(
             query.account_id,
             Collection::Mail,
@@ -53,7 +36,7 @@ where
         )?;
 
         let query_result = if changes.total_changes > 0 || query.calculate_total {
-            self.mail_query_ext(JMAPQueryRequest {
+            self.mail_query_ext(QueryRequest {
                 account_id: query.account_id,
                 filter: query.filter,
                 sort: query.sort,
@@ -65,7 +48,7 @@ where
                 arguments: query.arguments,
             })?
         } else {
-            JMAPQueryResult {
+            QueryResult {
                 is_immutable: false,
                 result: JSONValue::Null,
             }

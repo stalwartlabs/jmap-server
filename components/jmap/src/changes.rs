@@ -9,17 +9,10 @@ use store::{
 use crate::{
     id::{hex_reader, HexWriter, JMAPIdSerialize},
     json::JSONValue,
-    query::JMAPQueryResult,
+    query::QueryResult,
 };
 
-#[derive(Debug)]
-pub struct JMAPChangesRequest {
-    pub account_id: AccountId,
-    pub since_state: JMAPState,
-    pub max_changes: usize,
-}
-
-pub struct JMAPChangesResult {
+pub struct ChangesResult {
     pub total_changes: usize,
     pub has_children_changes: bool,
     pub result: JSONValue,
@@ -128,7 +121,7 @@ pub trait JMAPChanges {
         collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResult>;
+    ) -> store::Result<ChangesResult>;
 }
 
 impl<T> JMAPChanges for JMAPStore<T>
@@ -148,12 +141,12 @@ where
         collection: Collection,
         since_state: JMAPState,
         max_changes: usize,
-    ) -> store::Result<JMAPChangesResult> {
+    ) -> store::Result<ChangesResult> {
         let (items_sent, mut changelog) = match &since_state {
             JMAPState::Initial => {
                 let changelog = self.get_changes(account, collection, Query::All)?.unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
-                    return Ok(JMAPChangesResult {
+                    return Ok(ChangesResult {
                         total_changes: 0,
                         has_children_changes: false,
                         result: HashMap::from_iter([
@@ -233,7 +226,7 @@ where
             }
         }
 
-        Ok(JMAPChangesResult {
+        Ok(ChangesResult {
             total_changes,
             has_children_changes: !updated.is_empty() && !items_changed,
             result: HashMap::from_iter([
@@ -262,8 +255,8 @@ where
     }
 }
 
-impl JMAPChangesResult {
-    pub fn query(mut self, query_result: JMAPQueryResult, up_to_id: JSONValue) -> JSONValue {
+impl ChangesResult {
+    pub fn query(mut self, query_result: QueryResult, up_to_id: JSONValue) -> JSONValue {
         let mut result = HashMap::new();
         let changes = self.result.as_object_mut();
 

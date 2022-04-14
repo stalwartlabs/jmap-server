@@ -1,14 +1,14 @@
-use jmap::{json::JSONValue, JMAPGet};
+use jmap::{json::JSONValue, request::GetRequest};
 use jmap_mail::{
-    get::{JMAPMailGet, JMAPMailGetArguments},
-    HeaderName, JMAPMailBodyProperties, JMAPMailHeaderForm, JMAPMailHeaderProperty,
-    JMAPMailProperties,
+    get::JMAPMailGet, HeaderName, MailBodyProperties, MailHeaderForm, MailHeaderProperty,
+    MailProperties,
 };
 use mail_parser::RfcHeader;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
+    iter::FromIterator,
     path::PathBuf,
 };
 use store::{AccountId, JMAPStore, Store};
@@ -72,6 +72,29 @@ impl<'x> From<JSONValue> for SortedJSONValue {
     }
 }
 
+pub fn build_mail_get_arguments(
+    properties: Vec<MailBodyProperties>,
+    fetch_text: bool,
+    fetch_html: bool,
+    fetch_all: bool,
+    max_bytes: u64,
+) -> HashMap<String, JSONValue> {
+    HashMap::from_iter([
+        (
+            "bodyProperties".to_string(),
+            properties
+                .into_iter()
+                .map(|p| p.to_string().into())
+                .collect::<Vec<JSONValue>>()
+                .into(),
+        ),
+        ("fetchTextBodyValues".to_string(), fetch_text.into()),
+        ("fetchHtmlBodyValues".to_string(), fetch_html.into()),
+        ("fetchAllBodyValues".to_string(), fetch_all.into()),
+        ("maxBodyValueBytes".to_string(), max_bytes.into()),
+    ])
+}
+
 pub fn jmap_mail_get<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
@@ -98,78 +121,81 @@ where
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {
             mail_store
-                .mail_get(JMAPGet {
+                .mail_get(GetRequest {
                     account_id,
                     ids: vec![jmap_id].into(),
                     properties: vec![
-                        JMAPMailProperties::Id,
-                        JMAPMailProperties::BlobId,
-                        JMAPMailProperties::ThreadId,
-                        JMAPMailProperties::MailboxIds,
-                        JMAPMailProperties::Keywords,
-                        JMAPMailProperties::Size,
-                        JMAPMailProperties::ReceivedAt,
-                        JMAPMailProperties::MessageId,
-                        JMAPMailProperties::InReplyTo,
-                        JMAPMailProperties::References,
-                        JMAPMailProperties::Sender,
-                        JMAPMailProperties::From,
-                        JMAPMailProperties::To,
-                        JMAPMailProperties::Cc,
-                        JMAPMailProperties::Bcc,
-                        JMAPMailProperties::ReplyTo,
-                        JMAPMailProperties::Subject,
-                        JMAPMailProperties::SentAt,
-                        JMAPMailProperties::HasAttachment,
-                        JMAPMailProperties::Preview,
-                        JMAPMailProperties::BodyValues,
-                        JMAPMailProperties::TextBody,
-                        JMAPMailProperties::HtmlBody,
-                        JMAPMailProperties::Attachments,
-                        JMAPMailProperties::BodyStructure,
+                        MailProperties::Id,
+                        MailProperties::BlobId,
+                        MailProperties::ThreadId,
+                        MailProperties::MailboxIds,
+                        MailProperties::Keywords,
+                        MailProperties::Size,
+                        MailProperties::ReceivedAt,
+                        MailProperties::MessageId,
+                        MailProperties::InReplyTo,
+                        MailProperties::References,
+                        MailProperties::Sender,
+                        MailProperties::From,
+                        MailProperties::To,
+                        MailProperties::Cc,
+                        MailProperties::Bcc,
+                        MailProperties::ReplyTo,
+                        MailProperties::Subject,
+                        MailProperties::SentAt,
+                        MailProperties::HasAttachment,
+                        MailProperties::Preview,
+                        MailProperties::BodyValues,
+                        MailProperties::TextBody,
+                        MailProperties::HtmlBody,
+                        MailProperties::Attachments,
+                        MailProperties::BodyStructure,
                     ]
+                    .into_iter()
+                    .map(|p| p.to_string().into())
+                    .collect::<Vec<_>>()
                     .into(),
-                    arguments: JMAPMailGetArguments {
-                        body_properties: vec![
-                            JMAPMailBodyProperties::PartId,
-                            JMAPMailBodyProperties::BlobId,
-                            JMAPMailBodyProperties::Size,
-                            JMAPMailBodyProperties::Name,
-                            JMAPMailBodyProperties::Type,
-                            JMAPMailBodyProperties::Charset,
-                            JMAPMailBodyProperties::Headers,
-                            JMAPMailBodyProperties::Disposition,
-                            JMAPMailBodyProperties::Cid,
-                            JMAPMailBodyProperties::Language,
-                            JMAPMailBodyProperties::Location,
+                    arguments: build_mail_get_arguments(
+                        vec![
+                            MailBodyProperties::PartId,
+                            MailBodyProperties::BlobId,
+                            MailBodyProperties::Size,
+                            MailBodyProperties::Name,
+                            MailBodyProperties::Type,
+                            MailBodyProperties::Charset,
+                            MailBodyProperties::Headers,
+                            MailBodyProperties::Disposition,
+                            MailBodyProperties::Cid,
+                            MailBodyProperties::Language,
+                            MailBodyProperties::Location,
                         ],
-                        fetch_text_body_values: true,
-                        fetch_html_body_values: true,
-                        fetch_all_body_values: true,
-                        max_body_value_bytes: 100,
-                    },
+                        true,
+                        true,
+                        true,
+                        100,
+                    ),
                 })
                 .unwrap()
                 .eval("/list")
                 .unwrap()
         } else {
             let mut properties = vec![
-                JMAPMailProperties::Id,
-                JMAPMailProperties::MessageId,
-                JMAPMailProperties::InReplyTo,
-                JMAPMailProperties::References,
-                JMAPMailProperties::Sender,
-                JMAPMailProperties::From,
-                JMAPMailProperties::To,
-                JMAPMailProperties::Cc,
-                JMAPMailProperties::Bcc,
-                JMAPMailProperties::ReplyTo,
-                JMAPMailProperties::Subject,
-                JMAPMailProperties::SentAt,
-                JMAPMailProperties::Preview,
-                JMAPMailProperties::TextBody,
-                JMAPMailProperties::HtmlBody,
-                JMAPMailProperties::Attachments,
+                MailProperties::Id,
+                MailProperties::MessageId,
+                MailProperties::InReplyTo,
+                MailProperties::References,
+                MailProperties::Sender,
+                MailProperties::From,
+                MailProperties::To,
+                MailProperties::Cc,
+                MailProperties::Bcc,
+                MailProperties::ReplyTo,
+                MailProperties::Subject,
+                MailProperties::SentAt,
+                MailProperties::Preview,
+                MailProperties::TextBody,
+                MailProperties::HtmlBody,
+                MailProperties::Attachments,
             ];
 
             for header in [
@@ -184,33 +210,33 @@ where
                 HeaderName::Other("X-AddressesGroup-Single".into()),
                 HeaderName::Other("X-AddressesGroup".into()),
             ] {
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: false,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Addresses,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Addresses,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Addresses,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Addresses,
                     header: header.clone(),
                     all: false,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::GroupedAddresses,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::GroupedAddresses,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::GroupedAddresses,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::GroupedAddresses,
                     header: header.clone(),
                     all: false,
                 }));
@@ -224,23 +250,23 @@ where
                 HeaderName::Other("X-List-Single".into()),
                 HeaderName::Other("X-List".into()),
             ] {
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: false,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::URLs,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::URLs,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::URLs,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::URLs,
                     header: header.clone(),
                     all: false,
                 }));
@@ -252,23 +278,23 @@ where
                 HeaderName::Other("X-Date-Single".into()),
                 HeaderName::Other("X-Date".into()),
             ] {
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: false,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Date,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Date,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Date,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Date,
                     header: header.clone(),
                     all: false,
                 }));
@@ -280,23 +306,23 @@ where
                 HeaderName::Other("X-Id-Single".into()),
                 HeaderName::Other("X-Id".into()),
             ] {
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: false,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::MessageIds,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::MessageIds,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::MessageIds,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::MessageIds,
                     header: header.clone(),
                     all: false,
                 }));
@@ -308,23 +334,23 @@ where
                 HeaderName::Other("X-Text-Single".into()),
                 HeaderName::Other("X-Text".into()),
             ] {
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Raw,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Raw,
                     header: header.clone(),
                     all: false,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Text,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Text,
                     header: header.clone(),
                     all: true,
                 }));
-                properties.push(JMAPMailProperties::Header(JMAPMailHeaderProperty {
-                    form: JMAPMailHeaderForm::Text,
+                properties.push(MailProperties::Header(MailHeaderProperty {
+                    form: MailHeaderForm::Text,
                     header: header.clone(),
                     all: false,
                 }));
@@ -334,40 +360,36 @@ where
             for property in properties {
                 result.extend(
                     mail_store
-                        .mail_get(JMAPGet {
+                        .mail_get(GetRequest {
                             account_id,
                             ids: vec![jmap_id].into(),
-                            properties: vec![property].into(),
-                            arguments: JMAPMailGetArguments {
-                                body_properties: vec![
-                                    JMAPMailBodyProperties::Size,
-                                    JMAPMailBodyProperties::Name,
-                                    JMAPMailBodyProperties::Type,
-                                    JMAPMailBodyProperties::Charset,
-                                    JMAPMailBodyProperties::Disposition,
-                                    JMAPMailBodyProperties::Cid,
-                                    JMAPMailBodyProperties::Language,
-                                    JMAPMailBodyProperties::Location,
-                                    JMAPMailBodyProperties::Header(
-                                        JMAPMailHeaderProperty::new_other(
-                                            "X-Custom-Header".into(),
-                                            JMAPMailHeaderForm::Raw,
-                                            false,
-                                        ),
-                                    ),
-                                    JMAPMailBodyProperties::Header(
-                                        JMAPMailHeaderProperty::new_other(
-                                            "X-Custom-Header-2".into(),
-                                            JMAPMailHeaderForm::Raw,
-                                            false,
-                                        ),
-                                    ),
+                            properties: vec![property.to_string().into()].into(),
+                            arguments: build_mail_get_arguments(
+                                vec![
+                                    MailBodyProperties::Size,
+                                    MailBodyProperties::Name,
+                                    MailBodyProperties::Type,
+                                    MailBodyProperties::Charset,
+                                    MailBodyProperties::Disposition,
+                                    MailBodyProperties::Cid,
+                                    MailBodyProperties::Language,
+                                    MailBodyProperties::Location,
+                                    MailBodyProperties::Header(MailHeaderProperty::new_other(
+                                        "X-Custom-Header".into(),
+                                        MailHeaderForm::Raw,
+                                        false,
+                                    )),
+                                    MailBodyProperties::Header(MailHeaderProperty::new_other(
+                                        "X-Custom-Header-2".into(),
+                                        MailHeaderForm::Raw,
+                                        false,
+                                    )),
                                 ],
-                                fetch_text_body_values: true,
-                                fetch_html_body_values: true,
-                                fetch_all_body_values: true,
-                                max_body_value_bytes: 100,
-                            },
+                                true,
+                                true,
+                                true,
+                                100,
+                            ),
                         })
                         .unwrap()
                         .eval_unwrap_object("/list/0"),

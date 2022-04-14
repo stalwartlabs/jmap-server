@@ -10,7 +10,7 @@ pub mod thread;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::json::JSONValue;
+use jmap::{json::JSONValue, request::JSONArgumentParser, JMAPError};
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderOffset, MessagePartId, MessageStructure, RfcHeader,
@@ -20,19 +20,19 @@ use store::{
     bincode,
     blob::BlobIndex,
     serialize::{StoreDeserialize, StoreSerialize},
-    FieldId,
+    FieldId, Tag,
 };
 
 pub const MESSAGE_RAW: BlobIndex = 0;
 pub const MESSAGE_DATA: BlobIndex = 1;
 pub const MESSAGE_PARTS: BlobIndex = 2;
 
-pub type JMAPMailHeaders = HashMap<JMAPMailProperties, JSONValue>;
-pub type JMAPMailMimeHeaders = HashMap<JMAPMailBodyProperties, JSONValue>;
+pub type JMAPMailHeaders = HashMap<MailProperties, JSONValue>;
+pub type JMAPMailMimeHeaders = HashMap<MailBodyProperties, JSONValue>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageData {
-    pub properties: HashMap<JMAPMailProperties, JSONValue>,
+    pub properties: HashMap<MailProperties, JSONValue>,
     pub mime_parts: Vec<MimePart>,
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
@@ -181,7 +181,7 @@ impl From<MessageField> for FieldId {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub enum JMAPMailHeaderForm {
+pub enum MailHeaderForm {
     Raw,
     Text,
     Addresses,
@@ -191,46 +191,46 @@ pub enum JMAPMailHeaderForm {
     URLs,
 }
 
-impl JMAPMailHeaderForm {
-    pub fn parse(value: &str) -> Option<JMAPMailHeaderForm> {
+impl MailHeaderForm {
+    pub fn parse(value: &str) -> Option<MailHeaderForm> {
         match value {
-            "asText" => Some(JMAPMailHeaderForm::Text),
-            "asAddresses" => Some(JMAPMailHeaderForm::Addresses),
-            "asGroupedAddresses" => Some(JMAPMailHeaderForm::GroupedAddresses),
-            "asMessageIds" => Some(JMAPMailHeaderForm::MessageIds),
-            "asDate" => Some(JMAPMailHeaderForm::Date),
-            "asURLs" => Some(JMAPMailHeaderForm::URLs),
+            "asText" => Some(MailHeaderForm::Text),
+            "asAddresses" => Some(MailHeaderForm::Addresses),
+            "asGroupedAddresses" => Some(MailHeaderForm::GroupedAddresses),
+            "asMessageIds" => Some(MailHeaderForm::MessageIds),
+            "asDate" => Some(MailHeaderForm::Date),
+            "asURLs" => Some(MailHeaderForm::URLs),
             _ => None,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub struct JMAPMailHeaderProperty {
-    pub form: JMAPMailHeaderForm,
+pub struct MailHeaderProperty {
+    pub form: MailHeaderForm,
     pub header: HeaderName,
     pub all: bool,
 }
 
-impl JMAPMailHeaderProperty {
-    pub fn new_rfc(header: RfcHeader, form: JMAPMailHeaderForm, all: bool) -> Self {
-        JMAPMailHeaderProperty {
+impl MailHeaderProperty {
+    pub fn new_rfc(header: RfcHeader, form: MailHeaderForm, all: bool) -> Self {
+        MailHeaderProperty {
             form,
             header: HeaderName::Rfc(header),
             all,
         }
     }
-    pub fn new_other(header: String, form: JMAPMailHeaderForm, all: bool) -> Self {
-        JMAPMailHeaderProperty {
+    pub fn new_other(header: String, form: MailHeaderForm, all: bool) -> Self {
+        MailHeaderProperty {
             form,
             header: HeaderName::Other(header),
             all,
         }
     }
 
-    pub fn parse(value: &str) -> Option<JMAPMailHeaderProperty> {
+    pub fn parse(value: &str) -> Option<MailHeaderProperty> {
         let mut all = false;
-        let mut form = JMAPMailHeaderForm::Raw;
+        let mut form = MailHeaderForm::Raw;
         let mut header = None;
         for (pos, part) in value.split(':').enumerate() {
             match pos {
@@ -246,12 +246,12 @@ impl JMAPMailHeaderProperty {
                 },
                 2 | 3 if part == "all" => all = true,
                 2 => {
-                    form = JMAPMailHeaderForm::parse(part)?;
+                    form = MailHeaderForm::parse(part)?;
                 }
                 _ => return None,
             }
         }
-        Some(JMAPMailHeaderProperty {
+        Some(MailHeaderProperty {
             form,
             header: header?,
             all,
@@ -259,7 +259,18 @@ impl JMAPMailHeaderProperty {
     }
 }
 
-impl Display for JMAPMailHeaderProperty {
+impl JSONArgumentParser for MailHeaderProperty {
+    fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
+        let argument = argument
+            .unwrap_string()
+            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        MailHeaderProperty::parse(&argument).ok_or_else(|| {
+            JMAPError::InvalidArguments(format!("Unknown property: '{}'.", argument))
+        })
+    }
+}
+
+impl Display for MailHeaderProperty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "header:")?;
         match &self.header {
@@ -267,13 +278,13 @@ impl Display for JMAPMailHeaderProperty {
             HeaderName::Other(name) => name.fmt(f)?,
         }
         match self.form {
-            JMAPMailHeaderForm::Raw => (),
-            JMAPMailHeaderForm::Text => write!(f, ":asText")?,
-            JMAPMailHeaderForm::Addresses => write!(f, ":asAddresses")?,
-            JMAPMailHeaderForm::GroupedAddresses => write!(f, ":asGroupedAddresses")?,
-            JMAPMailHeaderForm::MessageIds => write!(f, ":asMessageIds")?,
-            JMAPMailHeaderForm::Date => write!(f, ":asDate")?,
-            JMAPMailHeaderForm::URLs => write!(f, ":asURLs")?,
+            MailHeaderForm::Raw => (),
+            MailHeaderForm::Text => write!(f, ":asText")?,
+            MailHeaderForm::Addresses => write!(f, ":asAddresses")?,
+            MailHeaderForm::GroupedAddresses => write!(f, ":asGroupedAddresses")?,
+            MailHeaderForm::MessageIds => write!(f, ":asMessageIds")?,
+            MailHeaderForm::Date => write!(f, ":asDate")?,
+            MailHeaderForm::URLs => write!(f, ":asURLs")?,
         }
         if self.all {
             write!(f, ":all")
@@ -284,7 +295,7 @@ impl Display for JMAPMailHeaderProperty {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
-pub enum JMAPMailProperties {
+pub enum MailProperties {
     Id,
     BlobId,
     ThreadId,
@@ -310,91 +321,91 @@ pub enum JMAPMailProperties {
     HtmlBody,
     Attachments,
     BodyStructure,
-    Header(JMAPMailHeaderProperty),
+    Header(MailHeaderProperty),
 }
 
-impl Display for JMAPMailProperties {
+impl Display for MailProperties {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JMAPMailProperties::Id => write!(f, "id"),
-            JMAPMailProperties::BlobId => write!(f, "blobId"),
-            JMAPMailProperties::ThreadId => write!(f, "threadId"),
-            JMAPMailProperties::MailboxIds => write!(f, "mailboxIds"),
-            JMAPMailProperties::Keywords => write!(f, "keywords"),
-            JMAPMailProperties::Size => write!(f, "size"),
-            JMAPMailProperties::ReceivedAt => write!(f, "receivedAt"),
-            JMAPMailProperties::MessageId => write!(f, "messageId"),
-            JMAPMailProperties::InReplyTo => write!(f, "inReplyTo"),
-            JMAPMailProperties::References => write!(f, "references"),
-            JMAPMailProperties::Sender => write!(f, "sender"),
-            JMAPMailProperties::From => write!(f, "from"),
-            JMAPMailProperties::To => write!(f, "to"),
-            JMAPMailProperties::Cc => write!(f, "cc"),
-            JMAPMailProperties::Bcc => write!(f, "bcc"),
-            JMAPMailProperties::ReplyTo => write!(f, "replyTo"),
-            JMAPMailProperties::Subject => write!(f, "subject"),
-            JMAPMailProperties::SentAt => write!(f, "sentAt"),
-            JMAPMailProperties::HasAttachment => write!(f, "hasAttachment"),
-            JMAPMailProperties::Preview => write!(f, "preview"),
-            JMAPMailProperties::BodyValues => write!(f, "bodyValues"),
-            JMAPMailProperties::TextBody => write!(f, "textBody"),
-            JMAPMailProperties::HtmlBody => write!(f, "htmlBody"),
-            JMAPMailProperties::Attachments => write!(f, "attachments"),
-            JMAPMailProperties::BodyStructure => write!(f, "bodyStructure"),
-            JMAPMailProperties::Header(header) => header.fmt(f),
+            MailProperties::Id => write!(f, "id"),
+            MailProperties::BlobId => write!(f, "blobId"),
+            MailProperties::ThreadId => write!(f, "threadId"),
+            MailProperties::MailboxIds => write!(f, "mailboxIds"),
+            MailProperties::Keywords => write!(f, "keywords"),
+            MailProperties::Size => write!(f, "size"),
+            MailProperties::ReceivedAt => write!(f, "receivedAt"),
+            MailProperties::MessageId => write!(f, "messageId"),
+            MailProperties::InReplyTo => write!(f, "inReplyTo"),
+            MailProperties::References => write!(f, "references"),
+            MailProperties::Sender => write!(f, "sender"),
+            MailProperties::From => write!(f, "from"),
+            MailProperties::To => write!(f, "to"),
+            MailProperties::Cc => write!(f, "cc"),
+            MailProperties::Bcc => write!(f, "bcc"),
+            MailProperties::ReplyTo => write!(f, "replyTo"),
+            MailProperties::Subject => write!(f, "subject"),
+            MailProperties::SentAt => write!(f, "sentAt"),
+            MailProperties::HasAttachment => write!(f, "hasAttachment"),
+            MailProperties::Preview => write!(f, "preview"),
+            MailProperties::BodyValues => write!(f, "bodyValues"),
+            MailProperties::TextBody => write!(f, "textBody"),
+            MailProperties::HtmlBody => write!(f, "htmlBody"),
+            MailProperties::Attachments => write!(f, "attachments"),
+            MailProperties::BodyStructure => write!(f, "bodyStructure"),
+            MailProperties::Header(header) => header.fmt(f),
         }
     }
 }
 
-impl JMAPMailProperties {
-    pub fn parse(value: &str) -> Option<JMAPMailProperties> {
+impl MailProperties {
+    pub fn parse(value: &str) -> Option<MailProperties> {
         match value {
-            "id" => Some(JMAPMailProperties::Id),
-            "blobId" => Some(JMAPMailProperties::BlobId),
-            "threadId" => Some(JMAPMailProperties::ThreadId),
-            "mailboxIds" => Some(JMAPMailProperties::MailboxIds),
-            "keywords" => Some(JMAPMailProperties::Keywords),
-            "size" => Some(JMAPMailProperties::Size),
-            "receivedAt" => Some(JMAPMailProperties::ReceivedAt),
-            "messageId" => Some(JMAPMailProperties::MessageId),
-            "inReplyTo" => Some(JMAPMailProperties::InReplyTo),
-            "references" => Some(JMAPMailProperties::References),
-            "sender" => Some(JMAPMailProperties::Sender),
-            "from" => Some(JMAPMailProperties::From),
-            "to" => Some(JMAPMailProperties::To),
-            "cc" => Some(JMAPMailProperties::Cc),
-            "bcc" => Some(JMAPMailProperties::Bcc),
-            "replyTo" => Some(JMAPMailProperties::ReplyTo),
-            "subject" => Some(JMAPMailProperties::Subject),
-            "sentAt" => Some(JMAPMailProperties::SentAt),
-            "hasAttachment" => Some(JMAPMailProperties::HasAttachment),
-            "preview" => Some(JMAPMailProperties::Preview),
-            "bodyValues" => Some(JMAPMailProperties::BodyValues),
-            "textBody" => Some(JMAPMailProperties::TextBody),
-            "htmlBody" => Some(JMAPMailProperties::HtmlBody),
-            "attachments" => Some(JMAPMailProperties::Attachments),
-            "bodyStructure" => Some(JMAPMailProperties::BodyStructure),
-            _ if value.starts_with("header:") => Some(JMAPMailProperties::Header(
-                JMAPMailHeaderProperty::parse(value)?,
-            )),
+            "id" => Some(MailProperties::Id),
+            "blobId" => Some(MailProperties::BlobId),
+            "threadId" => Some(MailProperties::ThreadId),
+            "mailboxIds" => Some(MailProperties::MailboxIds),
+            "keywords" => Some(MailProperties::Keywords),
+            "size" => Some(MailProperties::Size),
+            "receivedAt" => Some(MailProperties::ReceivedAt),
+            "messageId" => Some(MailProperties::MessageId),
+            "inReplyTo" => Some(MailProperties::InReplyTo),
+            "references" => Some(MailProperties::References),
+            "sender" => Some(MailProperties::Sender),
+            "from" => Some(MailProperties::From),
+            "to" => Some(MailProperties::To),
+            "cc" => Some(MailProperties::Cc),
+            "bcc" => Some(MailProperties::Bcc),
+            "replyTo" => Some(MailProperties::ReplyTo),
+            "subject" => Some(MailProperties::Subject),
+            "sentAt" => Some(MailProperties::SentAt),
+            "hasAttachment" => Some(MailProperties::HasAttachment),
+            "preview" => Some(MailProperties::Preview),
+            "bodyValues" => Some(MailProperties::BodyValues),
+            "textBody" => Some(MailProperties::TextBody),
+            "htmlBody" => Some(MailProperties::HtmlBody),
+            "attachments" => Some(MailProperties::Attachments),
+            "bodyStructure" => Some(MailProperties::BodyStructure),
+            _ if value.starts_with("header:") => {
+                Some(MailProperties::Header(MailHeaderProperty::parse(value)?))
+            }
             _ => None,
         }
     }
 
     pub fn as_rfc_header(&self) -> RfcHeader {
         match self {
-            JMAPMailProperties::MessageId => RfcHeader::MessageId,
-            JMAPMailProperties::InReplyTo => RfcHeader::InReplyTo,
-            JMAPMailProperties::References => RfcHeader::References,
-            JMAPMailProperties::Sender => RfcHeader::Sender,
-            JMAPMailProperties::From => RfcHeader::From,
-            JMAPMailProperties::To => RfcHeader::To,
-            JMAPMailProperties::Cc => RfcHeader::Cc,
-            JMAPMailProperties::Bcc => RfcHeader::Bcc,
-            JMAPMailProperties::ReplyTo => RfcHeader::ReplyTo,
-            JMAPMailProperties::Subject => RfcHeader::Subject,
-            JMAPMailProperties::SentAt => RfcHeader::Date,
-            JMAPMailProperties::Header(JMAPMailHeaderProperty {
+            MailProperties::MessageId => RfcHeader::MessageId,
+            MailProperties::InReplyTo => RfcHeader::InReplyTo,
+            MailProperties::References => RfcHeader::References,
+            MailProperties::Sender => RfcHeader::Sender,
+            MailProperties::From => RfcHeader::From,
+            MailProperties::To => RfcHeader::To,
+            MailProperties::Cc => RfcHeader::Cc,
+            MailProperties::Bcc => RfcHeader::Bcc,
+            MailProperties::ReplyTo => RfcHeader::ReplyTo,
+            MailProperties::Subject => RfcHeader::Subject,
+            MailProperties::SentAt => RfcHeader::Date,
+            MailProperties::Header(MailHeaderProperty {
                 header: HeaderName::Rfc(rfc),
                 ..
             }) => *rfc,
@@ -403,21 +414,32 @@ impl JMAPMailProperties {
     }
 }
 
-impl Default for JMAPMailProperties {
+impl Default for MailProperties {
     fn default() -> Self {
-        JMAPMailProperties::Id
+        MailProperties::Id
+    }
+}
+
+impl JSONArgumentParser for MailProperties {
+    fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
+        let argument = argument
+            .unwrap_string()
+            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        MailProperties::parse(&argument).ok_or_else(|| {
+            JMAPError::InvalidArguments(format!("Unknown property: '{}'.", argument))
+        })
     }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub enum JMAPMailBodyProperties {
+pub enum MailBodyProperties {
     PartId,
     BlobId,
     Size,
     Name,
     Type,
     Charset,
-    Header(JMAPMailHeaderProperty),
+    Header(MailHeaderProperty),
     Headers,
     Disposition,
     Cid,
@@ -426,22 +448,117 @@ pub enum JMAPMailBodyProperties {
     Subparts,
 }
 
-impl Display for JMAPMailBodyProperties {
+impl MailBodyProperties {
+    pub fn parse(value: &str) -> Option<MailBodyProperties> {
+        match value {
+            "partId" => Some(MailBodyProperties::PartId),
+            "blobId" => Some(MailBodyProperties::BlobId),
+            "size" => Some(MailBodyProperties::Size),
+            "name" => Some(MailBodyProperties::Name),
+            "type" => Some(MailBodyProperties::Type),
+            "charset" => Some(MailBodyProperties::Charset),
+            "headers" => Some(MailBodyProperties::Headers),
+            "disposition" => Some(MailBodyProperties::Disposition),
+            "cid" => Some(MailBodyProperties::Cid),
+            "language" => Some(MailBodyProperties::Language),
+            "location" => Some(MailBodyProperties::Location),
+            "subParts" => Some(MailBodyProperties::Subparts),
+            _ if value.starts_with("header:") => Some(MailBodyProperties::Header(
+                MailHeaderProperty::parse(value)?,
+            )),
+            _ => None,
+        }
+    }
+}
+
+impl JSONArgumentParser for MailBodyProperties {
+    fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
+        let argument = argument
+            .unwrap_string()
+            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        MailBodyProperties::parse(&argument).ok_or_else(|| {
+            JMAPError::InvalidArguments(format!("Unknown property: '{}'.", argument))
+        })
+    }
+}
+
+impl Display for MailBodyProperties {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JMAPMailBodyProperties::PartId => write!(f, "partId"),
-            JMAPMailBodyProperties::BlobId => write!(f, "blobId"),
-            JMAPMailBodyProperties::Size => write!(f, "size"),
-            JMAPMailBodyProperties::Name => write!(f, "name"),
-            JMAPMailBodyProperties::Type => write!(f, "type"),
-            JMAPMailBodyProperties::Charset => write!(f, "charset"),
-            JMAPMailBodyProperties::Header(header) => header.fmt(f),
-            JMAPMailBodyProperties::Headers => write!(f, "headers"),
-            JMAPMailBodyProperties::Disposition => write!(f, "disposition"),
-            JMAPMailBodyProperties::Cid => write!(f, "cid"),
-            JMAPMailBodyProperties::Language => write!(f, "language"),
-            JMAPMailBodyProperties::Location => write!(f, "location"),
-            JMAPMailBodyProperties::Subparts => write!(f, "subParts"),
+            MailBodyProperties::PartId => write!(f, "partId"),
+            MailBodyProperties::BlobId => write!(f, "blobId"),
+            MailBodyProperties::Size => write!(f, "size"),
+            MailBodyProperties::Name => write!(f, "name"),
+            MailBodyProperties::Type => write!(f, "type"),
+            MailBodyProperties::Charset => write!(f, "charset"),
+            MailBodyProperties::Header(header) => header.fmt(f),
+            MailBodyProperties::Headers => write!(f, "headers"),
+            MailBodyProperties::Disposition => write!(f, "disposition"),
+            MailBodyProperties::Cid => write!(f, "cid"),
+            MailBodyProperties::Language => write!(f, "language"),
+            MailBodyProperties::Location => write!(f, "location"),
+            MailBodyProperties::Subparts => write!(f, "subParts"),
         }
+    }
+}
+
+pub struct Keyword {
+    pub tag: Tag,
+}
+
+impl Keyword {
+    pub const SEEN: u8 = 0;
+    pub const DRAFT: u8 = 1;
+    pub const FLAGGED: u8 = 2;
+    pub const ANSWERED: u8 = 3;
+    pub const RECENT: u8 = 4;
+    pub const IMPORTANT: u8 = 5;
+    pub const PHISHING: u8 = 6;
+    pub const JUNK: u8 = 7;
+    pub const NOTJUNK: u8 = 8;
+
+    pub fn from_jmap(value: String) -> Tag {
+        if value.starts_with('$') {
+            match value.as_str() {
+                "$seen" => Tag::Static(Self::SEEN),
+                "$draft" => Tag::Static(Self::DRAFT),
+                "$flagged" => Tag::Static(Self::FLAGGED),
+                "$answered" => Tag::Static(Self::ANSWERED),
+                "$recent" => Tag::Static(Self::RECENT),
+                "$important" => Tag::Static(Self::IMPORTANT),
+                "$phishing" => Tag::Static(Self::PHISHING),
+                "$junk" => Tag::Static(Self::JUNK),
+                "$notjunk" => Tag::Static(Self::NOTJUNK),
+                _ => Tag::Text(value),
+            }
+        } else {
+            Tag::Text(value)
+        }
+    }
+
+    pub fn to_jmap(keyword: Tag) -> String {
+        match keyword {
+            Tag::Static(keyword) => match keyword {
+                Self::DRAFT => "$draft".to_string(),
+                Self::FLAGGED => "$flagged".to_string(),
+                Self::ANSWERED => "$answered".to_string(),
+                Self::RECENT => "$recent".to_string(),
+                Self::IMPORTANT => "$important".to_string(),
+                Self::PHISHING => "$phishing".to_string(),
+                Self::JUNK => "$junk".to_string(),
+                Self::NOTJUNK => "$notjunk".to_string(),
+                _ => unreachable!(),
+            },
+            Tag::Text(value) => value,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl JSONArgumentParser for Keyword {
+    fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
+        Ok(Keyword {
+            tag: Keyword::from_jmap(argument.parse_string()?),
+        })
     }
 }

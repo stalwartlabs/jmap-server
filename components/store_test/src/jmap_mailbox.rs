@@ -1,22 +1,21 @@
 use std::{collections::HashMap, iter::FromIterator};
 
 use jmap::{
-    changes::{JMAPChangesRequest, JMAPState},
+    changes::JMAPState,
     id::JMAPIdSerialize,
     json::JSONValue,
-    JMAPComparator, JMAPFilter, JMAPGet, JMAPQueryRequest, JMAPSet,
+    request::{ChangesRequest, GetRequest, QueryRequest, SetRequest},
 };
 use jmap_mail::{
-    get::{JMAPMailGet, JMAPMailGetArguments},
+    get::JMAPMailGet,
     import::JMAPMailImport,
-    mailbox::{
-        JMAPMailMailbox, JMAPMailboxComparator, JMAPMailboxFilterCondition, JMAPMailboxProperties,
-        JMAPMailboxQueryArguments, JMAPMailboxSetArguments,
-    },
+    mailbox::{JMAPMailMailbox, MailboxProperties},
     set::JMAPMailSet,
 };
 
 use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store};
+
+use crate::{jmap_mail_get::build_mail_get_arguments, JMAPComparator, JMAPFilter};
 
 const TEST_MAILBOXES: &[u8] = br#"
 [
@@ -121,6 +120,100 @@ const TEST_MAILBOXES: &[u8] = br#"
 ]
 "#;
 
+#[derive(Debug, Clone)]
+pub enum JMAPMailboxFilterCondition {
+    ParentId(JMAPId),
+    Name(String),
+    Role(String),
+    HasAnyRole(bool),
+    IsSubscribed(bool),
+}
+
+#[derive(Debug, Clone)]
+pub enum JMAPMailboxComparator {
+    Name,
+    Role,
+    ParentId,
+}
+
+impl From<JMAPComparator<JMAPMailboxComparator>> for jmap::query::Comparator {
+    fn from(comp: JMAPComparator<JMAPMailboxComparator>) -> Self {
+        jmap::query::Comparator {
+            property: match comp.property {
+                JMAPMailboxComparator::Name => "name".to_string(),
+                JMAPMailboxComparator::Role => "role".to_string(),
+                JMAPMailboxComparator::ParentId => "parentId".to_string(),
+            },
+            is_ascending: comp.is_ascending,
+            collation: None,
+            arguments: HashMap::new(),
+        }
+    }
+}
+
+impl From<JMAPMailboxFilterCondition> for JSONValue {
+    fn from(condition: JMAPMailboxFilterCondition) -> Self {
+        let mut json = HashMap::new();
+        match condition {
+            JMAPMailboxFilterCondition::ParentId(id) => {
+                json.insert("parentId".to_string(), id.to_jmap_string().into());
+            }
+            JMAPMailboxFilterCondition::Name(name) => {
+                json.insert("name".to_string(), name.into());
+            }
+            JMAPMailboxFilterCondition::Role(role) => {
+                json.insert("role".to_string(), role.into());
+            }
+            JMAPMailboxFilterCondition::HasAnyRole(b) => {
+                json.insert("hasAnyRole".to_string(), b.into());
+            }
+            JMAPMailboxFilterCondition::IsSubscribed(b) => {
+                json.insert("isSubscribed".to_string(), b.into());
+            }
+        }
+
+        json.into()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MailboxQueryRequest {
+    pub account_id: AccountId,
+    pub filter: JMAPFilter<JMAPMailboxFilterCondition>,
+    pub sort: Vec<JMAPComparator<JMAPMailboxComparator>>,
+    pub position: i64,
+    pub anchor: Option<JMAPId>,
+    pub anchor_offset: i64,
+    pub limit: usize,
+    pub calculate_total: bool,
+    pub sort_as_tree: bool,
+    pub filter_as_tree: bool,
+}
+
+impl From<MailboxQueryRequest> for QueryRequest {
+    fn from(request: MailboxQueryRequest) -> Self {
+        QueryRequest {
+            account_id: request.account_id,
+            filter: request.filter.into(),
+            sort: request
+                .sort
+                .into_iter()
+                .map(|c| c.into())
+                .collect::<Vec<_>>()
+                .into(),
+            position: request.position,
+            anchor: request.anchor,
+            anchor_offset: request.anchor_offset,
+            limit: request.limit,
+            calculate_total: request.calculate_total,
+            arguments: HashMap::from_iter([
+                ("sortAsTree".to_string(), request.sort_as_tree.into()),
+                ("filterAsTree".to_string(), request.filter_as_tree.into()),
+            ]),
+        }
+    }
+}
+
 pub fn jmap_mailbox<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
@@ -137,20 +230,21 @@ where
     // Sort by name
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::None,
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::None,
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
                     sort_as_tree: false,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -179,20 +273,22 @@ where
     // Sort by name as tree
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::None,
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::None,
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: true,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -220,22 +316,24 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
-                    "level".to_string()
-                )),
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
+                        "level".to_string()
+                    )),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: true,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -257,20 +355,24 @@ where
     // Filter as tree
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name("spam".to_string())),
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
+                        "spam".to_string()
+                    )),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: true,
                     filter_as_tree: true,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -280,31 +382,11 @@ where
     );
 
     assert!(mail_store
-        .mailbox_query(JMAPQueryRequest {
-            account_id,
-            filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name("level".to_string())),
-            sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-            position: 0,
-            anchor: None,
-            anchor_offset: 0,
-            limit: 100,
-            calculate_total: true,
-            arguments: JMAPMailboxQueryArguments {
-                sort_as_tree: true,
-                filter_as_tree: true,
-            },
-        })
-        .unwrap()
-        .eval_unwrap_array("/ids")
-        .is_empty());
-
-    // Role filters
-    assert_eq!(
-        mail_store
-            .mailbox_query(JMAPQueryRequest {
+        .mailbox_query(
+            MailboxQueryRequest {
                 account_id,
-                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Role(
-                    "inbox".to_string()
+                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
+                    "level".to_string()
                 )),
                 sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
                 position: 0,
@@ -312,11 +394,37 @@ where
                 anchor_offset: 0,
                 limit: 100,
                 calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+
+                sort_as_tree: true,
+                filter_as_tree: true,
+            }
+            .into()
+        )
+        .unwrap()
+        .eval_unwrap_array("/ids")
+        .is_empty());
+
+    // Role filters
+    assert_eq!(
+        mail_store
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Role(
+                        "inbox".to_string()
+                    )),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: false,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -327,20 +435,22 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::HasAnyRole),
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::HasAnyRole(true)),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: false,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -351,7 +461,7 @@ where
 
     // Duplicate role
     assert!(mail_store
-        .mailbox_set(JMAPSet {
+        .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
             create: JSONValue::Null,
@@ -361,9 +471,7 @@ where
             )])
             .into(),
             destroy: JSONValue::Null,
-            arguments: JMAPMailboxSetArguments {
-                remove_emails: false,
-            },
+            arguments: HashMap::new(),
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
@@ -372,7 +480,7 @@ where
 
     // Duplicate name
     assert!(mail_store
-        .mailbox_set(JMAPSet {
+        .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
             create: JSONValue::Null,
@@ -382,9 +490,7 @@ where
             )])
             .into(),
             destroy: JSONValue::Null,
-            arguments: JMAPMailboxSetArguments {
-                remove_emails: false,
-            },
+            arguments: HashMap::new(),
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
@@ -393,7 +499,7 @@ where
 
     // Circular relationship
     assert!(mail_store
-        .mailbox_set(JMAPSet {
+        .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
             create: JSONValue::Null,
@@ -407,9 +513,7 @@ where
             )])
             .into(),
             destroy: JSONValue::Null,
-            arguments: JMAPMailboxSetArguments {
-                remove_emails: false,
-            },
+            arguments: HashMap::new(),
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
@@ -417,7 +521,7 @@ where
         .is_some());
 
     assert!(mail_store
-        .mailbox_set(JMAPSet {
+        .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
             create: JSONValue::Null,
@@ -428,9 +532,7 @@ where
             )])
             .into(),
             destroy: JSONValue::Null,
-            arguments: JMAPMailboxSetArguments {
-                remove_emails: false,
-            },
+            arguments: HashMap::new(),
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
@@ -439,7 +541,7 @@ where
 
     // Invalid parent ID
     assert!(mail_store
-        .mailbox_set(JMAPSet {
+        .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
             create: JSONValue::Null,
@@ -450,9 +552,7 @@ where
             )])
             .into(),
             destroy: JSONValue::Null,
-            arguments: JMAPMailboxSetArguments {
-                remove_emails: false,
-            },
+            arguments: HashMap::new(),
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
@@ -461,10 +561,11 @@ where
 
     // Get state
     let state = mail_store
-        .mailbox_changes(JMAPChangesRequest {
+        .mailbox_changes(ChangesRequest {
             account_id,
             since_state: JMAPState::Initial,
             max_changes: 0,
+            arguments: HashMap::new(),
         })
         .unwrap()
         .eval_unwrap_jmap_state("/newState");
@@ -472,7 +573,7 @@ where
     // Rename and move mailbox
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
@@ -486,9 +587,7 @@ where
                 )])
                 .into(),
                 destroy: JSONValue::Null,
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: false,
-                },
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -498,10 +597,11 @@ where
 
     // Verify changes
     let state = mail_store
-        .mailbox_changes(JMAPChangesRequest {
+        .mailbox_changes(ChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
+            arguments: HashMap::new(),
         })
         .unwrap();
     assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 1);
@@ -529,10 +629,11 @@ where
 
     // Only email properties must have changed
     let state = mail_store
-        .mailbox_changes(JMAPChangesRequest {
+        .mailbox_changes(ChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
+            arguments: HashMap::new(),
         })
         .unwrap();
     assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 1);
@@ -543,10 +644,10 @@ where
     assert_eq!(
         state.eval("/updatedProperties").unwrap(),
         JSONValue::Array(vec![
-            JMAPMailboxProperties::TotalEmails.into(),
-            JMAPMailboxProperties::UnreadEmails.into(),
-            JMAPMailboxProperties::TotalThreads.into(),
-            JMAPMailboxProperties::UnreadThreads.into(),
+            MailboxProperties::TotalEmails.into(),
+            MailboxProperties::UnreadEmails.into(),
+            MailboxProperties::TotalThreads.into(),
+            MailboxProperties::UnreadThreads.into(),
         ])
     );
     let state = state.eval_unwrap_jmap_state("/newState");
@@ -554,7 +655,7 @@ where
     // Move email from Inbox to Trash
     assert_eq!(
         mail_store
-            .mail_set(JMAPSet {
+            .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
@@ -569,7 +670,7 @@ where
                 )])
                 .into(),
                 destroy: JSONValue::Null,
-                arguments: (),
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -579,10 +680,11 @@ where
 
     // E-mail properties of both Inbox and Trash must have changed
     let state = mail_store
-        .mailbox_changes(JMAPChangesRequest {
+        .mailbox_changes(ChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
+            arguments: HashMap::new(),
         })
         .unwrap();
     assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 2);
@@ -601,25 +703,23 @@ where
     assert_eq!(
         state.eval("/updatedProperties").unwrap(),
         JSONValue::Array(vec![
-            JMAPMailboxProperties::TotalEmails.into(),
-            JMAPMailboxProperties::UnreadEmails.into(),
-            JMAPMailboxProperties::TotalThreads.into(),
-            JMAPMailboxProperties::UnreadThreads.into(),
+            MailboxProperties::TotalEmails.into(),
+            MailboxProperties::UnreadEmails.into(),
+            MailboxProperties::TotalThreads.into(),
+            MailboxProperties::UnreadThreads.into(),
         ])
     );
 
     // Deleting folders with children is not allowed
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
                 update: JSONValue::Null,
                 destroy: vec![get_mailbox_id(&id_map, "1").into()].into(),
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: false,
-                },
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/destroyed")
@@ -630,15 +730,13 @@ where
     // Deleting folders with contents is not allowed (unless remove_emails is true)
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
                 update: JSONValue::Null,
                 destroy: vec![get_mailbox_id(&id_map, "trash").into()].into(),
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: false,
-                },
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/destroyed")
@@ -649,15 +747,15 @@ where
     // Delete Trash folder and its contents
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
                 update: JSONValue::Null,
                 destroy: vec![get_mailbox_id(&id_map, "trash").into()].into(),
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: true,
-                },
+                arguments: HashMap::from_iter([
+                    ("onDestroyRemoveEmails".to_string(), true.into(),)
+                ]),
             })
             .unwrap()
             .eval("/destroyed/0")
@@ -668,12 +766,12 @@ where
     // Verify that Trash folder and its contents are gone
     assert_eq!(
         mail_store
-            .mailbox_get(JMAPGet {
+            .mailbox_get(GetRequest {
                 account_id,
                 ids: vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "trash")).unwrap()]
                     .into(),
-                properties: None,
-                arguments: (),
+                properties: JSONValue::Null,
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notFound")
@@ -682,11 +780,11 @@ where
     );
     assert_eq!(
         mail_store
-            .mail_get(JMAPGet {
+            .mail_get(GetRequest {
                 account_id,
                 ids: vec![JMAPId::from_jmap_string(&message_id).unwrap()].into(),
-                properties: None,
-                arguments: JMAPMailGetArguments::default(),
+                properties: JSONValue::Null,
+                arguments: build_mail_get_arguments(vec![], true, true, true, 0),
             })
             .unwrap()
             .eval("/notFound")
@@ -697,7 +795,7 @@ where
     // Check search results after changing folder properties
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
@@ -713,9 +811,7 @@ where
                 )])
                 .into(),
                 destroy: JSONValue::Null,
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: false,
-                },
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -725,30 +821,32 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::and(vec![
-                    JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
-                        "Borradores".to_string()
-                    )),
-                    JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(
-                        JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "2")).unwrap() + 1
-                    )),
-                    JMAPFilter::not(vec![JMAPFilter::condition(
-                        JMAPMailboxFilterCondition::HasAnyRole
-                    )]),
-                ]),
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::and(vec![
+                        JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
+                            "Borradores".to_string()
+                        )),
+                        JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(
+                            JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "2")).unwrap() + 1
+                        )),
+                        JMAPFilter::not(vec![JMAPFilter::condition(
+                            JMAPMailboxFilterCondition::HasAnyRole(true)
+                        )]),
+                    ]),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: false,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -758,59 +856,69 @@ where
     );
 
     assert!(mail_store
-        .mailbox_query(JMAPQueryRequest {
-            account_id,
-            filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name("Drafts".to_string())),
-            sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-            position: 0,
-            anchor: None,
-            anchor_offset: 0,
-            limit: 100,
-            calculate_total: true,
-            arguments: JMAPMailboxQueryArguments {
-                sort_as_tree: false,
-                filter_as_tree: false,
-            },
-        })
-        .unwrap()
-        .eval_unwrap_array("/ids")
-        .is_empty());
-
-    assert!(mail_store
-        .mailbox_query(JMAPQueryRequest {
-            account_id,
-            filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Role("drafts".to_string())),
-            sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-            position: 0,
-            anchor: None,
-            anchor_offset: 0,
-            limit: 100,
-            calculate_total: true,
-            arguments: JMAPMailboxQueryArguments {
-                sort_as_tree: false,
-                filter_as_tree: false,
-            },
-        })
-        .unwrap()
-        .eval_unwrap_array("/ids")
-        .is_empty());
-
-    assert_eq!(
-        mail_store
-            .mailbox_query(JMAPQueryRequest {
+        .mailbox_query(
+            MailboxQueryRequest {
                 account_id,
-                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(0)),
+                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
+                    "Drafts".to_string()
+                )),
                 sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
                 position: 0,
                 anchor: None,
                 anchor_offset: 0,
                 limit: 100,
                 calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+
+                sort_as_tree: false,
+                filter_as_tree: false,
+            }
+            .into()
+        )
+        .unwrap()
+        .eval_unwrap_array("/ids")
+        .is_empty());
+
+    assert!(mail_store
+        .mailbox_query(
+            MailboxQueryRequest {
+                account_id,
+                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Role(
+                    "drafts".to_string()
+                )),
+                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                position: 0,
+                anchor: None,
+                anchor_offset: 0,
+                limit: 100,
+                calculate_total: true,
+
+                sort_as_tree: false,
+                filter_as_tree: false,
+            }
+            .into()
+        )
+        .unwrap()
+        .eval_unwrap_array("/ids")
+        .is_empty());
+
+    assert_eq!(
+        mail_store
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(0)),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
+
                     sort_as_tree: false,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -821,20 +929,21 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(JMAPQueryRequest {
-                account_id,
-                filter: JMAPFilter::condition(JMAPMailboxFilterCondition::HasAnyRole),
-                sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
-                position: 0,
-                anchor: None,
-                anchor_offset: 0,
-                limit: 100,
-                calculate_total: true,
-                arguments: JMAPMailboxQueryArguments {
+            .mailbox_query(
+                MailboxQueryRequest {
+                    account_id,
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::HasAnyRole(true)),
+                    sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
+                    position: 0,
+                    anchor: None,
+                    anchor_offset: 0,
+                    limit: 100,
+                    calculate_total: true,
                     sort_as_tree: false,
                     filter_as_tree: false,
-                },
-            })
+                }
+                .into()
+            )
             .unwrap()
             .eval_unwrap_array("/ids")
             .into_iter()
@@ -876,15 +985,13 @@ fn create_nested_mailboxes<T>(
         }
         let mailbox_num = format!("b{}", mailbox_num);
         let result = mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: HashMap::from_iter([(mailbox_num.clone(), mailbox)]).into(),
                 update: JSONValue::Null,
                 destroy: JSONValue::Null,
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: false,
-                },
+                arguments: HashMap::new(),
             })
             .unwrap();
 
@@ -916,7 +1023,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let result = mail_store
-        .mailbox_set(JMAPSet {
+        .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
             create: HashMap::from_iter([(
@@ -930,9 +1037,7 @@ where
             .into(),
             update: JSONValue::Null,
             destroy: JSONValue::Null,
-            arguments: JMAPMailboxSetArguments {
-                remove_emails: false,
-            },
+            arguments: HashMap::new(),
         })
         .unwrap();
 
@@ -952,7 +1057,7 @@ pub fn update_mailbox<T>(
 {
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
@@ -970,9 +1075,7 @@ pub fn update_mailbox<T>(
                 )])
                 .into(),
                 destroy: JSONValue::Null,
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: false,
-                },
+                arguments: HashMap::new(),
             })
             .unwrap()
             .eval("/notUpdated")
@@ -987,15 +1090,15 @@ where
 {
     assert_eq!(
         mail_store
-            .mailbox_set(JMAPSet {
+            .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: JSONValue::Null,
                 update: JSONValue::Null,
                 destroy: vec![jmap_id.to_jmap_string().into()].into(),
-                arguments: JMAPMailboxSetArguments {
-                    remove_emails: true,
-                },
+                arguments: HashMap::from_iter([
+                    ("onDestroyRemoveEmails".to_string(), true.into(),)
+                ]),
             })
             .unwrap()
             .eval("/notDestroyed")

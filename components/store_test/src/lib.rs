@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
+use jmap::json::JSONValue;
 use jmap_mail::{MessageData, MessageOutline, MESSAGE_DATA};
 use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;
@@ -32,6 +33,124 @@ pub mod jmap_mail_query_changes;
 pub mod jmap_mail_set;
 pub mod jmap_mail_thread;
 pub mod jmap_mailbox;
+
+#[derive(Debug, Clone)]
+pub struct JMAPComparator<T> {
+    pub property: T,
+    pub is_ascending: bool,
+    pub collation: Option<String>,
+}
+
+impl<T> JMAPComparator<T> {
+    pub fn ascending(property: T) -> Self {
+        Self {
+            property,
+            is_ascending: true,
+            collation: None,
+        }
+    }
+
+    pub fn descending(property: T) -> Self {
+        Self {
+            property,
+            is_ascending: false,
+            collation: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum JMAPLogicalOperator {
+    And,
+    Or,
+    Not,
+}
+
+#[derive(Debug, Clone)]
+pub struct JMAPFilterOperator<T> {
+    pub operator: JMAPLogicalOperator,
+    pub conditions: Vec<JMAPFilter<T>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum JMAPFilter<T> {
+    Condition(T),
+    Operator(JMAPFilterOperator<T>),
+    None,
+}
+
+impl<T> Default for JMAPFilter<T> {
+    fn default() -> Self {
+        JMAPFilter::None
+    }
+}
+
+impl<T> JMAPFilter<T> {
+    pub fn condition(cond: T) -> Self {
+        JMAPFilter::Condition(cond)
+    }
+
+    pub fn and(conditions: Vec<JMAPFilter<T>>) -> Self {
+        JMAPFilter::Operator(JMAPFilterOperator {
+            operator: JMAPLogicalOperator::And,
+            conditions,
+        })
+    }
+
+    pub fn or(conditions: Vec<JMAPFilter<T>>) -> Self {
+        JMAPFilter::Operator(JMAPFilterOperator {
+            operator: JMAPLogicalOperator::Or,
+            conditions,
+        })
+    }
+
+    pub fn not(conditions: Vec<JMAPFilter<T>>) -> Self {
+        JMAPFilter::Operator(JMAPFilterOperator {
+            operator: JMAPLogicalOperator::Not,
+            conditions,
+        })
+    }
+}
+
+impl<T> From<JMAPFilterOperator<T>> for JSONValue
+where
+    JSONValue: From<T>,
+{
+    fn from(filter: JMAPFilterOperator<T>) -> Self {
+        let mut map = HashMap::new();
+        map.insert(
+            "operator".to_string(),
+            match filter.operator {
+                JMAPLogicalOperator::And => "AND".to_string().into(),
+                JMAPLogicalOperator::Or => "OR".to_string().into(),
+                JMAPLogicalOperator::Not => "NOT".to_string().into(),
+            },
+        );
+        map.insert(
+            "conditions".to_string(),
+            filter
+                .conditions
+                .into_iter()
+                .map(|c| c.into())
+                .collect::<Vec<_>>()
+                .into(),
+        );
+        map.into()
+    }
+}
+
+impl<T> From<JMAPFilter<T>> for JSONValue
+where
+    JSONValue: From<T>,
+{
+    fn from(filter: JMAPFilter<T>) -> Self {
+        match filter {
+            JMAPFilter::Condition(cond) => cond.into(),
+            JMAPFilter::Operator(op) => op.into(),
+            JMAPFilter::None => JSONValue::Null,
+        }
+    }
+}
 
 pub fn deflate_artwork_data() -> Vec<u8> {
     let mut csv_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

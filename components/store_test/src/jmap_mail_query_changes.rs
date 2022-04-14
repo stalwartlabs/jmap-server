@@ -1,15 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::FromIterator,
+};
 
 use jmap::{
-    changes::JMAPState, id::JMAPIdSerialize, json::JSONValue, JMAPComparator, JMAPFilter,
-    JMAPQueryChangesRequest,
+    changes::JMAPState, id::JMAPIdSerialize, json::JSONValue, request::QueryChangesRequest,
 };
-use jmap_mail::{
-    changes::JMAPMailChanges,
-    import::JMAPMailImport,
-    query::{JMAPMailComparator, JMAPMailFilterCondition, JMAPMailQueryArguments},
-    MessageField,
-};
+use jmap_mail::{changes::JMAPMailChanges, import::JMAPMailImport, MessageField};
 use store::{
     batch::{Document, WriteBatch},
     field::DefaultOptions,
@@ -17,7 +14,46 @@ use store::{
 };
 use store::{Collection, JMAPIdPrefix};
 
-use crate::jmap_changes::LogAction;
+use crate::{
+    jmap_changes::LogAction,
+    jmap_mail_query::{JMAPMailComparator, JMAPMailFilterCondition},
+    JMAPComparator, JMAPFilter,
+};
+
+#[derive(Debug, Clone)]
+pub struct MailQueryChangesRequest {
+    pub account_id: AccountId,
+    pub filter: JMAPFilter<JMAPMailFilterCondition>,
+    pub sort: Vec<JMAPComparator<JMAPMailComparator>>,
+    pub since_query_state: JMAPState,
+    pub max_changes: usize,
+    pub up_to_id: JSONValue,
+    pub calculate_total: bool,
+    pub collapse_threads: bool,
+}
+
+impl From<MailQueryChangesRequest> for QueryChangesRequest {
+    fn from(request: MailQueryChangesRequest) -> Self {
+        QueryChangesRequest {
+            account_id: request.account_id,
+            filter: request.filter.into(),
+            sort: request
+                .sort
+                .into_iter()
+                .map(|c| c.into())
+                .collect::<Vec<_>>()
+                .into(),
+            calculate_total: request.calculate_total,
+            since_query_state: request.since_query_state,
+            max_changes: request.max_changes,
+            up_to_id: request.up_to_id,
+            arguments: HashMap::from_iter([(
+                "collapseThreads".to_string(),
+                request.collapse_threads.into(),
+            )]),
+        }
+    }
+}
 
 pub fn jmap_mail_query_changes<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
@@ -136,7 +172,7 @@ where
         let mut new_state = JMAPState::Initial;
         for state in &states {
             for (test_num, query) in vec![
-                JMAPQueryChangesRequest {
+                MailQueryChangesRequest {
                     account_id,
                     filter: JMAPFilter::None,
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -144,11 +180,9 @@ where
                     max_changes: 0,
                     up_to_id: JSONValue::Null,
                     calculate_total: false,
-                    arguments: JMAPMailQueryArguments {
-                        collapse_threads: false,
-                    },
+                    collapse_threads: false,
                 },
-                JMAPQueryChangesRequest {
+                MailQueryChangesRequest {
                     account_id,
                     filter: JMAPFilter::Condition(JMAPMailFilterCondition::From("test_1".into())),
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -156,11 +190,9 @@ where
                     max_changes: 0,
                     up_to_id: JSONValue::Null,
                     calculate_total: false,
-                    arguments: JMAPMailQueryArguments {
-                        collapse_threads: false,
-                    },
+                    collapse_threads: false,
                 },
-                JMAPQueryChangesRequest {
+                MailQueryChangesRequest {
                     account_id,
                     filter: JMAPFilter::Condition(JMAPMailFilterCondition::InMailbox(1)),
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -168,11 +200,9 @@ where
                     max_changes: 0,
                     up_to_id: JSONValue::Null,
                     calculate_total: false,
-                    arguments: JMAPMailQueryArguments {
-                        collapse_threads: false,
-                    },
+                    collapse_threads: false,
                 },
-                JMAPQueryChangesRequest {
+                MailQueryChangesRequest {
                     account_id,
                     filter: JMAPFilter::None,
                     sort: vec![JMAPComparator::ascending(JMAPMailComparator::ReceivedAt)],
@@ -183,9 +213,7 @@ where
                         .map(|id| id.to_jmap_string().into())
                         .unwrap_or(JSONValue::Null),
                     calculate_total: false,
-                    arguments: JMAPMailQueryArguments {
-                        collapse_threads: false,
-                    },
+                    collapse_threads: false,
                 },
             ]
             .into_iter()
@@ -194,7 +222,7 @@ where
                 if test_num == 3 && query.up_to_id.is_null() {
                     continue;
                 }
-                let changes = mail_store.mail_query_changes(query.clone()).unwrap();
+                let changes = mail_store.mail_query_changes(query.clone().into()).unwrap();
 
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.

@@ -3,8 +3,7 @@ use std::task::Poll;
 
 use futures::poll;
 
-use jmap_mail::mailbox::{JMAPMailboxProperties, Mailbox};
-use jmap_mail::query::MailboxId;
+use jmap_mail::mailbox::{Mailbox, MailboxProperties};
 use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
 
 use store::leb128::Leb128;
@@ -691,7 +690,7 @@ where
                 document_id,
                 MessageField::Mailbox.into(),
             )? {
-                item_size += mailboxes.items.len() * std::mem::size_of::<MailboxId>();
+                item_size += mailboxes.items.len() * std::mem::size_of::<DocumentId>();
                 mailboxes.items
             } else {
                 return Ok(None);
@@ -783,7 +782,7 @@ where
                     account_id,
                     Collection::Mailbox,
                     document_id,
-                    JMAPMailboxProperties::Id.into(),
+                    MailboxProperties::Id.into(),
                 )?
                 .map(|mailbox| {
                     (

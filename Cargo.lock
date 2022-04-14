@@ -1030,7 +1030,6 @@ dependencies = [
 name = "jmap_mail"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "jmap",
  "mail-builder",
  "mail-parser",
@@ -1972,6 +1971,7 @@ dependencies = [
  "base32",
  "bincode",
  "bitpacking",
+ "chrono",
  "lz4_flex",
  "moka",
  "nlp",

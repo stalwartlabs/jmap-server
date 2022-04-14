@@ -14,7 +14,7 @@ pub enum JSONPointer {
     Root,
     Wildcard,
     String(String),
-    ArrayIndex(u64),
+    Number(u64),
     Path(Vec<JSONPointer>),
 }
 
@@ -58,7 +58,7 @@ impl JSONPointer {
 
             if add_token {
                 if is_number && !is_escaped && !is_string && !is_wildcard {
-                    path.push(JSONPointer::ArrayIndex(
+                    path.push(JSONPointer::Number(
                         value.get(last_pos..pos)?.parse().unwrap_or(0),
                     ));
                 } else if is_wildcard && (pos - last_pos) == 1 {
@@ -144,6 +144,14 @@ impl JSONNumber {
                     0
                 }
             }
+        }
+    }
+
+    pub fn to_int(&self) -> i64 {
+        match self {
+            JSONNumber::PosInt(i) => *i as i64,
+            JSONNumber::NegInt(i) => *i,
+            JSONNumber::Float(f) => *f as i64,
         }
     }
 }
@@ -266,6 +274,13 @@ impl JSONValue {
         }
     }
 
+    pub fn to_int(&self) -> Option<i64> {
+        match self {
+            JSONValue::Number(number) => Some(number.to_int()),
+            _ => None,
+        }
+    }
+
     pub fn to_bool(&self) -> Option<bool> {
         match self {
             JSONValue::Bool(bool) => Some(*bool),
@@ -334,25 +349,23 @@ impl JSONValue {
     }
 
     pub fn eval(&self, pointer: &str) -> crate::Result<JSONValue> {
-        self.eval_ptr(
-            JSONPointer::parse(pointer).ok_or_else(|| {
-                JMAPError::ParseError(format!("Invalid JSON Pointer: {}", pointer))
-            })?,
-        )
+        self.eval_ptr(JSONPointer::parse(pointer).ok_or_else(|| {
+            JMAPError::InvalidResultReference(format!("Failed to parse: {}", pointer))
+        })?)
     }
 
     pub fn eval_ptr(&self, pointer: JSONPointer) -> crate::Result<JSONValue> {
         let path = match pointer {
             JSONPointer::Path(path) => {
                 if path.len() > 5 {
-                    return Err(JMAPError::ParseError(format!(
-                        "Invalid JSON Pointer: Too many arguments, {} provided, max is 5.",
+                    return Err(JMAPError::InvalidResultReference(format!(
+                        "Too many arguments, {} provided, max is 5.",
                         path.len()
                     )));
                 }
                 path
             }
-            path_item @ (JSONPointer::String(_) | JSONPointer::ArrayIndex(_)) => {
+            path_item @ (JSONPointer::String(_) | JSONPointer::Number(_)) => {
                 vec![path_item]
             }
             JSONPointer::Root | JSONPointer::Wildcard => return Ok(self.clone()),
@@ -371,13 +384,27 @@ impl JSONValue {
                             return Ok(value.clone());
                         }
                     } else {
-                        return Err(JMAPError::ParseError(format!(
-                            "Invalid JSON Pointer: Item '{}' not found.",
+                        return Err(JMAPError::InvalidResultReference(format!(
+                            "Item '{}' not found.",
                             name
                         )));
                     }
                 }
-                (JSONPointer::ArrayIndex(pos), JSONValue::Array(array)) => {
+                (JSONPointer::Number(name), JSONValue::Object(obj)) => {
+                    if let Some(value) = obj.get(&name.to_string()) {
+                        if !is_last {
+                            eval_item = value;
+                        } else {
+                            return Ok(value.clone());
+                        }
+                    } else {
+                        return Err(JMAPError::InvalidResultReference(format!(
+                            "Item '{}' not found.",
+                            name
+                        )));
+                    }
+                }
+                (JSONPointer::Number(pos), JSONValue::Array(array)) => {
                     if let Some(array_item) = array.get(*pos as usize) {
                         if !is_last {
                             eval_item = array_item;
@@ -385,8 +412,8 @@ impl JSONValue {
                             return Ok(array_item.clone());
                         }
                     } else {
-                        return Err(JMAPError::ParseError(format!(
-                            "Invalid JSON Pointer: Array position {} is out of bounds.",
+                        return Err(JMAPError::InvalidResultReference(format!(
+                            "Array position {} is out of bounds.",
                             pos
                         )));
                     }
@@ -401,29 +428,31 @@ impl JSONValue {
                             {
                                 let is_last = path_pos == path.len() - 1;
 
-                                match (path_item, eval_item) {
-                                    (JSONPointer::String(name), JSONValue::Object(obj)) => {
-                                        if let Some(value) = obj.get(name) {
-                                            if !is_last {
-                                                eval_item = value;
-                                            } else if let JSONValue::Array(array_items) = value {
-                                                results.extend(array_items.iter().cloned());
-                                            } else {
-                                                results.push(value.clone());
-                                            }
+                                if let JSONValue::Object(obj) = eval_item {
+                                    if let Some(value) = match path_item {
+                                        JSONPointer::String(str) => obj.get(str),
+                                        JSONPointer::Number(num) => obj.get(&num.to_string()),
+                                        JSONPointer::Wildcard => obj.get("*"),
+                                        _ => unreachable!(),
+                                    } {
+                                        if !is_last {
+                                            eval_item = value;
+                                        } else if let JSONValue::Array(array_items) = value {
+                                            results.extend(array_items.iter().cloned());
                                         } else {
-                                            return Err(JMAPError::ParseError(format!(
-                                                "Invalid JSON Pointer: Item '{}' not found.",
-                                                name
-                                            )));
+                                            results.push(value.clone());
                                         }
-                                    }
-                                    _ => {
-                                        return Err(JMAPError::ParseError(format!(
-                                            "Invalid JSON Pointer: Could not evaluate path item {:?}.",
+                                    } else {
+                                        return Err(JMAPError::InvalidResultReference(format!(
+                                            "Item '{:?}' not found.",
                                             path_item
                                         )));
                                     }
+                                } else {
+                                    return Err(JMAPError::InvalidResultReference(format!(
+                                        "Could not evaluate path item {:?}.",
+                                        path_item
+                                    )));
                                 }
                             }
                         }
@@ -433,16 +462,16 @@ impl JSONValue {
                     }
                 }
                 _ => {
-                    return Err(JMAPError::ParseError(format!(
-                        "Invalid JSON Pointer: Could not evaluate path item {:?}.",
+                    return Err(JMAPError::InvalidResultReference(format!(
+                        "Could not evaluate path item {:?}.",
                         path_item
                     )));
                 }
             }
         }
 
-        Err(JMAPError::ParseError(format!(
-            "Invalid JSON Pointer: Could not evaluate path {:?}.",
+        Err(JMAPError::InvalidResultReference(format!(
+            "Could not evaluate path {:?}.",
             path
         )))
     }
@@ -506,12 +535,12 @@ mod tests {
                     JSONPointer::Wildcard,
                 ]),
             ),
-            ("1234", JSONPointer::ArrayIndex(1234)),
+            ("1234", JSONPointer::Number(1234)),
             (
                 "/hello/1234",
                 JSONPointer::Path(vec![
                     JSONPointer::String("hello".to_string()),
-                    JSONPointer::ArrayIndex(1234),
+                    JSONPointer::Number(1234),
                 ]),
             ),
             ("~0~1", JSONPointer::String("~/".to_string())),
@@ -528,7 +557,7 @@ mod tests {
                     JSONPointer::String("hello".to_string()),
                     JSONPointer::String("world".to_string()),
                     JSONPointer::Wildcard,
-                    JSONPointer::ArrayIndex(99),
+                    JSONPointer::Number(99),
                 ]),
             ),
             ("/", JSONPointer::String("".to_string())),
