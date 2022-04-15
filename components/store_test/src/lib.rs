@@ -283,28 +283,6 @@ where
                             other_tagged_docs &= &last_ids;
 
                             if ASSERT {
-                                /*if tagged_docs != other_tagged_docs {
-                                    let m1 = self
-                                        .db
-                                        .get::<Mailbox>(
-                                            ColumnFamily::Values,
-                                            &ValueKey::serialize_value(
-                                                account_id, collection, 0, 0,
-                                            ),
-                                        )
-                                        .unwrap();
-                                    let m2 = other
-                                        .db
-                                        .get::<Mailbox>(
-                                            ColumnFamily::Values,
-                                            &ValueKey::serialize_value(
-                                                account_id, collection, 0, 0,
-                                            ),
-                                        )
-                                        .unwrap();
-
-                                    println!("{:?}\n{:?}", m1, m2);
-                                }*/
                                 assert_eq!(
                                     tagged_docs,
                                     other_tagged_docs,
@@ -424,31 +402,6 @@ where
                                                     blob_index
                                                 );
                                             } else if entry.size != other_entry.size {
-                                                /*let blob = self
-                                                    .get_blob(
-                                                        account_id,
-                                                        Collection::Mail,
-                                                        document_id,
-                                                        blob_index as BlobIndex,
-                                                    )
-                                                    .unwrap()
-                                                    .unwrap();
-                                                let other_blob = other
-                                                    .get_blob(
-                                                        account_id,
-                                                        Collection::Mail,
-                                                        document_id,
-                                                        blob_index as BlobIndex,
-                                                    )
-                                                    .unwrap()
-                                                    .unwrap();
-                                                panic!(
-                                                    "{:?} -> '{}'\n{:?} -> '{}'",
-                                                    entry,
-                                                    String::from_utf8(blob).unwrap(),
-                                                    other_entry,
-                                                    String::from_utf8(other_blob).unwrap()
-                                                );*/
                                                 println!(
                                                     "{} != {}, {:?}/{}/{:?}/{}, blob index {}",
                                                     entry.size,
@@ -661,8 +614,6 @@ where
                             } else if ASSERT {
                                 assert_eq!(value, other_value.into(), "{:?} {:?}", cf, key);
                             } else {
-                                //println!("Key: [{:?}]", key);
-
                                 let other_value = other_value.into_boxed_slice();
                                 if value != other_value {
                                     println!(

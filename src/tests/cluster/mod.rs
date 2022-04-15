@@ -429,15 +429,7 @@ where
                             }
                         }
                         assert!(follower.is_up_to_date());
-                        /*println!(
-                            "Comparing store of leader {} with follower {}",
-                            leader_pos, follower_pos
-                        );*/
                         let keys_leader = leader.store.compare_with(&follower.store);
-                        /*println!(
-                            "Comparing store of follower {} with leader {}",
-                            follower_pos, leader_pos
-                        );*/
                         let keys_follower = follower.store.compare_with(&leader.store);
                         assert!(
                             keys_leader.iter().map(|(_, v)| *v).sum::<usize>() > 0,
@@ -498,7 +490,7 @@ fn postmortem() {
 }
 
 #[tokio::test]
-#[ignore]
+#[cfg_attr(not(feature = "test_cluster"), ignore)]
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
     raft_election::<RocksDB>().await;
@@ -508,7 +500,7 @@ async fn test_cluster() {
 }
 
 #[tokio::test]
-#[ignore]
+#[cfg_attr(not(feature = "fuzz_cluster"), ignore)]
 async fn fuzz_cluster() {
     tracing_subscriber::fmt::init();
     cluster_fuzz::<RocksDB>(vec![]).await;

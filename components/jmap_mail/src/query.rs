@@ -235,8 +235,8 @@ where
                         )?)])
                     }
                     _ => {
-                        return Err(JMAPError::InvalidArguments(format!(
-                            "Unknown condition '{}'.",
+                        return Err(JMAPError::UnsupportedFilter(format!(
+                            "Unsupported filter '{}'.",
                             cond_name
                         )))
                     }
@@ -342,8 +342,8 @@ where
                     })
                 }
                 _ => {
-                    return Err(JMAPError::InvalidArguments(format!(
-                        "Unknown sort property '{}'.",
+                    return Err(JMAPError::UnsupportedSort(format!(
+                        "Unsupported sort property '{}'.",
                         comp.property
                     )))
                 }

@@ -160,7 +160,11 @@ where
         .unwrap();*/
 
         assert_eq!(
-            SortedJSONValue::from(result),
+            SortedJSONValue::from(
+                result
+                    .eval(&format!("/parsed/{}", blob_id.to_jmap_string()))
+                    .unwrap()
+            ),
             serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
         );
     }

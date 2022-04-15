@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use store::{chrono::DateTime, AccountId, DocumentId, JMAPId};
 
@@ -91,6 +91,7 @@ pub struct ParseRequest {
     pub arguments: HashMap<String, JSONValue>,
 }
 
+#[derive(Debug)]
 pub enum Object {
     Core,
     Mailbox,
@@ -329,8 +330,10 @@ impl JSONValue {
 
         Ok(())
     }
+}
 
-    fn parse_invocation(self, name: String, response: &Response) -> crate::Result<Invocation> {
+impl Invocation {
+    pub fn parse(name: &str, arguments: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut name_parts = name.split('/');
         let obj = match name_parts.next().ok_or_else(|| {
             JMAPError::InvalidArguments(format!("Failed to parse method name: {}.", name))
@@ -345,7 +348,7 @@ impl JSONValue {
             "VacationResponse" => Object::VacationResponse,
             "PushSubscription" => Object::PushSubscription,
             _ => {
-                return Err(JMAPError::InvalidArguments(format!(
+                return Err(JMAPError::UnknownMethod(format!(
                     "Unknown object: {}",
                     name
                 )))
@@ -356,36 +359,36 @@ impl JSONValue {
             JMAPError::InvalidArguments(format!("Failed to parse method name: {}.", name))
         })? {
             "get" => {
-                let r = self.parse_get_request(response)?;
+                let r = GetRequest::parse(arguments, response)?;
                 (r.account_id, Method::Get(r))
             }
             "set" => {
-                let r = self.parse_set_request(response)?;
+                let r = SetRequest::parse(arguments, response)?;
                 (r.account_id, Method::Set(r))
             }
             "query" => {
-                let r = self.parse_query_request(response)?;
+                let r = QueryRequest::parse(arguments, response)?;
                 (r.account_id, Method::Query(r))
             }
             "queryChanges" => {
-                let r = self.parse_query_changes(response)?;
+                let r = QueryChangesRequest::parse(arguments, response)?;
                 (r.account_id, Method::QueryChanges(r))
             }
             "changes" => {
-                let r = self.parse_changes_request(response)?;
+                let r = ChangesRequest::parse(arguments, response)?;
                 (r.account_id, Method::Changes(r))
             }
             "import" => {
-                let r = self.parse_import_request(response)?;
+                let r = ImportRequest::parse(arguments, response)?;
                 (r.account_id, Method::Import(r))
             }
             "parse" => {
-                let r = self.parse_parse_request(response)?;
+                let r = ParseRequest::parse(arguments, response)?;
                 (r.account_id, Method::Parse(r))
             }
-            "echo" => (0, Method::Echo(self)),
+            "echo" => (0, Method::Echo(arguments)),
             _ => {
-                return Err(JMAPError::InvalidArguments(format!(
+                return Err(JMAPError::UnknownMethod(format!(
                     "Unknown method: {}",
                     name
                 )))
@@ -398,8 +401,10 @@ impl JSONValue {
             account_id,
         })
     }
+}
 
-    fn parse_get_request(self, response: &Response) -> crate::Result<GetRequest> {
+impl GetRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = GetRequest {
             account_id: 0,
             ids: None,
@@ -407,7 +412,7 @@ impl JSONValue {
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "ids" => request.ids = value.parse_array_items(true)?,
@@ -421,8 +426,10 @@ impl JSONValue {
 
         Ok(request)
     }
+}
 
-    fn parse_set_request(self, response: &Response) -> crate::Result<SetRequest> {
+impl SetRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = SetRequest {
             account_id: 0,
             if_in_state: None,
@@ -432,7 +439,7 @@ impl JSONValue {
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "ifInState" => request.if_in_state = value.parse_jmap_state(true)?,
@@ -448,8 +455,10 @@ impl JSONValue {
 
         Ok(request)
     }
+}
 
-    fn parse_query_request(self, response: &Response) -> crate::Result<QueryRequest> {
+impl QueryRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = QueryRequest {
             account_id: 0,
             filter: JSONValue::Null,
@@ -462,7 +471,7 @@ impl JSONValue {
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "filter" => request.filter = value,
@@ -489,8 +498,10 @@ impl JSONValue {
 
         Ok(request)
     }
+}
 
-    fn parse_query_changes(self, response: &Response) -> crate::Result<QueryChangesRequest> {
+impl QueryChangesRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = QueryChangesRequest {
             account_id: 0,
             filter: JSONValue::Null,
@@ -502,7 +513,7 @@ impl JSONValue {
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "filter" => request.filter = value,
@@ -532,8 +543,10 @@ impl JSONValue {
 
         Ok(request)
     }
+}
 
-    fn parse_changes_request(self, response: &Response) -> crate::Result<ChangesRequest> {
+impl ChangesRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ChangesRequest {
             account_id: 0,
             since_state: JMAPState::Initial,
@@ -541,7 +554,7 @@ impl JSONValue {
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "sinceQueryState" => request.since_state = value.parse_jmap_state(false)?.unwrap(),
@@ -557,15 +570,17 @@ impl JSONValue {
 
         Ok(request)
     }
+}
 
-    fn parse_import_request(self, response: &Response) -> crate::Result<ImportRequest> {
+impl ImportRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ImportRequest {
             account_id: 0,
             if_in_state: None,
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "ifInState" => request.if_in_state = value.parse_jmap_state(true)?,
@@ -578,14 +593,16 @@ impl JSONValue {
 
         Ok(request)
     }
+}
 
-    fn parse_parse_request(self, response: &Response) -> crate::Result<ParseRequest> {
+impl ParseRequest {
+    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ParseRequest {
             account_id: 0,
             arguments: HashMap::new(),
         };
 
-        self.parse_arguments(response, |name, value| {
+        invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 _ => {
@@ -596,6 +613,30 @@ impl JSONValue {
         })?;
 
         Ok(request)
+    }
+}
+
+impl Display for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap())
+    }
+}
+
+impl Response {
+    pub fn new(session_state: String, capacity: usize) -> Self {
+        Response {
+            session_state,
+            method_responses: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn push_response(&mut self, name: String, call_id: String, response: JSONValue) {
+        self.method_responses.push((name, response, call_id));
+    }
+
+    pub fn push_error(&mut self, call_id: String, error: JMAPError) {
+        self.method_responses
+            .push(("error".to_string(), error.into(), call_id));
     }
 }
 

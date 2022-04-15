@@ -215,7 +215,6 @@ where
 
     // Delete all messages and make sure no keys are left in the store.
     for (account_id, message_ids) in all_message_ids {
-        println!("Deleting messages from account {}...", account_id);
         for message_id in message_ids {
             delete_email(mail_store, account_id, message_id);
         }

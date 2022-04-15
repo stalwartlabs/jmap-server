@@ -20,7 +20,7 @@ use store::{
     bincode,
     blob::BlobIndex,
     serialize::{StoreDeserialize, StoreSerialize},
-    FieldId, Tag,
+    FieldId, StoreError, Tag,
 };
 
 pub const MESSAGE_RAW: BlobIndex = 0;
@@ -536,21 +536,28 @@ impl Keyword {
         }
     }
 
-    pub fn to_jmap(keyword: Tag) -> String {
+    pub fn to_jmap(keyword: Tag) -> store::Result<String> {
         match keyword {
             Tag::Static(keyword) => match keyword {
-                Self::DRAFT => "$draft".to_string(),
-                Self::FLAGGED => "$flagged".to_string(),
-                Self::ANSWERED => "$answered".to_string(),
-                Self::RECENT => "$recent".to_string(),
-                Self::IMPORTANT => "$important".to_string(),
-                Self::PHISHING => "$phishing".to_string(),
-                Self::JUNK => "$junk".to_string(),
-                Self::NOTJUNK => "$notjunk".to_string(),
-                _ => unreachable!(),
+                Self::SEEN => Ok("$seen".to_string()),
+                Self::DRAFT => Ok("$draft".to_string()),
+                Self::FLAGGED => Ok("$flagged".to_string()),
+                Self::ANSWERED => Ok("$answered".to_string()),
+                Self::RECENT => Ok("$recent".to_string()),
+                Self::IMPORTANT => Ok("$important".to_string()),
+                Self::PHISHING => Ok("$phishing".to_string()),
+                Self::JUNK => Ok("$junk".to_string()),
+                Self::NOTJUNK => Ok("$notjunk".to_string()),
+                9..=u8::MAX => Err(StoreError::InternalError(format!(
+                    "Invalid keyword id {}",
+                    keyword
+                ))),
             },
-            Tag::Text(value) => value,
-            _ => unreachable!(),
+            Tag::Text(value) => Ok(value),
+            _ => Err(StoreError::InternalError(format!(
+                "Invalid keyword tag {:?}",
+                keyword
+            ))),
         }
     }
 }

@@ -227,6 +227,18 @@ impl From<()> for JSONValue {
     }
 }
 
+impl<T> From<Option<T>> for JSONValue
+where
+    JSONValue: From<T>,
+{
+    fn from(value: Option<T>) -> Self {
+        match value {
+            Some(v) => v.into(),
+            None => JSONValue::Null,
+        }
+    }
+}
+
 impl JSONValue {
     pub fn is_null(&self) -> bool {
         matches!(self, JSONValue::Null)

@@ -1,5 +1,4 @@
 pub mod cluster;
-pub mod error;
 pub mod jmap;
 #[cfg(test)]
 pub mod tests;
@@ -16,7 +15,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     cluster::{main::start_cluster, IPC_CHANNEL_BUFFER},
-    jmap::jmap_request,
+    jmap::handle_jmap_request,
 };
 
 pub struct JMAPServer<T> {
@@ -77,8 +76,11 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .app_data(web::JsonConfig::default().limit(10000000))
             .app_data(jmap_server.clone())
-            .route("/jmap", web::post().to(jmap_request))
-            .route("/.well-known/jmap", web::post().to(jmap_request))
+            .route("/jmap", web::post().to(handle_jmap_request::<RocksDB>))
+            .route(
+                "/.well-known/jmap",
+                web::get().to(handle_jmap_request::<RocksDB>),
+            )
     })
     .bind(http_addr)?
     .run()

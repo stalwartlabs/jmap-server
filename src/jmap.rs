@@ -1,13 +1,16 @@
-use actix_web::{web, HttpResponse};
+use actix_web::http::header::ContentType;
+use actix_web::http::StatusCode;
+use actix_web::{post, web, HttpRequest, HttpResponse, ResponseError};
 
 use jmap::json::JSONValue;
-use store::tracing::error;
+use jmap::request::{Invocation, Method, Object, Request, Response};
+use jmap::{JMAPError, RequestError, RequestLimitError};
+use store::tracing::{debug, error};
 use store::ColumnFamily;
 use store::{
     serialize::{StoreDeserialize, StoreSerialize},
     Store, StoreError,
 };
-use store_rocksdb::RocksDB;
 use tokio::sync::oneshot;
 
 use crate::cluster::Event;
@@ -75,9 +78,8 @@ where
             tx.send(f()).ok();
         });
 
-        rx.await.map_err(|e| {
-            StoreError::InternalError(format!("Failed to write batch: Await error: {}", e))
-        })?
+        rx.await
+            .map_err(|e| StoreError::InternalError(format!("Await error: {}", e)))?
     }
 
     pub async fn shutdown(&self) {
@@ -110,9 +112,77 @@ where
     }
 }
 
-pub async fn jmap_request(
-    request: web::Json<JSONValue>,
-    _server: web::Data<JMAPServer<RocksDB>>,
-) -> HttpResponse {
-    HttpResponse::Ok().json(request.0)
+pub async fn handle_jmap_request<T>(
+    request: web::Bytes,
+    core: web::Data<JMAPServer<T>>,
+) -> HttpResponse
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let (status_code, body) = if request.len() < core.store.config.max_size_request {
+        match serde_json::from_slice::<Request>(&request) {
+            Ok(request) => {
+                if request.method_calls.len() < core.store.config.max_calls_in_request {
+                    (
+                        StatusCode::OK,
+                        handle_method_calls(request, core).await.to_string(),
+                    )
+                } else {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        RequestError::limit(RequestLimitError::CallsIn).to_string(),
+                    )
+                }
+            }
+            Err(err) => {
+                debug!("Failed to parse request: {}", err);
+
+                (
+                    StatusCode::BAD_REQUEST,
+                    RequestError::not_request().to_string(),
+                )
+            }
+        }
+    } else {
+        (
+            StatusCode::BAD_REQUEST,
+            RequestError::limit(RequestLimitError::Size).to_string(),
+        )
+    };
+
+    HttpResponse::build(status_code)
+        .insert_header(ContentType::json())
+        .body(body)
+}
+
+pub async fn handle_method_calls<T>(request: Request, core: web::Data<JMAPServer<T>>) -> Response
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let mut responses = Response::new("abc".to_string(), request.method_calls.len());
+
+    for (name, arguments, call_id) in request.method_calls {
+        match Invocation::parse(&name, arguments, &responses) {
+            Ok(invocation) => match handle_method_call(invocation, &core).await {
+                Ok(response) => responses.push_response(name, call_id, response),
+                Err(err) => responses.push_error(call_id, err),
+            },
+            Err(err) => responses.push_error(call_id, err),
+        }
+    }
+
+    responses
+}
+
+pub async fn handle_method_call<T>(
+    invocation: Invocation,
+    core: &web::Data<JMAPServer<T>>,
+) -> jmap::Result<JSONValue>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    match (invocation.obj, invocation.call) {
+        (Object::Core, Method::Echo(arguments)) => Ok(arguments),
+        _ => Err(JMAPError::AccountNotFound),
+    }
 }

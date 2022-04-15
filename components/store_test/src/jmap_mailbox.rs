@@ -122,7 +122,7 @@ const TEST_MAILBOXES: &[u8] = br#"
 
 #[derive(Debug, Clone)]
 pub enum JMAPMailboxFilterCondition {
-    ParentId(JMAPId),
+    ParentId(Option<JMAPId>),
     Name(String),
     Role(String),
     HasAnyRole(bool),
@@ -156,7 +156,10 @@ impl From<JMAPMailboxFilterCondition> for JSONValue {
         let mut json = HashMap::new();
         match condition {
             JMAPMailboxFilterCondition::ParentId(id) => {
-                json.insert("parentId".to_string(), id.to_jmap_string().into());
+                json.insert(
+                    "parentId".to_string(),
+                    id.map(|id| id.to_jmap_string()).into(),
+                );
             }
             JMAPMailboxFilterCondition::Name(name) => {
                 json.insert("name".to_string(), name.into());
@@ -475,8 +478,7 @@ where
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
-        .remove(&get_mailbox_id(&id_map, "sent"))
-        .is_some());
+        .contains_key(&get_mailbox_id(&id_map, "sent")));
 
     // Duplicate name
     assert!(mail_store
@@ -494,8 +496,7 @@ where
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
-        .remove(&get_mailbox_id(&id_map, "2"))
-        .is_some());
+        .contains_key(&get_mailbox_id(&id_map, "2")));
 
     // Circular relationship
     assert!(mail_store
@@ -517,8 +518,7 @@ where
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
-        .remove(&get_mailbox_id(&id_map, "1"))
-        .is_some());
+        .contains_key(&get_mailbox_id(&id_map, "1")));
 
     assert!(mail_store
         .mailbox_set(SetRequest {
@@ -536,8 +536,7 @@ where
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
-        .remove(&get_mailbox_id(&id_map, "1"))
-        .is_some());
+        .contains_key(&get_mailbox_id(&id_map, "1")));
 
     // Invalid parent ID
     assert!(mail_store
@@ -556,8 +555,7 @@ where
         })
         .unwrap()
         .eval_unwrap_object("/notUpdated")
-        .remove(&get_mailbox_id(&id_map, "1"))
-        .is_some());
+        .contains_key(&get_mailbox_id(&id_map, "1")));
 
     // Get state
     let state = mail_store
@@ -828,9 +826,9 @@ where
                         JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
                             "Borradores".to_string()
                         )),
-                        JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(
-                            JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "2")).unwrap() + 1
-                        )),
+                        JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(Some(
+                            JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "2")).unwrap()
+                        ))),
                         JMAPFilter::not(vec![JMAPFilter::condition(
                             JMAPMailboxFilterCondition::HasAnyRole(true)
                         )]),
@@ -841,7 +839,6 @@ where
                     anchor_offset: 0,
                     limit: 100,
                     calculate_total: true,
-
                     sort_as_tree: false,
                     filter_as_tree: false,
                 }
@@ -868,7 +865,6 @@ where
                 anchor_offset: 0,
                 limit: 100,
                 calculate_total: true,
-
                 sort_as_tree: false,
                 filter_as_tree: false,
             }
@@ -906,7 +902,7 @@ where
             .mailbox_query(
                 MailboxQueryRequest {
                     account_id,
-                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(0)),
+                    filter: JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(None)),
                     sort: vec![JMAPComparator::ascending(JMAPMailboxComparator::Name)],
                     position: 0,
                     anchor: None,

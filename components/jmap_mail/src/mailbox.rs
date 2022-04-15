@@ -736,8 +736,8 @@ where
                     }
                     "isSubscribed" => todo!(), //TODO implement
                     _ => {
-                        return Err(JMAPError::InvalidArguments(format!(
-                            "Unknown condition '{}'.",
+                        return Err(JMAPError::UnsupportedFilter(format!(
+                            "Unsupported filter '{}'.",
                             cond_name
                         )))
                     }
@@ -754,8 +754,8 @@ where
                     "role" => MailboxProperties::Role,
                     "parentId" => MailboxProperties::ParentId,
                     _ => {
-                        return Err(JMAPError::InvalidArguments(format!(
-                            "Unknown sort property '{}'.",
+                        return Err(JMAPError::UnsupportedSort(format!(
+                            "Unsupported sort property '{}'.",
                             comp.property
                         )))
                     }
@@ -778,14 +778,14 @@ where
 
         let filter_as_tree = request
             .arguments
-            .remove("filterAsTree")
-            .and_then(|v| v.unwrap_bool())
+            .get("filterAsTree")
+            .and_then(|v| v.to_bool())
             .unwrap_or(false);
 
         let sort_as_tree = request
             .arguments
-            .remove("sortAsTree")
-            .and_then(|v| v.unwrap_bool())
+            .get("sortAsTree")
+            .and_then(|v| v.to_bool())
             .unwrap_or(false);
 
         if !results.is_empty() && (filter_as_tree || sort_as_tree) {

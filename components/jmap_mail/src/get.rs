@@ -447,12 +447,11 @@ where
                                 document_id,
                                 MessageField::Keyword.into(),
                             )? {
-                                JSONValue::Object(
-                                    tags.items
-                                        .into_iter()
-                                        .map(|tag| (Keyword::to_jmap(tag), JSONValue::Bool(true)))
-                                        .collect(),
-                                )
+                                let mut keywords = HashMap::with_capacity(tags.items.len());
+                                for tag in tags.items {
+                                    keywords.insert(Keyword::to_jmap(tag)?, true.into());
+                                }
+                                keywords.into()
                             } else {
                                 JSONValue::Null
                             }
