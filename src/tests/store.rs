@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use store::{JMAPStore, Store};
+use store::{JMAPConfig, JMAPStore, Store};
 use store_rocksdb::RocksDB;
 use store_test::{destroy_temp_dir, init_settings};
 
@@ -23,7 +23,11 @@ where
     let (settings, temp_dir) = init_settings(name, peer_num, total_peers, delete_if_exists);
 
     (
-        JMAPStore::new(T::open(&settings).unwrap(), &settings),
+        JMAPStore::new(
+            T::open(&settings).unwrap(),
+            JMAPConfig::from(&settings),
+            &settings,
+        ),
         temp_dir,
     )
 }

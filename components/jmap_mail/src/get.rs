@@ -200,7 +200,7 @@ where
             .unwrap_or_else(RoaringBitmap::new);
 
         let request_ids: Vec<u64> = if let Some(request_ids) = request.ids {
-            if request_ids.len() > self.config.get_max_results {
+            if request_ids.len() > self.config.max_objects_in_get {
                 return Err(JMAPError::RequestTooLarge);
             } else {
                 request_ids
@@ -208,7 +208,7 @@ where
         } else if !document_ids.is_empty() {
             let document_ids = document_ids
                 .iter()
-                .take(self.config.get_max_results)
+                .take(self.config.max_objects_in_get)
                 .collect::<Vec<DocumentId>>();
             self.get_multi_document_tag_id(
                 request.account_id,

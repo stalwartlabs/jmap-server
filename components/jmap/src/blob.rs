@@ -35,7 +35,7 @@ where
             BlobId::Owned(blob_id) => {
                 //TODO check ACL
                 self.get_blob(
-                    blob_id.account,
+                    blob_id.account_id,
                     blob_id.collection,
                     blob_id.document,
                     blob_id.blob_index,
@@ -46,7 +46,7 @@ where
             }
             BlobId::InnerOwned(blob_id) => self
                 .get_blob(
-                    blob_id.blob_id.account,
+                    blob_id.blob_id.account_id,
                     blob_id.blob_id.collection,
                     blob_id.blob_id.document,
                     blob_id.blob_id.blob_index,

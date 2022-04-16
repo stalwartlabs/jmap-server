@@ -167,7 +167,11 @@ where
             JMAPState::Exact(change_id) => (
                 0,
                 self.get_changes(account, collection, Query::Since(*change_id))?
-                    .ok_or(StoreError::NotFound)?,
+                    .ok_or_else(|| {
+                        StoreError::InvalidArguments(
+                            "The specified stateId does could not be found.".to_string(),
+                        )
+                    })?,
             ),
             JMAPState::Intermediate(intermediate_state) => {
                 let mut changelog = self
@@ -176,7 +180,11 @@ where
                         collection,
                         Query::RangeInclusive(intermediate_state.from_id, intermediate_state.to_id),
                     )?
-                    .ok_or(StoreError::NotFound)?;
+                    .ok_or_else(|| {
+                        StoreError::InvalidArguments(
+                            "The specified stateId does could not be found.".to_string(),
+                        )
+                    })?;
                 if intermediate_state.items_sent >= changelog.changes.len() {
                     (
                         0,
@@ -185,7 +193,11 @@ where
                             collection,
                             Query::Since(intermediate_state.to_id),
                         )?
-                        .ok_or(StoreError::NotFound)?,
+                        .ok_or_else(|| {
+                            StoreError::InvalidArguments(
+                                "The specified stateId does could not be found.".to_string(),
+                            )
+                        })?,
                     )
                 } else {
                     changelog.changes.drain(

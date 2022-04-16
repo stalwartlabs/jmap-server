@@ -226,7 +226,7 @@ where
         let total_changes = request.create.to_object().map_or(0, |c| c.len())
             + request.update.to_object().map_or(0, |c| c.len())
             + request.destroy.to_array().map_or(0, |c| c.len());
-        if total_changes > self.config.mailbox_set_max_changes {
+        if total_changes > self.config.max_objects_in_set {
             return Err(JMAPError::RequestTooLarge);
         }
 
@@ -560,7 +560,7 @@ where
             });
 
         let request_ids = if let Some(request_ids) = request.ids {
-            if request_ids.len() > self.config.get_max_results {
+            if request_ids.len() > self.config.max_objects_in_get {
                 return Err(JMAPError::RequestTooLarge);
             } else {
                 request_ids
@@ -569,7 +569,7 @@ where
             self.get_document_ids(request.account_id, Collection::Mailbox)?
                 .unwrap_or_default()
                 .into_iter()
-                .take(self.config.get_max_results)
+                .take(self.config.max_objects_in_get)
                 .map(|id| id as JMAPId)
                 .collect::<Vec<JMAPId>>()
         };

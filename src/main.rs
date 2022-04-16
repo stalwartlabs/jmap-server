@@ -3,86 +3,38 @@ pub mod jmap;
 #[cfg(test)]
 pub mod tests;
 
-use std::{
-    net::SocketAddr,
-    sync::{atomic::AtomicBool, Arc},
-};
-
-use actix_web::{middleware, web, App, HttpServer};
-use store::{config::EnvSettings, tracing::info, JMAPStore, Store};
+use crate::jmap::server::{init_jmap_server, start_jmap_server, JMAPServer, DEFAULT_HTTP_PORT};
+use store::{config::EnvSettings, tracing::info};
 use store_rocksdb::RocksDB;
-use tokio::sync::mpsc;
 
-use crate::{
-    cluster::{main::start_cluster, IPC_CHANNEL_BUFFER},
-    jmap::handle_jmap_request,
-};
-
-pub struct JMAPServer<T> {
-    pub store: Arc<JMAPStore<T>>,
-    pub cluster_tx: mpsc::Sender<cluster::Event>,
-    pub worker_pool: rayon::ThreadPool,
-    pub is_leader: AtomicBool,
-    pub is_up_to_date: AtomicBool,
-
-    #[cfg(test)]
-    pub is_offline: AtomicBool,
-}
-
-pub const DEFAULT_HTTP_PORT: u16 = 8080;
-pub const DEFAULT_RPC_PORT: u16 = 7911;
+use crate::cluster::main::start_cluster;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Read configuration parameters
-    let settings = EnvSettings::new();
-    let is_cluster = settings.get("cluster").is_some();
+    let mut settings = EnvSettings::new();
+    if !settings.contains_key("jmap-url") {
+        let default_url = format!(
+            "http://{}:{}",
+            settings.parse_ipaddr("advertise-addr", "127.0.0.1"),
+            settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT)
+        );
+        info!(
+            "Warning: JMAP base URL parameter 'jmap-url' was not specified, using default '{}'.",
+            default_url
+        );
+        settings.set_value("jmap-url".to_string(), default_url);
+    }
 
-    // Build the JMAP store
-    let (cluster_tx, cluster_rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
-    let jmap_server = web::Data::new(JMAPServer {
-        store: JMAPStore::new(RocksDB::open(&settings).unwrap(), &settings).into(),
-        worker_pool: rayon::ThreadPoolBuilder::new()
-            .num_threads(
-                settings
-                    .parse("worker-pool-size")
-                    .filter(|v| *v > 0)
-                    .unwrap_or_else(num_cpus::get),
-            )
-            .build()
-            .unwrap(),
-        cluster_tx: cluster_tx.clone(),
-        is_leader: (!is_cluster).into(),
-        is_up_to_date: (!is_cluster).into(),
-        #[cfg(test)]
-        is_offline: false.into(),
-    });
+    let (jmap_server, cluster) = init_jmap_server::<RocksDB>(&settings);
 
     // Start cluster
-    if is_cluster {
+    if let Some((cluster_tx, cluster_rx)) = cluster {
         start_cluster(jmap_server.clone(), &settings, cluster_rx, cluster_tx).await;
     }
 
-    // Start HTTP server
-    let http_addr = SocketAddr::from((
-        settings.parse_ipaddr("bind-addr", "127.0.0.1"),
-        settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT),
-    ));
-    info!("Starting HTTP server at {} (TCP)...", http_addr);
-    HttpServer::new(move || {
-        App::new()
-            .wrap(middleware::Logger::default())
-            .app_data(web::JsonConfig::default().limit(10000000))
-            .app_data(jmap_server.clone())
-            .route("/jmap", web::post().to(handle_jmap_request::<RocksDB>))
-            .route(
-                "/.well-known/jmap",
-                web::get().to(handle_jmap_request::<RocksDB>),
-            )
-    })
-    .bind(http_addr)?
-    .run()
-    .await
+    // Start JMAP server
+    start_jmap_server(jmap_server, settings).await
 }

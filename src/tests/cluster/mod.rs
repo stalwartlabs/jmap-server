@@ -16,11 +16,11 @@ use store_test::{
 };
 use tokio::{sync::mpsc, time::sleep};
 
-use crate::tests::cluster::fuzz::cluster_fuzz;
 use crate::{
-    cluster::{self, main::start_cluster, IPC_CHANNEL_BUFFER},
+    cluster::{self, main::start_cluster},
     JMAPServer,
 };
+use crate::{jmap::server::init_jmap_server, tests::cluster::fuzz::cluster_fuzz};
 
 use self::{
     crud::crud_ops, election::raft_election, log_conflict::resolve_log_conflict,
@@ -92,19 +92,8 @@ where
         let (settings, temp_dir) =
             init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
 
-        let (tx, rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
-        let jmap_server = web::Data::new(JMAPServer {
-            store: JMAPStore::new(T::open(&settings).unwrap(), &settings).into(),
-            worker_pool: rayon::ThreadPoolBuilder::new()
-                .num_threads(num_cpus::get())
-                .build()
-                .unwrap(),
-            cluster_tx: tx.clone(),
-            is_leader: false.into(),
-            is_up_to_date: false.into(),
-            #[cfg(test)]
-            is_offline: false.into(),
-        });
+        let (jmap_server, cluster) = init_jmap_server(&settings);
+        let (tx, rx) = cluster.unwrap();
 
         Peer {
             tx,

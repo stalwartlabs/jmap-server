@@ -62,7 +62,7 @@ pub fn hex_reader(id: &str, start_pos: usize) -> impl Iterator<Item = u8> + '_ {
 
 #[derive(Clone, Debug)]
 pub struct OwnedBlob {
-    pub account: AccountId,
+    pub account_id: AccountId,
     pub collection: Collection,
     pub document: DocumentId,
     pub blob_index: BlobIndex,
@@ -70,7 +70,7 @@ pub struct OwnedBlob {
 
 #[derive(Clone, Debug)]
 pub struct TemporaryBlob {
-    pub account: AccountId,
+    pub account_id: AccountId,
     pub timestamp: u64,
     pub hash: u64,
 }
@@ -91,22 +91,22 @@ pub enum BlobId {
 
 impl BlobId {
     pub fn new_owned(
-        account: AccountId,
+        account_id: AccountId,
         collection: Collection,
         document: DocumentId,
         blob_index: BlobIndex,
     ) -> Self {
         BlobId::Owned(OwnedBlob {
-            account,
+            account_id,
             collection,
             document,
             blob_index,
         })
     }
 
-    pub fn new_temporary(account: AccountId, timestamp: u64, hash: u64) -> Self {
+    pub fn new_temporary(account_id: AccountId, timestamp: u64, hash: u64) -> Self {
         BlobId::Temporary(TemporaryBlob {
-            account,
+            account_id,
             timestamp,
             hash,
         })
@@ -127,6 +127,15 @@ impl BlobId {
             BlobId::InnerOwned(_) | BlobId::InnerTemporary(_) => None,
         }
     }
+
+    pub fn owner_id(&self) -> AccountId {
+        match self {
+            BlobId::Owned(blob_id) => blob_id.account_id,
+            BlobId::Temporary(blob_id) => blob_id.account_id,
+            BlobId::InnerOwned(blob_id) => blob_id.blob_id.account_id,
+            BlobId::InnerTemporary(blob_id) => blob_id.blob_id.account_id,
+        }
+    }
 }
 
 impl JMAPIdSerialize for BlobId {
@@ -139,7 +148,7 @@ impl JMAPIdSerialize for BlobId {
                 let mut it = hex_reader(id, 1);
 
                 Some(BlobId::Owned(OwnedBlob {
-                    account: AccountId::from_leb128_it(&mut it)?,
+                    account_id: AccountId::from_leb128_it(&mut it)?,
                     collection: it.next()?.into(),
                     document: DocumentId::from_leb128_it(&mut it)?,
                     blob_index: BlobIndex::from_leb128_it(&mut it)?,
@@ -149,7 +158,7 @@ impl JMAPIdSerialize for BlobId {
                 let mut it = hex_reader(id, 1);
 
                 Some(BlobId::Temporary(TemporaryBlob {
-                    account: AccountId::from_leb128_it(&mut it)?,
+                    account_id: AccountId::from_leb128_it(&mut it)?,
                     timestamp: u64::from_leb128_it(&mut it)?,
                     hash: u64::from_leb128_it(&mut it)?,
                 }))
@@ -159,7 +168,7 @@ impl JMAPIdSerialize for BlobId {
 
                 Some(BlobId::InnerTemporary(InnerBlob {
                     blob_id: TemporaryBlob {
-                        account: AccountId::from_leb128_it(&mut it)?,
+                        account_id: AccountId::from_leb128_it(&mut it)?,
                         timestamp: u64::from_leb128_it(&mut it)?,
                         hash: u64::from_leb128_it(&mut it)?,
                     },
@@ -171,7 +180,7 @@ impl JMAPIdSerialize for BlobId {
 
                 Some(BlobId::InnerOwned(InnerBlob {
                     blob_id: OwnedBlob {
-                        account: AccountId::from_leb128_it(&mut it)?,
+                        account_id: AccountId::from_leb128_it(&mut it)?,
                         collection: it.next()?.into(),
                         document: DocumentId::from_leb128_it(&mut it)?,
                         blob_index: BlobIndex::from_leb128_it(&mut it)?,
@@ -189,14 +198,14 @@ impl JMAPIdSerialize for BlobId {
         match self {
             BlobId::Owned(blob_id) => {
                 writer.result.push('o');
-                blob_id.account.to_leb128_writer(&mut writer).unwrap();
+                blob_id.account_id.to_leb128_writer(&mut writer).unwrap();
                 writer.write(&[blob_id.collection as u8]).unwrap();
                 blob_id.document.to_leb128_writer(&mut writer).unwrap();
                 blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
             }
             BlobId::Temporary(blob_id) => {
                 writer.result.push('t');
-                blob_id.account.to_leb128_writer(&mut writer).unwrap();
+                blob_id.account_id.to_leb128_writer(&mut writer).unwrap();
                 blob_id.timestamp.to_leb128_writer(&mut writer).unwrap();
                 blob_id.hash.to_leb128_writer(&mut writer).unwrap();
             }
@@ -204,7 +213,7 @@ impl JMAPIdSerialize for BlobId {
                 writer.result.push('p');
                 blob_id
                     .blob_id
-                    .account
+                    .account_id
                     .to_leb128_writer(&mut writer)
                     .unwrap();
                 writer.write(&[blob_id.blob_id.collection as u8]).unwrap();
@@ -224,7 +233,7 @@ impl JMAPIdSerialize for BlobId {
                 writer.result.push('q');
                 blob_id
                     .blob_id
-                    .account
+                    .account_id
                     .to_leb128_writer(&mut writer)
                     .unwrap();
                 blob_id

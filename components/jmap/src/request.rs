@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 
+use serde::Serialize;
 use store::{chrono::DateTime, AccountId, DocumentId, JMAPId};
 
 use crate::{
@@ -24,7 +25,8 @@ pub struct Response {
     #[serde(rename(serialize = "methodResponses"))]
     pub method_responses: Vec<(String, JSONValue, String)>,
     #[serde(rename(serialize = "sessionState"))]
-    pub session_state: String,
+    #[serde(serialize_with = "serialize_hex")]
+    pub session_state: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -616,14 +618,8 @@ impl ParseRequest {
     }
 }
 
-impl Display for Response {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::to_string(self).unwrap())
-    }
-}
-
 impl Response {
-    pub fn new(session_state: String, capacity: usize) -> Self {
+    pub fn new(session_state: u64, capacity: usize) -> Self {
         Response {
             session_state,
             method_responses: Vec::with_capacity(capacity),
@@ -637,6 +633,10 @@ impl Response {
     pub fn push_error(&mut self, call_id: String, error: JMAPError) {
         self.method_responses
             .push(("error".to_string(), error.into(), call_id));
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(&self).unwrap()
     }
 }
 
@@ -705,4 +705,11 @@ mod tests {
             }
         );
     }
+}
+
+pub fn serialize_hex<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    format!("{:x}", value).serialize(serializer)
 }

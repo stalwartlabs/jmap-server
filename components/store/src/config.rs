@@ -53,6 +53,10 @@ impl EnvSettings {
         }
     }
 
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.args.contains_key(name) || env::var(name.replace('-', "_").to_uppercase()).is_ok()
+    }
+
     pub fn parse<T>(&self, name: &str) -> Option<T>
     where
         T: FromStr,

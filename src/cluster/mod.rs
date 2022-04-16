@@ -21,7 +21,7 @@ use store::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::{JMAPServer, DEFAULT_HTTP_PORT, DEFAULT_RPC_PORT};
+use crate::{jmap::server::DEFAULT_RPC_PORT, JMAPServer};
 
 use self::{gossip::PeerInfo, rpc::spawn_peer_rpc};
 
@@ -202,11 +202,6 @@ where
         // Obtain public addresses to advertise
         let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
         let rpc_port = settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT);
-        let default_url = format!(
-            "http://{}:{}",
-            advertise_addr,
-            settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT)
-        );
 
         // Obtain peer id from disk or generate a new one.
         let peer_id = if let Some(peer_id) = core.get_key("peer_id").await.unwrap() {
@@ -242,15 +237,9 @@ where
 
         // Create advertise addresses
         let addr = SocketAddr::from((advertise_addr, rpc_port));
-        let jmap_url = settings.parse("jmap-url").unwrap_or_else(|| {
-            info!(
-                "Warning: Parameter 'jmap-url' not specified, using default '{}'.",
-                default_url
-            );
-            default_url.clone()
-        });
 
         // Calculate generationId
+        let jmap_url = settings.get("jmap-url").unwrap();
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
         shard_id.hash(&mut generation);
@@ -276,7 +265,7 @@ where
             epoch: 0,
             addr,
             key,
-            jmap_url: format!("{}/jmap", jmap_url),
+            jmap_url,
             term: last_log.term,
             uncommitted_index: last_log.index,
             last_log,

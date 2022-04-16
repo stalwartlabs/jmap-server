@@ -82,7 +82,7 @@ where
         let total_changes = request.create.to_object().map_or(0, |c| c.len())
             + request.update.to_object().map_or(0, |c| c.len())
             + request.destroy.to_array().map_or(0, |c| c.len());
-        if total_changes > self.config.set_max_changes {
+        if total_changes > self.config.max_objects_in_set {
             return Err(JMAPError::RequestTooLarge);
         }
 

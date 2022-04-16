@@ -675,7 +675,9 @@ pub fn build_message_document(
     raw_message: Vec<u8>,
     received_at: Option<i64>,
 ) -> store::Result<(Vec<String>, String)> {
-    let message = Message::parse(&raw_message).ok_or(StoreError::ParseError)?;
+    let message = Message::parse(&raw_message).ok_or_else(|| {
+        StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
+    })?;
     let mut total_parts = message.parts.len();
     let mut total_blobs = 0;
     let mut message_data = MessageData {

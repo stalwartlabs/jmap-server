@@ -17,6 +17,7 @@ pub mod term_index;
 pub mod update;
 
 use std::{
+    fmt::Display,
     ops::Deref,
     path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
@@ -49,15 +50,25 @@ pub enum StoreError {
     DeserializeError(String),
     InvalidArguments(String),
     AnchorNotFound,
-    ParseError,
     DataCorruption,
-    NotFound,
-    InvalidArgument,
 }
 
 impl StoreError {
     pub fn into_owned(&self) -> StoreError {
         self.clone()
+    }
+}
+
+impl Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StoreError::InternalError(s) => write!(f, "Internal error: {}", s),
+            StoreError::SerializeError(s) => write!(f, "Serialization error: {}", s),
+            StoreError::DeserializeError(s) => write!(f, "Deserialization error: {}", s),
+            StoreError::InvalidArguments(s) => write!(f, "Invalid arguments: {}", s),
+            StoreError::AnchorNotFound => write!(f, "Anchor not found."),
+            StoreError::DataCorruption => write!(f, "Data corruption."),
+        }
     }
 }
 
@@ -478,7 +489,7 @@ where
 
 pub struct JMAPStore<T> {
     pub db: T,
-    pub config: JMAPStoreConfig,
+    pub config: JMAPConfig,
 
     pub account_lock: MutexMap<()>,
     pub blob_lock: MutexMap<()>,
@@ -493,7 +504,7 @@ pub struct JMAPStore<T> {
     pub raft_index: AtomicU64,
 }
 
-pub struct JMAPStoreConfig {
+pub struct JMAPConfig {
     pub is_in_cluster: bool,
 
     pub blob_base_path: PathBuf,
@@ -501,27 +512,28 @@ pub struct JMAPStoreConfig {
     pub blob_temp_ttl: u64,
 
     pub default_language: Language,
+
     pub max_size_upload: usize,
     pub max_concurrent_upload: usize,
     pub max_size_request: usize,
-    pub max_concurrent_request: usize,
+    pub max_concurrent_requests: usize,
     pub max_calls_in_request: usize,
     pub max_objects_in_get: usize,
     pub max_objects_in_set: usize,
+
     pub query_max_results: usize,
-    pub get_max_results: usize,
-    pub set_max_changes: usize,
-    pub mailbox_set_max_changes: usize,
+    pub mailbox_name_max_len: usize,
     pub mailbox_max_total: usize,
     pub mailbox_max_depth: usize,
+    pub mail_attachments_max_size: usize,
     pub mail_thread_max_results: usize,
     pub mail_import_max_items: usize,
     pub mail_parse_max_items: usize,
 }
 
-impl From<&EnvSettings> for JMAPStoreConfig {
+impl From<&EnvSettings> for JMAPConfig {
     fn from(settings: &EnvSettings) -> Self {
-        JMAPStoreConfig {
+        JMAPConfig {
             blob_base_path: PathBuf::from(
                 settings
                     .get("db-path")
@@ -531,17 +543,16 @@ impl From<&EnvSettings> for JMAPStoreConfig {
             max_size_upload: 50000000,
             max_concurrent_upload: 8,
             max_size_request: 10000000,
-            max_concurrent_request: 8,
+            max_concurrent_requests: 8,
             max_calls_in_request: 32,
-            max_objects_in_get: 256,
-            max_objects_in_set: 128,
+            max_objects_in_get: 500,
+            max_objects_in_set: 500,
             blob_temp_ttl: 3600, //TODO configure all params
-            get_max_results: 100,
-            set_max_changes: 100,
             query_max_results: 1000,
-            mailbox_set_max_changes: 100,
+            mailbox_name_max_len: 255, //TODO implement
             mailbox_max_total: 1000,
             mailbox_max_depth: 10,
+            mail_attachments_max_size: 50000000, //TODO implement
             mail_thread_max_results: 100,
             mail_import_max_items: 2,
             mail_parse_max_items: 5,
@@ -555,9 +566,9 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn new(db: T, settings: &EnvSettings) -> Self {
+    pub fn new(db: T, config: JMAPConfig, settings: &EnvSettings) -> Self {
         let mut store = Self {
-            config: settings.into(),
+            config,
             term_id_last: db
                 .get::<TermId>(ColumnFamily::Values, LAST_TERM_ID_KEY)
                 .unwrap()

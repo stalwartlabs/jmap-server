@@ -14,7 +14,7 @@ use tokio::{
     time,
 };
 
-use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer, DEFAULT_RPC_PORT};
+use crate::{cluster::IPC_CHANNEL_BUFFER, jmap::server::DEFAULT_RPC_PORT, JMAPServer};
 
 use super::{
     gossip::{self, spawn_quidnunc, PING_INTERVAL},
