@@ -12,6 +12,7 @@ use jmap_mail::mailbox::JMAPMailMailbox;
 use jmap_mail::parse::JMAPMailParse;
 use jmap_mail::query::JMAPMailQuery;
 use jmap_mail::set::JMAPMailSet;
+use jmap_mail::thread::JMAPMailThread;
 use store::tracing::debug;
 use store::Store;
 
@@ -25,13 +26,20 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let (status_code, body) = if request.len() < core.store.config.max_size_request {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::from_slice::<JSONValue>(&request).unwrap())
+                .unwrap()
+        );
+
         match serde_json::from_slice::<Request>(&request) {
             Ok(request) => {
                 if request.method_calls.len() < core.store.config.max_calls_in_request {
-                    (
-                        StatusCode::OK,
-                        handle_method_calls(request, core).await.to_json(),
-                    )
+                    (StatusCode::OK, {
+                        let result = handle_method_calls(request, core).await;
+                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        result.to_json()
+                    })
                 } else {
                     (
                         StatusCode::BAD_REQUEST,
@@ -64,19 +72,38 @@ pub async fn handle_method_calls<T>(request: Request, core: web::Data<JMAPServer
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut responses = Response::new(1234, request.method_calls.len());
+    let include_created_ids = request.created_ids.is_some();
+    let mut response = Response::new(
+        1234,
+        request.created_ids.unwrap_or_default(),
+        request.method_calls.len(),
+    );
 
-    for (name, arguments, call_id) in request.method_calls {
-        match Invocation::parse(&name, arguments, &responses) {
-            Ok(invocation) => match handle_method_call(invocation, &core).await {
-                Ok(response) => responses.push_response(name, call_id, response),
-                Err(err) => responses.push_error(call_id, err),
-            },
-            Err(err) => responses.push_error(call_id, err),
+    let total_method_calls = request.method_calls.len();
+    for (call_num, (name, arguments, call_id)) in request.method_calls.into_iter().enumerate() {
+        match Invocation::parse(&name, arguments, &response, &core.store.config) {
+            Ok(invocation) => {
+                let is_set = invocation.is_set();
+
+                match handle_method_call(invocation, &core).await {
+                    Ok(result) => response.push_response(
+                        name,
+                        call_id,
+                        result,
+                        is_set && (include_created_ids || call_num < total_method_calls - 1),
+                    ),
+                    Err(err) => response.push_error(call_id, err),
+                }
+            }
+            Err(err) => response.push_error(call_id, err),
         }
     }
 
-    responses
+    if !include_created_ids {
+        response.created_ids.clear();
+    }
+
+    response
 }
 
 pub async fn handle_method_call<T>(
@@ -95,13 +122,15 @@ where
         (Object::Email, Method::Changes(request)) => store.mail_changes(request),
         (Object::Email, Method::Import(request)) => store.mail_import(request),
         (Object::Email, Method::Parse(request)) => store.mail_parse(request),
+        (Object::Thread, Method::Get(request)) => store.thread_get(request),
+        (Object::Thread, Method::Changes(request)) => store.thread_changes(request),
         (Object::Mailbox, Method::Get(request)) => store.mailbox_get(request),
         (Object::Mailbox, Method::Set(request)) => store.mailbox_set(request),
         (Object::Mailbox, Method::Query(request)) => store.mailbox_query(request),
         (Object::Mailbox, Method::QueryChanges(request)) => store.mailbox_query_changes(request),
         (Object::Mailbox, Method::Changes(request)) => store.mailbox_changes(request),
         (Object::Core, Method::Echo(arguments)) => Ok(arguments),
-        _ => Err(JMAPError::AccountNotFound),
+        _ => Err(JMAPError::ServerUnavailable),
     })
     .await
 }

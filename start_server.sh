@@ -6,3 +6,5 @@ if test $1 -ge 2; then
 else
     RUST_BACKTRACE=1 RUST_LOG="jmap_server=debug" cargo run -- --db-path /tmp/server1 --http-port=8081 --rpc-port=7911 --seed-nodes '127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914' --cluster secret
 fi
+
+#RUST_BACKTRACE=1 RUST_LOG="actix_web=debug,jmap_server=debug" cargo run

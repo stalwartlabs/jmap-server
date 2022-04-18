@@ -467,13 +467,12 @@ where
         .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
-            create: JSONValue::Null,
+            create: vec![],
             update: HashMap::from_iter([(
                 get_mailbox_id(&id_map, "sent"),
                 HashMap::from_iter([("role".to_string(), "INBOX".to_string().into())]).into(),
-            )])
-            .into(),
-            destroy: JSONValue::Null,
+            )]),
+            destroy: vec![],
             arguments: HashMap::new(),
         })
         .unwrap()
@@ -485,13 +484,12 @@ where
         .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
-            create: JSONValue::Null,
+            create: vec![],
             update: HashMap::from_iter([(
                 get_mailbox_id(&id_map, "2"),
                 HashMap::from_iter([("name".to_string(), "Level 3".to_string().into())]).into(),
-            )])
-            .into(),
-            destroy: JSONValue::Null,
+            )]),
+            destroy: vec![],
             arguments: HashMap::new(),
         })
         .unwrap()
@@ -503,7 +501,7 @@ where
         .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
-            create: JSONValue::Null,
+            create: vec![],
             update: HashMap::from_iter([(
                 get_mailbox_id(&id_map, "1"),
                 HashMap::from_iter([(
@@ -511,9 +509,8 @@ where
                     get_mailbox_id(&id_map, "1.1.1.1.1").into()
                 )])
                 .into(),
-            )])
-            .into(),
-            destroy: JSONValue::Null,
+            )]),
+            destroy: vec![],
             arguments: HashMap::new(),
         })
         .unwrap()
@@ -524,14 +521,13 @@ where
         .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
-            create: JSONValue::Null,
+            create: vec![],
             update: HashMap::from_iter([(
                 get_mailbox_id(&id_map, "1"),
                 HashMap::from_iter([("parentId".to_string(), get_mailbox_id(&id_map, "1").into())])
                     .into(),
-            )])
-            .into(),
-            destroy: JSONValue::Null,
+            )]),
+            destroy: vec![],
             arguments: HashMap::new(),
         })
         .unwrap()
@@ -543,14 +539,13 @@ where
         .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
-            create: JSONValue::Null,
+            create: vec![],
             update: HashMap::from_iter([(
                 get_mailbox_id(&id_map, "1"),
                 HashMap::from_iter([("parentId".to_string(), JMAPId::MAX.to_jmap_string().into())])
                     .into(),
-            )])
-            .into(),
-            destroy: JSONValue::Null,
+            )]),
+            destroy: vec![],
             arguments: HashMap::new(),
         })
         .unwrap()
@@ -574,7 +569,7 @@ where
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
+                create: vec![],
                 update: HashMap::from_iter([(
                     get_mailbox_id(&id_map, "1.1.1.1.1"),
                     HashMap::from_iter([
@@ -582,9 +577,8 @@ where
                         ("parentId".to_string(), get_mailbox_id(&id_map, "2").into())
                     ])
                     .into(),
-                )])
-                .into(),
-                destroy: JSONValue::Null,
+                )]),
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -656,7 +650,7 @@ where
             .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
+                create: vec![],
                 update: HashMap::from_iter([(
                     message_id.clone(),
                     HashMap::from_iter([(
@@ -665,9 +659,8 @@ where
                             .into()
                     )])
                     .into(),
-                )])
-                .into(),
-                destroy: JSONValue::Null,
+                )]),
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -714,9 +707,9 @@ where
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
-                update: JSONValue::Null,
-                destroy: vec![get_mailbox_id(&id_map, "1").into()].into(),
+                create: vec![],
+                update: HashMap::new(),
+                destroy: vec![get_mailbox_id(&id_map, "1").into()],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -731,9 +724,9 @@ where
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
-                update: JSONValue::Null,
-                destroy: vec![get_mailbox_id(&id_map, "trash").into()].into(),
+                create: vec![],
+                update: HashMap::new(),
+                destroy: vec![get_mailbox_id(&id_map, "trash").into()],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -748,9 +741,9 @@ where
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
-                update: JSONValue::Null,
-                destroy: vec![get_mailbox_id(&id_map, "trash").into()].into(),
+                create: vec![],
+                update: HashMap::new(),
+                destroy: vec![get_mailbox_id(&id_map, "trash").into()],
                 arguments: HashMap::from_iter([
                     ("onDestroyRemoveEmails".to_string(), true.into(),)
                 ]),
@@ -796,7 +789,7 @@ where
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
+                create: vec![],
                 update: HashMap::from_iter([(
                     get_mailbox_id(&id_map, "drafts"),
                     HashMap::from_iter([
@@ -806,9 +799,8 @@ where
                         ("parentId".to_string(), get_mailbox_id(&id_map, "2").into())
                     ])
                     .into(),
-                )])
-                .into(),
-                destroy: JSONValue::Null,
+                )]),
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -984,9 +976,9 @@ fn create_nested_mailboxes<T>(
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: HashMap::from_iter([(mailbox_num.clone(), mailbox)]).into(),
-                update: JSONValue::Null,
-                destroy: JSONValue::Null,
+                create: Vec::from_iter([(mailbox_num.clone(), mailbox)]),
+                update: HashMap::new(),
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap();
@@ -1022,22 +1014,21 @@ where
         .mailbox_set(SetRequest {
             account_id,
             if_in_state: None,
-            create: HashMap::from_iter([(
+            create: Vec::from_iter([(
                 "my_id".to_string(),
                 HashMap::from_iter([
                     ("name".to_string(), name.to_string().into()),
                     ("role".to_string(), role.to_string().into()),
                 ])
                 .into(),
-            )])
-            .into(),
-            update: JSONValue::Null,
-            destroy: JSONValue::Null,
+            )]),
+            update: HashMap::new(),
+            destroy: vec![],
             arguments: HashMap::new(),
         })
         .unwrap();
 
-    assert_eq!(result.eval("/notCreated").unwrap(), JSONValue::Null);
+    assert_eq!(result.eval("/notCreated").unwrap(), HashMap::new().into());
 
     result.eval_unwrap_jmap_id("/created/my_id/id")
 }
@@ -1056,7 +1047,7 @@ pub fn update_mailbox<T>(
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
+                create: vec![],
                 update: HashMap::from_iter([(
                     jmap_id.to_jmap_string(),
                     HashMap::from_iter([
@@ -1068,9 +1059,8 @@ pub fn update_mailbox<T>(
                         ("sortOrder".to_string(), ((ref_id * 100) + seq_id).into())
                     ])
                     .into(),
-                )])
-                .into(),
-                destroy: JSONValue::Null,
+                )]),
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -1089,9 +1079,9 @@ where
             .mailbox_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: JSONValue::Null,
-                update: JSONValue::Null,
-                destroy: vec![jmap_id.to_jmap_string().into()].into(),
+                create: vec![],
+                update: HashMap::new(),
+                destroy: vec![jmap_id.to_jmap_string().into()],
                 arguments: HashMap::from_iter([
                     ("onDestroyRemoveEmails".to_string(), true.into(),)
                 ]),

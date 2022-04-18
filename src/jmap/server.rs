@@ -212,19 +212,20 @@ where
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
+            .wrap(middleware::NormalizePath::trim())
             .app_data(jmap_server.clone())
             .route("/.well-known/jmap", web::get().to(handle_jmap_session::<T>))
-            .route("/api/", web::post().to(handle_jmap_request::<T>))
+            .route("/jmap", web::post().to(handle_jmap_request::<T>))
             .route(
-                "/upload/{accountId}",
+                "/jmap/upload/{accountId}",
                 web::post().to(handle_jmap_upload::<T>),
             )
             .route(
-                "/download/{accountId}/{blobId}/{name}",
+                "/jmap/download/{accountId}/{blobId}/{name}",
                 web::get().to(handle_jmap_download::<T>),
             )
             .route(
-                "/eventsource/",
+                "/jmap/eventsource",
                 web::get().to(handle_jmap_event_source::<T>),
             )
     })

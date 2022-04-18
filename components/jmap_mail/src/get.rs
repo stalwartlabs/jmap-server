@@ -663,22 +663,8 @@ where
             "state".to_string(),
             self.get_state(request.account_id, Collection::Mail)?.into(),
         );
-        obj.insert(
-            "list".to_string(),
-            if !results.is_empty() {
-                JSONValue::Array(results)
-            } else {
-                JSONValue::Null
-            },
-        );
-        obj.insert(
-            "notFound".to_string(),
-            if !not_found.is_empty() {
-                not_found.into()
-            } else {
-                JSONValue::Null
-            },
-        );
+        obj.insert("list".to_string(), results.into());
+        obj.insert("notFound".to_string(), not_found.into());
         Ok(obj.into())
     }
 }

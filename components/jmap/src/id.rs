@@ -1,6 +1,8 @@
-use std::io::Write;
+use std::{collections::HashMap, io::Write};
 
 use store::{blob::BlobIndex, leb128::Leb128, AccountId, Collection, DocumentId, JMAPId};
+
+use crate::{json::JSONValue, JMAPError};
 
 pub trait JMAPIdSerialize {
     fn from_jmap_string(id: &str) -> Option<Self>
@@ -23,6 +25,49 @@ impl JMAPIdSerialize for JMAPId {
 
     fn to_jmap_string(&self) -> String {
         format!("i{:02x}", self)
+    }
+}
+
+pub trait JMAPIdReference {
+    fn from_jmap_ref(id: &str, created_ids: &HashMap<String, JSONValue>) -> crate::Result<Self>
+    where
+        Self: Sized;
+}
+
+impl JMAPIdReference for JMAPId {
+    fn from_jmap_ref(id: &str, created_ids: &HashMap<String, JSONValue>) -> crate::Result<Self>
+    where
+        Self: Sized,
+    {
+        if !id.starts_with('#') {
+            JMAPId::from_jmap_string(id)
+                .ok_or_else(|| JMAPError::InvalidArguments(format!("Invalid JMAP Id: {}", id)))
+        } else {
+            let id_ref = id.get(1..).ok_or_else(|| {
+                JMAPError::InvalidArguments(format!("Invalid reference to JMAP Id: {}", id))
+            })?;
+
+            if let Some(created_id) = created_ids.get(id_ref) {
+                let created_id = created_id
+                    .to_object()
+                    .unwrap()
+                    .get("id")
+                    .unwrap()
+                    .to_string()
+                    .unwrap();
+                JMAPId::from_jmap_string(created_id).ok_or_else(|| {
+                    JMAPError::InvalidArguments(format!(
+                        "Invalid referenced JMAP Id: {} ({})",
+                        id_ref, created_id
+                    ))
+                })
+            } else {
+                Err(JMAPError::InvalidArguments(format!(
+                    "Reference '{}' not found in createdIds.",
+                    id_ref
+                )))
+            }
+        }
     }
 }
 

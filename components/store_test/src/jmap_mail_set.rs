@@ -136,7 +136,7 @@ where
             .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                create: HashMap::from_iter(
+                create: Vec::from_iter(
                     vec![("m1".to_string(), {
                         let mut result: HashMap<String, JSONValue> = HashMap::new();
                         for (k, mut v) in JSONValue::from(
@@ -154,10 +154,9 @@ where
                         result.into()
                     })]
                     .into_iter(),
-                )
-                .into(),
-                update: JSONValue::Null,
-                destroy: JSONValue::Null,
+                ),
+                update: HashMap::new(),
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap();
@@ -271,7 +270,7 @@ where
     message_ids
 }
 
-fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
+fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> HashMap<String, JSONValue> {
     entries
         .into_iter()
         .map(|(jmap_id, bytes)| {
@@ -281,7 +280,6 @@ fn json_to_jmap_update(entries: Vec<(String, &[u8])>) -> JSONValue {
             )
         })
         .collect::<HashMap<String, JSONValue>>()
-        .into()
 }
 
 fn get_mailboxes_and_keywords<T>(
@@ -352,8 +350,8 @@ fn jmap_mail_update<T>(
                 "mailboxIds": {"i0": true, "i1": true}
             }"#,
                 )]),
-                create: JSONValue::Null,
-                destroy: JSONValue::Null,
+                create: vec![],
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -384,8 +382,8 @@ fn jmap_mail_update<T>(
                 "mailboxIds/i0": null
             }"#,
                 )]),
-                create: JSONValue::Null,
-                destroy: JSONValue::Null,
+                create: vec![],
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -413,8 +411,8 @@ fn jmap_mail_update<T>(
                 "mailboxIds/i1": null
                 }"#,
                 )]),
-                create: JSONValue::Null,
-                destroy: JSONValue::Null,
+                create: vec![],
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -433,8 +431,8 @@ fn jmap_mail_update<T>(
                 "mailboxIds/i1": null
                 }"#,
                 )]),
-                create: JSONValue::Null,
-                destroy: vec![message_id_1.clone().into()].into(),
+                create: vec![],
+                destroy: vec![message_id_1.clone().into()],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -447,9 +445,9 @@ fn jmap_mail_update<T>(
             .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                update: JSONValue::Null,
-                create: JSONValue::Null,
-                destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()].into(),
+                update: HashMap::new(),
+                create: vec![],
+                destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -543,10 +541,9 @@ pub fn update_email<T>(
             .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                update: HashMap::from_iter([(jmap_id.to_jmap_string(), update_values.into())])
-                    .into(),
-                create: JSONValue::Null,
-                destroy: JSONValue::Null,
+                update: HashMap::from_iter([(jmap_id.to_jmap_string(), update_values.into())]),
+                create: vec![],
+                destroy: vec![],
                 arguments: HashMap::new(),
             })
             .unwrap()
@@ -565,9 +562,9 @@ where
             .mail_set(SetRequest {
                 account_id,
                 if_in_state: None,
-                update: JSONValue::Null,
-                create: JSONValue::Null,
-                destroy: vec![jmap_id.to_jmap_string().into()].into(),
+                update: HashMap::new(),
+                create: vec![],
+                destroy: vec![jmap_id.to_jmap_string().into()],
                 arguments: HashMap::new(),
             })
             .unwrap()

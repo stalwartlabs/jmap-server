@@ -5,7 +5,7 @@ pub mod json;
 pub mod query;
 pub mod request;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use json::JSONValue;
 use store::{tracing::error, StoreError};
@@ -148,6 +148,30 @@ impl From<StoreError> for JMAPError {
             StoreError::AnchorNotFound => JMAPError::AnchorNotFound,
             StoreError::InvalidArguments(err) => JMAPError::InvalidArguments(err),
             _ => JMAPError::ServerFail(e),
+        }
+    }
+}
+
+impl Display for JMAPError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            JMAPError::InvalidArguments(err) => write!(f, "Invalid arguments: {}", err),
+            JMAPError::RequestTooLarge => write!(f, "Request too large"),
+            JMAPError::StateMismatch => write!(f, "State mismatch"),
+            JMAPError::AnchorNotFound => write!(f, "Anchor not found"),
+            JMAPError::UnsupportedFilter(err) => write!(f, "Unsupported filter: {}", err),
+            JMAPError::UnsupportedSort(err) => write!(f, "Unsupported sort: {}", err),
+            JMAPError::ServerFail(err) => write!(f, "Server error: {}", err),
+            JMAPError::UnknownMethod(err) => write!(f, "Unknown method: {}", err),
+            JMAPError::ServerUnavailable => write!(f, "Server unavailable"),
+            JMAPError::ServerPartialFail => write!(f, "Server partial fail"),
+            JMAPError::InvalidResultReference(err) => {
+                write!(f, "Invalid result reference: {}", err)
+            }
+            JMAPError::Forbidden => write!(f, "Forbidden"),
+            JMAPError::AccountNotFound => write!(f, "Account not found"),
+            JMAPError::AccountNotSupportedByMethod => write!(f, "Account not supported by method"),
+            JMAPError::AccountReadOnly => write!(f, "Account read only"),
         }
     }
 }

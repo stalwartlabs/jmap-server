@@ -2,7 +2,6 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
     iter::FromIterator,
-    time::SystemTime,
 };
 
 use actix_web::{
@@ -118,14 +117,14 @@ impl Session {
             accounts: HashMap::new(),
             primary_accounts: HashMap::new(),
             username: "".to_string(),
-            api_url: format!("{}/api/", jmap_base_url),
+            api_url: format!("{}/jmap/", jmap_base_url),
             download_url: format!(
-                "{}/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}",
+                "{}/jmap/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}",
                 jmap_base_url
             ),
-            upload_url: format!("{}/upload/{{accountId}}/", jmap_base_url),
+            upload_url: format!("{}/jmap/upload/{{accountId}}/", jmap_base_url),
             event_source_url: format!(
-                "{}/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}",
+                "{}/jmap/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}",
                 jmap_base_url
             ),
             state: 0,
@@ -138,14 +137,8 @@ impl Session {
         name: String,
         capabilities: Option<&[URI]>,
     ) {
-        // Generate state id
-        let mut s = DefaultHasher::new();
-        account_id.hash(&mut s);
-        SystemTime::now().hash(&mut s);
-        self.state = s.finish();
-        self.state = 1234; //TODO: remove this line
-
         self.username = name.to_string();
+
         if let Some(capabilities) = capabilities {
             for capability in capabilities {
                 self.primary_accounts
@@ -157,10 +150,24 @@ impl Session {
                     .insert(capability.clone(), account_id.clone());
             }
         }
+
         self.accounts.insert(
             account_id,
             Account::new(name, true, false).add_capabilities(capabilities, &self.capabilities),
         );
+
+        self.update_state();
+    }
+
+    fn update_state(&mut self) {
+        // Generate state id
+        let mut s = DefaultHasher::new();
+        for (account_id, account) in &self.accounts {
+            account_id.hash(&mut s);
+            account.name.hash(&mut s);
+        }
+        self.state = s.finish();
+        self.state = 1234; //TODO: remove this line
     }
 
     pub fn add_account(
@@ -171,17 +178,17 @@ impl Session {
         is_read_only: bool,
         capabilities: Option<&[URI]>,
     ) {
-        self.state += 1;
         self.accounts.insert(
             account_id,
             Account::new(name, is_personal, is_read_only)
                 .add_capabilities(capabilities, &self.capabilities),
         );
+        self.update_state();
     }
 
     pub fn remove_account(&mut self, account_id: &str) {
-        self.state += 1;
         self.accounts.remove(account_id);
+        self.update_state();
     }
 
     pub fn to_json(&self) -> String {

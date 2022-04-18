@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use store::{chrono::DateTime, AccountId, DocumentId, JMAPId};
+use store::{chrono::DateTime, AccountId, DocumentId, JMAPConfig, JMAPId};
 
 use crate::{
     changes::JMAPState,
@@ -27,15 +27,18 @@ pub struct Response {
     #[serde(rename(serialize = "sessionState"))]
     #[serde(serialize_with = "serialize_hex")]
     pub session_state: u64,
+    #[serde(rename(deserialize = "createdIds"))]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub created_ids: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SetRequest {
     pub account_id: AccountId,
     pub if_in_state: Option<JMAPState>,
-    pub create: JSONValue,
-    pub update: JSONValue,
-    pub destroy: JSONValue,
+    pub create: Vec<(String, JSONValue)>,
+    pub update: HashMap<String, JSONValue>,
+    pub destroy: Vec<JSONValue>,
     pub arguments: HashMap<String, JSONValue>,
 }
 
@@ -106,6 +109,7 @@ pub enum Object {
     PushSubscription,
 }
 
+#[derive(Debug)]
 pub enum Method {
     Echo(JSONValue),
     Get(GetRequest),
@@ -117,6 +121,7 @@ pub enum Method {
     Parse(ParseRequest),
 }
 
+#[derive(Debug)]
 pub struct Invocation {
     pub obj: Object,
     pub call: Method,
@@ -335,7 +340,12 @@ impl JSONValue {
 }
 
 impl Invocation {
-    pub fn parse(name: &str, arguments: JSONValue, response: &Response) -> crate::Result<Self> {
+    pub fn parse(
+        name: &str,
+        arguments: JSONValue,
+        response: &Response,
+        config: &JMAPConfig,
+    ) -> crate::Result<Self> {
         let mut name_parts = name.split('/');
         let obj = match name_parts.next().ok_or_else(|| {
             JMAPError::InvalidArguments(format!("Failed to parse method name: {}.", name))
@@ -366,6 +376,9 @@ impl Invocation {
             }
             "set" => {
                 let r = SetRequest::parse(arguments, response)?;
+                if r.create.len() + r.update.len() + r.destroy.len() > config.max_objects_in_set {
+                    return Err(JMAPError::RequestTooLarge);
+                }
                 (r.account_id, Method::Set(r))
             }
             "query" => {
@@ -403,12 +416,16 @@ impl Invocation {
             account_id,
         })
     }
+
+    pub fn is_set(&self) -> bool {
+        matches!(self.call, Method::Set(_))
+    }
 }
 
 impl GetRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = GetRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             ids: None,
             properties: JSONValue::Null,
             arguments: HashMap::new(),
@@ -431,13 +448,75 @@ impl GetRequest {
 }
 
 impl SetRequest {
+    fn map_id_references(
+        child_id: &str,
+        property: &mut JSONValue,
+        response: &Response,
+        mut graph: Option<&mut HashMap<String, Vec<String>>>,
+    ) {
+        match property {
+            JSONValue::String(id_ref) if id_ref.starts_with('#') => {
+                if let Some(parent_id) = id_ref.get(1..) {
+                    if let Some(id) = response.created_ids.get(parent_id) {
+                        *id_ref = id.to_string();
+                    } else if let Some(graph) = graph.as_mut() {
+                        graph
+                            .entry(child_id.to_string())
+                            .or_insert_with(Vec::new)
+                            .push(parent_id.to_string());
+                    }
+                }
+            }
+            JSONValue::Array(array) => {
+                for array_item in array {
+                    if let JSONValue::String(id_ref) = array_item {
+                        if id_ref.starts_with('#') {
+                            if let Some(parent_id) = id_ref.get(1..) {
+                                if let Some(id) = response.created_ids.get(parent_id) {
+                                    *id_ref = id.to_string();
+                                } else if let Some(graph) = graph.as_mut() {
+                                    graph
+                                        .entry(child_id.to_string())
+                                        .or_insert_with(Vec::new)
+                                        .push(parent_id.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            JSONValue::Object(object) => {
+                let mut rename_keys = HashMap::with_capacity(object.len());
+                for key in object.keys() {
+                    if key.starts_with('#') {
+                        if let Some(parent_id) = key.get(1..) {
+                            if let Some(id) = response.created_ids.get(parent_id) {
+                                rename_keys.insert(key.to_string(), id.to_string());
+                            } else if let Some(graph) = graph.as_mut() {
+                                graph
+                                    .entry(child_id.to_string())
+                                    .or_insert_with(Vec::new)
+                                    .push(parent_id.to_string());
+                            }
+                        }
+                    }
+                }
+                for (rename_from_key, rename_to_key) in rename_keys {
+                    let value = object.remove(&rename_from_key).unwrap();
+                    object.insert(rename_to_key, value);
+                }
+            }
+            _ => (),
+        }
+    }
+
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = SetRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             if_in_state: None,
-            create: JSONValue::Null,
-            update: JSONValue::Null,
-            destroy: JSONValue::Null,
+            create: Vec::with_capacity(0),
+            update: HashMap::with_capacity(0),
+            destroy: Vec::with_capacity(0),
             arguments: HashMap::new(),
         };
 
@@ -445,9 +524,99 @@ impl SetRequest {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
                 "ifInState" => request.if_in_state = value.parse_jmap_state(true)?,
-                "create" => request.create = value,
-                "update" => request.update = value,
-                "destroy" => request.destroy = value,
+                "create" => {
+                    // Order create objects by reference
+                    if let Some(mut objects) = value.unwrap_object() {
+                        let mut create = Vec::with_capacity(objects.len());
+                        let mut graph = HashMap::with_capacity(objects.len());
+
+                        for (child_id, object) in objects.iter_mut() {
+                            if let Some(properties) = object.to_object_mut() {
+                                for (property_id, property) in properties {
+                                    if property_id.ends_with("Id") || property_id.ends_with("Ids") {
+                                        SetRequest::map_id_references(
+                                            child_id,
+                                            property,
+                                            response,
+                                            Some(&mut graph),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        // Topological sort
+                        if !graph.is_empty() {
+                            let mut it_stack = Vec::new();
+                            let keys = graph.keys().cloned().collect::<Vec<_>>();
+                            let mut it = keys.iter();
+
+                            'main: loop {
+                                while let Some(from_id) = it.next() {
+                                    if let Some(to_ids) = graph.get(from_id) {
+                                        it_stack.push((it, from_id));
+                                        if it_stack.len() > 1000 {
+                                            return Err(JMAPError::InvalidArguments(
+                                                "Cyclical references are not allowed.".to_string(),
+                                            ));
+                                        }
+                                        it = to_ids.iter();
+                                        continue;
+                                    } else if let Some(object) = objects.remove(from_id) {
+                                        create.push((from_id.to_string(), object));
+                                        if objects.is_empty() {
+                                            break 'main;
+                                        }
+                                    }
+                                }
+
+                                if let Some((prev_it, from_id)) = it_stack.pop() {
+                                    it = prev_it;
+                                    if let Some(object) = objects.remove(from_id) {
+                                        create.push((from_id.to_string(), object));
+                                        if objects.is_empty() {
+                                            break 'main;
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+                        for (user_id, object) in objects {
+                            create.push((user_id, object));
+                        }
+                        request.create = create;
+                    }
+                }
+                "update" => {
+                    if let Some(mut objects) = value.unwrap_object() {
+                        for object in objects.values_mut() {
+                            if let Some(properties) = object.to_object_mut() {
+                                for (property_id, property) in properties {
+                                    if property_id.ends_with("Id") || property_id.ends_with("Ids") {
+                                        SetRequest::map_id_references(
+                                            property_id,
+                                            property,
+                                            response,
+                                            None,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        request.update = objects;
+                    }
+                }
+                "destroy" => {
+                    if let Some(mut array_items) = value.unwrap_array() {
+                        for item in &mut array_items {
+                            SetRequest::map_id_references("", item, response, None);
+                        }
+                        request.destroy = array_items;
+                    }
+                }
                 _ => {
                     request.arguments.insert(name, value);
                 }
@@ -462,7 +631,7 @@ impl SetRequest {
 impl QueryRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = QueryRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             filter: JSONValue::Null,
             sort: None,
             position: 0,
@@ -505,7 +674,7 @@ impl QueryRequest {
 impl QueryChangesRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = QueryChangesRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             filter: JSONValue::Null,
             sort: None,
             since_query_state: JMAPState::Initial,
@@ -550,7 +719,7 @@ impl QueryChangesRequest {
 impl ChangesRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ChangesRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             since_state: JMAPState::Initial,
             max_changes: 0,
             arguments: HashMap::new(),
@@ -577,7 +746,7 @@ impl ChangesRequest {
 impl ImportRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ImportRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             if_in_state: None,
             arguments: HashMap::new(),
         };
@@ -600,7 +769,7 @@ impl ImportRequest {
 impl ParseRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ParseRequest {
-            account_id: 0,
+            account_id: 1, //TODO
             arguments: HashMap::new(),
         };
 
@@ -619,14 +788,39 @@ impl ParseRequest {
 }
 
 impl Response {
-    pub fn new(session_state: u64, capacity: usize) -> Self {
+    pub fn new(session_state: u64, created_ids: HashMap<String, String>, capacity: usize) -> Self {
         Response {
             session_state,
+            created_ids,
             method_responses: Vec::with_capacity(capacity),
         }
     }
 
-    pub fn push_response(&mut self, name: String, call_id: String, response: JSONValue) {
+    pub fn push_response(
+        &mut self,
+        name: String,
+        call_id: String,
+        response: JSONValue,
+        add_created_ids: bool,
+    ) {
+        if add_created_ids {
+            if let Some(obj) = response
+                .to_object()
+                .and_then(|o| o.get("created"))
+                .and_then(|o| o.to_object())
+            {
+                for (user_id, obj) in obj {
+                    if let Some(id) = obj
+                        .to_object()
+                        .and_then(|o| o.get("id"))
+                        .and_then(|id| id.to_string())
+                    {
+                        self.created_ids.insert(user_id.to_string(), id.to_string());
+                    }
+                }
+            }
+        }
+
         self.method_responses.push((name, response, call_id));
     }
 
@@ -640,76 +834,335 @@ impl Response {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashMap, iter::FromIterator};
-
-    use crate::{json::JSONValue, request::Request};
-
-    #[test]
-    fn parse_request() {
-        assert_eq!(
-            serde_json::from_slice::<Request>(
-                br#"{
-                "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
-                "methodCalls": [
-                  [ "method1", {
-                    "arg1": "arg1data",
-                    "arg2": "arg2data"
-                  }, "c1" ],
-                  [ "method2", {
-                    "arg1": "arg1data"
-                  }, "c2" ],
-                  [ "method3", {}, "c3" ]
-                ]
-              }"#,
-            )
-            .unwrap(),
-            Request {
-                using: vec![
-                    "urn:ietf:params:jmap:core".to_string(),
-                    "urn:ietf:params:jmap:mail".to_string()
-                ],
-                method_calls: vec![
-                    (
-                        "method1".to_string(),
-                        HashMap::from_iter([
-                            (
-                                "arg2".to_string(),
-                                JSONValue::String("arg2data".to_string())
-                            ),
-                            (
-                                "arg1".to_string(),
-                                JSONValue::String("arg1data".to_string())
-                            )
-                        ])
-                        .into(),
-                        "c1".to_string()
-                    ),
-                    (
-                        "method2".to_string(),
-                        HashMap::from_iter([(
-                            "arg1".to_string(),
-                            JSONValue::String("arg1data".to_string())
-                        )])
-                        .into(),
-                        "c2".to_string()
-                    ),
-                    (
-                        "method3".to_string(),
-                        HashMap::new().into(),
-                        "c3".to_string()
-                    )
-                ],
-                created_ids: None
-            }
-        );
-    }
-}
-
 pub fn serialize_hex<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     format!("{:x}", value).serialize(serializer)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use store::{config::EnvSettings, JMAPConfig};
+
+    use crate::{
+        json::JSONValue,
+        request::{Method, Request},
+        JMAPError,
+    };
+
+    use super::{Invocation, Response};
+
+    #[test]
+    fn map_sort_created_ids() {
+        let request = serde_json::from_slice::<Request>(
+            br##"{
+                    "using": [
+                        "urn:ietf:params:jmap:core",
+                        "urn:ietf:params:jmap:mail"
+                    ],
+                    "methodCalls": [
+                        [
+                            "Mailbox/set",
+                            {
+                                "accountId": "i01",
+                                "create": {
+                                    "a": {
+                                        "name": "Folder a",
+                                        "parentId": "#b"
+                                    },
+                                    "b": {
+                                        "name": "Folder b",
+                                        "parentId": "#c"
+                                    },
+                                    "c": {
+                                        "name": "Folder c",
+                                        "parentId": "#d"
+                                    },
+                                    "d": {
+                                        "name": "Folder d",
+                                        "parentId": "#e"
+                                    },
+                                    "e": {
+                                        "name": "Folder e",
+                                        "parentId": "#f"
+                                    },
+                                    "f": {
+                                        "name": "Folder f",
+                                        "parentId": "#g"
+                                    },
+                                    "g": {
+                                        "name": "Folder g",
+                                        "parentId": null
+                                    }
+                                }
+                            },
+                            "fulltree"
+                        ],
+                        [
+                            "Mailbox/set",
+                            {
+                                "accountId": "i01",
+                                "create": {
+                                    "a1": {
+                                        "name": "Folder a1",
+                                        "parentId": null
+                                    },
+                                    "b2": {
+                                        "name": "Folder b2",
+                                        "parentId": "#a1"
+                                    },
+                                    "c3": {
+                                        "name": "Folder c3",
+                                        "parentId": "#a1"
+                                    },
+                                    "d4": {
+                                        "name": "Folder d4",
+                                        "parentId": "#b2"
+                                    },
+                                    "e5": {
+                                        "name": "Folder e5",
+                                        "parentId": "#b2"
+                                    },
+                                    "f6": {
+                                        "name": "Folder f6",
+                                        "parentId": "#d4"
+                                    },
+                                    "g7": {
+                                        "name": "Folder g7",
+                                        "parentId": "#e5"
+                                    }
+                                }
+                            },
+                            "fulltree2"
+                        ],
+                        [
+                            "Mailbox/set",
+                            {
+                                "accountId": "i01",
+                                "create": {
+                                    "z": {
+                                        "name": "Folder Z",
+                                        "parentId": "#x"
+                                    },
+                                    "y": {
+                                        "name": null
+                                    },
+                                    "x": {
+                                        "name": "Folder X"
+                                    }
+                                }
+                            },
+                            "xyz"
+                        ],
+                        [
+                            "Mailbox/set",
+                            {
+                                "accountId": "i01",
+                                "create": {
+                                    "a": {
+                                        "name": "Folder a",
+                                        "parentId": "#b"
+                                    },
+                                    "b": {
+                                        "name": "Folder b",
+                                        "parentId": "#c"
+                                    },
+                                    "c": {
+                                        "name": "Folder c",
+                                        "parentId": "#d"
+                                    },
+                                    "d": {
+                                        "name": "Folder d",
+                                        "parentId": "#a"
+                                    }
+                                }
+                            },
+                            "circular"
+                        ]
+                    ]
+                }"##,
+        )
+        .unwrap();
+
+        let response = Response::new(
+            1234,
+            request.created_ids.unwrap_or_default(),
+            request.method_calls.len(),
+        );
+        let config = JMAPConfig::from(&EnvSettings {
+            args: HashMap::new(),
+        });
+
+        for (test_num, (name, arguments, _)) in request.method_calls.into_iter().enumerate() {
+            match Invocation::parse(&name, arguments, &response, &config) {
+                Ok(invocation) => {
+                    assert!((0..3).contains(&test_num), "Unexpected invocation");
+
+                    if let Method::Set(set) = invocation.call {
+                        if test_num == 0 {
+                            assert_eq!(
+                                set.create.into_iter().map(|b| b.0).collect::<Vec<_>>(),
+                                ["g", "f", "e", "d", "c", "b", "a"]
+                                    .iter()
+                                    .map(|i| i.to_string())
+                                    .collect::<Vec<_>>()
+                            );
+                        } else if test_num == 1 {
+                            let mut pending_ids = vec!["a1", "b2", "d4", "e5", "f6", "c3", "g7"];
+
+                            for (id, _) in &set.create {
+                                match id.as_str() {
+                                    "a1" => (),
+                                    "b2" | "c3" => assert!(!pending_ids.contains(&"a1")),
+                                    "d4" | "e5" => assert!(!pending_ids.contains(&"b2")),
+                                    "f6" => assert!(!pending_ids.contains(&"d4")),
+                                    "g7" => assert!(!pending_ids.contains(&"e5")),
+                                    _ => panic!("Unexpected ID"),
+                                }
+                                pending_ids.retain(|i| i != id);
+                            }
+
+                            if !pending_ids.is_empty() {
+                                panic!(
+                                    "Unexpected order: {:?}",
+                                    all_ids = set
+                                        .create
+                                        .iter()
+                                        .map(|b| b.0.to_string())
+                                        .collect::<Vec<_>>()
+                                );
+                            }
+                        } else if test_num == 2 {
+                            assert_eq!(
+                                set.create.into_iter().map(|b| b.0).collect::<Vec<_>>(),
+                                ["x", "z", "y"]
+                                    .iter()
+                                    .map(|i| i.to_string())
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                    } else {
+                        panic!("Expected SetRequest");
+                    };
+                }
+                Err(err) => {
+                    assert_eq!(test_num, 3);
+                    assert!(matches!(err, JMAPError::InvalidArguments(_)));
+                }
+            }
+        }
+
+        let request = serde_json::from_slice::<Request>(
+            br##"{
+                "using": [
+                    "urn:ietf:params:jmap:core",
+                    "urn:ietf:params:jmap:mail"
+                ],
+                "methodCalls": [
+                    [
+                        "Mailbox/set",
+                        {
+                            "accountId": "i01",
+                            "create": {
+                                "a": {
+                                    "name": "a",
+                                    "parentId": "#x"
+                                },
+                                "b": {
+                                    "name": "b",
+                                    "parentId": "#y"
+                                },
+                                "c": {
+                                    "name": "c",
+                                    "parentId": "#z"
+                                }
+                            }
+                        },
+                        "ref1"
+                    ],
+                    [
+                        "Mailbox/set",
+                        {
+                            "accountId": "i01",
+                            "create": {
+                                "a1": {
+                                    "name": "a1",
+                                    "parentId": "#a"
+                                },
+                                "b2": {
+                                    "name": "b2",
+                                    "parentId": "#b"
+                                },
+                                "c3": {
+                                    "name": "c3",
+                                    "parentId": "#c"
+                                }
+                            }
+                        },
+                        "red2"
+                    ]
+                ],
+                "createdIds": {
+                    "x": "i01",
+                    "y": "i02",
+                    "z": "i03"
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let mut response = Response::new(
+            1234,
+            request.created_ids.unwrap_or_default(),
+            request.method_calls.len(),
+        );
+
+        let mut invocations = request.method_calls.into_iter();
+        let (name, arguments, _) = invocations.next().unwrap();
+        let invocation = Invocation::parse(&name, arguments, &response, &config).unwrap();
+        if let Method::Set(set) = invocation.call {
+            let create: JSONValue = set.create.into_iter().collect::<HashMap<_, _>>().into();
+            assert_eq!(create.eval_unwrap_string("/a/parentId"), "i01");
+            assert_eq!(create.eval_unwrap_string("/b/parentId"), "i02");
+            assert_eq!(create.eval_unwrap_string("/c/parentId"), "i03");
+        } else {
+            panic!("Expected SetRequest");
+        };
+
+        response.push_response(
+            "test".to_string(),
+            "test".to_string(),
+            serde_json::from_slice::<JSONValue>(
+                br##"{
+                "created": {
+                    "a": {
+                        "id": "i05"
+                    },
+                    "b": {
+                        "id": "i06"
+                    },
+                    "c": {
+                        "id": "i07"
+                    }
+                }
+            }"##,
+            )
+            .unwrap(),
+            true,
+        );
+
+        let (name, arguments, _) = invocations.next().unwrap();
+        let invocation = Invocation::parse(&name, arguments, &response, &config).unwrap();
+        if let Method::Set(set) = invocation.call {
+            let create: JSONValue = set.create.into_iter().collect::<HashMap<_, _>>().into();
+            assert_eq!(create.eval_unwrap_string("/a1/parentId"), "i05");
+            assert_eq!(create.eval_unwrap_string("/b2/parentId"), "i06");
+            assert_eq!(create.eval_unwrap_string("/c3/parentId"), "i07");
+        } else {
+            panic!("Expected SetRequest");
+        };
+    }
 }

@@ -1,8 +1,10 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use store::{JMAPConfig, JMAPStore, Store};
 use store_rocksdb::RocksDB;
-use store_test::{destroy_temp_dir, init_settings};
+use store_test::{
+    destroy_temp_dir, init_settings, jmap_mail_set::insert_email, jmap_mailbox::insert_mailbox,
+};
 
 pub fn init_db<T>(name: &str, delete_if_exists: bool) -> (JMAPStore<T>, PathBuf)
 where
@@ -148,4 +150,41 @@ fn jmap_mailbox() {
     store_test::jmap_mailbox::jmap_mailbox(&db, 1);
 
     destroy_temp_dir(temp_dir);
+}
+
+#[test]
+#[ignore]
+fn insert_test_data() {
+    let (db, temp_dir) = init_db::<RocksDB>("strdb_jmap_test", true);
+
+    let inbox_id = insert_mailbox(&db, 1, "Inbox", "INBOX");
+    let mut test_dir = PathBuf::from(
+        "/home/vagrant/code/jmap-server/components/store_test/resources/jmap_mail_get/",
+    ); //env!("CARGO_MANIFEST_DIR"));
+       //test_dir.push("resources");
+       //test_dir.push("jmap_mail_get");
+
+    /*for (pos, file_name) in fs::read_dir(&test_dir).unwrap().into_iter().enumerate() {
+        let file_name = file_name.as_ref().unwrap().path();
+        if file_name.extension().map_or(false, |e| e == "eml") {
+            insert_email(
+                &db,
+                1,
+                fs::read(&file_name).unwrap(),
+                vec![inbox_id],
+                vec![match pos % 5 {
+                    0 => "$seen",
+                    1 => "$flagged",
+                    2 => "$answered",
+                    3 => "$draft",
+                    _ => "$junk",
+                }],
+                None,
+            );
+        }
+    }*/
+
+    //store_test::jmap_mailbox::jmap_mailbox(&db, 1);
+
+    //destroy_temp_dir(temp_dir);
 }

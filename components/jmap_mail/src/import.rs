@@ -60,8 +60,22 @@ impl MailImportRequest {
                     .ok_or_else(|| {
                         JMAPError::InvalidArguments(format!("Missing mailboxIds for {}.", id))
                     })?
-                    .parse_array_items(true)?
-                    .unwrap_or_default(),
+                    .unwrap_object()
+                    .ok_or_else(|| {
+                        JMAPError::InvalidArguments(format!(
+                            "Expected mailboxIds object for {}.",
+                            id
+                        ))
+                    })?
+                    .into_iter()
+                    .filter_map(|(k, v)| {
+                        if v.to_bool()? {
+                            JMAPId::from_jmap_string(&k).map(|id| id as DocumentId)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
                 keywords: if let Some(keywords) = item_value.remove("keywords") {
                     keywords
                         .parse_array_items::<Keyword>(true)?

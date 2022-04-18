@@ -465,7 +465,7 @@ where
                                 }
                                 local_peer.generation = peer.generation;
                                 local_peer.shard_id = peer.shard_id;
-                                local_peer.jmap_url = format!("{}/jmap", peer.jmap_url);
+                                local_peer.jmap_url = peer.jmap_url;
                                 peers_changed = true;
                             }
 

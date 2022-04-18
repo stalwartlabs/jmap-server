@@ -1,11 +1,10 @@
 use jmap::blob::JMAPBlobStore;
 use jmap::changes::JMAPChanges;
+use jmap::id::JMAPIdReference;
 use jmap::id::{BlobId, JMAPIdSerialize};
 use jmap::json::JSONValue;
 use jmap::request::SetRequest;
 use jmap::SetErrorType;
-use store::chrono::DateTime;
-
 use jmap::{json::JSONPointer, JMAPError};
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
@@ -18,6 +17,7 @@ use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::batch::{Document, WriteBatch};
+use store::chrono::DateTime;
 use store::field::{DefaultOptions, Options};
 use store::roaring::RoaringBitmap;
 use store::{AccountId, Collection, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
@@ -42,6 +42,7 @@ pub trait JMAPMailSet {
         account: AccountId,
         fields: JSONValue,
         existing_mailboxes: &RoaringBitmap,
+        created_ids: &HashMap<String, JSONValue>,
     ) -> Result<MessageItem, JSONValue>;
     fn import_body_structure<'x: 'y, 'y>(
         &'y self,
@@ -79,13 +80,6 @@ where
             }
         }
 
-        let total_changes = request.create.to_object().map_or(0, |c| c.len())
-            + request.update.to_object().map_or(0, |c| c.len())
-            + request.destroy.to_array().map_or(0, |c| c.len());
-        if total_changes > self.config.max_objects_in_set {
-            return Err(JMAPError::RequestTooLarge);
-        }
-
         let mut changes = WriteBatch::new(request.account_id, self.config.is_in_cluster);
         let document_ids = self
             .get_document_ids(request.account_id, Collection::Mail)?
@@ -93,196 +87,165 @@ where
         let mut mailbox_ids = None;
         let mut response = HashMap::new();
 
-        if let JSONValue::Object(create) = request.create {
-            let mut created = HashMap::with_capacity(create.len());
-            let mut not_created = HashMap::with_capacity(create.len());
+        let mut created = HashMap::with_capacity(request.create.len());
+        let mut not_created = HashMap::with_capacity(request.create.len());
 
-            for (create_id, message_fields) in create {
-                let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
-                    mailbox_ids
-                } else {
-                    mailbox_ids = self
-                        .get_document_ids(request.account_id, Collection::Mailbox)?
-                        .unwrap_or_default()
-                        .into();
-                    mailbox_ids.as_ref().unwrap()
-                };
+        for (create_id, message_fields) in request.create {
+            let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
+                mailbox_ids
+            } else {
+                mailbox_ids = self
+                    .get_document_ids(request.account_id, Collection::Mailbox)?
+                    .unwrap_or_default()
+                    .into();
+                mailbox_ids.as_ref().unwrap()
+            };
 
-                match self.build_message(request.account_id, message_fields, mailbox_ids) {
-                    Ok(import_item) => {
-                        created.insert(
-                            create_id,
-                            self.mail_import_blob(
-                                request.account_id,
-                                import_item.blob,
-                                import_item.mailbox_ids,
-                                import_item.keywords,
-                                import_item.received_at,
-                            )?,
-                        );
-                    }
-                    Err(err) => {
-                        not_created.insert(create_id, err);
-                    }
+            match self.build_message(request.account_id, message_fields, mailbox_ids, &created) {
+                Ok(import_item) => {
+                    created.insert(
+                        create_id,
+                        self.mail_import_blob(
+                            request.account_id,
+                            import_item.blob,
+                            import_item.mailbox_ids,
+                            import_item.keywords,
+                            import_item.received_at,
+                        )?,
+                    );
+                }
+                Err(err) => {
+                    not_created.insert(create_id, err);
                 }
             }
-
-            response.insert(
-                "created".to_string(),
-                if !created.is_empty() {
-                    created.into()
-                } else {
-                    JSONValue::Null
-                },
-            );
-            response.insert(
-                "notCreated".to_string(),
-                if !not_created.is_empty() {
-                    not_created.into()
-                } else {
-                    JSONValue::Null
-                },
-            );
-        } else {
-            response.insert("created".to_string(), JSONValue::Null);
-            response.insert("notCreated".to_string(), JSONValue::Null);
         }
 
-        if let JSONValue::Object(update) = request.update {
-            let mut updated = HashMap::with_capacity(update.len());
-            let mut not_updated = HashMap::with_capacity(update.len());
+        let mut updated = HashMap::with_capacity(request.update.len());
+        let mut not_updated = HashMap::with_capacity(request.update.len());
 
-            'main: for (jmap_id_str, properties) in update {
-                let (jmap_id, properties) = if let (Some(jmap_id), Some(properties)) = (
-                    JMAPId::from_jmap_string(&jmap_id_str),
-                    properties.unwrap_object(),
-                ) {
-                    (jmap_id, properties)
-                } else {
-                    not_updated.insert(
-                        jmap_id_str,
-                        JSONValue::new_error(
-                            SetErrorType::InvalidProperties,
-                            "Failed to parse request.",
-                        ),
-                    );
-                    continue 'main;
-                };
-                let document_id = jmap_id.get_document_id();
-                if !document_ids.contains(document_id) {
-                    not_updated.insert(
-                        jmap_id_str,
-                        JSONValue::new_error(SetErrorType::NotFound, "ID not found."),
-                    );
-                    continue;
-                } else if let JSONValue::Array(destroy_ids) = &request.destroy {
-                    if destroy_ids
-                        .iter()
-                        .any(|x| x.to_string().map(|v| v == jmap_id_str).unwrap_or(false))
-                    {
-                        not_updated.insert(
-                            jmap_id_str,
-                            JSONValue::new_error(
-                                SetErrorType::WillDestroy,
-                                "ID will be destroyed.",
-                            ),
-                        );
-                        continue;
-                    }
-                }
-                let mut document = Document::new(Collection::Mail, document_id);
+        'main: for (jmap_id_str, properties) in request.update {
+            let (jmap_id, properties) = if let (Some(jmap_id), Some(properties)) = (
+                JMAPId::from_jmap_string(&jmap_id_str),
+                properties.unwrap_object(),
+            ) {
+                (jmap_id, properties)
+            } else {
+                not_updated.insert(
+                    jmap_id_str,
+                    JSONValue::new_error(
+                        SetErrorType::InvalidProperties,
+                        "Failed to parse request.",
+                    ),
+                );
+                continue 'main;
+            };
+            let document_id = jmap_id.get_document_id();
+            if !document_ids.contains(document_id) {
+                not_updated.insert(
+                    jmap_id_str,
+                    JSONValue::new_error(SetErrorType::NotFound, "ID not found."),
+                );
+                continue;
+            } else if request
+                .destroy
+                .iter()
+                .any(|x| x.to_string().map(|v| v == jmap_id_str).unwrap_or(false))
+            {
+                not_updated.insert(
+                    jmap_id_str,
+                    JSONValue::new_error(SetErrorType::WillDestroy, "ID will be destroyed."),
+                );
+                continue;
+            }
+            let mut document = Document::new(Collection::Mail, document_id);
 
-                let mut keyword_op_list = HashMap::new();
-                let mut keyword_op_clear_all = false;
-                let mut mailbox_op_list = HashMap::new();
-                let mut mailbox_op_clear_all = false;
+            let mut keyword_op_list = HashMap::new();
+            let mut keyword_op_clear_all = false;
+            let mut mailbox_op_list = HashMap::new();
+            let mut mailbox_op_clear_all = false;
 
-                for (field, value) in properties {
-                    match JSONPointer::parse(&field).unwrap_or(JSONPointer::Root) {
-                        JSONPointer::String(field) => {
-                            match MailProperties::parse(&field).unwrap_or(MailProperties::Id) {
-                                MailProperties::Keywords => {
-                                    if let JSONValue::Object(value) = value {
-                                        // Add keywords to the list
-                                        for (keyword, value) in value {
-                                            if let JSONValue::Bool(true) = value {
-                                                keyword_op_list
-                                                    .insert(Keyword::from_jmap(keyword), true);
-                                            }
+            for (field, value) in properties {
+                match JSONPointer::parse(&field).unwrap_or(JSONPointer::Root) {
+                    JSONPointer::String(field) => {
+                        match MailProperties::parse(&field).unwrap_or(MailProperties::Id) {
+                            MailProperties::Keywords => {
+                                if let JSONValue::Object(value) = value {
+                                    // Add keywords to the list
+                                    for (keyword, value) in value {
+                                        if let JSONValue::Bool(true) = value {
+                                            keyword_op_list
+                                                .insert(Keyword::from_jmap(keyword), true);
                                         }
-                                        keyword_op_clear_all = true;
-                                    } else {
-                                        not_updated.insert(
-                                            jmap_id_str,
-                                            JSONValue::new_invalid_property(
-                                                "keywords",
-                                                "Expected an object.",
-                                            ),
-                                        );
-                                        continue 'main;
                                     }
-                                }
-                                MailProperties::MailboxIds => {
-                                    // Unwrap JSON object
-                                    if let JSONValue::Object(value) = value {
-                                        // Add mailbox ids to the list
-                                        for (mailbox_id, value) in value {
-                                            match (
-                                                JMAPId::from_jmap_string(mailbox_id.as_ref()),
-                                                value,
-                                            ) {
-                                                (Some(mailbox_id), JSONValue::Bool(true)) => {
-                                                    mailbox_op_list.insert(
-                                                        Tag::Id(mailbox_id.get_document_id()),
-                                                        true,
-                                                    );
-                                                }
-                                                (None, _) => {
-                                                    not_updated.insert(
-                                                        jmap_id_str,
-                                                        JSONValue::new_invalid_property(
-                                                            format!("mailboxIds/{}", mailbox_id),
-                                                            "Failed to parse mailbox id.",
-                                                        ),
-                                                    );
-                                                    continue 'main;
-                                                }
-                                                _ => (),
-                                            }
-                                        }
-                                        mailbox_op_clear_all = true;
-                                    } else {
-                                        // mailboxIds is not a JSON object
-                                        not_updated.insert(
-                                            jmap_id_str,
-                                            JSONValue::new_invalid_property(
-                                                "mailboxIds",
-                                                "Expected an object.",
-                                            ),
-                                        );
-                                        continue 'main;
-                                    }
-                                }
-                                _ => {
+                                    keyword_op_clear_all = true;
+                                } else {
                                     not_updated.insert(
                                         jmap_id_str,
                                         JSONValue::new_invalid_property(
-                                            field,
-                                            "Unsupported property.",
+                                            "keywords",
+                                            "Expected an object.",
                                         ),
                                     );
                                     continue 'main;
                                 }
                             }
+                            MailProperties::MailboxIds => {
+                                // Unwrap JSON object
+                                if let JSONValue::Object(value) = value {
+                                    // Add mailbox ids to the list
+                                    for (mailbox_id, value) in value {
+                                        match (
+                                            JMAPId::from_jmap_ref(mailbox_id.as_ref(), &created),
+                                            value,
+                                        ) {
+                                            (Ok(mailbox_id), JSONValue::Bool(true)) => {
+                                                mailbox_op_list.insert(
+                                                    Tag::Id(mailbox_id.get_document_id()),
+                                                    true,
+                                                );
+                                            }
+                                            (Err(err), _) => {
+                                                not_updated.insert(
+                                                    jmap_id_str,
+                                                    JSONValue::new_invalid_property(
+                                                        format!("mailboxIds/{}", mailbox_id),
+                                                        err.to_string(),
+                                                    ),
+                                                );
+                                                continue 'main;
+                                            }
+                                            _ => (),
+                                        }
+                                    }
+                                    mailbox_op_clear_all = true;
+                                } else {
+                                    // mailboxIds is not a JSON object
+                                    not_updated.insert(
+                                        jmap_id_str,
+                                        JSONValue::new_invalid_property(
+                                            "mailboxIds",
+                                            "Expected an object.",
+                                        ),
+                                    );
+                                    continue 'main;
+                                }
+                            }
+                            _ => {
+                                not_updated.insert(
+                                    jmap_id_str,
+                                    JSONValue::new_invalid_property(field, "Unsupported property."),
+                                );
+                                continue 'main;
+                            }
                         }
+                    }
 
-                        JSONPointer::Path(mut path) if path.len() == 2 => {
-                            if let (JSONPointer::String(property), JSONPointer::String(field)) =
-                                (path.pop().unwrap(), path.pop().unwrap())
-                            {
-                                let is_mailbox = match MailProperties::parse(&field)
-                                    .unwrap_or(MailProperties::Id)
-                                {
+                    JSONPointer::Path(mut path) if path.len() == 2 => {
+                        if let (JSONPointer::String(property), JSONPointer::String(field)) =
+                            (path.pop().unwrap(), path.pop().unwrap())
+                        {
+                            let is_mailbox =
+                                match MailProperties::parse(&field).unwrap_or(MailProperties::Id) {
                                     MailProperties::MailboxIds => true,
                                     MailProperties::Keywords => false,
                                     _ => {
@@ -296,62 +259,155 @@ where
                                         continue 'main;
                                     }
                                 };
-                                match value {
-                                    JSONValue::Null | JSONValue::Bool(false) => {
-                                        if is_mailbox {
-                                            if let Some(mailbox_id) =
-                                                JMAPId::from_jmap_string(property.as_ref())
-                                            {
+                            match value {
+                                JSONValue::Null | JSONValue::Bool(false) => {
+                                    if is_mailbox {
+                                        match JMAPId::from_jmap_ref(property.as_ref(), &created) {
+                                            Ok(mailbox_id) => {
                                                 mailbox_op_list.insert(
                                                     Tag::Id(mailbox_id.get_document_id()),
                                                     false,
                                                 );
                                             }
-                                        } else {
-                                            keyword_op_list
-                                                .insert(Keyword::from_jmap(property), false);
+                                            Err(err) => {
+                                                not_updated.insert(
+                                                    jmap_id_str,
+                                                    JSONValue::new_invalid_property(
+                                                        format!("{}/{}", field, property),
+                                                        err.to_string(),
+                                                    ),
+                                                );
+                                                continue 'main;
+                                            }
                                         }
+                                    } else {
+                                        keyword_op_list.insert(Keyword::from_jmap(property), false);
                                     }
-                                    JSONValue::Bool(true) => {
-                                        if is_mailbox {
-                                            if let Some(mailbox_id) =
-                                                JMAPId::from_jmap_string(property.as_ref())
-                                            {
+                                }
+                                JSONValue::Bool(true) => {
+                                    if is_mailbox {
+                                        match JMAPId::from_jmap_ref(property.as_ref(), &created) {
+                                            Ok(mailbox_id) => {
                                                 mailbox_op_list.insert(
                                                     Tag::Id(mailbox_id.get_document_id()),
                                                     true,
                                                 );
                                             }
-                                        } else {
-                                            keyword_op_list
-                                                .insert(Keyword::from_jmap(property), true);
+                                            Err(err) => {
+                                                not_updated.insert(
+                                                    jmap_id_str,
+                                                    JSONValue::new_invalid_property(
+                                                        format!("{}/{}", field, property),
+                                                        err.to_string(),
+                                                    ),
+                                                );
+                                                continue 'main;
+                                            }
                                         }
-                                    }
-                                    _ => {
-                                        not_updated.insert(
-                                            jmap_id_str,
-                                            JSONValue::new_invalid_property(
-                                                format!("{}/{}", field, property),
-                                                "Expected a boolean or null value.",
-                                            ),
-                                        );
-                                        continue 'main;
+                                    } else {
+                                        keyword_op_list.insert(Keyword::from_jmap(property), true);
                                     }
                                 }
-                            } else {
-                                not_updated.insert(
-                                    jmap_id_str,
-                                    JSONValue::new_invalid_property(field, "Unsupported property."),
-                                );
-                                continue 'main;
+                                _ => {
+                                    not_updated.insert(
+                                        jmap_id_str,
+                                        JSONValue::new_invalid_property(
+                                            format!("{}/{}", field, property),
+                                            "Expected a boolean or null value.",
+                                        ),
+                                    );
+                                    continue 'main;
+                                }
                             }
+                        } else {
+                            not_updated.insert(
+                                jmap_id_str,
+                                JSONValue::new_invalid_property(field, "Unsupported property."),
+                            );
+                            continue 'main;
                         }
-                        _ => {
+                    }
+                    _ => {
+                        not_updated.insert(
+                            jmap_id_str,
+                            JSONValue::new_invalid_property(
+                                field.to_string(),
+                                "Unsupported property.",
+                            ),
+                        );
+                        continue 'main;
+                    }
+                }
+            }
+
+            let mut changed_mailboxes = HashSet::with_capacity(mailbox_op_list.len());
+            if !mailbox_op_list.is_empty() || mailbox_op_clear_all {
+                // Obtain mailboxes
+                let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
+                    mailbox_ids
+                } else {
+                    mailbox_ids = self
+                        .get_document_ids(request.account_id, Collection::Mailbox)?
+                        .unwrap_or_default()
+                        .into();
+                    mailbox_ids.as_ref().unwrap()
+                };
+
+                // Deserialize mailbox list
+                let current_mailboxes = self
+                    .get_document_tags(
+                        request.account_id,
+                        Collection::Mail,
+                        document_id,
+                        MessageField::Mailbox.into(),
+                    )?
+                    .map(|current_mailboxes| current_mailboxes.items)
+                    .unwrap_or_default();
+
+                let mut has_mailboxes = false;
+
+                for mailbox in &current_mailboxes {
+                    if mailbox_op_clear_all {
+                        // Untag mailbox unless it is in the list of mailboxes to tag
+                        if !mailbox_op_list.get(mailbox).unwrap_or(&false) {
+                            document.tag(
+                                MessageField::Mailbox,
+                                mailbox.clone(),
+                                DefaultOptions::new().clear(),
+                            );
+                            changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                        }
+                    } else if !mailbox_op_list.get(mailbox).unwrap_or(&true) {
+                        // Untag mailbox if is marked for untagging
+                        document.tag(
+                            MessageField::Mailbox,
+                            mailbox.clone(),
+                            DefaultOptions::new().clear(),
+                        );
+                        changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                    } else {
+                        // Keep mailbox in the list
+                        has_mailboxes = true;
+                    }
+                }
+
+                for (mailbox, do_create) in mailbox_op_list {
+                    if do_create {
+                        let mailbox_id = mailbox.unwrap_id().unwrap_or_default();
+                        // Make sure the mailbox exists
+                        if mailbox_ids.contains(mailbox_id) {
+                            // Tag mailbox if it is not already tagged
+                            if !current_mailboxes.contains(&mailbox) {
+                                document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
+                                changed_mailboxes.insert(mailbox_id);
+                            }
+                            has_mailboxes = true;
+                        } else {
                             not_updated.insert(
                                 jmap_id_str,
                                 JSONValue::new_invalid_property(
-                                    field.to_string(),
-                                    "Unsupported property.",
+                                    format!("mailboxIds/{}", mailbox_id),
+                                    "Mailbox does not exist.",
                                 ),
                             );
                             continue 'main;
@@ -359,128 +415,36 @@ where
                     }
                 }
 
-                let mut changed_mailboxes = HashSet::with_capacity(mailbox_op_list.len());
-                if !mailbox_op_list.is_empty() || mailbox_op_clear_all {
-                    // Obtain mailboxes
-                    let mailbox_ids = if let Some(mailbox_ids) = &mailbox_ids {
-                        mailbox_ids
-                    } else {
-                        mailbox_ids = self
-                            .get_document_ids(request.account_id, Collection::Mailbox)?
-                            .unwrap_or_default()
-                            .into();
-                        mailbox_ids.as_ref().unwrap()
-                    };
-
-                    // Deserialize mailbox list
-                    let current_mailboxes = self
-                        .get_document_tags(
-                            request.account_id,
-                            Collection::Mail,
-                            document_id,
-                            MessageField::Mailbox.into(),
-                        )?
-                        .map(|current_mailboxes| current_mailboxes.items)
-                        .unwrap_or_default();
-
-                    let mut has_mailboxes = false;
-
-                    for mailbox in &current_mailboxes {
-                        if mailbox_op_clear_all {
-                            // Untag mailbox unless it is in the list of mailboxes to tag
-                            if !mailbox_op_list.get(mailbox).unwrap_or(&false) {
-                                document.tag(
-                                    MessageField::Mailbox,
-                                    mailbox.clone(),
-                                    DefaultOptions::new().clear(),
-                                );
-                                changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
-                            }
-                        } else if !mailbox_op_list.get(mailbox).unwrap_or(&true) {
-                            // Untag mailbox if is marked for untagging
-                            document.tag(
-                                MessageField::Mailbox,
-                                mailbox.clone(),
-                                DefaultOptions::new().clear(),
-                            );
-                            changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
-                        } else {
-                            // Keep mailbox in the list
-                            has_mailboxes = true;
-                        }
-                    }
-
-                    for (mailbox, do_create) in mailbox_op_list {
-                        if do_create {
-                            let mailbox_id = mailbox.unwrap_id().unwrap_or_default();
-                            // Make sure the mailbox exists
-                            if mailbox_ids.contains(mailbox_id) {
-                                // Tag mailbox if it is not already tagged
-                                if !current_mailboxes.contains(&mailbox) {
-                                    document.tag(
-                                        MessageField::Mailbox,
-                                        mailbox,
-                                        DefaultOptions::new(),
-                                    );
-                                    changed_mailboxes.insert(mailbox_id);
-                                }
-                                has_mailboxes = true;
-                            } else {
-                                not_updated.insert(
-                                    jmap_id_str,
-                                    JSONValue::new_invalid_property(
-                                        format!("mailboxIds/{}", mailbox_id),
-                                        "Mailbox does not exist.",
-                                    ),
-                                );
-                                continue 'main;
-                            }
-                        }
-                    }
-
-                    // Messages have to be in at least one mailbox
-                    if !has_mailboxes {
-                        not_updated.insert(
-                            jmap_id_str,
-                            JSONValue::new_invalid_property(
-                                "mailboxIds",
-                                "Message must belong to at least one mailbox.",
-                            ),
-                        );
-                        continue 'main;
-                    }
+                // Messages have to be in at least one mailbox
+                if !has_mailboxes {
+                    not_updated.insert(
+                        jmap_id_str,
+                        JSONValue::new_invalid_property(
+                            "mailboxIds",
+                            "Message must belong to at least one mailbox.",
+                        ),
+                    );
+                    continue 'main;
                 }
+            }
 
-                if !keyword_op_list.is_empty() || keyword_op_clear_all {
-                    // Deserialize current keywords
-                    let current_keywords = self
-                        .get_document_tags(
-                            request.account_id,
-                            Collection::Mail,
-                            document_id,
-                            MessageField::Keyword.into(),
-                        )?
-                        .map(|tags| tags.items)
-                        .unwrap_or_default();
+            if !keyword_op_list.is_empty() || keyword_op_clear_all {
+                // Deserialize current keywords
+                let current_keywords = self
+                    .get_document_tags(
+                        request.account_id,
+                        Collection::Mail,
+                        document_id,
+                        MessageField::Keyword.into(),
+                    )?
+                    .map(|tags| tags.items)
+                    .unwrap_or_default();
 
-                    let mut unread_changed = false;
-                    for keyword in &current_keywords {
-                        if keyword_op_clear_all {
-                            // Untag keyword unless it is in the list of keywords to tag
-                            if !keyword_op_list.get(keyword).unwrap_or(&false) {
-                                document.tag(
-                                    MessageField::Keyword,
-                                    keyword.clone(),
-                                    DefaultOptions::new().clear(),
-                                );
-                                if !unread_changed
-                                    && matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
-                                {
-                                    unread_changed = true;
-                                }
-                            }
-                        } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
-                            // Untag keyword if is marked for untagging
+                let mut unread_changed = false;
+                for keyword in &current_keywords {
+                    if keyword_op_clear_all {
+                        // Untag keyword unless it is in the list of keywords to tag
+                        if !keyword_op_list.get(keyword).unwrap_or(&false) {
                             document.tag(
                                 MessageField::Keyword,
                                 keyword.clone(),
@@ -492,90 +456,82 @@ where
                                 unread_changed = true;
                             }
                         }
-                    }
-
-                    for (keyword, do_create) in keyword_op_list {
-                        if do_create {
-                            // Tag keyword if it is not already tagged
-                            if !current_keywords.contains(&keyword) {
-                                document.tag(
-                                    MessageField::Keyword,
-                                    keyword.clone(),
-                                    DefaultOptions::new(),
-                                );
-                                if !unread_changed
-                                    && matches!(&keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
-                                {
-                                    unread_changed = true;
-                                }
-                            }
+                    } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
+                        // Untag keyword if is marked for untagging
+                        document.tag(
+                            MessageField::Keyword,
+                            keyword.clone(),
+                            DefaultOptions::new().clear(),
+                        );
+                        if !unread_changed
+                            && matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
+                        {
+                            unread_changed = true;
                         }
                     }
+                }
 
-                    // Mark mailboxes as changed if the message is tagged/untagged with $seen
-                    if unread_changed {
-                        if let Some(current_mailboxes) = self.get_document_tags(
-                            request.account_id,
-                            Collection::Mail,
-                            document_id,
-                            MessageField::Mailbox.into(),
-                        )? {
-                            for mailbox in current_mailboxes.items {
-                                changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                for (keyword, do_create) in keyword_op_list {
+                    if do_create {
+                        // Tag keyword if it is not already tagged
+                        if !current_keywords.contains(&keyword) {
+                            document.tag(
+                                MessageField::Keyword,
+                                keyword.clone(),
+                                DefaultOptions::new(),
+                            );
+                            if !unread_changed
+                                && matches!(&keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
+                            {
+                                unread_changed = true;
                             }
                         }
                     }
                 }
 
-                // Log mailbox changes
-                if !changed_mailboxes.is_empty() {
-                    for changed_mailbox_id in changed_mailboxes {
-                        changes.log_child_update(Collection::Mailbox, changed_mailbox_id);
+                // Mark mailboxes as changed if the message is tagged/untagged with $seen
+                if unread_changed {
+                    if let Some(current_mailboxes) = self.get_document_tags(
+                        request.account_id,
+                        Collection::Mail,
+                        document_id,
+                        MessageField::Mailbox.into(),
+                    )? {
+                        for mailbox in current_mailboxes.items {
+                            changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                        }
                     }
-                }
-
-                if !document.is_empty() {
-                    changes.update_document(document);
-                    changes.log_update(Collection::Mail, jmap_id);
-                    updated.insert(jmap_id_str, JSONValue::Null);
-                } else {
-                    not_updated.insert(
-                        jmap_id_str,
-                        JSONValue::new_error(
-                            SetErrorType::InvalidPatch,
-                            "No changes found in request.",
-                        ),
-                    );
                 }
             }
 
-            response.insert(
-                "updated".to_string(),
-                if !updated.is_empty() {
-                    updated.into()
-                } else {
-                    JSONValue::Null
-                },
-            );
-            response.insert(
-                "notUpdated".to_string(),
-                if !not_updated.is_empty() {
-                    not_updated.into()
-                } else {
-                    JSONValue::Null
-                },
-            );
-        } else {
-            response.insert("updated".to_string(), JSONValue::Null);
-            response.insert("notUpdated".to_string(), JSONValue::Null);
+            // Log mailbox changes
+            if !changed_mailboxes.is_empty() {
+                for changed_mailbox_id in changed_mailboxes {
+                    changes.log_child_update(Collection::Mailbox, changed_mailbox_id);
+                }
+            }
+
+            if !document.is_empty() {
+                changes.update_document(document);
+                changes.log_update(Collection::Mail, jmap_id);
+                updated.insert(jmap_id_str, JSONValue::Null);
+            } else {
+                not_updated.insert(
+                    jmap_id_str,
+                    JSONValue::new_error(
+                        SetErrorType::InvalidPatch,
+                        "No changes found in request.",
+                    ),
+                );
+            }
         }
 
-        if let JSONValue::Array(destroy_ids) = request.destroy {
-            let mut destroyed = Vec::with_capacity(destroy_ids.len());
-            let mut not_destroyed = HashMap::with_capacity(destroy_ids.len());
+        let mut destroyed = Vec::with_capacity(request.destroy.len());
+        let mut not_destroyed = HashMap::with_capacity(request.destroy.len());
 
-            for destroy_id in destroy_ids {
-                if let Some(jmap_id) = destroy_id.to_jmap_id() {
+        for destroy_id in request.destroy {
+            if let Some(jmap_id) = destroy_id.to_string() {
+                if let Ok(jmap_id) = JMAPId::from_jmap_ref(jmap_id, &created) {
                     let document_id = jmap_id.get_document_id();
                     if document_ids.contains(document_id) {
                         changes.delete_document(Collection::Mail, document_id);
@@ -584,34 +540,23 @@ where
                         continue;
                     }
                 }
-                if let JSONValue::String(destroy_id) = destroy_id {
-                    not_destroyed.insert(
-                        destroy_id,
-                        JSONValue::new_error(SetErrorType::NotFound, "ID not found."),
-                    );
-                }
             }
-
-            response.insert(
-                "destroyed".to_string(),
-                if !destroyed.is_empty() {
-                    destroyed.into()
-                } else {
-                    JSONValue::Null
-                },
-            );
-            response.insert(
-                "notDestroyed".to_string(),
-                if !not_destroyed.is_empty() {
-                    not_destroyed.into()
-                } else {
-                    JSONValue::Null
-                },
-            );
-        } else {
-            response.insert("destroyed".to_string(), JSONValue::Null);
-            response.insert("notDestroyed".to_string(), JSONValue::Null);
+            if let JSONValue::String(destroy_id) = destroy_id {
+                not_destroyed.insert(
+                    destroy_id,
+                    JSONValue::new_error(SetErrorType::NotFound, "ID not found."),
+                );
+            }
         }
+
+        response.insert("created".to_string(), created.into());
+        response.insert("notCreated".to_string(), not_created.into());
+
+        response.insert("updated".to_string(), updated.into());
+        response.insert("notUpdated".to_string(), not_updated.into());
+
+        response.insert("destroyed".to_string(), destroyed.into());
+        response.insert("notDestroyed".to_string(), not_destroyed.into());
 
         response.insert(
             "newState".to_string(),
@@ -634,6 +579,7 @@ where
         account: AccountId,
         fields: JSONValue,
         existing_mailboxes: &RoaringBitmap,
+        created_ids: &HashMap<String, JSONValue>,
     ) -> Result<MessageItem, JSONValue> {
         let fields = if let JSONValue::Object(fields) = fields {
             fields
@@ -665,11 +611,11 @@ where
                             "Expected object containing mailboxIds",
                         )
                     })? {
-                        let mailbox_id = JMAPId::from_jmap_string(mailbox)
-                            .ok_or_else(|| {
+                        let mailbox_id = JMAPId::from_jmap_ref(mailbox, created_ids)
+                            .map_err(|err| {
                                 JSONValue::new_error(
                                     SetErrorType::InvalidProperties,
-                                    format!("Failed to parse mailboxId: {}", mailbox),
+                                    err.to_string(),
                                 )
                             })?
                             .get_document_id();

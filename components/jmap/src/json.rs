@@ -258,6 +258,13 @@ impl JSONValue {
         }
     }
 
+    pub fn to_object_mut(&mut self) -> Option<&mut HashMap<String, JSONValue>> {
+        match self {
+            JSONValue::Object(object) => Some(object),
+            _ => None,
+        }
+    }
+
     pub fn as_object_mut(&mut self) -> &mut HashMap<String, JSONValue> {
         match self {
             JSONValue::Object(object) => object,
