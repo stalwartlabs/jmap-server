@@ -7,10 +7,11 @@ use jmap::{
     request::{ChangesRequest, GetRequest, QueryRequest, SetRequest},
 };
 use jmap_mail::{
-    get::JMAPMailGet,
-    import::JMAPMailImport,
-    mailbox::{JMAPMailMailbox, MailboxProperties},
-    set::JMAPMailSet,
+    mail::{get::JMAPMailGet, import::JMAPMailImport, set::JMAPMailSet},
+    mailbox::{
+        changes::JMAPMailMailboxChanges, get::JMAPMailMailboxGet, query::JMAPMailMailboxQuery,
+        set::JMAPMailMailboxSet, MailboxProperties,
+    },
 };
 
 use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store};
@@ -584,7 +585,7 @@ where
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 
     // Verify changes
@@ -666,7 +667,7 @@ where
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 
     // E-mail properties of both Inbox and Trash must have changed
@@ -715,7 +716,7 @@ where
             .unwrap()
             .eval("/destroyed")
             .unwrap(),
-        JSONValue::Null,
+        Vec::new().into(),
     );
 
     // Deleting folders with contents is not allowed (unless remove_emails is true)
@@ -732,7 +733,7 @@ where
             .unwrap()
             .eval("/destroyed")
             .unwrap(),
-        JSONValue::Null,
+        Vec::new().into(),
     );
 
     // Delete Trash folder and its contents
@@ -806,7 +807,7 @@ where
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 
     assert_eq!(
@@ -983,7 +984,7 @@ fn create_nested_mailboxes<T>(
             })
             .unwrap();
 
-        assert_eq!(result.eval("/notCreated").unwrap(), JSONValue::Null);
+        assert_eq!(result.eval("/notCreated").unwrap(), HashMap::new().into());
 
         let mailbox_id = result.eval_unwrap_jmap_id(&format!("/created/{}/id", mailbox_num));
 
@@ -1066,7 +1067,7 @@ pub fn update_mailbox<T>(
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 }
 
@@ -1089,6 +1090,6 @@ where
             .unwrap()
             .eval("/notDestroyed")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 }

@@ -6,7 +6,7 @@ use jmap::{
     json::{JSONNumber, JSONValue},
     request::{GetRequest, SetRequest},
 };
-use jmap_mail::{
+use jmap_mail::mail::{
     get::JMAPMailGet, import::JMAPMailImport, parse::get_message_blob, set::JMAPMailSet,
     MailBodyProperties, MailProperties,
 };
@@ -161,7 +161,7 @@ where
             })
             .unwrap();
 
-        assert_eq!(result.eval("/notCreated").unwrap(), JSONValue::Null);
+        assert_eq!(result.eval("/notCreated").unwrap(), HashMap::new().into());
 
         let values = result.eval("/created/m1").unwrap();
 
@@ -357,7 +357,7 @@ fn jmap_mail_update<T>(
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 
     assert_eq!(
@@ -389,7 +389,7 @@ fn jmap_mail_update<T>(
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 
     assert_eq!(
@@ -453,7 +453,7 @@ fn jmap_mail_update<T>(
             .unwrap()
             .eval("/notDestroyed")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 
     assert_eq!(
@@ -549,7 +549,7 @@ pub fn update_email<T>(
             .unwrap()
             .eval("/notUpdated")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 }
 
@@ -570,6 +570,6 @@ where
             .unwrap()
             .eval("/notDestroyed")
             .unwrap(),
-        JSONValue::Null
+        HashMap::new().into()
     );
 }

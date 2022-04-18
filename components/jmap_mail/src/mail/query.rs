@@ -14,7 +14,7 @@ use store::{
 };
 use store::{Collection, JMAPIdPrefix};
 
-use crate::{Keyword, MessageField};
+use crate::mail::{Keyword, MessageField};
 
 pub trait JMAPMailQuery {
     fn mail_query(&self, request: QueryRequest) -> jmap::Result<JSONValue>;

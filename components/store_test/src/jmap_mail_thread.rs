@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jmap::{json::JSONValue, request::GetRequest};
-use jmap_mail::{import::JMAPMailImport, thread::JMAPMailThread};
+use jmap_mail::{mail::import::JMAPMailImport, thread::get::JMAPMailThreadGet};
 use store::{AccountId, JMAPStore, Store};
 
 pub fn jmap_mail_thread<T>(mail_store: &JMAPStore<T>, account_id: AccountId)

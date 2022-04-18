@@ -3,8 +3,8 @@ use std::task::Poll;
 
 use futures::poll;
 
+use jmap_mail::mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
 use jmap_mail::mailbox::{Mailbox, MailboxProperties};
-use jmap_mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
 
 use store::leb128::Leb128;
 use store::log::{LogIndex, RaftId};

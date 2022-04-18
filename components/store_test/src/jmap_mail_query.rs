@@ -3,7 +3,7 @@ use jmap::{
     json::JSONValue,
     request::{GetRequest, QueryRequest},
 };
-use jmap_mail::{
+use jmap_mail::mail::{
     get::JMAPMailGet, import::JMAPMailImport, query::JMAPMailQuery, MailProperties, MessageField,
 };
 use mail_parser::RfcHeader;

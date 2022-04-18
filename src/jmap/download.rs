@@ -4,7 +4,7 @@ use jmap::{
     id::{BlobId, JMAPIdSerialize},
     ProblemDetails,
 };
-use jmap_mail::parse::get_message_blob;
+use jmap_mail::mail::parse::get_message_blob;
 use store::{tracing::error, AccountId, JMAPId, Store};
 
 use super::server::JMAPServer;

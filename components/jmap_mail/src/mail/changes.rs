@@ -1,8 +1,6 @@
-use crate::query::JMAPMailQuery;
 use jmap::changes::JMAPChanges;
 use jmap::json::JSONValue;
-use jmap::query::QueryResult;
-use jmap::request::{ChangesRequest, QueryChangesRequest, QueryRequest};
+use jmap::request::ChangesRequest;
 use jmap::JMAPError;
 use store::{Collection, JMAPStore, Store};
 

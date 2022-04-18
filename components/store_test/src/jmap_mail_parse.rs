@@ -6,7 +6,7 @@ use jmap::{
     json::JSONValue,
     request::{GetRequest, ParseRequest},
 };
-use jmap_mail::{
+use jmap_mail::mail::{
     get::JMAPMailGet,
     import::JMAPMailImport,
     parse::{get_message_blob, JMAPMailParse},

@@ -30,7 +30,7 @@ use store::{
     AccountId, Integer, JMAPStore, LongInteger, Store, StoreError, Tag,
 };
 
-use crate::{
+use crate::mail::{
     get::{
         add_body_parts, add_body_structure, add_body_value, add_raw_header,
         transform_json_emailaddress, transform_json_string, transform_json_stringlist,

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap_mail::{import::JMAPMailImport, MessageField};
+use jmap_mail::mail::{import::JMAPMailImport, MessageField};
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,

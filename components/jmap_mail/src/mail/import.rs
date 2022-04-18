@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::Keyword;
-use crate::{parse::get_message_blob, MESSAGE_RAW};
+use crate::mail::Keyword;
+use crate::mail::{parse::get_message_blob, MESSAGE_RAW};
 use jmap::blob::JMAPBlobStore;
 use jmap::request::ImportRequest;
 use jmap::{
@@ -22,7 +22,7 @@ use store::{
 };
 use store::{Collection, DocumentId, JMAPIdPrefix};
 
-use crate::{parse::build_message_document, MessageField};
+use crate::mail::{parse::build_message_document, MessageField};
 
 pub struct MailImportRequest {
     pub emails: Vec<MailImportItem>,

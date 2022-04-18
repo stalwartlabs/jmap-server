@@ -3,7 +3,7 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
 use jmap::json::JSONValue;
-use jmap_mail::{MessageData, MessageOutline, MESSAGE_DATA};
+use jmap_mail::mail::{MessageData, MessageOutline, MESSAGE_DATA};
 use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;
 use store::leb128::Leb128;

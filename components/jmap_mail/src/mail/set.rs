@@ -22,9 +22,9 @@ use store::field::{DefaultOptions, Options};
 use store::roaring::RoaringBitmap;
 use store::{AccountId, Collection, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
 
-use crate::import::JMAPMailImport;
-use crate::parse::get_message_blob;
-use crate::{
+use crate::mail::import::JMAPMailImport;
+use crate::mail::parse::get_message_blob;
+use crate::mail::{
     HeaderName, Keyword, MailHeaderForm, MailHeaderProperty, MailProperties, MessageField,
 };
 

@@ -11,7 +11,7 @@ use jmap::{
     JMAPError,
 };
 
-use crate::{
+use crate::mail::{
     parse::{
         header_to_jmap_address, header_to_jmap_date, header_to_jmap_id, header_to_jmap_text,
         header_to_jmap_url,

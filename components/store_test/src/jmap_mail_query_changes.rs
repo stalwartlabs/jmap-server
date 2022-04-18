@@ -6,7 +6,7 @@ use std::{
 use jmap::{
     changes::JMAPState, id::JMAPIdSerialize, json::JSONValue, request::QueryChangesRequest,
 };
-use jmap_mail::{changes::JMAPMailChanges, import::JMAPMailImport, MessageField};
+use jmap_mail::mail::{import::JMAPMailImport, query_changes::JMAPMailQueryChanges, MessageField};
 use store::{
     batch::{Document, WriteBatch},
     field::DefaultOptions,

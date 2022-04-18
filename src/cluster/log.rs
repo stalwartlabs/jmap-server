@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
-use jmap_mail::import::JMAPMailImport;
-use jmap_mail::mailbox::{JMAPMailMailbox, Mailbox};
+use jmap_mail::mail::import::JMAPMailImport;
+use jmap_mail::mailbox::set::JMAPMailMailboxSet;
+use jmap_mail::mailbox::Mailbox;
 use store::batch::WriteBatch;
 use store::leb128::Leb128;
 use store::serialize::{

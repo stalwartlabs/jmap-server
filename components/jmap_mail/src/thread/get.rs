@@ -1,26 +1,20 @@
 use std::collections::HashMap;
 
 use jmap::{
-    changes::JMAPChanges,
-    id::JMAPIdSerialize,
-    json::JSONValue,
-    request::{ChangesRequest, GetRequest},
-    JMAPError,
+    changes::JMAPChanges, id::JMAPIdSerialize, json::JSONValue, request::GetRequest, JMAPError,
 };
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
     Collection, Comparator, FieldComparator, Filter, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag,
 };
 
-use crate::MessageField;
+use crate::mail::MessageField;
 
-pub trait JMAPMailThread {
+pub trait JMAPMailThreadGet {
     fn thread_get(&self, request: GetRequest) -> jmap::Result<JSONValue>;
-
-    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue>;
 }
 
-impl<T> JMAPMailThread for JMAPStore<T>
+impl<T> JMAPMailThreadGet for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -92,17 +86,5 @@ where
             },
         );
         Ok(obj.into())
-    }
-
-    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue> {
-        Ok(self
-            .get_jmap_changes(
-                request.account_id,
-                Collection::Thread,
-                request.since_state,
-                request.max_changes,
-            )
-            .map_err(JMAPError::ServerFail)?
-            .result)
     }
 }
