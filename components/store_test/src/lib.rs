@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
-use jmap::json::JSONValue;
+
+use jmap::protocol::json::JSONValue;
 use jmap_mail::mail::{MessageData, MessageOutline, MESSAGE_DATA};
 use store::blob::{BlobEntries, BlobIndex};
 use store::field::Keywords;

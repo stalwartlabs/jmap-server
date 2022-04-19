@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
-use jmap::changes::JMAPChanges;
-use jmap::id::JMAPIdReference;
+use crate::mail::MessageField;
+use jmap::error::method::MethodError;
+use jmap::error::set::SetErrorType;
+use jmap::id::jmap::JMAPIdReference;
 use jmap::id::JMAPIdSerialize;
-
-use jmap::request::SetRequest;
-use jmap::{json::JSONValue, JMAPError, SetErrorType};
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::request::set::SetRequest;
 use store::batch::Document;
 use store::field::{DefaultOptions, Options, Text};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
@@ -16,8 +18,6 @@ use store::{
     AccountId, Collection, Comparator, ComparisonOperator, DocumentId, FieldValue, Filter, JMAPId,
     JMAPIdPrefix, JMAPStore, LongInteger, StoreError, Tag,
 };
-
-use crate::mail::MessageField;
 
 use super::{Mailbox, MailboxChanges, MailboxProperties};
 
@@ -55,7 +55,7 @@ where
         let old_state = self.get_state(request.account_id, Collection::Mailbox)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
-                return Err(JMAPError::StateMismatch);
+                return Err(MethodError::StateMismatch);
             }
         }
 

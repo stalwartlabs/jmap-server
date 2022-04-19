@@ -1,6 +1,6 @@
 use store::{blob::BlobIndex, AccountId, JMAPStore, Store};
 
-use crate::id::BlobId;
+use crate::id::blob::BlobId;
 
 pub type InnerBlobFnc = fn(&[u8], BlobIndex) -> Option<Vec<u8>>;
 

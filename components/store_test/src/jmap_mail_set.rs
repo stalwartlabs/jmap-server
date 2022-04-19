@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap::{
-    blob::JMAPBlobStore,
     id::JMAPIdSerialize,
-    json::{JSONNumber, JSONValue},
-    request::{GetRequest, SetRequest},
+    jmap_store::blob::JMAPBlobStore,
+    protocol::json::{JSONNumber, JSONValue},
+    request::{get::GetRequest, set::SetRequest},
 };
 use jmap_mail::mail::{
     get::JMAPMailGet, import::JMAPMailImport, parse::get_message_blob, set::JMAPMailSet,

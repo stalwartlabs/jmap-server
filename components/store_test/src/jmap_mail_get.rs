@@ -1,4 +1,4 @@
-use jmap::{json::JSONValue, request::GetRequest};
+use jmap::{protocol::json::JSONValue, request::get::GetRequest};
 use jmap_mail::mail::{
     get::JMAPMailGet, HeaderName, MailBodyProperties, MailHeaderForm, MailHeaderProperty,
     MailProperties,

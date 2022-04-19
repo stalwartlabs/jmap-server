@@ -1,4 +1,7 @@
-use jmap::{changes::JMAPChanges, json::JSONValue, request::ChangesRequest, JMAPError};
+use jmap::{
+    error::method::MethodError, jmap_store::changes::JMAPChanges, protocol::json::JSONValue,
+    request::changes::ChangesRequest,
+};
 use store::{Collection, JMAPStore, Store};
 
 pub trait JMAPMailThreadChanges {
@@ -17,7 +20,7 @@ where
                 request.since_state,
                 request.max_changes,
             )
-            .map_err(JMAPError::ServerFail)?
+            .map_err(MethodError::ServerFail)?
             .result)
     }
 }

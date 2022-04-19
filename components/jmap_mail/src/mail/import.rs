@@ -2,15 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use crate::mail::Keyword;
 use crate::mail::{parse::get_message_blob, MESSAGE_RAW};
-use jmap::blob::JMAPBlobStore;
-use jmap::request::ImportRequest;
-use jmap::{
-    changes::JMAPChanges,
-    id::{BlobId, JMAPIdSerialize},
-    json::JSONValue,
-    JMAPError,
-};
 
+use jmap::error::method::MethodError;
+use jmap::id::blob::BlobId;
+use jmap::id::JMAPIdSerialize;
+use jmap::jmap_store::blob::JMAPBlobStore;
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::request::import::ImportRequest;
 use store::batch::Document;
 use store::field::{DefaultOptions, Options};
 use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
@@ -39,30 +38,30 @@ impl MailImportRequest {
     fn parse_arguments(mut arguments: HashMap<String, JSONValue>) -> jmap::Result<Self> {
         let arguments = arguments
             .remove("emails")
-            .ok_or_else(|| JMAPError::InvalidArguments("Missing emails property.".to_string()))?
+            .ok_or_else(|| MethodError::InvalidArguments("Missing emails property.".to_string()))?
             .unwrap_object()
-            .ok_or_else(|| JMAPError::InvalidArguments("Expected email object.".to_string()))?;
+            .ok_or_else(|| MethodError::InvalidArguments("Expected email object.".to_string()))?;
         let mut emails = Vec::with_capacity(arguments.len());
         for (id, item_value) in arguments {
             let mut item_value = item_value.unwrap_object().ok_or_else(|| {
-                JMAPError::InvalidArguments(format!("Expected mailImport object for {}.", id))
+                MethodError::InvalidArguments(format!("Expected mailImport object for {}.", id))
             })?;
             emails.push(MailImportItem {
                 blob_id: item_value
                     .remove("blobId")
                     .ok_or_else(|| {
-                        JMAPError::InvalidArguments(format!("Missing blobId for {}.", id))
+                        MethodError::InvalidArguments(format!("Missing blobId for {}.", id))
                     })?
                     .parse_blob_id(false)?
                     .unwrap(),
                 mailbox_ids: item_value
                     .remove("mailboxIds")
                     .ok_or_else(|| {
-                        JMAPError::InvalidArguments(format!("Missing mailboxIds for {}.", id))
+                        MethodError::InvalidArguments(format!("Missing mailboxIds for {}.", id))
                     })?
                     .unwrap_object()
                     .ok_or_else(|| {
-                        JMAPError::InvalidArguments(format!(
+                        MethodError::InvalidArguments(format!(
                             "Expected mailboxIds object for {}.",
                             id
                         ))
@@ -136,13 +135,13 @@ where
         let old_state = self.get_state(request.account_id, Collection::Mail)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
-                return Err(JMAPError::StateMismatch);
+                return Err(MethodError::StateMismatch);
             }
         }
 
         let emails = MailImportRequest::parse_arguments(request.arguments)?.emails;
         if emails.len() > self.config.mail_import_max_items {
-            return Err(JMAPError::RequestTooLarge);
+            return Err(MethodError::RequestTooLarge);
         }
 
         let mailbox_ids = self

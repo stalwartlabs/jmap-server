@@ -1,10 +1,9 @@
 use std::{collections::HashMap, iter::FromIterator};
 
 use jmap::{
-    changes::JMAPState,
-    id::JMAPIdSerialize,
-    json::JSONValue,
-    request::{ChangesRequest, GetRequest, QueryRequest, SetRequest},
+    id::{state::JMAPState, JMAPIdSerialize},
+    protocol::json::JSONValue,
+    request::{changes::ChangesRequest, get::GetRequest, query::QueryRequest, set::SetRequest},
 };
 use jmap_mail::{
     mail::{get::JMAPMailGet, import::JMAPMailImport, set::JMAPMailSet},
@@ -137,9 +136,9 @@ pub enum JMAPMailboxComparator {
     ParentId,
 }
 
-impl From<JMAPComparator<JMAPMailboxComparator>> for jmap::query::Comparator {
+impl From<JMAPComparator<JMAPMailboxComparator>> for jmap::request::query::Comparator {
     fn from(comp: JMAPComparator<JMAPMailboxComparator>) -> Self {
-        jmap::query::Comparator {
+        jmap::request::query::Comparator {
             property: match comp.property {
                 JMAPMailboxComparator::Name => "name".to_string(),
                 JMAPMailboxComparator::Role => "role".to_string(),

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jmap::{json::JSONValue, request::GetRequest};
+use jmap::{protocol::json::JSONValue, request::get::GetRequest};
 use jmap_mail::{mail::import::JMAPMailImport, thread::get::JMAPMailThreadGet};
 use store::{AccountId, JMAPStore, Store};
 

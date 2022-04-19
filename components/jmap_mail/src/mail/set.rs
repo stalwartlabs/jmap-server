@@ -1,11 +1,13 @@
-use jmap::blob::JMAPBlobStore;
-use jmap::changes::JMAPChanges;
-use jmap::id::JMAPIdReference;
-use jmap::id::{BlobId, JMAPIdSerialize};
-use jmap::json::JSONValue;
-use jmap::request::SetRequest;
-use jmap::SetErrorType;
-use jmap::{json::JSONPointer, JMAPError};
+use jmap::error::method::MethodError;
+use jmap::error::set::SetErrorType;
+use jmap::id::blob::BlobId;
+use jmap::id::jmap::JMAPIdReference;
+use jmap::id::JMAPIdSerialize;
+use jmap::jmap_store::blob::JMAPBlobStore;
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::protocol::json_pointer::JSONPointer;
+use jmap::request::set::SetRequest;
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
 use mail_builder::headers::date::Date;
@@ -76,7 +78,7 @@ where
         let old_state = self.get_state(request.account_id, Collection::Mail)?;
         if let Some(if_in_state) = request.if_in_state {
             if old_state != if_in_state {
-                return Err(JMAPError::StateMismatch);
+                return Err(MethodError::StateMismatch);
             }
         }
 

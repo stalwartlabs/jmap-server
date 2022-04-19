@@ -1,9 +1,7 @@
-use jmap::changes::JMAPChanges;
-
-use jmap::json::JSONValue;
-use jmap::query::QueryResult;
-use jmap::request::{QueryChangesRequest, QueryRequest};
-
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::request::query::{QueryRequest, QueryResult};
+use jmap::request::query_changes::QueryChangesRequest;
 use store::Store;
 use store::{Collection, JMAPStore};
 

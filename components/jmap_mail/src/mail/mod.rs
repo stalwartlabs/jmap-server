@@ -9,7 +9,7 @@ pub mod set;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{json::JSONValue, request::JSONArgumentParser, JMAPError};
+use jmap::{error::method::MethodError, protocol::json::JSONValue, request::JSONArgumentParser};
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderOffset, MessagePartId, MessageStructure, RfcHeader,
@@ -260,11 +260,11 @@ impl MailHeaderProperty {
 
 impl JSONArgumentParser for MailHeaderProperty {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
-        let argument = argument
-            .unwrap_string()
-            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        let argument = argument.unwrap_string().ok_or_else(|| {
+            MethodError::InvalidArguments("Expected string argument.".to_string())
+        })?;
         MailHeaderProperty::parse(&argument).ok_or_else(|| {
-            JMAPError::InvalidArguments(format!("Unknown property: '{}'.", argument))
+            MethodError::InvalidArguments(format!("Unknown property: '{}'.", argument))
         })
     }
 }
@@ -421,11 +421,11 @@ impl Default for MailProperties {
 
 impl JSONArgumentParser for MailProperties {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
-        let argument = argument
-            .unwrap_string()
-            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        let argument = argument.unwrap_string().ok_or_else(|| {
+            MethodError::InvalidArguments("Expected string argument.".to_string())
+        })?;
         MailProperties::parse(&argument).ok_or_else(|| {
-            JMAPError::InvalidArguments(format!("Unknown property: '{}'.", argument))
+            MethodError::InvalidArguments(format!("Unknown property: '{}'.", argument))
         })
     }
 }
@@ -472,11 +472,11 @@ impl MailBodyProperties {
 
 impl JSONArgumentParser for MailBodyProperties {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
-        let argument = argument
-            .unwrap_string()
-            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        let argument = argument.unwrap_string().ok_or_else(|| {
+            MethodError::InvalidArguments("Expected string argument.".to_string())
+        })?;
         MailBodyProperties::parse(&argument).ok_or_else(|| {
-            JMAPError::InvalidArguments(format!("Unknown property: '{}'.", argument))
+            MethodError::InvalidArguments(format!("Unknown property: '{}'.", argument))
         })
     }
 }

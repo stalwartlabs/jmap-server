@@ -9,7 +9,7 @@ use actix_web::{
     web, HttpResponse,
 };
 use jmap::URI;
-use jmap::{id::JMAPIdSerialize, request::serialize_hex};
+use jmap::{id::JMAPIdSerialize, protocol::response::serialize_hex};
 use store::{config::EnvSettings, JMAPConfig, Store};
 
 use super::server::JMAPServer;

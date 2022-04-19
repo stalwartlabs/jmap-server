@@ -1,9 +1,6 @@
 use std::collections::HashSet;
 
-use jmap::{
-    changes::{JMAPChanges, JMAPState},
-    json::JSONValue,
-};
+use jmap::{id::state::JMAPState, jmap_store::changes::JMAPChanges, protocol::json::JSONValue};
 use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
 
 use crate::db_log::assert_compaction;

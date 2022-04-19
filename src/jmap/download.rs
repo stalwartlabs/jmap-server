@@ -1,13 +1,11 @@
 use actix_web::{http::StatusCode, web, HttpResponse};
-use jmap::{
-    blob::JMAPBlobStore,
-    id::{BlobId, JMAPIdSerialize},
-    ProblemDetails,
-};
-use jmap_mail::mail::parse::get_message_blob;
-use store::{tracing::error, AccountId, JMAPId, Store};
+use jmap::jmap_store::blob::JMAPBlobStore;
 
 use super::server::JMAPServer;
+use jmap::id::JMAPIdSerialize;
+use jmap::{error::problem_details::ProblemDetails, id::blob::BlobId};
+use jmap_mail::mail::parse::get_message_blob;
+use store::{tracing::error, AccountId, JMAPId, Store};
 
 #[derive(serde::Deserialize)]
 pub struct Params {

@@ -1,13 +1,11 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use jmap::changes::JMAPChanges;
-
+use jmap::error::method::MethodError;
 use jmap::id::JMAPIdSerialize;
-
-use jmap::request::GetRequest;
-use jmap::{json::JSONValue, JMAPError};
-
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::request::get::GetRequest;
 use store::roaring::RoaringBitmap;
 
 use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, StoreError, Tag};
@@ -66,7 +64,7 @@ where
 
         let request_ids = if let Some(request_ids) = request.ids {
             if request_ids.len() > self.config.max_objects_in_get {
-                return Err(JMAPError::RequestTooLarge);
+                return Err(MethodError::RequestTooLarge);
             } else {
                 request_ids
             }

@@ -1,109 +1,11 @@
-use std::{collections::HashMap, io::Write};
+use std::io::Write;
 
-use store::{blob::BlobIndex, leb128::Leb128, AccountId, Collection, DocumentId, JMAPId};
+use store::{blob::BlobIndex, AccountId, Collection, DocumentId};
 
-use crate::{json::JSONValue, JMAPError};
+use crate::{error::method::MethodError, protocol::json::JSONValue};
 
-pub trait JMAPIdSerialize {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized;
-    fn to_jmap_string(&self) -> String;
-}
-
-impl JMAPIdSerialize for JMAPId {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        if id.as_bytes().get(0)? == &b'i' {
-            JMAPId::from_str_radix(id.get(1..)?, 16).ok()?.into()
-        } else {
-            None
-        }
-    }
-
-    fn to_jmap_string(&self) -> String {
-        format!("i{:02x}", self)
-    }
-}
-
-pub trait JMAPIdReference {
-    fn from_jmap_ref(id: &str, created_ids: &HashMap<String, JSONValue>) -> crate::Result<Self>
-    where
-        Self: Sized;
-}
-
-impl JMAPIdReference for JMAPId {
-    fn from_jmap_ref(id: &str, created_ids: &HashMap<String, JSONValue>) -> crate::Result<Self>
-    where
-        Self: Sized,
-    {
-        if !id.starts_with('#') {
-            JMAPId::from_jmap_string(id)
-                .ok_or_else(|| JMAPError::InvalidArguments(format!("Invalid JMAP Id: {}", id)))
-        } else {
-            let id_ref = id.get(1..).ok_or_else(|| {
-                JMAPError::InvalidArguments(format!("Invalid reference to JMAP Id: {}", id))
-            })?;
-
-            if let Some(created_id) = created_ids.get(id_ref) {
-                let created_id = created_id
-                    .to_object()
-                    .unwrap()
-                    .get("id")
-                    .unwrap()
-                    .to_string()
-                    .unwrap();
-                JMAPId::from_jmap_string(created_id).ok_or_else(|| {
-                    JMAPError::InvalidArguments(format!(
-                        "Invalid referenced JMAP Id: {} ({})",
-                        id_ref, created_id
-                    ))
-                })
-            } else {
-                Err(JMAPError::InvalidArguments(format!(
-                    "Reference '{}' not found in createdIds.",
-                    id_ref
-                )))
-            }
-        }
-    }
-}
-
-pub struct HexWriter {
-    pub result: String,
-}
-
-impl HexWriter {
-    pub fn with_capacity(capacity: usize) -> Self {
-        HexWriter {
-            result: String::with_capacity(capacity),
-        }
-    }
-}
-
-impl std::io::Write for HexWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        use std::fmt::Write;
-
-        for &byte in buf {
-            write!(&mut self.result, "{:02x}", byte).unwrap();
-        }
-        Ok(2 * buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-#[inline(always)]
-pub fn hex_reader(id: &str, start_pos: usize) -> impl Iterator<Item = u8> + '_ {
-    (start_pos..id.len())
-        .step_by(2)
-        .map(move |i| u8::from_str_radix(id.get(i..i + 2).unwrap_or(""), 16).unwrap_or(u8::MAX))
-}
+use super::{hex_reader, HexWriter, JMAPIdSerialize};
+use store::leb128::Leb128;
 
 #[derive(Clone, Debug)]
 pub struct OwnedBlob {
@@ -291,5 +193,26 @@ impl JMAPIdSerialize for BlobId {
             }
         }
         writer.result
+    }
+}
+
+impl JSONValue {
+    pub fn to_blob_id(&self) -> Option<BlobId> {
+        match self {
+            JSONValue::String(string) => BlobId::from_jmap_string(string),
+            _ => None,
+        }
+    }
+
+    pub fn parse_blob_id(self, optional: bool) -> crate::Result<Option<BlobId>> {
+        match self {
+            JSONValue::String(string) => Ok(Some(BlobId::from_jmap_string(&string).ok_or_else(
+                || MethodError::InvalidArguments("Failed to parse blobId.".to_string()),
+            )?)),
+            JSONValue::Null if optional => Ok(None),
+            _ => Err(MethodError::InvalidArguments(
+                "Expected string.".to_string(),
+            )),
+        }
     }
 }

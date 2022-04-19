@@ -4,11 +4,12 @@ use std::{
     vec,
 };
 
-use jmap::{blob::JMAPBlobStore, request::ParseRequest};
 use jmap::{
-    id::{BlobId, JMAPIdSerialize},
-    json::JSONValue,
-    JMAPError,
+    error::method::MethodError,
+    id::{blob::BlobId, JMAPIdSerialize},
+    jmap_store::blob::JMAPBlobStore,
+    protocol::json::JSONValue,
+    request::parse::ParseRequest,
 };
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
@@ -67,7 +68,7 @@ where
                 .arguments
                 .remove("blobIds")
                 .ok_or_else(|| {
-                    JMAPError::InvalidArguments("Missing blobIds property.".to_string())
+                    MethodError::InvalidArguments("Missing blobIds property.".to_string())
                 })?
                 .parse_array_items::<BlobId>(false)?
                 .unwrap(),
@@ -101,7 +102,7 @@ where
         };
 
         if request.blob_ids.len() > self.config.mail_parse_max_items {
-            return Err(JMAPError::RequestTooLarge);
+            return Err(MethodError::RequestTooLarge);
         }
 
         for blob_id in &request.blob_ids {

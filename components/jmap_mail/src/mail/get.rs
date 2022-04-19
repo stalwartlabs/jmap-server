@@ -3,14 +3,6 @@ use std::{
     iter::FromIterator,
 };
 
-use jmap::{
-    changes::JMAPChanges,
-    id::{BlobId, JMAPIdSerialize},
-    json::JSONValue,
-    request::GetRequest,
-    JMAPError,
-};
-
 use crate::mail::{
     parse::{
         header_to_jmap_address, header_to_jmap_date, header_to_jmap_id, header_to_jmap_text,
@@ -19,6 +11,13 @@ use crate::mail::{
     HeaderName, JMAPMailHeaders, Keyword, MailBodyProperties, MailHeaderForm, MailHeaderProperty,
     MailProperties, MessageData, MessageField, MessageOutline, MimePart, MimePartType,
     MESSAGE_DATA, MESSAGE_PARTS, MESSAGE_RAW,
+};
+use jmap::{
+    error::method::MethodError,
+    id::{blob::BlobId, JMAPIdSerialize},
+    jmap_store::changes::JMAPChanges,
+    protocol::json::JSONValue,
+    request::get::GetRequest,
 };
 use mail_parser::{
     parsers::{
@@ -64,7 +63,7 @@ impl MailGetArguments {
                     max_body_value_bytes = arg_value.parse_unsigned_int(false)?.unwrap() as usize
                 }
                 _ => {
-                    return Err(JMAPError::InvalidArguments(format!(
+                    return Err(MethodError::InvalidArguments(format!(
                         "Unknown argument: '{}'.",
                         arg_name
                     )))
@@ -201,7 +200,7 @@ where
 
         let request_ids: Vec<u64> = if let Some(request_ids) = request.ids {
             if request_ids.len() > self.config.max_objects_in_get {
-                return Err(JMAPError::RequestTooLarge);
+                return Err(MethodError::RequestTooLarge);
             } else {
                 request_ids
             }
@@ -1038,7 +1037,7 @@ pub fn transform_rfc_header(
             as_collection,
         ),
         _ => {
-            return Err(JMAPError::InvalidArguments(
+            return Err(MethodError::InvalidArguments(
                 "Invalid header property.".to_string(),
             ))
         }
@@ -1246,7 +1245,7 @@ pub fn transform_json_string(value: JSONValue, as_collection: bool) -> JSONValue
 mod tests {
     use std::collections::HashMap;
 
-    use jmap::json::JSONValue;
+    use jmap::protocol::json::JSONValue;
 
     #[test]
     fn test_json_transform() {

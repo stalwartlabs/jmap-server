@@ -2,7 +2,9 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpRequest, HttpResponse,
 };
-use jmap::{blob::JMAPBlobStore, id::JMAPIdSerialize, ProblemDetails};
+use jmap::{
+    error::problem_details::ProblemDetails, id::JMAPIdSerialize, jmap_store::blob::JMAPBlobStore,
+};
 use store::{tracing::error, AccountId, JMAPId, Store};
 
 use super::server::JMAPServer;

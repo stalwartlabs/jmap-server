@@ -1,9 +1,13 @@
 use crate::mail::query::JMAPMailQuery;
-use jmap::changes::JMAPChanges;
-use jmap::json::JSONValue;
-use jmap::query::QueryResult;
-use jmap::request::{QueryChangesRequest, QueryRequest};
 
+use jmap::{
+    jmap_store::changes::JMAPChanges,
+    protocol::json::JSONValue,
+    request::{
+        query::{QueryRequest, QueryResult},
+        query_changes::QueryChangesRequest,
+    },
+};
 use store::{Collection, JMAPStore, Store};
 
 pub trait JMAPMailQueryChanges {

@@ -1,7 +1,7 @@
 use jmap::{
     id::JMAPIdSerialize,
-    json::JSONValue,
-    request::{GetRequest, QueryRequest},
+    protocol::json::JSONValue,
+    request::{get::GetRequest, query::QueryRequest},
 };
 use jmap_mail::mail::{
     get::JMAPMailGet, import::JMAPMailImport, query::JMAPMailQuery, MailProperties, MessageField,
@@ -79,7 +79,7 @@ pub struct MailQueryRequest {
     pub collapse_threads: bool,
 }
 
-impl From<JMAPComparator<JMAPMailComparator>> for jmap::query::Comparator {
+impl From<JMAPComparator<JMAPMailComparator>> for jmap::request::query::Comparator {
     fn from(comp: JMAPComparator<JMAPMailComparator>) -> Self {
         let mut arguments = HashMap::new();
         let property = match comp.property {
@@ -103,7 +103,7 @@ impl From<JMAPComparator<JMAPMailComparator>> for jmap::query::Comparator {
             }
         };
 
-        jmap::query::Comparator {
+        jmap::request::query::Comparator {
             property,
             is_ascending: comp.is_ascending,
             collation: None,

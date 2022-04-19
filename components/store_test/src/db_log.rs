@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use jmap::{
-    changes::{JMAPChanges, JMAPState},
-    id::JMAPIdSerialize,
-    json::JSONValue,
+    id::{state::JMAPState, JMAPIdSerialize},
+    jmap_store::changes::JMAPChanges,
+    protocol::json::JSONValue,
 };
 use store::{
     batch::WriteBatch,

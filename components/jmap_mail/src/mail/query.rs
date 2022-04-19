@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap::changes::JMAPChanges;
-use jmap::json::JSONValue;
-use jmap::query::QueryResult;
-use jmap::request::QueryRequest;
-use jmap::JMAPError;
+use jmap::error::method::MethodError;
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::request::query::{QueryRequest, QueryResult};
 use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
 use mail_parser::RfcHeader;
 use nlp::Language;
@@ -158,7 +157,7 @@ where
                     }
                     "header" => {
                         let mut cond_value = cond_value.unwrap_array().ok_or_else(|| {
-                            JMAPError::InvalidArguments("Expected array.".to_string())
+                            MethodError::InvalidArguments("Expected array.".to_string())
                         })?;
                         let (value, header) = match cond_value.len() {
                             1 => ("".to_string(), cond_value.pop().unwrap().parse_string()?),
@@ -167,7 +166,7 @@ where
                                 cond_value.pop().unwrap().parse_string()?,
                             ),
                             _ => {
-                                return Err(JMAPError::InvalidArguments(
+                                return Err(MethodError::InvalidArguments(
                                     "Expected array of length 1 or 2.".to_string(),
                                 ));
                             }
@@ -175,7 +174,7 @@ where
                         let header = match parse_header_name(header.as_bytes()) {
                             (_, HeaderParserResult::Rfc(rfc_header)) => rfc_header,
                             _ => {
-                                return Err(JMAPError::InvalidArguments(format!(
+                                return Err(MethodError::InvalidArguments(format!(
                                     "Querying non-RFC header '{}' is not allowed.",
                                     header
                                 )))
@@ -235,7 +234,7 @@ where
                         )?)])
                     }
                     _ => {
-                        return Err(JMAPError::UnsupportedFilter(format!(
+                        return Err(MethodError::UnsupportedFilter(format!(
                             "Unsupported filter '{}'.",
                             cond_name
                         )))
@@ -246,7 +245,7 @@ where
             }
         };
 
-        let sort_fnc = |mut comp: jmap::query::Comparator| {
+        let sort_fnc = |mut comp: jmap::request::query::Comparator| {
             Ok(match comp.property.as_ref() {
                 "receivedAt" => Comparator::Field(FieldComparator {
                     field: MessageField::ReceivedAt.into(),
@@ -286,7 +285,7 @@ where
                                     comp.arguments
                                         .remove("keyword")
                                         .ok_or_else(|| {
-                                            JMAPError::InvalidArguments(
+                                            MethodError::InvalidArguments(
                                                 "Missing 'keyword' property.".to_string(),
                                             )
                                         })?
@@ -308,7 +307,7 @@ where
                                 comp.arguments
                                     .remove("keyword")
                                     .ok_or_else(|| {
-                                        JMAPError::InvalidArguments(
+                                        MethodError::InvalidArguments(
                                             "Missing 'keyword' property.".to_string(),
                                         )
                                     })?
@@ -330,7 +329,7 @@ where
                                 comp.arguments
                                     .remove("keyword")
                                     .ok_or_else(|| {
-                                        JMAPError::InvalidArguments(
+                                        MethodError::InvalidArguments(
                                             "Missing 'keyword' property.".to_string(),
                                         )
                                     })?
@@ -342,7 +341,7 @@ where
                     })
                 }
                 _ => {
-                    return Err(JMAPError::UnsupportedSort(format!(
+                    return Err(MethodError::UnsupportedSort(format!(
                         "Unsupported sort property '{}'.",
                         comp.property
                     )))

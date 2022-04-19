@@ -2,9 +2,12 @@ use actix_web::http::header::ContentType;
 use actix_web::http::StatusCode;
 use actix_web::{web, HttpResponse};
 
-use jmap::json::JSONValue;
-use jmap::request::{Invocation, Method, Object, Request, Response};
-use jmap::{JMAPError, RequestError, RequestLimitError};
+use jmap::error::method::MethodError;
+use jmap::error::request::{RequestError, RequestLimitError};
+use jmap::protocol::invocation::{Invocation, Method, Object};
+use jmap::protocol::json::JSONValue;
+use jmap::protocol::request::Request;
+use jmap::protocol::response::Response;
 use jmap_mail::mail::changes::JMAPMailChanges;
 use jmap_mail::mail::get::JMAPMailGet;
 use jmap_mail::mail::import::JMAPMailImport;
@@ -137,7 +140,7 @@ where
         (Object::Mailbox, Method::QueryChanges(request)) => store.mailbox_query_changes(request),
         (Object::Mailbox, Method::Changes(request)) => store.mailbox_changes(request),
         (Object::Core, Method::Echo(arguments)) => Ok(arguments),
-        _ => Err(JMAPError::ServerUnavailable),
+        _ => Err(MethodError::ServerUnavailable),
     })
     .await
 }

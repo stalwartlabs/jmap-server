@@ -6,8 +6,9 @@ pub mod set;
 
 use std::fmt::Display;
 
+use jmap::error::method::MethodError;
+use jmap::protocol::json::JSONValue;
 use jmap::request::JSONArgumentParser;
-use jmap::{json::JSONValue, JMAPError};
 
 use store::serialize::{StoreDeserialize, StoreSerialize};
 
@@ -117,11 +118,11 @@ impl MailboxProperties {
 
 impl JSONArgumentParser for MailboxProperties {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
-        let argument = argument
-            .unwrap_string()
-            .ok_or_else(|| JMAPError::InvalidArguments("Expected string argument.".to_string()))?;
+        let argument = argument.unwrap_string().ok_or_else(|| {
+            MethodError::InvalidArguments("Expected string argument.".to_string())
+        })?;
         MailboxProperties::parse(&argument).ok_or_else(|| {
-            JMAPError::InvalidArguments(format!("Unknown mailbox property: '{}'.", argument))
+            MethodError::InvalidArguments(format!("Unknown mailbox property: '{}'.", argument))
         })
     }
 }

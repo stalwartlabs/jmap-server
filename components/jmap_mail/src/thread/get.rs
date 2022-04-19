@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use jmap::{
-    changes::JMAPChanges, id::JMAPIdSerialize, json::JSONValue, request::GetRequest, JMAPError,
+    error::method::MethodError, id::JMAPIdSerialize, jmap_store::changes::JMAPChanges,
+    protocol::json::JSONValue, request::get::GetRequest,
 };
 use store::{
     query::{JMAPIdMapFnc, JMAPStoreQuery},
@@ -22,7 +23,7 @@ where
         let thread_ids = request.ids.unwrap_or_default();
 
         if thread_ids.len() > self.config.mail_thread_max_results {
-            return Err(JMAPError::RequestTooLarge);
+            return Err(MethodError::RequestTooLarge);
         }
 
         let mut not_found = Vec::new();

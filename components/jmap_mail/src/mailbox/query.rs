@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap::changes::JMAPChanges;
-
-use jmap::request::QueryRequest;
-use jmap::{json::JSONValue, JMAPError};
-
+use jmap::error::method::MethodError;
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::protocol::json::JSONValue;
+use jmap::request::query::QueryRequest;
 use store::query::JMAPIdMapFnc;
 
 use store::Store;
@@ -56,7 +55,7 @@ where
                     }
                     "isSubscribed" => todo!(), //TODO implement
                     _ => {
-                        return Err(JMAPError::UnsupportedFilter(format!(
+                        return Err(MethodError::UnsupportedFilter(format!(
                             "Unsupported filter '{}'.",
                             cond_name
                         )))
@@ -67,14 +66,14 @@ where
             }
         };
 
-        let sort_fnc = |comp: jmap::query::Comparator| {
+        let sort_fnc = |comp: jmap::request::query::Comparator| {
             Ok(Comparator::Field(FieldComparator {
                 field: match comp.property.as_ref() {
                     "name" => MailboxProperties::Name,
                     "role" => MailboxProperties::Role,
                     "parentId" => MailboxProperties::ParentId,
                     _ => {
-                        return Err(JMAPError::UnsupportedSort(format!(
+                        return Err(MethodError::UnsupportedSort(format!(
                             "Unsupported sort property '{}'.",
                             comp.property
                         )))

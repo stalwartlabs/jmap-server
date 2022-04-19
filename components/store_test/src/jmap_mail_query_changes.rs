@@ -4,7 +4,9 @@ use std::{
 };
 
 use jmap::{
-    changes::JMAPState, id::JMAPIdSerialize, json::JSONValue, request::QueryChangesRequest,
+    id::{state::JMAPState, JMAPIdSerialize},
+    protocol::json::JSONValue,
+    request::query_changes::QueryChangesRequest,
 };
 use jmap_mail::mail::{import::JMAPMailImport, query_changes::JMAPMailQueryChanges, MessageField};
 use store::{
