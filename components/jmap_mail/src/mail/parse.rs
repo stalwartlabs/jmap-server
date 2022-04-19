@@ -1400,7 +1400,7 @@ fn parse_header(document: &mut Document, header_name: RfcHeader, header_value: &
             if date_time.is_valid() {
                 document.number(
                     header_name,
-                    date_time.to_timestamp().unwrap() as u64,
+                    date_time.to_timestamp() as u64,
                     DefaultOptions::new().sort(),
                 );
             }
