@@ -4,25 +4,29 @@ use actix_web::{web, HttpResponse};
 
 use jmap::error::method::MethodError;
 use jmap::error::request::{RequestError, RequestLimitError};
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::jmap_store::get::JMAPGet;
+use jmap::jmap_store::import::JMAPImport;
+use jmap::jmap_store::parse::JMAPParse;
+use jmap::jmap_store::query::JMAPQuery;
+use jmap::jmap_store::query_changes::JMAPQueryChanges;
+use jmap::jmap_store::set::JMAPSet;
 use jmap::protocol::invocation::{Invocation, Method, Object};
 use jmap::protocol::json::JSONValue;
 use jmap::protocol::request::Request;
 use jmap::protocol::response::Response;
-use jmap_mail::mail::changes::JMAPMailChanges;
-use jmap_mail::mail::get::JMAPMailGet;
-use jmap_mail::mail::import::JMAPMailImport;
-use jmap_mail::mail::parse::JMAPMailParse;
-use jmap_mail::mail::query::JMAPMailQuery;
-use jmap_mail::mail::query_changes::JMAPMailQueryChanges;
-use jmap_mail::mail::set::JMAPMailSet;
-
-use jmap_mail::mailbox::changes::JMAPMailMailboxChanges;
-use jmap_mail::mailbox::get::JMAPMailMailboxGet;
-use jmap_mail::mailbox::query::JMAPMailMailboxQuery;
-use jmap_mail::mailbox::query_changes::JMAPMailMailboxQueryChanges;
-use jmap_mail::mailbox::set::JMAPMailMailboxSet;
-use jmap_mail::thread::changes::JMAPMailThreadChanges;
-use jmap_mail::thread::get::JMAPMailThreadGet;
+use jmap_mail::mail::changes::ChangesMail;
+use jmap_mail::mail::get::GetMail;
+use jmap_mail::mail::import::ImportMail;
+use jmap_mail::mail::parse::ParseMail;
+use jmap_mail::mail::query::QueryMail;
+use jmap_mail::mail::set::SetMail;
+use jmap_mail::mailbox::changes::ChangesMailbox;
+use jmap_mail::mailbox::get::GetMailbox;
+use jmap_mail::mailbox::query::QueryMailbox;
+use jmap_mail::mailbox::set::SetMailbox;
+use jmap_mail::thread::changes::ChangesThread;
+use jmap_mail::thread::get::GetThread;
 use store::tracing::debug;
 use store::Store;
 
@@ -124,23 +128,41 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let store = core.store.clone();
-    core.spawn_jmap_request(move || match (invocation.obj, invocation.call) {
-        (Object::Email, Method::Get(request)) => store.mail_get(request),
-        (Object::Email, Method::Set(request)) => store.mail_set(request),
-        (Object::Email, Method::Query(request)) => store.mail_query(request),
-        (Object::Email, Method::QueryChanges(request)) => store.mail_query_changes(request),
-        (Object::Email, Method::Changes(request)) => store.mail_changes(request),
-        (Object::Email, Method::Import(request)) => store.mail_import(request),
-        (Object::Email, Method::Parse(request)) => store.mail_parse(request),
-        (Object::Thread, Method::Get(request)) => store.thread_get(request),
-        (Object::Thread, Method::Changes(request)) => store.thread_changes(request),
-        (Object::Mailbox, Method::Get(request)) => store.mailbox_get(request),
-        (Object::Mailbox, Method::Set(request)) => store.mailbox_set(request),
-        (Object::Mailbox, Method::Query(request)) => store.mailbox_query(request),
-        (Object::Mailbox, Method::QueryChanges(request)) => store.mailbox_query_changes(request),
-        (Object::Mailbox, Method::Changes(request)) => store.mailbox_changes(request),
-        (Object::Core, Method::Echo(arguments)) => Ok(arguments),
-        _ => Err(MethodError::ServerUnavailable),
+    core.spawn_jmap_request(move || {
+        Ok(match (invocation.obj, invocation.call) {
+            (Object::Email, Method::Get(request)) => store.get::<GetMail<T>>(request)?.into(),
+            (Object::Email, Method::Set(request)) => store.set::<SetMail>(request)?.into(),
+            (Object::Email, Method::Query(request)) => store.query::<QueryMail<T>>(request)?.into(),
+            (Object::Email, Method::QueryChanges(request)) => store
+                .query_changes::<ChangesMail, QueryMail<T>>(request)?
+                .into(),
+            (Object::Email, Method::Changes(request)) => {
+                store.changes::<ChangesMail>(request)?.into()
+            }
+            (Object::Email, Method::Import(request)) => {
+                store.import::<ImportMail<T>>(request)?.into()
+            }
+            (Object::Email, Method::Parse(request)) => store.parse::<ParseMail>(request)?.into(),
+            (Object::Thread, Method::Get(request)) => store.get::<GetThread<T>>(request)?.into(),
+            (Object::Thread, Method::Changes(request)) => {
+                store.changes::<ChangesThread>(request)?.into()
+            }
+            (Object::Mailbox, Method::Get(request)) => store.get::<GetMailbox<T>>(request)?.into(),
+            (Object::Mailbox, Method::Set(request)) => store.set::<SetMailbox>(request)?.into(),
+            (Object::Mailbox, Method::Query(request)) => {
+                store.query::<QueryMailbox<T>>(request)?.into()
+            }
+            (Object::Mailbox, Method::QueryChanges(request)) => store
+                .query_changes::<ChangesMailbox, QueryMailbox<T>>(request)?
+                .into(),
+            (Object::Mailbox, Method::Changes(request)) => {
+                store.changes::<ChangesMailbox>(request)?.into()
+            }
+            (Object::Core, Method::Echo(arguments)) => arguments,
+            _ => {
+                return Err(MethodError::ServerUnavailable);
+            }
+        })
     })
     .await
 }

@@ -15,7 +15,7 @@ use crate::mail::{
 use jmap::{
     error::method::MethodError,
     id::{blob::BlobId, JMAPIdSerialize},
-    jmap_store::changes::JMAPChanges,
+    jmap_store::get::GetObject,
     protocol::json::JSONValue,
     request::get::GetRequest,
 };
@@ -30,11 +30,26 @@ use mail_parser::{
     },
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{
-    blob::BlobIndex, leb128::Leb128, roaring::RoaringBitmap, Collection, JMAPId, JMAPStore,
-};
+use store::{blob::BlobIndex, leb128::Leb128, AccountId, Collection, JMAPId, JMAPStore};
 use store::{serialize::StoreDeserialize, JMAPIdPrefix};
 use store::{DocumentId, Store, StoreError};
+
+pub struct GetMail<'y, T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    store: &'y JMAPStore<T>,
+    account_id: AccountId,
+    properties: Vec<MailProperties>,
+    arguments: MailGetArguments,
+    fetch_raw: FetchRaw,
+}
+
+enum FetchRaw {
+    Header,
+    All,
+    None,
+}
 
 #[derive(Debug, Default)]
 pub struct MailGetArguments {
@@ -45,93 +60,16 @@ pub struct MailGetArguments {
     pub max_body_value_bytes: usize,
 }
 
-impl MailGetArguments {
-    pub fn parse_arguments(arguments: HashMap<String, JSONValue>) -> jmap::Result<Self> {
-        let mut body_properties = None;
-        let mut fetch_text_body_values = false;
-        let mut fetch_html_body_values = false;
-        let mut fetch_all_body_values = false;
-        let mut max_body_value_bytes = 0;
-
-        for (arg_name, arg_value) in arguments {
-            match arg_name.as_str() {
-                "bodyProperties" => body_properties = arg_value.parse_array_items(true)?,
-                "fetchTextBodyValues" => fetch_text_body_values = arg_value.parse_bool()?,
-                "fetchHtmlBodyValues" => fetch_html_body_values = arg_value.parse_bool()?,
-                "fetchAllBodyValues" => fetch_all_body_values = arg_value.parse_bool()?,
-                "maxBodyValueBytes" => {
-                    max_body_value_bytes = arg_value.parse_unsigned_int(false)?.unwrap() as usize
-                }
-                _ => {
-                    return Err(MethodError::InvalidArguments(format!(
-                        "Unknown argument: '{}'.",
-                        arg_name
-                    )))
-                }
-            }
-        }
-
-        Ok(MailGetArguments {
-            body_properties: body_properties.unwrap_or_else(|| {
-                vec![
-                    MailBodyProperties::PartId,
-                    MailBodyProperties::BlobId,
-                    MailBodyProperties::Size,
-                    MailBodyProperties::Name,
-                    MailBodyProperties::Type,
-                    MailBodyProperties::Charset,
-                    MailBodyProperties::Disposition,
-                    MailBodyProperties::Cid,
-                    MailBodyProperties::Language,
-                    MailBodyProperties::Location,
-                ]
-            }),
-            fetch_text_body_values,
-            fetch_html_body_values,
-            fetch_all_body_values,
-            max_body_value_bytes,
-        })
-    }
-}
-
 trait BlobIdClone {
     fn clone_with_index(&self, blob_index: BlobIndex) -> Self;
 }
 
-impl BlobIdClone for BlobId {
-    fn clone_with_index(&self, blob_index: BlobIndex) -> Self {
-        match self {
-            BlobId::Owned(owned) => {
-                let mut owned = owned.clone();
-                owned.blob_index = blob_index + MESSAGE_PARTS;
-                BlobId::Owned(owned)
-            }
-            BlobId::InnerOwned(inner) => {
-                let mut inner = inner.clone();
-                inner.blob_index = blob_index;
-                BlobId::InnerOwned(inner)
-            }
-            BlobId::InnerTemporary(inner) => {
-                let mut inner = inner.clone();
-                inner.blob_index = blob_index;
-                BlobId::InnerTemporary(inner)
-            }
-            BlobId::Temporary(_) => unreachable!(),
-        }
-    }
-}
-
-pub trait JMAPMailGet {
-    fn mail_get(&self, request: GetRequest) -> jmap::Result<JSONValue>;
-}
-
-impl<T> JMAPMailGet for JMAPStore<T>
+impl<'y, T> GetObject<'y, T> for GetMail<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_get(&self, request: GetRequest) -> jmap::Result<JSONValue> {
-        let properties = request
-            .properties
+    fn init(store: &'y JMAPStore<T>, request: &mut GetRequest) -> jmap::Result<Self> {
+        let properties = std::mem::take(&mut request.properties)
             .parse_array_items(true)?
             .unwrap_or_else(|| {
                 vec![
@@ -162,338 +100,290 @@ where
                 ]
             });
 
-        let arguments = MailGetArguments::parse_arguments(request.arguments)?;
+        let arguments = MailGetArguments::parse_arguments(std::mem::take(&mut request.arguments))?;
 
-        enum FetchRaw {
-            Header,
-            All,
-            None,
-        }
-
-        let fetch_raw = if arguments.body_properties.iter().any(|prop| {
-            matches!(
-                prop,
-                MailBodyProperties::Headers | MailBodyProperties::Header(_)
-            )
-        }) {
-            FetchRaw::All
-        } else if properties.iter().any(|prop| {
-            matches!(
-                prop,
-                MailProperties::Header(MailHeaderProperty {
-                    form: MailHeaderForm::Raw,
-                    ..
-                }) | MailProperties::Header(MailHeaderProperty {
-                    header: HeaderName::Other(_),
-                    ..
-                }) | MailProperties::BodyStructure
-            )
-        }) {
-            FetchRaw::Header
-        } else {
-            FetchRaw::None
-        };
-
-        let document_ids = self
-            .get_document_ids(request.account_id, Collection::Mail)?
-            .unwrap_or_else(RoaringBitmap::new);
-
-        let request_ids: Vec<u64> = if let Some(request_ids) = request.ids {
-            if request_ids.len() > self.config.max_objects_in_get {
-                return Err(MethodError::RequestTooLarge);
+        Ok(GetMail {
+            store,
+            account_id: request.account_id,
+            fetch_raw: if arguments.body_properties.iter().any(|prop| {
+                matches!(
+                    prop,
+                    MailBodyProperties::Headers | MailBodyProperties::Header(_)
+                )
+            }) {
+                FetchRaw::All
+            } else if properties.iter().any(|prop| {
+                matches!(
+                    prop,
+                    MailProperties::Header(MailHeaderProperty {
+                        form: MailHeaderForm::Raw,
+                        ..
+                    }) | MailProperties::Header(MailHeaderProperty {
+                        header: HeaderName::Other(_),
+                        ..
+                    }) | MailProperties::BodyStructure
+                )
+            }) {
+                FetchRaw::Header
             } else {
-                request_ids
-            }
-        } else if !document_ids.is_empty() {
-            let document_ids = document_ids
-                .iter()
-                .take(self.config.max_objects_in_get)
-                .collect::<Vec<DocumentId>>();
-            self.get_multi_document_tag_id(
-                request.account_id,
-                Collection::Mail,
-                document_ids.iter().copied(),
-                MessageField::ThreadId.into(),
-            )?
-            .into_iter()
-            .zip(document_ids)
-            .filter_map(|(thread_id, document_id)| {
-                JMAPId::from_parts(*thread_id?, document_id).into()
-            })
-            .collect::<Vec<u64>>()
-        } else {
-            Vec::new()
-        };
+                FetchRaw::None
+            },
+            properties,
+            arguments,
+        })
+    }
 
-        let mut not_found = Vec::new();
-        let mut results = Vec::with_capacity(request_ids.len());
-
-        for jmap_id in request_ids {
-            let document_id = jmap_id.get_document_id();
-            if !document_ids.contains(document_id) {
-                not_found.push(jmap_id.to_jmap_string().into());
-                continue;
-            }
-
-            let message_data_bytes = self
-                .get_blob(
-                    request.account_id,
-                    Collection::Mail,
-                    document_id,
-                    MESSAGE_DATA,
-                )?
-                .ok_or(StoreError::DataCorruption)?;
-
-            let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
-                .ok_or(StoreError::DataCorruption)?;
-
-            let mut message_data = MessageData::deserialize(
-                &message_data_bytes[read_bytes..read_bytes + message_data_len],
-            )
+    fn get_item(&self, jmap_id: JMAPId) -> jmap::Result<Option<JSONValue>> {
+        let document_id = jmap_id.get_document_id();
+        let message_data_bytes = self
+            .store
+            .get_blob(self.account_id, Collection::Mail, document_id, MESSAGE_DATA)?
             .ok_or(StoreError::DataCorruption)?;
-            let (message_raw, mut message_outline) = match &fetch_raw {
-                FetchRaw::All => (
-                    Some(
-                        self.get_blob(
-                            request.account_id,
-                            Collection::Mail,
-                            document_id,
-                            MESSAGE_RAW,
-                        )?
+
+        let (message_data_len, read_bytes) =
+            usize::from_leb128_bytes(&message_data_bytes[..]).ok_or(StoreError::DataCorruption)?;
+
+        let mut message_data = MessageData::deserialize(
+            &message_data_bytes[read_bytes..read_bytes + message_data_len],
+        )
+        .ok_or(StoreError::DataCorruption)?;
+        let (message_raw, mut message_outline) = match &self.fetch_raw {
+            FetchRaw::All => (
+                Some(
+                    self.store
+                        .get_blob(self.account_id, Collection::Mail, document_id, MESSAGE_RAW)?
                         .ok_or(StoreError::DataCorruption)?,
-                    ),
-                    Some(
-                        MessageOutline::deserialize(
-                            &message_data_bytes[read_bytes + message_data_len..],
-                        )
-                        .ok_or(StoreError::DataCorruption)?,
-                    ),
                 ),
-                FetchRaw::Header => {
-                    let message_outline = MessageOutline::deserialize(
+                Some(
+                    MessageOutline::deserialize(
                         &message_data_bytes[read_bytes + message_data_len..],
                     )
-                    .ok_or(StoreError::DataCorruption)?;
-                    (
-                        Some(
-                            self.get_blob_range(
-                                request.account_id,
+                    .ok_or(StoreError::DataCorruption)?,
+                ),
+            ),
+            FetchRaw::Header => {
+                let message_outline = MessageOutline::deserialize(
+                    &message_data_bytes[read_bytes + message_data_len..],
+                )
+                .ok_or(StoreError::DataCorruption)?;
+                (
+                    Some(
+                        self.store
+                            .get_blob_range(
+                                self.account_id,
                                 Collection::Mail,
                                 document_id,
                                 MESSAGE_RAW,
                                 0..message_outline.body_offset as u32,
                             )?
                             .ok_or(StoreError::DataCorruption)?,
-                        ),
-                        Some(message_outline),
-                    )
-                }
-                FetchRaw::None => (None, None),
-            };
+                    ),
+                    Some(message_outline),
+                )
+            }
+            FetchRaw::None => (None, None),
+        };
 
-            let message_raw_ref = message_raw.as_ref().map(|raw| raw.as_ref());
-            let base_blob_id =
-                BlobId::new_owned(request.account_id, Collection::Mail, document_id, 0);
-            let mut result: HashMap<String, JSONValue> = HashMap::new();
+        let message_raw_ref = message_raw.as_ref().map(|raw| raw.as_ref());
+        let base_blob_id = BlobId::new_owned(self.account_id, Collection::Mail, document_id, 0);
+        let mut result: HashMap<String, JSONValue> = HashMap::new();
 
-            for property in &properties {
-                if let Entry::Vacant(entry) = result.entry(property.to_string()) {
-                    let value = match property {
-                        MailProperties::Header(MailHeaderProperty {
-                            form: form @ MailHeaderForm::Raw,
-                            header,
-                            all,
-                        })
-                        | MailProperties::Header(MailHeaderProperty {
-                            form,
-                            header: header @ HeaderName::Other(_),
-                            all,
-                        }) => {
-                            if let Some(offsets) = message_outline
-                                .as_mut()
-                                .unwrap()
-                                .headers
-                                .get_mut(0)
-                                .and_then(|l| l.remove(header))
-                            {
-                                add_raw_header(
-                                    &offsets,
-                                    message_raw.as_ref().unwrap(),
-                                    form.clone(),
-                                    *all,
-                                )
-                            } else {
-                                JSONValue::Null
-                            }
-                        }
-                        MailProperties::MessageId => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::MessageId,
-                            MailHeaderForm::MessageIds,
-                            false,
-                        )?,
-                        MailProperties::InReplyTo => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::InReplyTo,
-                            MailHeaderForm::MessageIds,
-                            false,
-                        )?,
-                        MailProperties::References => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::References,
-                            MailHeaderForm::MessageIds,
-                            false,
-                        )?,
-                        MailProperties::Sender => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::Sender,
-                            MailHeaderForm::Addresses,
-                            false,
-                        )?,
-                        MailProperties::From => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::From,
-                            MailHeaderForm::Addresses,
-                            false,
-                        )?,
-                        MailProperties::To => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::To,
-                            MailHeaderForm::Addresses,
-                            false,
-                        )?,
-                        MailProperties::Cc => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::Cc,
-                            MailHeaderForm::Addresses,
-                            false,
-                        )?,
-                        MailProperties::Bcc => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::Bcc,
-                            MailHeaderForm::Addresses,
-                            false,
-                        )?,
-                        MailProperties::ReplyTo => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::ReplyTo,
-                            MailHeaderForm::Addresses,
-                            false,
-                        )?,
-                        MailProperties::Subject => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::Subject,
-                            MailHeaderForm::Text,
-                            false,
-                        )?,
-                        MailProperties::SentAt => add_rfc_header(
-                            &mut message_data.properties,
-                            RfcHeader::Date,
-                            MailHeaderForm::Date,
-                            false,
-                        )?,
-                        MailProperties::Header(MailHeaderProperty {
-                            form,
-                            header: HeaderName::Rfc(header),
-                            all,
-                        }) => add_rfc_header(
-                            &mut message_data.properties,
-                            *header,
-                            form.clone(),
-                            *all,
-                        )?,
-                        MailProperties::Id => JSONValue::String(jmap_id.to_jmap_string()),
-                        MailProperties::BlobId => JSONValue::String(
-                            BlobId::new_owned(
-                                request.account_id,
-                                Collection::Mail,
-                                document_id,
-                                MESSAGE_RAW,
+        for property in &self.properties {
+            if let Entry::Vacant(entry) = result.entry(property.to_string()) {
+                let value = match property {
+                    MailProperties::Header(MailHeaderProperty {
+                        form: form @ MailHeaderForm::Raw,
+                        header,
+                        all,
+                    })
+                    | MailProperties::Header(MailHeaderProperty {
+                        form,
+                        header: header @ HeaderName::Other(_),
+                        all,
+                    }) => {
+                        if let Some(offsets) = message_outline
+                            .as_mut()
+                            .unwrap()
+                            .headers
+                            .get_mut(0)
+                            .and_then(|l| l.remove(header))
+                        {
+                            add_raw_header(
+                                &offsets,
+                                message_raw.as_ref().unwrap(),
+                                form.clone(),
+                                *all,
                             )
-                            .to_jmap_string(),
-                        ),
-                        MailProperties::ThreadId => {
-                            JSONValue::String((jmap_id.get_prefix_id() as JMAPId).to_jmap_string())
+                        } else {
+                            JSONValue::Null
                         }
-                        MailProperties::MailboxIds => {
-                            if let Some(mailboxes) = self.get_document_tags(
-                                request.account_id,
-                                Collection::Mail,
-                                document_id,
-                                MessageField::Mailbox.into(),
-                            )? {
-                                JSONValue::Object(
-                                    mailboxes
-                                        .items
-                                        .into_iter()
-                                        .map(|mailbox| {
-                                            (
-                                                (mailbox.unwrap_id().unwrap() as JMAPId)
-                                                    .to_jmap_string(),
-                                                JSONValue::Bool(true),
-                                            )
-                                        })
-                                        .collect(),
-                                )
-                            } else {
-                                JSONValue::Null
+                    }
+                    MailProperties::MessageId => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::MessageId,
+                        MailHeaderForm::MessageIds,
+                        false,
+                    )?,
+                    MailProperties::InReplyTo => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::InReplyTo,
+                        MailHeaderForm::MessageIds,
+                        false,
+                    )?,
+                    MailProperties::References => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::References,
+                        MailHeaderForm::MessageIds,
+                        false,
+                    )?,
+                    MailProperties::Sender => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::Sender,
+                        MailHeaderForm::Addresses,
+                        false,
+                    )?,
+                    MailProperties::From => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::From,
+                        MailHeaderForm::Addresses,
+                        false,
+                    )?,
+                    MailProperties::To => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::To,
+                        MailHeaderForm::Addresses,
+                        false,
+                    )?,
+                    MailProperties::Cc => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::Cc,
+                        MailHeaderForm::Addresses,
+                        false,
+                    )?,
+                    MailProperties::Bcc => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::Bcc,
+                        MailHeaderForm::Addresses,
+                        false,
+                    )?,
+                    MailProperties::ReplyTo => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::ReplyTo,
+                        MailHeaderForm::Addresses,
+                        false,
+                    )?,
+                    MailProperties::Subject => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::Subject,
+                        MailHeaderForm::Text,
+                        false,
+                    )?,
+                    MailProperties::SentAt => add_rfc_header(
+                        &mut message_data.properties,
+                        RfcHeader::Date,
+                        MailHeaderForm::Date,
+                        false,
+                    )?,
+                    MailProperties::Header(MailHeaderProperty {
+                        form,
+                        header: HeaderName::Rfc(header),
+                        all,
+                    }) => {
+                        add_rfc_header(&mut message_data.properties, *header, form.clone(), *all)?
+                    }
+                    MailProperties::Id => JSONValue::String(jmap_id.to_jmap_string()),
+                    MailProperties::BlobId => JSONValue::String(
+                        BlobId::new_owned(
+                            self.account_id,
+                            Collection::Mail,
+                            document_id,
+                            MESSAGE_RAW,
+                        )
+                        .to_jmap_string(),
+                    ),
+                    MailProperties::ThreadId => {
+                        JSONValue::String((jmap_id.get_prefix_id() as JMAPId).to_jmap_string())
+                    }
+                    MailProperties::MailboxIds => {
+                        if let Some(mailboxes) = self.store.get_document_tags(
+                            self.account_id,
+                            Collection::Mail,
+                            document_id,
+                            MessageField::Mailbox.into(),
+                        )? {
+                            JSONValue::Object(
+                                mailboxes
+                                    .items
+                                    .into_iter()
+                                    .map(|mailbox| {
+                                        (
+                                            (mailbox.unwrap_id().unwrap() as JMAPId)
+                                                .to_jmap_string(),
+                                            JSONValue::Bool(true),
+                                        )
+                                    })
+                                    .collect(),
+                            )
+                        } else {
+                            JSONValue::Null
+                        }
+                    }
+                    MailProperties::Keywords => {
+                        if let Some(tags) = self.store.get_document_tags(
+                            self.account_id,
+                            Collection::Mail,
+                            document_id,
+                            MessageField::Keyword.into(),
+                        )? {
+                            let mut keywords = HashMap::with_capacity(tags.items.len());
+                            for tag in tags.items {
+                                keywords.insert(Keyword::to_jmap(tag)?, true.into());
                             }
+                            keywords.into()
+                        } else {
+                            JSONValue::Null
                         }
-                        MailProperties::Keywords => {
-                            if let Some(tags) = self.get_document_tags(
-                                request.account_id,
-                                Collection::Mail,
-                                document_id,
-                                MessageField::Keyword.into(),
-                            )? {
-                                let mut keywords = HashMap::with_capacity(tags.items.len());
-                                for tag in tags.items {
-                                    keywords.insert(Keyword::to_jmap(tag)?, true.into());
-                                }
-                                keywords.into()
-                            } else {
-                                JSONValue::Null
-                            }
-                        }
-                        MailProperties::Size
-                        | MailProperties::ReceivedAt
-                        | MailProperties::HasAttachment => {
-                            message_data.properties.remove(property).unwrap_or_default()
-                        }
-                        MailProperties::TextBody => add_body_parts(
-                            &message_data.text_body,
-                            &message_data.mime_parts,
-                            &arguments.body_properties,
-                            message_raw_ref,
-                            message_outline.as_ref(),
-                            &base_blob_id,
-                        ),
+                    }
+                    MailProperties::Size
+                    | MailProperties::ReceivedAt
+                    | MailProperties::HasAttachment => {
+                        message_data.properties.remove(property).unwrap_or_default()
+                    }
+                    MailProperties::TextBody => add_body_parts(
+                        &message_data.text_body,
+                        &message_data.mime_parts,
+                        &self.arguments.body_properties,
+                        message_raw_ref,
+                        message_outline.as_ref(),
+                        &base_blob_id,
+                    ),
 
-                        MailProperties::HtmlBody => add_body_parts(
-                            &message_data.html_body,
-                            &message_data.mime_parts,
-                            &arguments.body_properties,
-                            message_raw_ref,
-                            message_outline.as_ref(),
-                            &base_blob_id,
-                        ),
+                    MailProperties::HtmlBody => add_body_parts(
+                        &message_data.html_body,
+                        &message_data.mime_parts,
+                        &self.arguments.body_properties,
+                        message_raw_ref,
+                        message_outline.as_ref(),
+                        &base_blob_id,
+                    ),
 
-                        MailProperties::Attachments => add_body_parts(
-                            &message_data.attachments,
-                            &message_data.mime_parts,
-                            &arguments.body_properties,
-                            message_raw_ref,
-                            message_outline.as_ref(),
-                            &base_blob_id,
-                        ),
+                    MailProperties::Attachments => add_body_parts(
+                        &message_data.attachments,
+                        &message_data.mime_parts,
+                        &self.arguments.body_properties,
+                        message_raw_ref,
+                        message_outline.as_ref(),
+                        &base_blob_id,
+                    ),
 
-                        MailProperties::Preview => {
-                            if !message_data.text_body.is_empty() {
-                                JSONValue::String(
-                                    preview_text(
-                                        String::from_utf8(
-                                            self.get_blob_range(
-                                                request.account_id,
+                    MailProperties::Preview => {
+                        if !message_data.text_body.is_empty() {
+                            JSONValue::String(
+                                preview_text(
+                                    String::from_utf8(
+                                        self.store
+                                            .get_blob_range(
+                                                self.account_id,
                                                 Collection::Mail,
                                                 document_id,
                                                 MESSAGE_PARTS
@@ -508,24 +398,23 @@ where
                                                 0..260,
                                             )?
                                             .ok_or(StoreError::DataCorruption)?,
-                                        )
-                                        .map_or_else(
-                                            |err| {
-                                                String::from_utf8_lossy(err.as_bytes()).into_owned()
-                                            },
-                                            |s| s,
-                                        )
-                                        .into(),
-                                        256,
                                     )
-                                    .to_string(),
+                                    .map_or_else(
+                                        |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                                        |s| s,
+                                    )
+                                    .into(),
+                                    256,
                                 )
-                            } else if !message_data.html_body.is_empty() {
-                                JSONValue::String(
-                                    preview_html(
-                                        String::from_utf8(
-                                            self.get_blob(
-                                                request.account_id,
+                                .to_string(),
+                            )
+                        } else if !message_data.html_body.is_empty() {
+                            JSONValue::String(
+                                preview_html(
+                                    String::from_utf8(
+                                        self.store
+                                            .get_blob(
+                                                self.account_id,
                                                 Collection::Mail,
                                                 document_id,
                                                 MESSAGE_PARTS
@@ -539,71 +428,72 @@ where
                                                         .blob_index,
                                             )?
                                             .ok_or(StoreError::DataCorruption)?,
-                                        )
-                                        .map_or_else(
-                                            |err| {
-                                                String::from_utf8_lossy(err.as_bytes()).into_owned()
-                                            },
-                                            |s| s,
-                                        )
-                                        .into(),
-                                        256,
                                     )
-                                    .to_string(),
+                                    .map_or_else(
+                                        |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                                        |s| s,
+                                    )
+                                    .into(),
+                                    256,
                                 )
-                            } else {
-                                JSONValue::Null
-                            }
+                                .to_string(),
+                            )
+                        } else {
+                            JSONValue::Null
                         }
-                        MailProperties::BodyValues => {
-                            let mut fetch_parts = BTreeMap::new();
-                            if arguments.fetch_all_body_values || arguments.fetch_text_body_values {
-                                message_data.text_body.iter().for_each(|part| {
-                                    if let Some(mime_part) = message_data.mime_parts.get(*part + 1)
+                    }
+                    MailProperties::BodyValues => {
+                        let mut fetch_parts = BTreeMap::new();
+                        if self.arguments.fetch_all_body_values
+                            || self.arguments.fetch_text_body_values
+                        {
+                            message_data.text_body.iter().for_each(|part| {
+                                if let Some(mime_part) = message_data.mime_parts.get(*part + 1) {
+                                    if let MimePartType::Html | MimePartType::Text =
+                                        mime_part.mime_type
                                     {
-                                        if let MimePartType::Html | MimePartType::Text =
-                                            mime_part.mime_type
+                                        if let btree_map::Entry::Vacant(entry) =
+                                            fetch_parts.entry(mime_part.blob_index + MESSAGE_PARTS)
                                         {
-                                            if let btree_map::Entry::Vacant(entry) = fetch_parts
-                                                .entry(mime_part.blob_index + MESSAGE_PARTS)
-                                            {
-                                                entry.insert((mime_part, *part));
-                                            }
+                                            entry.insert((mime_part, *part));
                                         }
                                     }
-                                });
-                            }
-                            if arguments.fetch_all_body_values || arguments.fetch_html_body_values {
-                                message_data.html_body.iter().for_each(|part| {
-                                    if let Some(mime_part) = message_data.mime_parts.get(*part + 1)
+                                }
+                            });
+                        }
+                        if self.arguments.fetch_all_body_values
+                            || self.arguments.fetch_html_body_values
+                        {
+                            message_data.html_body.iter().for_each(|part| {
+                                if let Some(mime_part) = message_data.mime_parts.get(*part + 1) {
+                                    if let MimePartType::Html | MimePartType::Text =
+                                        mime_part.mime_type
                                     {
-                                        if let MimePartType::Html | MimePartType::Text =
-                                            mime_part.mime_type
+                                        if let btree_map::Entry::Vacant(entry) =
+                                            fetch_parts.entry(mime_part.blob_index + MESSAGE_PARTS)
                                         {
-                                            if let btree_map::Entry::Vacant(entry) = fetch_parts
-                                                .entry(mime_part.blob_index + MESSAGE_PARTS)
-                                            {
-                                                entry.insert((mime_part, *part));
-                                            }
+                                            entry.insert((mime_part, *part));
                                         }
                                     }
-                                });
-                            }
+                                }
+                            });
+                        }
 
-                            if !fetch_parts.is_empty() {
-                                let blobs = fetch_parts
-                                    .keys()
-                                    .map(|k| {
-                                        if arguments.max_body_value_bytes == 0 {
-                                            (*k, 0..u32::MAX)
-                                        } else {
-                                            (*k, 0..(arguments.max_body_value_bytes + 10) as u32)
-                                        }
-                                    })
-                                    .collect();
-                                JSONValue::Object(HashMap::from_iter(
-                                    self.get_blobs(
-                                        request.account_id,
+                        if !fetch_parts.is_empty() {
+                            let blobs = fetch_parts
+                                .keys()
+                                .map(|k| {
+                                    if self.arguments.max_body_value_bytes == 0 {
+                                        (*k, 0..u32::MAX)
+                                    } else {
+                                        (*k, 0..(self.arguments.max_body_value_bytes + 10) as u32)
+                                    }
+                                })
+                                .collect();
+                            JSONValue::Object(HashMap::from_iter(
+                                self.store
+                                    .get_blobs(
+                                        self.account_id,
                                         Collection::Mail,
                                         document_id,
                                         blobs,
@@ -624,47 +514,66 @@ where
                                                     },
                                                     |s| s,
                                                 ),
-                                                &arguments,
+                                                &self.arguments,
                                             ),
                                         )
                                     }),
-                                ))
-                            } else {
-                                JSONValue::Null
-                            }
+                            ))
+                        } else {
+                            JSONValue::Null
                         }
-                        MailProperties::BodyStructure => {
-                            if let Some(body_structure) = add_body_structure(
-                                message_outline.as_ref().unwrap(),
-                                &message_data.mime_parts,
-                                &arguments.body_properties,
-                                message_raw_ref,
-                                &base_blob_id,
-                            ) {
-                                body_structure
-                            } else {
-                                JSONValue::Null
-                            }
-                        }
-                    };
-
-                    if !value.is_null() {
-                        entry.insert(value);
                     }
+                    MailProperties::BodyStructure => {
+                        if let Some(body_structure) = add_body_structure(
+                            message_outline.as_ref().unwrap(),
+                            &message_data.mime_parts,
+                            &self.arguments.body_properties,
+                            message_raw_ref,
+                            &base_blob_id,
+                        ) {
+                            body_structure
+                        } else {
+                            JSONValue::Null
+                        }
+                    }
+                };
+
+                if !value.is_null() {
+                    entry.insert(value);
                 }
             }
-
-            results.push(result.into());
         }
 
-        let mut obj = HashMap::new();
-        obj.insert(
-            "state".to_string(),
-            self.get_state(request.account_id, Collection::Mail)?.into(),
-        );
-        obj.insert("list".to_string(), results.into());
-        obj.insert("notFound".to_string(), not_found.into());
-        Ok(obj.into())
+        Ok(Some(result.into()))
+    }
+
+    fn collection() -> Collection {
+        Collection::Mail
+    }
+
+    fn map_ids<W>(&self, document_ids: W) -> jmap::Result<Vec<JMAPId>>
+    where
+        W: Iterator<Item = DocumentId>,
+    {
+        let document_ids = document_ids.collect::<Vec<DocumentId>>();
+        Ok(self
+            .store
+            .get_multi_document_tag_id(
+                self.account_id,
+                Collection::Mail,
+                document_ids.iter().copied(),
+                MessageField::ThreadId.into(),
+            )?
+            .into_iter()
+            .zip(document_ids)
+            .filter_map(|(thread_id, document_id)| {
+                JMAPId::from_parts(*thread_id?, document_id).into()
+            })
+            .collect::<Vec<JMAPId>>())
+    }
+
+    fn has_virtual_ids() -> bool {
+        false
     }
 }
 
@@ -1238,6 +1147,78 @@ pub fn transform_json_string(value: JSONValue, as_collection: bool) -> JSONValue
             }
         }
         _ => JSONValue::Null,
+    }
+}
+
+impl MailGetArguments {
+    pub fn parse_arguments(arguments: HashMap<String, JSONValue>) -> jmap::Result<Self> {
+        let mut body_properties = None;
+        let mut fetch_text_body_values = false;
+        let mut fetch_html_body_values = false;
+        let mut fetch_all_body_values = false;
+        let mut max_body_value_bytes = 0;
+
+        for (arg_name, arg_value) in arguments {
+            match arg_name.as_str() {
+                "bodyProperties" => body_properties = arg_value.parse_array_items(true)?,
+                "fetchTextBodyValues" => fetch_text_body_values = arg_value.parse_bool()?,
+                "fetchHtmlBodyValues" => fetch_html_body_values = arg_value.parse_bool()?,
+                "fetchAllBodyValues" => fetch_all_body_values = arg_value.parse_bool()?,
+                "maxBodyValueBytes" => {
+                    max_body_value_bytes = arg_value.parse_unsigned_int(false)?.unwrap() as usize
+                }
+                _ => {
+                    return Err(MethodError::InvalidArguments(format!(
+                        "Unknown argument: '{}'.",
+                        arg_name
+                    )))
+                }
+            }
+        }
+
+        Ok(MailGetArguments {
+            body_properties: body_properties.unwrap_or_else(|| {
+                vec![
+                    MailBodyProperties::PartId,
+                    MailBodyProperties::BlobId,
+                    MailBodyProperties::Size,
+                    MailBodyProperties::Name,
+                    MailBodyProperties::Type,
+                    MailBodyProperties::Charset,
+                    MailBodyProperties::Disposition,
+                    MailBodyProperties::Cid,
+                    MailBodyProperties::Language,
+                    MailBodyProperties::Location,
+                ]
+            }),
+            fetch_text_body_values,
+            fetch_html_body_values,
+            fetch_all_body_values,
+            max_body_value_bytes,
+        })
+    }
+}
+
+impl BlobIdClone for BlobId {
+    fn clone_with_index(&self, blob_index: BlobIndex) -> Self {
+        match self {
+            BlobId::Owned(owned) => {
+                let mut owned = owned.clone();
+                owned.blob_index = blob_index + MESSAGE_PARTS;
+                BlobId::Owned(owned)
+            }
+            BlobId::InnerOwned(inner) => {
+                let mut inner = inner.clone();
+                inner.blob_index = blob_index;
+                BlobId::InnerOwned(inner)
+            }
+            BlobId::InnerTemporary(inner) => {
+                let mut inner = inner.clone();
+                inner.blob_index = blob_index;
+                BlobId::InnerTemporary(inner)
+            }
+            BlobId::Temporary(_) => unreachable!(),
+        }
     }
 }
 

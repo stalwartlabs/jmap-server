@@ -1,6 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use jmap::{id::state::JMAPState, jmap_store::changes::JMAPChanges, protocol::json::JSONValue};
+use jmap::{
+    id::state::JMAPState, jmap_store::changes::JMAPChanges, protocol::json::JSONValue,
+    request::changes::ChangesRequest,
+};
+use jmap_mail::mail::changes::ChangesMail;
 use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
 
 use crate::db_log::assert_compaction;
@@ -148,10 +152,15 @@ where
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
-            let changes = mail_store
-                .get_jmap_changes(account_id, Collection::Mail, state.clone(), 0)
+            let changes: JSONValue = mail_store
+                .changes::<ChangesMail>(ChangesRequest {
+                    account_id,
+                    since_state: state.clone(),
+                    max_changes: 0,
+                    arguments: HashMap::new(),
+                })
                 .unwrap()
-                .result;
+                .into();
 
             assert_eq!(
                 expected_changelog[test_num],
@@ -196,10 +205,15 @@ where
                 let mut int_state = state.clone();
 
                 for _ in 0..100 {
-                    let changes = mail_store
-                        .get_jmap_changes(account_id, Collection::Mail, int_state, max_changes)
+                    let changes: JSONValue = mail_store
+                        .changes::<ChangesMail>(ChangesRequest {
+                            account_id,
+                            since_state: int_state,
+                            max_changes,
+                            arguments: HashMap::new(),
+                        })
                         .unwrap()
-                        .result;
+                        .into();
 
                     assert!(
                         changes.eval_unwrap_unsigned_int("/totalChanges") <= max_changes as u64,
@@ -239,10 +253,15 @@ where
 
     assert_compaction(mail_store, 1);
 
-    let changes = mail_store
-        .get_jmap_changes(account_id, Collection::Mail, JMAPState::Initial, 0)
+    let changes: JSONValue = mail_store
+        .changes::<ChangesMail>(ChangesRequest {
+            account_id,
+            since_state: JMAPState::Initial,
+            max_changes: 0,
+            arguments: HashMap::new(),
+        })
         .unwrap()
-        .result;
+        .into();
 
     assert_eq!(
         changes

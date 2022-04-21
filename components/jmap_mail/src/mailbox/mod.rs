@@ -1,7 +1,6 @@
 pub mod changes;
 pub mod get;
 pub mod query;
-pub mod query_changes;
 pub mod set;
 
 use std::fmt::Display;
@@ -32,15 +31,6 @@ impl StoreDeserialize for Mailbox {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
         bincode::deserialize(bytes).ok()
     }
-}
-
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct MailboxChanges {
-    pub name: Option<String>,
-    pub parent_id: Option<JMAPId>,
-    pub role: Option<Option<String>>,
-    pub sort_order: Option<u32>,
-    pub is_subscribed: Option<bool>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

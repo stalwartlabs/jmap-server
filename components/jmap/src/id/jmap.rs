@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use store::JMAPId;
 
 use crate::{error::method::MethodError, protocol::json::JSONValue};
@@ -20,49 +18,6 @@ impl JMAPIdSerialize for JMAPId {
 
     fn to_jmap_string(&self) -> String {
         format!("i{:02x}", self)
-    }
-}
-
-pub trait JMAPIdReference {
-    fn from_jmap_ref(id: &str, created_ids: &HashMap<String, JSONValue>) -> crate::Result<Self>
-    where
-        Self: Sized;
-}
-
-impl JMAPIdReference for JMAPId {
-    fn from_jmap_ref(id: &str, created_ids: &HashMap<String, JSONValue>) -> crate::Result<Self>
-    where
-        Self: Sized,
-    {
-        if !id.starts_with('#') {
-            JMAPId::from_jmap_string(id)
-                .ok_or_else(|| MethodError::InvalidArguments(format!("Invalid JMAP Id: {}", id)))
-        } else {
-            let id_ref = id.get(1..).ok_or_else(|| {
-                MethodError::InvalidArguments(format!("Invalid reference to JMAP Id: {}", id))
-            })?;
-
-            if let Some(created_id) = created_ids.get(id_ref) {
-                let created_id = created_id
-                    .to_object()
-                    .unwrap()
-                    .get("id")
-                    .unwrap()
-                    .to_string()
-                    .unwrap();
-                JMAPId::from_jmap_string(created_id).ok_or_else(|| {
-                    MethodError::InvalidArguments(format!(
-                        "Invalid referenced JMAP Id: {} ({})",
-                        id_ref, created_id
-                    ))
-                })
-            } else {
-                Err(MethodError::InvalidArguments(format!(
-                    "Reference '{}' not found in createdIds.",
-                    id_ref
-                )))
-            }
-        }
     }
 }
 

@@ -522,11 +522,11 @@ pub struct JMAPConfig {
     pub max_objects_in_set: usize,
 
     pub query_max_results: usize,
+    pub changes_max_results: usize,
     pub mailbox_name_max_len: usize,
     pub mailbox_max_total: usize,
     pub mailbox_max_depth: usize,
     pub mail_attachments_max_size: usize,
-    pub mail_thread_max_results: usize,
     pub mail_import_max_items: usize,
     pub mail_parse_max_items: usize,
 }
@@ -548,12 +548,12 @@ impl From<&EnvSettings> for JMAPConfig {
             max_objects_in_get: 500,
             max_objects_in_set: 500,
             blob_temp_ttl: 3600, //TODO configure all params
+            changes_max_results: 1000,
             query_max_results: 1000,
             mailbox_name_max_len: 255, //TODO implement
             mailbox_max_total: 1000,
             mailbox_max_depth: 10,
             mail_attachments_max_size: 50000000, //TODO implement
-            mail_thread_max_results: 100,
             mail_import_max_items: 2,
             mail_parse_max_items: 5,
             default_language: Language::English,

@@ -8,7 +8,7 @@ use nlp::Language;
 use store::{
     batch::{Document, WriteBatch},
     field::{DefaultOptions, Options, Text},
-    query::{JMAPIdMapFnc, JMAPStoreQuery},
+    query::DefaultIdMapper,
     Collection, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
     TextQuery,
 };
@@ -420,12 +420,12 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+            .query_store::<DefaultIdMapper>(
                 0,
                 Collection::Mail,
                 filter,
                 Comparator::ascending(fields["accession_number"]),
-            ))
+            )
             .unwrap()
         {
             results.push(
@@ -509,12 +509,7 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
-                0,
-                Collection::Mail,
-                filter,
-                Comparator::List(sort),
-            ))
+            .query_store::<DefaultIdMapper>(0, Collection::Mail, filter, Comparator::List(sort))
             .unwrap()
         {
             results.push(

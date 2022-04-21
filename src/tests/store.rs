@@ -155,10 +155,10 @@ fn jmap_mailbox() {
 #[test]
 #[ignore]
 fn insert_test_data() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_jmap_test", true);
+    let (db, _temp_dir) = init_db::<RocksDB>("strdb_jmap_test", true);
 
-    let inbox_id = insert_mailbox(&db, 1, "Inbox", "INBOX");
-    let mut test_dir = PathBuf::from(
+    let _inbox_id = insert_mailbox(&db, 1, "Inbox", "INBOX");
+    let mut _test_dir = PathBuf::from(
         "/home/vagrant/code/jmap-server/components/store_test/resources/jmap_mail_get/",
     ); //env!("CARGO_MANIFEST_DIR"));
        //test_dir.push("resources");

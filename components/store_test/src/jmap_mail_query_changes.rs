@@ -5,10 +5,13 @@ use std::{
 
 use jmap::{
     id::{state::JMAPState, JMAPIdSerialize},
+    jmap_store::query_changes::JMAPQueryChanges,
     protocol::json::JSONValue,
     request::query_changes::QueryChangesRequest,
 };
-use jmap_mail::mail::{import::JMAPMailImport, query_changes::JMAPMailQueryChanges, MessageField};
+use jmap_mail::mail::{
+    changes::ChangesMail, import::JMAPMailImport, query::QueryMail, MessageField,
+};
 use store::{
     batch::{Document, WriteBatch},
     field::DefaultOptions,
@@ -224,7 +227,10 @@ where
                 if test_num == 3 && query.up_to_id.is_null() {
                     continue;
                 }
-                let changes = mail_store.mail_query_changes(query.clone().into()).unwrap();
+                let changes: JSONValue = mail_store
+                    .query_changes::<ChangesMail, QueryMail<T>>(query.clone().into())
+                    .unwrap()
+                    .into();
 
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.

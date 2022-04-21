@@ -64,4 +64,11 @@ impl JSONValue {
         );
         o.into()
     }
+
+    pub fn store_error() -> Self {
+        JSONValue::new_error(
+            SetErrorType::Forbidden,
+            "There was a problem while processing your request.".to_string(),
+        )
+    }
 }

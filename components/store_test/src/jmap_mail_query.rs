@@ -1,10 +1,11 @@
 use jmap::{
     id::JMAPIdSerialize,
+    jmap_store::{get::JMAPGet, query::JMAPQuery},
     protocol::json::JSONValue,
     request::{get::GetRequest, query::QueryRequest},
 };
 use jmap_mail::mail::{
-    get::JMAPMailGet, import::JMAPMailImport, query::JMAPMailQuery, MailProperties, MessageField,
+    get::GetMail, import::JMAPMailImport, query::QueryMail, MailProperties, MessageField,
 };
 use mail_parser::RfcHeader;
 use std::{
@@ -12,13 +13,13 @@ use std::{
     iter::FromIterator,
     time::Instant,
 };
+use store::JMAPIdPrefix;
 use store::{
     chrono::{SecondsFormat, TimeZone, Utc},
-    query::JMAPIdMapFnc,
+    query::DefaultIdMapper,
     AccountId, Collection, Comparator, DocumentId, FieldValue, Filter, Integer, JMAPId, JMAPStore,
     Store, Tag,
 };
-use store::{query::JMAPStoreQuery, JMAPIdPrefix};
 
 use crate::{
     db_insert_filter_sort::FIELDS, deflate_artwork_data, jmap_mail_get::build_mail_get_arguments,
@@ -400,12 +401,12 @@ where
 
     println!("Deleting all messages...");
     for message_id in mail_store
-        .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+        .query_store::<DefaultIdMapper>(
             account_id,
             Collection::Mail,
             Filter::None,
             Comparator::None,
-        ))
+        )
         .unwrap()
     {
         delete_email(mail_store, account_id, message_id);
@@ -643,7 +644,7 @@ where
     ] {
         assert_eq!(
             mail_store
-                .mail_query(
+                .query::<QueryMail<T>>(
                     MailQueryRequest {
                         account_id,
                         filter,
@@ -658,7 +659,7 @@ where
                     .into()
                 )
                 .unwrap()
-                .eval_unwrap_array("/ids")
+                .ids
                 .into_iter()
                 .map(|id| get_message_id(mail_store, id.to_jmap_id().unwrap(), account_id))
                 .collect::<Vec<String>>(),
@@ -945,9 +946,9 @@ where
     ] {
         assert_eq!(
             mail_store
-                .mail_query(query.clone().into())
+                .query::<QueryMail<T>>(query.clone().into())
                 .unwrap()
-                .eval_unwrap_array("/ids")
+                .ids
                 .into_iter()
                 .map(|id| get_message_id(mail_store, id.to_jmap_id().unwrap(), account_id))
                 .collect::<Vec<String>>(),
@@ -956,9 +957,9 @@ where
         query.collapse_threads = true;
         assert_eq!(
             mail_store
-                .mail_query(query.into())
+                .query::<QueryMail<T>>(query.into())
                 .unwrap()
-                .eval_unwrap_array("/ids")
+                .ids
                 .into_iter()
                 .map(|id| get_message_id(mail_store, id.to_jmap_id().unwrap(), account_id))
                 .collect::<Vec<String>>(),
@@ -972,7 +973,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let doc_id = mail_store
-        .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+        .query_store::<DefaultIdMapper>(
             account_id,
             Collection::Mail,
             Filter::eq(
@@ -980,7 +981,7 @@ where
                 FieldValue::Keyword(anchor.into()),
             ),
             Comparator::None,
-        ))
+        )
         .unwrap()
         .next()
         .unwrap()
@@ -1003,13 +1004,15 @@ fn get_message_id<T>(mail_store: &JMAPStore<T>, jmap_id: JMAPId, account_id: Acc
 where
     T: for<'x> Store<'x> + 'static,
 {
-    mail_store
-        .mail_get(GetRequest {
-            account_id,
-            ids: vec![jmap_id].into(),
-            properties: vec![MailProperties::MessageId.to_string().into()].into(),
-            arguments: build_mail_get_arguments(vec![], false, false, false, 100),
-        })
-        .unwrap()
-        .eval_unwrap_string("/list/0/messageId/0")
+    JSONValue::from(
+        mail_store
+            .get::<GetMail<T>>(GetRequest {
+                account_id,
+                ids: vec![jmap_id].into(),
+                properties: vec![MailProperties::MessageId.to_string().into()].into(),
+                arguments: build_mail_get_arguments(vec![], false, false, false, 100),
+            })
+            .unwrap(),
+    )
+    .eval_unwrap_string("/list/0/messageId/0")
 }

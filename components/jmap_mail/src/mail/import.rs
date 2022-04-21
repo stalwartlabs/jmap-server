@@ -4,15 +4,16 @@ use crate::mail::Keyword;
 use crate::mail::{parse::get_message_blob, MESSAGE_RAW};
 
 use jmap::error::method::MethodError;
+use jmap::error::set::SetErrorType;
 use jmap::id::blob::BlobId;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
-use jmap::jmap_store::changes::JMAPChanges;
+use jmap::jmap_store::import::ImportObject;
 use jmap::protocol::json::JSONValue;
 use jmap::request::import::ImportRequest;
 use store::batch::Document;
 use store::field::{DefaultOptions, Options};
-use store::query::{JMAPIdMapFnc, JMAPStoreQuery};
+use store::query::DefaultIdMapper;
 use store::tracing::debug;
 use store::tracing::log::error;
 use store::{
@@ -23,30 +24,60 @@ use store::{Collection, DocumentId, JMAPIdPrefix};
 
 use crate::mail::{parse::build_message_document, MessageField};
 
-pub struct MailImportRequest {
-    pub emails: Vec<MailImportItem>,
+pub struct ImportMail<'y, T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub store: &'y JMAPStore<T>,
+    pub account_id: AccountId,
+    pub mailbox_ids: RoaringBitmap,
 }
-pub struct MailImportItem {
-    pub id: String,
+pub struct ImportItem {
     pub blob_id: BlobId,
     pub mailbox_ids: Vec<DocumentId>,
     pub keywords: Vec<Keyword>,
     pub received_at: Option<i64>,
 }
 
-impl MailImportRequest {
-    fn parse_arguments(mut arguments: HashMap<String, JSONValue>) -> jmap::Result<Self> {
-        let arguments = arguments
+impl<'y, T> ImportObject<'y, T> for ImportMail<'y, T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    type Item = ImportItem;
+
+    fn init(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> jmap::Result<Self> {
+        Ok(ImportMail {
+            store,
+            account_id: request.account_id,
+            mailbox_ids: store
+                .get_document_ids(request.account_id, Collection::Mailbox)?
+                .unwrap_or_default(),
+        })
+    }
+
+    fn parse_items(
+        &self,
+        request: &mut ImportRequest,
+    ) -> jmap::Result<HashMap<String, Self::Item>> {
+        let arguments = request
+            .arguments
             .remove("emails")
             .ok_or_else(|| MethodError::InvalidArguments("Missing emails property.".to_string()))?
             .unwrap_object()
             .ok_or_else(|| MethodError::InvalidArguments("Expected email object.".to_string()))?;
-        let mut emails = Vec::with_capacity(arguments.len());
+
+        if self.store.config.mail_import_max_items > 0
+            && arguments.len() > self.store.config.mail_import_max_items
+        {
+            return Err(MethodError::RequestTooLarge);
+        }
+
+        let mut emails = HashMap::with_capacity(arguments.len());
         for (id, item_value) in arguments {
             let mut item_value = item_value.unwrap_object().ok_or_else(|| {
                 MethodError::InvalidArguments(format!("Expected mailImport object for {}.", id))
             })?;
-            emails.push(MailImportItem {
+            let item = ImportItem {
                 blob_id: item_value
                     .remove("blobId")
                     .ok_or_else(|| {
@@ -87,17 +118,58 @@ impl MailImportRequest {
                 } else {
                     None
                 },
-                id,
-            });
+            };
+            emails.insert(id, item);
         }
 
-        Ok(MailImportRequest { emails })
+        Ok(emails)
+    }
+
+    fn import_item(&self, item: Self::Item) -> jmap::Result<Result<JSONValue, JSONValue>> {
+        if item.mailbox_ids.is_empty() {
+            return Ok(Err(JSONValue::new_invalid_property(
+                "mailboxIds",
+                "Message must belong to at least one mailbox.",
+            )));
+        }
+
+        for &mailbox_id in &item.mailbox_ids {
+            if !self.mailbox_ids.contains(mailbox_id) {
+                return Ok(Err(JSONValue::new_invalid_property(
+                    "mailboxIds",
+                    format!(
+                        "Mailbox {} does not exist.",
+                        (mailbox_id as JMAPId).to_jmap_string()
+                    ),
+                )));
+            }
+        }
+
+        if let Some(blob) =
+            self.store
+                .download_blob(self.account_id, &item.blob_id, get_message_blob)?
+        {
+            Ok(Ok(self.store.mail_import_blob(
+                self.account_id,
+                blob,
+                item.mailbox_ids,
+                item.keywords.into_iter().map(|k| k.tag).collect(),
+                item.received_at,
+            )?))
+        } else {
+            Ok(Err(JSONValue::new_error(
+                SetErrorType::BlobNotFound,
+                format!("BlobId {} not found.", item.blob_id.to_jmap_string()),
+            )))
+        }
+    }
+
+    fn collection() -> Collection {
+        Collection::Mail
     }
 }
 
 pub trait JMAPMailImport {
-    fn mail_import(&self, request: ImportRequest) -> jmap::Result<JSONValue>;
-
     fn mail_import_blob(
         &self,
         account_id: AccountId,
@@ -131,107 +203,6 @@ impl<T> JMAPMailImport for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_import(&self, request: ImportRequest) -> jmap::Result<JSONValue> {
-        let old_state = self.get_state(request.account_id, Collection::Mail)?;
-        if let Some(if_in_state) = request.if_in_state {
-            if old_state != if_in_state {
-                return Err(MethodError::StateMismatch);
-            }
-        }
-
-        let emails = MailImportRequest::parse_arguments(request.arguments)?.emails;
-        if emails.len() > self.config.mail_import_max_items {
-            return Err(MethodError::RequestTooLarge);
-        }
-
-        let mailbox_ids = self
-            .get_document_ids(request.account_id, Collection::Mailbox)?
-            .unwrap_or_else(RoaringBitmap::new);
-
-        let mut created = HashMap::with_capacity(emails.len());
-        let mut not_created = HashMap::with_capacity(emails.len());
-
-        'main: for item in emails {
-            if item.mailbox_ids.is_empty() {
-                not_created.insert(
-                    item.id,
-                    JSONValue::new_invalid_property(
-                        "mailboxIds",
-                        "Message must belong to at least one mailbox.",
-                    ),
-                );
-                continue 'main;
-            }
-            for &mailbox_id in &item.mailbox_ids {
-                if !mailbox_ids.contains(mailbox_id) {
-                    not_created.insert(
-                        item.id,
-                        JSONValue::new_invalid_property(
-                            "mailboxIds",
-                            format!(
-                                "Mailbox {} does not exist.",
-                                (mailbox_id as JMAPId).to_jmap_string()
-                            ),
-                        ),
-                    );
-                    continue 'main;
-                }
-            }
-
-            if let Some(blob) =
-                self.download_blob(request.account_id, &item.blob_id, get_message_blob)?
-            {
-                created.insert(
-                    item.id,
-                    self.mail_import_blob(
-                        request.account_id,
-                        blob,
-                        item.mailbox_ids,
-                        item.keywords.into_iter().map(|k| k.tag).collect(),
-                        item.received_at,
-                    )?,
-                );
-            } else {
-                not_created.insert(
-                    item.id,
-                    JSONValue::new_invalid_property(
-                        "blobId",
-                        format!("BlobId {} not found.", item.blob_id.to_jmap_string()),
-                    ),
-                );
-            }
-        }
-
-        let mut obj = HashMap::new();
-        obj.insert(
-            "newState".to_string(),
-            if !created.is_empty() {
-                self.get_state(request.account_id, Collection::Mail)?
-            } else {
-                old_state.clone()
-            }
-            .into(),
-        );
-        obj.insert("oldState".to_string(), old_state.into());
-        obj.insert(
-            "created".to_string(),
-            if !created.is_empty() {
-                created.into()
-            } else {
-                JSONValue::Null
-            },
-        );
-        obj.insert(
-            "notCreated".to_string(),
-            if !not_created.is_empty() {
-                not_created.into()
-            } else {
-                JSONValue::Null
-            },
-        );
-        Ok(obj.into())
-    }
-
     fn mail_import_blob(
         &self,
         account_id: AccountId,
@@ -274,7 +245,7 @@ where
                 .get_multi_document_tag_id(
                     account_id,
                     Collection::Mail,
-                    self.query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+                    self.query_store::<DefaultIdMapper>(
                         account_id,
                         Collection::Mail,
                         Filter::and(vec![
@@ -295,7 +266,7 @@ where
                             ),
                         ]),
                         Comparator::None,
-                    ))?
+                    )?
                     .into_iter()
                     .map(|id| id.get_document_id())
                     .collect::<Vec<u32>>()

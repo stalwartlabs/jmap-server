@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use jmap::{protocol::json::JSONValue, request::get::GetRequest};
-use jmap_mail::{mail::import::JMAPMailImport, thread::get::JMAPMailThreadGet};
+use jmap::{jmap_store::get::JMAPGet, protocol::json::JSONValue, request::get::GetRequest};
+use jmap_mail::{mail::import::JMAPMailImport, thread::get::GetThread};
 use store::{AccountId, JMAPStore, Store};
 
 pub fn jmap_mail_thread<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
@@ -26,15 +26,17 @@ where
     }
 
     assert_eq!(
-        mail_store
-            .thread_get(GetRequest {
-                account_id,
-                ids: Some(vec![thread_id]),
-                properties: JSONValue::Null,
-                arguments: HashMap::new()
-            })
-            .unwrap()
-            .eval_unwrap_array("/list/0/emailIds"),
+        JSONValue::from(
+            mail_store
+                .get::<GetThread<T>>(GetRequest {
+                    account_id,
+                    ids: Some(vec![thread_id]),
+                    properties: JSONValue::Null,
+                    arguments: HashMap::new()
+                })
+                .unwrap()
+        )
+        .eval_unwrap_array("/list/0/emailIds"),
         expected_result
     );
 }

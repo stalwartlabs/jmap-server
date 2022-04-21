@@ -1,6 +1,6 @@
-use jmap::{protocol::json::JSONValue, request::get::GetRequest};
+use jmap::{jmap_store::get::JMAPGet, protocol::json::JSONValue, request::get::GetRequest};
 use jmap_mail::mail::{
-    get::JMAPMailGet, HeaderName, MailBodyProperties, MailHeaderForm, MailHeaderProperty,
+    get::GetMail, HeaderName, MailBodyProperties, MailHeaderForm, MailHeaderProperty,
     MailProperties,
 };
 use mail_parser::RfcHeader;
@@ -120,64 +120,66 @@ where
         );
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {
-            mail_store
-                .mail_get(GetRequest {
-                    account_id,
-                    ids: vec![jmap_id].into(),
-                    properties: vec![
-                        MailProperties::Id,
-                        MailProperties::BlobId,
-                        MailProperties::ThreadId,
-                        MailProperties::MailboxIds,
-                        MailProperties::Keywords,
-                        MailProperties::Size,
-                        MailProperties::ReceivedAt,
-                        MailProperties::MessageId,
-                        MailProperties::InReplyTo,
-                        MailProperties::References,
-                        MailProperties::Sender,
-                        MailProperties::From,
-                        MailProperties::To,
-                        MailProperties::Cc,
-                        MailProperties::Bcc,
-                        MailProperties::ReplyTo,
-                        MailProperties::Subject,
-                        MailProperties::SentAt,
-                        MailProperties::HasAttachment,
-                        MailProperties::Preview,
-                        MailProperties::BodyValues,
-                        MailProperties::TextBody,
-                        MailProperties::HtmlBody,
-                        MailProperties::Attachments,
-                        MailProperties::BodyStructure,
-                    ]
-                    .into_iter()
-                    .map(|p| p.to_string().into())
-                    .collect::<Vec<_>>()
-                    .into(),
-                    arguments: build_mail_get_arguments(
-                        vec![
-                            MailBodyProperties::PartId,
-                            MailBodyProperties::BlobId,
-                            MailBodyProperties::Size,
-                            MailBodyProperties::Name,
-                            MailBodyProperties::Type,
-                            MailBodyProperties::Charset,
-                            MailBodyProperties::Headers,
-                            MailBodyProperties::Disposition,
-                            MailBodyProperties::Cid,
-                            MailBodyProperties::Language,
-                            MailBodyProperties::Location,
-                        ],
-                        true,
-                        true,
-                        true,
-                        100,
-                    ),
-                })
-                .unwrap()
-                .eval("/list")
-                .unwrap()
+            JSONValue::from(
+                mail_store
+                    .get::<GetMail<T>>(GetRequest {
+                        account_id,
+                        ids: vec![jmap_id].into(),
+                        properties: vec![
+                            MailProperties::Id,
+                            MailProperties::BlobId,
+                            MailProperties::ThreadId,
+                            MailProperties::MailboxIds,
+                            MailProperties::Keywords,
+                            MailProperties::Size,
+                            MailProperties::ReceivedAt,
+                            MailProperties::MessageId,
+                            MailProperties::InReplyTo,
+                            MailProperties::References,
+                            MailProperties::Sender,
+                            MailProperties::From,
+                            MailProperties::To,
+                            MailProperties::Cc,
+                            MailProperties::Bcc,
+                            MailProperties::ReplyTo,
+                            MailProperties::Subject,
+                            MailProperties::SentAt,
+                            MailProperties::HasAttachment,
+                            MailProperties::Preview,
+                            MailProperties::BodyValues,
+                            MailProperties::TextBody,
+                            MailProperties::HtmlBody,
+                            MailProperties::Attachments,
+                            MailProperties::BodyStructure,
+                        ]
+                        .into_iter()
+                        .map(|p| p.to_string().into())
+                        .collect::<Vec<_>>()
+                        .into(),
+                        arguments: build_mail_get_arguments(
+                            vec![
+                                MailBodyProperties::PartId,
+                                MailBodyProperties::BlobId,
+                                MailBodyProperties::Size,
+                                MailBodyProperties::Name,
+                                MailBodyProperties::Type,
+                                MailBodyProperties::Charset,
+                                MailBodyProperties::Headers,
+                                MailBodyProperties::Disposition,
+                                MailBodyProperties::Cid,
+                                MailBodyProperties::Language,
+                                MailBodyProperties::Location,
+                            ],
+                            true,
+                            true,
+                            true,
+                            100,
+                        ),
+                    })
+                    .unwrap(),
+            )
+            .eval("/list")
+            .unwrap()
         } else {
             let mut properties = vec![
                 MailProperties::Id,
@@ -359,40 +361,42 @@ where
             let mut result = HashMap::new();
             for property in properties {
                 result.extend(
-                    mail_store
-                        .mail_get(GetRequest {
-                            account_id,
-                            ids: vec![jmap_id].into(),
-                            properties: vec![property.to_string().into()].into(),
-                            arguments: build_mail_get_arguments(
-                                vec![
-                                    MailBodyProperties::Size,
-                                    MailBodyProperties::Name,
-                                    MailBodyProperties::Type,
-                                    MailBodyProperties::Charset,
-                                    MailBodyProperties::Disposition,
-                                    MailBodyProperties::Cid,
-                                    MailBodyProperties::Language,
-                                    MailBodyProperties::Location,
-                                    MailBodyProperties::Header(MailHeaderProperty::new_other(
-                                        "X-Custom-Header".into(),
-                                        MailHeaderForm::Raw,
-                                        false,
-                                    )),
-                                    MailBodyProperties::Header(MailHeaderProperty::new_other(
-                                        "X-Custom-Header-2".into(),
-                                        MailHeaderForm::Raw,
-                                        false,
-                                    )),
-                                ],
-                                true,
-                                true,
-                                true,
-                                100,
-                            ),
-                        })
-                        .unwrap()
-                        .eval_unwrap_object("/list/0"),
+                    JSONValue::from(
+                        mail_store
+                            .get::<GetMail<T>>(GetRequest {
+                                account_id,
+                                ids: vec![jmap_id].into(),
+                                properties: vec![property.to_string().into()].into(),
+                                arguments: build_mail_get_arguments(
+                                    vec![
+                                        MailBodyProperties::Size,
+                                        MailBodyProperties::Name,
+                                        MailBodyProperties::Type,
+                                        MailBodyProperties::Charset,
+                                        MailBodyProperties::Disposition,
+                                        MailBodyProperties::Cid,
+                                        MailBodyProperties::Language,
+                                        MailBodyProperties::Location,
+                                        MailBodyProperties::Header(MailHeaderProperty::new_other(
+                                            "X-Custom-Header".into(),
+                                            MailHeaderForm::Raw,
+                                            false,
+                                        )),
+                                        MailBodyProperties::Header(MailHeaderProperty::new_other(
+                                            "X-Custom-Header-2".into(),
+                                            MailHeaderForm::Raw,
+                                            false,
+                                        )),
+                                    ],
+                                    true,
+                                    true,
+                                    true,
+                                    100,
+                                ),
+                            })
+                            .unwrap(),
+                    )
+                    .eval_unwrap_object("/list/0"),
                 );
             }
             JSONValue::Array(vec![JSONValue::Object(result)])

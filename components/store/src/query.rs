@@ -20,47 +20,20 @@ struct State {
     bm: Option<RoaringBitmap>,
 }
 
-pub type JMAPIdMapFnc = fn(DocumentId) -> crate::Result<Option<JMAPId>>;
-
-pub struct JMAPStoreQuery<T>
-where
-    T: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
-{
-    pub account_id: AccountId,
-    pub collection: Collection,
-    pub filter_map_fnc: Option<T>,
-    pub filter: Filter,
-    pub sort: Comparator,
+pub trait QueryFilterMap {
+    fn filter_map_id(&mut self, document_id: DocumentId) -> crate::Result<Option<JMAPId>>;
 }
 
-impl<T> JMAPStoreQuery<T>
-where
-    T: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
-{
-    pub fn new(
-        account_id: AccountId,
-        collection: Collection,
-        filter: Filter,
-        sort: Comparator,
-    ) -> Self {
-        Self {
-            account_id,
-            collection,
-            filter_map_fnc: None,
-            filter,
-            sort,
-        }
-    }
-}
+pub struct DefaultIdMapper {}
 
 pub struct StoreIterator<'x, T, U>
 where
     T: Store<'x>,
-    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+    U: QueryFilterMap,
 {
     store: &'x JMAPStore<T>,
     iterators: Vec<IndexIterator<'x, T>>,
-    filter_map_fnc: Option<U>,
+    filter_map: Option<&'x mut U>,
     current: usize,
 }
 
@@ -104,37 +77,47 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     #[allow(clippy::blocks_in_if_conditions)]
-    pub fn query<'y: 'x, 'x, U>(
+    pub fn query_store<'y: 'x, 'x, U>(
         &'y self,
-        mut request: JMAPStoreQuery<U>,
+        account_id: AccountId,
+        collection: Collection,
+        filter: Filter,
+        sort: Comparator,
     ) -> crate::Result<StoreIterator<'x, T, U>>
     where
-        U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+        U: QueryFilterMap,
     {
         let document_ids = self
-            .get_document_ids(request.account_id, request.collection)?
+            .get_document_ids(account_id, collection)?
             .unwrap_or_else(RoaringBitmap::new);
 
-        let filter = match request.filter {
+        let filter = match filter {
             Filter::Operator(filter) => filter,
             Filter::None => {
                 return Ok(StoreIterator::new(
                     self,
                     document_ids.clone(),
                     document_ids,
-                    request,
+                    account_id,
+                    collection,
+                    sort,
                 ));
             }
             Filter::DocumentSet(set) => {
-                request.filter = Filter::None;
-                return Ok(StoreIterator::new(self, set, document_ids, request));
+                return Ok(StoreIterator::new(
+                    self,
+                    set,
+                    document_ids,
+                    account_id,
+                    collection,
+                    sort,
+                ));
             }
             _ => FilterOperator {
                 operator: LogicalOperator::And,
-                conditions: vec![request.filter],
+                conditions: vec![filter],
             },
         };
-        request.filter = Filter::None;
 
         let mut state = State {
             op: filter.operator,
@@ -154,8 +137,8 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.get_bitmap(&BitmapKey::serialize_keyword(
-                                        request.account_id,
-                                        request.collection,
+                                        account_id,
+                                        collection,
                                         filter_cond.field,
                                         &keyword,
                                     ))?,
@@ -171,8 +154,8 @@ where
                                         TokenIterator::new(&text, Language::English, false)
                                             .map(|token| {
                                                 BitmapKey::serialize_keyword(
-                                                    request.account_id,
-                                                    request.collection,
+                                                    account_id,
+                                                    collection,
                                                     field_cond_field,
                                                     &token.word,
                                                 )
@@ -197,8 +180,8 @@ where
                                             if !requested_ids.contains(&match_term.id) {
                                                 requested_ids.insert(match_term.id);
                                                 keys.push(BitmapKey::serialize_term(
-                                                    request.account_id,
-                                                    request.collection,
+                                                    account_id,
+                                                    collection,
                                                     filter_cond.field,
                                                     match_term.id,
                                                     true,
@@ -216,8 +199,8 @@ where
                                                         self.db.get::<TermIndex>(
                                                             ColumnFamily::Values,
                                                             &ValueKey::serialize_term_index(
-                                                                request.account_id,
-                                                                request.collection,
+                                                                account_id,
+                                                                collection,
                                                                 document_id,
                                                             ),
                                                         )?
@@ -269,8 +252,8 @@ where
                                                 if !requested_ids.contains(&term_op) {
                                                     requested_ids.insert(term_op);
                                                     keys.push(BitmapKey::serialize_term(
-                                                        request.account_id,
-                                                        request.collection,
+                                                        account_id,
+                                                        collection,
                                                         filter_cond.field,
                                                         term_op.0,
                                                         term_op.1,
@@ -311,8 +294,8 @@ where
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
-                                            request.account_id,
-                                            request.collection,
+                                            account_id,
+                                            collection,
                                             filter_cond.field,
                                             &i.to_be_bytes(),
                                         ),
@@ -327,8 +310,8 @@ where
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
-                                            request.account_id,
-                                            request.collection,
+                                            account_id,
+                                            collection,
                                             filter_cond.field,
                                             &i.to_be_bytes(),
                                         ),
@@ -343,8 +326,8 @@ where
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
-                                            request.account_id,
-                                            request.collection,
+                                            account_id,
+                                            collection,
                                             filter_cond.field,
                                             &f.to_be_bytes(),
                                         ),
@@ -358,8 +341,8 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.get_bitmap(&BitmapKey::serialize_tag(
-                                        request.account_id,
-                                        request.collection,
+                                        account_id,
+                                        collection,
                                         filter_cond.field,
                                         &tag,
                                     ))?,
@@ -399,7 +382,9 @@ where
             self,
             state.bm.unwrap_or_else(RoaringBitmap::new),
             document_ids,
-            request,
+            account_id,
+            collection,
+            sort,
         ))
     }
 }
@@ -407,46 +392,40 @@ where
 impl<'x, T, U> StoreIterator<'x, T, U>
 where
     T: Store<'x>,
-    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+    U: QueryFilterMap,
 {
     pub fn new(
         store: &'x JMAPStore<T>,
         mut results: RoaringBitmap,
         document_ids: RoaringBitmap,
-        request: JMAPStoreQuery<U>,
+        account_id: AccountId,
+        collection: Collection,
+        sort: Comparator,
     ) -> Self {
         let mut iterators: Vec<IndexIterator<T>> = Vec::new();
-        for comp in (if let Comparator::List(list) = request.sort {
+        for comp in (if let Comparator::List(list) = sort {
             list
         } else {
-            vec![request.sort]
+            vec![sort]
         })
         .into_iter()
         {
             iterators.push(IndexIterator {
                 index: match comp {
                     Comparator::Field(comp) => {
-                        let prefix = IndexKey::serialize_field(
-                            request.account_id,
-                            request.collection as u8,
-                            comp.field,
-                        );
+                        let prefix =
+                            IndexKey::serialize_field(account_id, collection as u8, comp.field);
                         IndexType::DB(DBIndex {
                             it: None,
                             start_key: if !comp.ascending {
-                                let (key_account_id, key_collection, key_field) = if comp.field
-                                    < FieldId::MAX
-                                {
-                                    (request.account_id, request.collection as u8, comp.field + 1)
-                                } else if (request.collection as u8) < u8::MAX {
-                                    (
-                                        request.account_id,
-                                        (request.collection as u8) + 1,
-                                        comp.field,
-                                    )
-                                } else {
-                                    (request.account_id + 1, request.collection as u8, comp.field)
-                                };
+                                let (key_account_id, key_collection, key_field) =
+                                    if comp.field < FieldId::MAX {
+                                        (account_id, collection as u8, comp.field + 1)
+                                    } else if (collection as u8) < u8::MAX {
+                                        (account_id, (collection as u8) + 1, comp.field)
+                                    } else {
+                                        (account_id + 1, collection as u8, comp.field)
+                                    };
                                 IndexKey::serialize_field(key_account_id, key_collection, key_field)
                             } else {
                                 prefix.clone()
@@ -482,9 +461,14 @@ where
         StoreIterator {
             store,
             iterators,
-            filter_map_fnc: request.filter_map_fnc,
+            filter_map: None,
             current: 0,
         }
+    }
+
+    pub fn set_filter_map(mut self, filter_map: &'x mut U) -> Self {
+        self.filter_map = Some(filter_map);
+        self
     }
 
     pub fn len(&self) -> usize {
@@ -499,7 +483,7 @@ where
 impl<'x, T, U> Iterator for StoreIterator<'x, T, U>
 where
     T: Store<'x>,
-    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
+    U: QueryFilterMap,
 {
     type Item = JMAPId;
 
@@ -702,8 +686,8 @@ where
                 }
             }
 
-            if let Some(filter_map_fnc) = &mut self.filter_map_fnc {
-                if let Some(jmap_id) = filter_map_fnc(doc_id).ok()? {
+            if let Some(filter_map) = &mut self.filter_map {
+                if let Some(jmap_id) = filter_map.filter_map_id(doc_id).ok()? {
                     return Some(jmap_id);
                 } else {
                     continue 'outer;
@@ -721,5 +705,11 @@ where
             it.remaining.len() as usize,
             Some(it.remaining.len() as usize),
         )
+    }
+}
+
+impl QueryFilterMap for DefaultIdMapper {
+    fn filter_map_id(&mut self, document_id: DocumentId) -> crate::Result<Option<JMAPId>> {
+        Ok(Some(document_id as JMAPId))
     }
 }

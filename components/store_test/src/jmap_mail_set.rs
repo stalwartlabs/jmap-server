@@ -2,12 +2,12 @@ use std::{collections::HashMap, fs, iter::FromIterator, path::PathBuf};
 
 use jmap::{
     id::JMAPIdSerialize,
-    jmap_store::blob::JMAPBlobStore,
+    jmap_store::{blob::JMAPBlobStore, get::JMAPGet, set::JMAPSet},
     protocol::json::{JSONNumber, JSONValue},
     request::{get::GetRequest, set::SetRequest},
 };
 use jmap_mail::mail::{
-    get::JMAPMailGet, import::JMAPMailImport, parse::get_message_blob, set::JMAPMailSet,
+    get::GetMail, import::JMAPMailImport, parse::get_message_blob, set::SetMail,
     MailBodyProperties, MailProperties,
 };
 use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
@@ -132,8 +132,8 @@ where
             continue;
         }
 
-        let result = mail_store
-            .mail_set(SetRequest {
+        let result: JSONValue = mail_store
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: Vec::from_iter(
@@ -159,7 +159,8 @@ where
                 destroy: vec![],
                 arguments: HashMap::new(),
             })
-            .unwrap();
+            .unwrap()
+            .into();
 
         assert_eq!(result.eval("/notCreated").unwrap(), HashMap::new().into());
 
@@ -178,9 +179,9 @@ where
         let jmap_id = JMAPId::from_jmap_string(&jmap_id_str).unwrap();
         message_ids.push(jmap_id_str);
 
-        let parsed_message = SortedJSONValue::from(
+        let parsed_message = SortedJSONValue::from(JSONValue::from(
             mail_store
-                .mail_get(GetRequest {
+                .get::<GetMail<T>>(GetRequest {
                     account_id,
                     ids: vec![jmap_id].into(),
                     properties: vec![
@@ -234,9 +235,8 @@ where
                     ),
                 })
                 .unwrap()
-                .eval("/list")
-                .unwrap(),
-        );
+                .list,
+        ));
 
         file_name.set_extension("jmap");
 
@@ -290,19 +290,21 @@ fn get_mailboxes_and_keywords<T>(
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut result = mail_store
-        .mail_get(GetRequest {
-            account_id,
-            ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
-            properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
-                .into_iter()
-                .map(|p| p.to_string().into())
-                .collect::<Vec<_>>()
-                .into(),
-            arguments: build_mail_get_arguments(vec![], false, false, false, 100),
-        })
-        .unwrap()
-        .eval_unwrap_object("/list/0");
+    let mut result = JSONValue::from(
+        mail_store
+            .get::<GetMail<T>>(GetRequest {
+                account_id,
+                ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
+                properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
+                    .into_iter()
+                    .map(|p| p.to_string().into())
+                    .collect::<Vec<_>>()
+                    .into(),
+                arguments: build_mail_get_arguments(vec![], false, false, false, 100),
+            })
+            .unwrap(),
+    )
+    .eval_unwrap_object("/list/0");
 
     let mut mailboxes = Vec::new();
     let mut keywords = Vec::new();
@@ -340,7 +342,7 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(SetRequest {
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
@@ -355,9 +357,8 @@ fn jmap_mail_update<T>(
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 
     assert_eq!(
@@ -370,7 +371,7 @@ fn jmap_mail_update<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(SetRequest {
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: json_to_jmap_update(vec![(
@@ -387,9 +388,8 @@ fn jmap_mail_update<T>(
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 
     assert_eq!(
@@ -401,48 +401,52 @@ fn jmap_mail_update<T>(
     );
 
     assert_eq!(
-        mail_store
-            .mail_set(SetRequest {
-                account_id,
-                if_in_state: None,
-                update: json_to_jmap_update(vec![(
-                    message_id_1.clone(),
-                    br#"{
+        JSONValue::from(
+            mail_store
+                .set::<SetMail>(SetRequest {
+                    account_id,
+                    if_in_state: None,
+                    update: json_to_jmap_update(vec![(
+                        message_id_1.clone(),
+                        br#"{
                 "mailboxIds/i1": null
                 }"#,
-                )]),
-                create: vec![],
-                destroy: vec![],
-                arguments: HashMap::new(),
-            })
-            .unwrap()
-            .eval_unwrap_string(&format!("/notUpdated/{}/description", message_id_1)),
+                    )]),
+                    create: vec![],
+                    destroy: vec![],
+                    arguments: HashMap::new(),
+                })
+                .unwrap()
+        )
+        .eval_unwrap_string(&format!("/notUpdated/{}/description", message_id_1)),
         "Message must belong to at least one mailbox."
     );
 
     assert_eq!(
-        mail_store
-            .mail_set(SetRequest {
-                account_id,
-                if_in_state: None,
-                update: json_to_jmap_update(vec![(
-                    message_id_1.clone(),
-                    br#"{
+        JSONValue::from(
+            mail_store
+                .set::<SetMail>(SetRequest {
+                    account_id,
+                    if_in_state: None,
+                    update: json_to_jmap_update(vec![(
+                        message_id_1.clone(),
+                        br#"{
                 "mailboxIds/i1": null
                 }"#,
-                )]),
-                create: vec![],
-                destroy: vec![message_id_1.clone().into()],
-                arguments: HashMap::new(),
-            })
-            .unwrap()
-            .eval_unwrap_string(&format!("/notUpdated/{}/error_type", message_id_1)),
+                    )]),
+                    create: vec![],
+                    destroy: vec![message_id_1.clone().into()],
+                    arguments: HashMap::new(),
+                })
+                .unwrap()
+        )
+        .eval_unwrap_string(&format!("/notUpdated/{}/error_type", message_id_1)),
         "willDestroy"
     );
 
     assert_eq!(
         mail_store
-            .mail_set(SetRequest {
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: HashMap::new(),
@@ -451,34 +455,34 @@ fn jmap_mail_update<T>(
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notDestroyed")
-            .unwrap(),
-        HashMap::new().into()
+            .not_destroyed,
+        HashMap::new()
     );
 
     assert_eq!(
-        JSONValue::Array(vec![
+        JSONValue::from(vec![
             message_id_2.clone().into(),
             message_id_3.clone().into()
         ]),
-        mail_store
-            .mail_get(GetRequest {
-                account_id,
-                ids: vec![
-                    JMAPId::from_jmap_string(&message_id_2).unwrap(),
-                    JMAPId::from_jmap_string(&message_id_3).unwrap()
-                ]
-                .into(),
-                properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
-                    .into_iter()
-                    .map(|p| p.to_string().into())
-                    .collect::<Vec<_>>()
+        JSONValue::from(
+            mail_store
+                .get::<GetMail<T>>(GetRequest {
+                    account_id,
+                    ids: vec![
+                        JMAPId::from_jmap_string(&message_id_2).unwrap(),
+                        JMAPId::from_jmap_string(&message_id_3).unwrap()
+                    ]
                     .into(),
-                arguments: build_mail_get_arguments(vec![], false, false, false, 100,)
-            },)
-            .unwrap()
-            .eval("/notFound")
-            .unwrap()
+                    properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
+                        .into_iter()
+                        .map(|p| p.to_string().into())
+                        .collect::<Vec<_>>()
+                        .into(),
+                    arguments: build_mail_get_arguments(vec![], false, false, false, 100,)
+                },)
+                .unwrap()
+                .not_found
+        ),
     )
 }
 
@@ -538,7 +542,7 @@ pub fn update_email<T>(
 
     assert_eq!(
         mail_store
-            .mail_set(SetRequest {
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: HashMap::from_iter([(jmap_id.to_jmap_string(), update_values.into())]),
@@ -547,9 +551,8 @@ pub fn update_email<T>(
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 }
 
@@ -559,7 +562,7 @@ where
 {
     assert_eq!(
         mail_store
-            .mail_set(SetRequest {
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 update: HashMap::new(),
@@ -568,8 +571,7 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notDestroyed")
-            .unwrap(),
-        HashMap::new().into()
+            .not_destroyed,
+        HashMap::new()
     );
 }

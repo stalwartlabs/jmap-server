@@ -1,26 +1,28 @@
 use jmap::{
-    error::method::MethodError, jmap_store::changes::JMAPChanges, protocol::json::JSONValue,
+    jmap_store::changes::{ChangesObject, ChangesResult, JMAPChanges},
     request::changes::ChangesRequest,
 };
 use store::{Collection, JMAPStore, Store};
 
-pub trait JMAPMailThreadChanges {
-    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue>;
+pub struct ChangesThread {}
+
+impl ChangesObject for ChangesThread {
+    fn collection() -> Collection {
+        Collection::Thread
+    }
+
+    fn handle_result(_result: &mut ChangesResult) {}
 }
 
-impl<T> JMAPMailThreadChanges for JMAPStore<T>
+pub trait JMAPThreadChanges {
+    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResult>;
+}
+
+impl<T> JMAPThreadChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue> {
-        Ok(self
-            .get_jmap_changes(
-                request.account_id,
-                Collection::Thread,
-                request.since_state,
-                request.max_changes,
-            )
-            .map_err(MethodError::ServerFail)?
-            .result)
+    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResult> {
+        self.changes::<ChangesThread>(request)
     }
 }

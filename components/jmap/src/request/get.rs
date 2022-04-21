@@ -33,6 +33,10 @@ impl GetRequest {
             Ok(())
         })?;
 
+        if matches!(request.ids, Some(ref ids) if ids.is_empty()) {
+            request.ids = None;
+        }
+
         Ok(request)
     }
 }

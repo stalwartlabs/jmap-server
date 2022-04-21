@@ -2,14 +2,14 @@ use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap::{
     id::{blob::BlobId, JMAPIdSerialize},
-    jmap_store::blob::JMAPBlobStore,
+    jmap_store::{blob::JMAPBlobStore, get::JMAPGet, parse::JMAPParse},
     protocol::json::JSONValue,
     request::{get::GetRequest, parse::ParseRequest},
 };
 use jmap_mail::mail::{
-    get::JMAPMailGet,
+    get::GetMail,
     import::JMAPMailImport,
-    parse::{get_message_blob, JMAPMailParse},
+    parse::{get_message_blob, ParseMail},
     HeaderName, MailBodyProperties, MailHeaderForm, MailHeaderProperty, MailProperties,
 };
 use mail_parser::RfcHeader;
@@ -31,31 +31,33 @@ where
         test_file.push(test_name);
 
         let blob_id = BlobId::from_jmap_string(
-            &mail_store
-                .mail_get(GetRequest {
-                    account_id,
-                    ids: vec![mail_store
-                        .mail_import_blob(
-                            account_id,
-                            fs::read(&test_file).unwrap(),
-                            vec![],
-                            vec![],
-                            None,
-                        )
-                        .unwrap()
-                        .eval_unwrap_jmap_id("/id")]
-                    .into(),
-                    properties: vec![MailProperties::Attachments.to_string().into()].into(),
-                    arguments: build_mail_get_arguments(
-                        vec![MailBodyProperties::BlobId],
-                        false,
-                        false,
-                        false,
-                        100,
-                    ),
-                })
-                .unwrap()
-                .eval_unwrap_string("/list/0/attachments/0/blobId"),
+            &JSONValue::from(
+                mail_store
+                    .get::<GetMail<T>>(GetRequest {
+                        account_id,
+                        ids: vec![mail_store
+                            .mail_import_blob(
+                                account_id,
+                                fs::read(&test_file).unwrap(),
+                                vec![],
+                                vec![],
+                                None,
+                            )
+                            .unwrap()
+                            .eval_unwrap_jmap_id("/id")]
+                        .into(),
+                        properties: vec![MailProperties::Attachments.to_string().into()].into(),
+                        arguments: build_mail_get_arguments(
+                            vec![MailBodyProperties::BlobId],
+                            false,
+                            false,
+                            false,
+                            100,
+                        ),
+                    })
+                    .unwrap(),
+            )
+            .eval_unwrap_string("/list/0/attachments/0/blobId"),
         )
         .unwrap();
 
@@ -78,10 +80,7 @@ where
             true,
             100,
         );
-        arguments.insert(
-            "blobIds".to_string(),
-            vec![blob_id.clone().to_jmap_string().into()].into(),
-        );
+
         arguments.insert(
             "properties".to_string(),
             vec![
@@ -117,15 +116,17 @@ where
             .into(),
         );
 
-        let result = mail_store
-            .mail_parse(ParseRequest {
+        let result: JSONValue = mail_store
+            .parse::<ParseMail>(ParseRequest {
                 account_id,
                 arguments,
+                blob_ids: vec![blob_id.clone()],
             })
-            .unwrap();
+            .unwrap()
+            .into();
 
-        assert_eq!(result.eval("/notFound").unwrap(), JSONValue::Null);
-        assert_eq!(result.eval("/notParsable").unwrap(), JSONValue::Null);
+        assert_eq!(result.eval("/notFound").unwrap(), vec![].into());
+        assert_eq!(result.eval("/notParsable").unwrap(), vec![].into());
 
         for part_name in ["textBody", "htmlBody", "attachments"] {
             for part in result.eval_unwrap_array(&format!(
@@ -381,23 +382,23 @@ where
             true,
             100,
         );
-        arguments.insert(
-            "blobIds".to_string(),
-            vec![blob_id.clone().to_jmap_string().into()].into(),
-        );
+
         arguments.insert(
             "properties".to_string(),
             vec![property.to_string().into()].into(),
         );
 
         result.extend(
-            mail_store
-                .mail_parse(ParseRequest {
-                    account_id,
-                    arguments,
-                })
-                .unwrap()
-                .eval_unwrap_object(&format!("/parsed/{}", blob_id.to_jmap_string())),
+            JSONValue::from(
+                mail_store
+                    .parse::<ParseMail>(ParseRequest {
+                        account_id,
+                        arguments,
+                        blob_ids: vec![blob_id.clone()],
+                    })
+                    .unwrap(),
+            )
+            .eval_unwrap_object(&format!("/parsed/{}", blob_id.to_jmap_string())),
         );
     }
 

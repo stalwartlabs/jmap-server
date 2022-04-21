@@ -122,3 +122,51 @@ impl JSONValue {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use store::log::ChangeId;
+
+    use crate::id::JMAPIdSerialize;
+
+    use super::JMAPState;
+
+    #[test]
+    fn test_state_id() {
+        for id in [
+            JMAPState::new_initial(),
+            JMAPState::new_exact(0),
+            JMAPState::new_exact(12345678),
+            JMAPState::new_exact(ChangeId::MAX),
+            JMAPState::new_intermediate(0, 0, 1),
+            JMAPState::new_intermediate(1024, 2048, 100),
+            JMAPState::new_intermediate(12345678, 87654321, 1),
+            JMAPState::new_intermediate(0, 0, 12345678),
+            JMAPState::new_intermediate(0, 87654321, 12345678),
+            JMAPState::new_intermediate(12345678, 87654321, 1),
+            JMAPState::new_intermediate(12345678, 87654321, 12345678),
+            JMAPState::new_intermediate(ChangeId::MAX, ChangeId::MAX, ChangeId::MAX as usize),
+        ] {
+            assert_eq!(
+                JMAPState::from_jmap_string(&id.to_jmap_string()).unwrap(),
+                id
+            );
+        }
+
+        for invalid_id in [
+            "z",
+            "",
+            "blah",
+            "izzzz",
+            "i00zz",
+            "r00",
+            "r00zz",
+            "r00z",
+            "rffffffffffffffffff01ffffffffffffffffff01ffffffffffffffffff01",
+            "rcec2f105e3bcf42300",
+        ] {
+            assert!(JMAPState::from_jmap_string(invalid_id).is_none());
+        }
+    }
+}

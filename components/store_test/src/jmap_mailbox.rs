@@ -2,14 +2,15 @@ use std::{collections::HashMap, iter::FromIterator};
 
 use jmap::{
     id::{state::JMAPState, JMAPIdSerialize},
+    jmap_store::{changes::JMAPChanges, get::JMAPGet, query::JMAPQuery, set::JMAPSet},
     protocol::json::JSONValue,
     request::{changes::ChangesRequest, get::GetRequest, query::QueryRequest, set::SetRequest},
 };
 use jmap_mail::{
-    mail::{get::JMAPMailGet, import::JMAPMailImport, set::JMAPMailSet},
+    mail::{get::GetMail, import::JMAPMailImport, set::SetMail},
     mailbox::{
-        changes::JMAPMailMailboxChanges, get::JMAPMailMailboxGet, query::JMAPMailMailboxQuery,
-        set::JMAPMailMailboxSet, MailboxProperties,
+        changes::ChangesMailbox, get::GetMailbox, query::QueryMailbox, set::SetMailbox,
+        MailboxProperties,
     },
 };
 
@@ -233,7 +234,7 @@ where
     // Sort by name
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::None,
@@ -249,7 +250,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -276,7 +277,7 @@ where
     // Sort by name as tree
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::None,
@@ -293,7 +294,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -319,7 +320,7 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
@@ -338,7 +339,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -358,7 +359,7 @@ where
     // Filter as tree
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
@@ -377,7 +378,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -385,7 +386,7 @@ where
     );
 
     assert!(mail_store
-        .mailbox_query(
+        .query::<QueryMailbox<T>>(
             MailboxQueryRequest {
                 account_id,
                 filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
@@ -404,13 +405,13 @@ where
             .into()
         )
         .unwrap()
-        .eval_unwrap_array("/ids")
+        .ids
         .is_empty());
 
     // Role filters
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Role(
@@ -429,7 +430,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -438,7 +439,7 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::condition(JMAPMailboxFilterCondition::HasAnyRole(true)),
@@ -455,7 +456,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -464,7 +465,7 @@ where
 
     // Duplicate role
     assert!(mail_store
-        .mailbox_set(SetRequest {
+        .set::<SetMailbox>(SetRequest {
             account_id,
             if_in_state: None,
             create: vec![],
@@ -476,12 +477,12 @@ where
             arguments: HashMap::new(),
         })
         .unwrap()
-        .eval_unwrap_object("/notUpdated")
+        .not_updated
         .contains_key(&get_mailbox_id(&id_map, "sent")));
 
     // Duplicate name
     assert!(mail_store
-        .mailbox_set(SetRequest {
+        .set::<SetMailbox>(SetRequest {
             account_id,
             if_in_state: None,
             create: vec![],
@@ -493,12 +494,12 @@ where
             arguments: HashMap::new(),
         })
         .unwrap()
-        .eval_unwrap_object("/notUpdated")
+        .not_updated
         .contains_key(&get_mailbox_id(&id_map, "2")));
 
     // Circular relationship
     assert!(mail_store
-        .mailbox_set(SetRequest {
+        .set::<SetMailbox>(SetRequest {
             account_id,
             if_in_state: None,
             create: vec![],
@@ -514,11 +515,11 @@ where
             arguments: HashMap::new(),
         })
         .unwrap()
-        .eval_unwrap_object("/notUpdated")
+        .not_updated
         .contains_key(&get_mailbox_id(&id_map, "1")));
 
     assert!(mail_store
-        .mailbox_set(SetRequest {
+        .set::<SetMailbox>(SetRequest {
             account_id,
             if_in_state: None,
             create: vec![],
@@ -531,12 +532,12 @@ where
             arguments: HashMap::new(),
         })
         .unwrap()
-        .eval_unwrap_object("/notUpdated")
+        .not_updated
         .contains_key(&get_mailbox_id(&id_map, "1")));
 
     // Invalid parent ID
     assert!(mail_store
-        .mailbox_set(SetRequest {
+        .set::<SetMailbox>(SetRequest {
             account_id,
             if_in_state: None,
             create: vec![],
@@ -549,24 +550,24 @@ where
             arguments: HashMap::new(),
         })
         .unwrap()
-        .eval_unwrap_object("/notUpdated")
+        .not_updated
         .contains_key(&get_mailbox_id(&id_map, "1")));
 
     // Get state
     let state = mail_store
-        .mailbox_changes(ChangesRequest {
+        .changes::<ChangesMailbox>(ChangesRequest {
             account_id,
             since_state: JMAPState::Initial,
             max_changes: 0,
             arguments: HashMap::new(),
         })
         .unwrap()
-        .eval_unwrap_jmap_state("/newState");
+        .new_state;
 
     // Rename and move mailbox
     assert_eq!(
         mail_store
-            .mailbox_set(SetRequest {
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -582,20 +583,20 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 
     // Verify changes
-    let state = mail_store
-        .mailbox_changes(ChangesRequest {
+    let state: JSONValue = mail_store
+        .changes::<ChangesMailbox>(ChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
             arguments: HashMap::new(),
         })
-        .unwrap();
+        .unwrap()
+        .into();
     assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 1);
     assert!(state.eval_unwrap_array("/updated").len() == 1);
     assert!(
@@ -620,14 +621,15 @@ where
         .eval_unwrap_string("/id");
 
     // Only email properties must have changed
-    let state = mail_store
-        .mailbox_changes(ChangesRequest {
+    let state: JSONValue = mail_store
+        .changes::<ChangesMailbox>(ChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
             arguments: HashMap::new(),
         })
-        .unwrap();
+        .unwrap()
+        .into();
     assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 1);
     assert_eq!(
         state.eval("/updated").unwrap(),
@@ -647,7 +649,7 @@ where
     // Move email from Inbox to Trash
     assert_eq!(
         mail_store
-            .mail_set(SetRequest {
+            .set::<SetMail>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -664,20 +666,20 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 
     // E-mail properties of both Inbox and Trash must have changed
-    let state = mail_store
-        .mailbox_changes(ChangesRequest {
+    let state: JSONValue = mail_store
+        .changes::<ChangesMailbox>(ChangesRequest {
             account_id,
             since_state: state,
             max_changes: 0,
             arguments: HashMap::new(),
         })
-        .unwrap();
+        .unwrap()
+        .into();
     assert_eq!(state.eval_unwrap_unsigned_int("/totalChanges"), 2);
     let mut folder_ids = vec![
         JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "trash")).unwrap(),
@@ -704,7 +706,7 @@ where
     // Deleting folders with children is not allowed
     assert_eq!(
         mail_store
-            .mailbox_set(SetRequest {
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -713,15 +715,14 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/destroyed")
-            .unwrap(),
-        Vec::new().into(),
+            .destroyed,
+        Vec::new(),
     );
 
     // Deleting folders with contents is not allowed (unless remove_emails is true)
     assert_eq!(
         mail_store
-            .mailbox_set(SetRequest {
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -730,34 +731,36 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/destroyed")
-            .unwrap(),
-        Vec::new().into(),
+            .destroyed,
+        Vec::new(),
     );
 
     // Delete Trash folder and its contents
     assert_eq!(
-        mail_store
-            .mailbox_set(SetRequest {
-                account_id,
-                if_in_state: None,
-                create: vec![],
-                update: HashMap::new(),
-                destroy: vec![get_mailbox_id(&id_map, "trash").into()],
-                arguments: HashMap::from_iter([
-                    ("onDestroyRemoveEmails".to_string(), true.into(),)
-                ]),
-            })
-            .unwrap()
-            .eval("/destroyed/0")
-            .unwrap(),
+        JSONValue::from(
+            mail_store
+                .set::<SetMailbox>(SetRequest {
+                    account_id,
+                    if_in_state: None,
+                    create: vec![],
+                    update: HashMap::new(),
+                    destroy: vec![get_mailbox_id(&id_map, "trash").into()],
+                    arguments: HashMap::from_iter([(
+                        "onDestroyRemoveEmails".to_string(),
+                        true.into(),
+                    )]),
+                })
+                .unwrap()
+        )
+        .eval("/destroyed/0")
+        .unwrap(),
         get_mailbox_id(&id_map, "trash").into(),
     );
 
     // Verify that Trash folder and its contents are gone
     assert_eq!(
         mail_store
-            .mailbox_get(GetRequest {
+            .get::<GetMailbox<T>>(GetRequest {
                 account_id,
                 ids: vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "trash")).unwrap()]
                     .into(),
@@ -765,28 +768,26 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notFound")
-            .unwrap(),
-        vec![get_mailbox_id(&id_map, "trash").into()].into()
+            .not_found,
+        vec![get_mailbox_id(&id_map, "trash").into()]
     );
     assert_eq!(
         mail_store
-            .mail_get(GetRequest {
+            .get::<GetMail<T>>(GetRequest {
                 account_id,
                 ids: vec![JMAPId::from_jmap_string(&message_id).unwrap()].into(),
                 properties: JSONValue::Null,
                 arguments: build_mail_get_arguments(vec![], true, true, true, 0),
             })
             .unwrap()
-            .eval("/notFound")
-            .unwrap(),
-        vec![message_id.into()].into()
+            .not_found,
+        vec![message_id.into()]
     );
 
     // Check search results after changing folder properties
     assert_eq!(
         mail_store
-            .mailbox_set(SetRequest {
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -804,14 +805,13 @@ where
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::and(vec![
@@ -837,7 +837,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -845,7 +845,7 @@ where
     );
 
     assert!(mail_store
-        .mailbox_query(
+        .query::<QueryMailbox<T>>(
             MailboxQueryRequest {
                 account_id,
                 filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Name(
@@ -863,11 +863,11 @@ where
             .into()
         )
         .unwrap()
-        .eval_unwrap_array("/ids")
+        .ids
         .is_empty());
 
     assert!(mail_store
-        .mailbox_query(
+        .query::<QueryMailbox<T>>(
             MailboxQueryRequest {
                 account_id,
                 filter: JMAPFilter::condition(JMAPMailboxFilterCondition::Role(
@@ -886,12 +886,12 @@ where
             .into()
         )
         .unwrap()
-        .eval_unwrap_array("/ids")
+        .ids
         .is_empty());
 
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::condition(JMAPMailboxFilterCondition::ParentId(None)),
@@ -908,7 +908,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -917,7 +917,7 @@ where
 
     assert_eq!(
         mail_store
-            .mailbox_query(
+            .query::<QueryMailbox<T>>(
                 MailboxQueryRequest {
                     account_id,
                     filter: JMAPFilter::condition(JMAPMailboxFilterCondition::HasAnyRole(true)),
@@ -933,7 +933,7 @@ where
                 .into()
             )
             .unwrap()
-            .eval_unwrap_array("/ids")
+            .ids
             .into_iter()
             .map(|id| id_map.get(&id.to_jmap_id().unwrap()).unwrap())
             .collect::<Vec<_>>(),
@@ -972,8 +972,8 @@ fn create_nested_mailboxes<T>(
             }
         }
         let mailbox_num = format!("b{}", mailbox_num);
-        let result = mail_store
-            .mailbox_set(SetRequest {
+        let result: JSONValue = mail_store
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: Vec::from_iter([(mailbox_num.clone(), mailbox)]),
@@ -981,7 +981,8 @@ fn create_nested_mailboxes<T>(
                 destroy: vec![],
                 arguments: HashMap::new(),
             })
-            .unwrap();
+            .unwrap()
+            .into();
 
         assert_eq!(result.eval("/notCreated").unwrap(), HashMap::new().into());
 
@@ -1010,8 +1011,8 @@ pub fn insert_mailbox<T>(
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let result = mail_store
-        .mailbox_set(SetRequest {
+    let result: JSONValue = mail_store
+        .set::<SetMailbox>(SetRequest {
             account_id,
             if_in_state: None,
             create: Vec::from_iter([(
@@ -1026,7 +1027,8 @@ where
             destroy: vec![],
             arguments: HashMap::new(),
         })
-        .unwrap();
+        .unwrap()
+        .into();
 
     assert_eq!(result.eval("/notCreated").unwrap(), HashMap::new().into());
 
@@ -1044,7 +1046,7 @@ pub fn update_mailbox<T>(
 {
     assert_eq!(
         mail_store
-            .mailbox_set(SetRequest {
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -1064,9 +1066,8 @@ pub fn update_mailbox<T>(
                 arguments: HashMap::new(),
             })
             .unwrap()
-            .eval("/notUpdated")
-            .unwrap(),
-        HashMap::new().into()
+            .not_updated,
+        HashMap::new()
     );
 }
 
@@ -1076,7 +1077,7 @@ where
 {
     assert_eq!(
         mail_store
-            .mailbox_set(SetRequest {
+            .set::<SetMailbox>(SetRequest {
                 account_id,
                 if_in_state: None,
                 create: vec![],
@@ -1087,8 +1088,7 @@ where
                 ]),
             })
             .unwrap()
-            .eval("/notDestroyed")
-            .unwrap(),
-        HashMap::new().into()
+            .not_destroyed,
+        HashMap::new()
     );
 }

@@ -1,10 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use jmap::{
     id::{state::JMAPState, JMAPIdSerialize},
     jmap_store::changes::JMAPChanges,
     protocol::json::JSONValue,
+    request::changes::ChangesRequest,
 };
+use jmap_mail::mail::changes::ChangesMail;
 use store::{
     batch::WriteBatch,
     log::{Entry, LogIndex, RaftId, TermId},
@@ -70,11 +72,15 @@ where
 
     for (num, expected_inserted_id) in expected_inserted_ids.into_iter().enumerate() {
         let account_id = (num * 3) as AccountId;
-
-        let changes = mail_store
-            .get_jmap_changes(account_id, Collection::Mail, JMAPState::Initial, 0)
+        let changes: JSONValue = mail_store
+            .changes::<ChangesMail>(ChangesRequest {
+                account_id,
+                since_state: JMAPState::Initial,
+                max_changes: 0,
+                arguments: HashMap::new(),
+            })
             .unwrap()
-            .result;
+            .into();
 
         assert_eq!(
             changes.eval("/created").unwrap(),

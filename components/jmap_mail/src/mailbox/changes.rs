@@ -1,29 +1,18 @@
-use jmap::jmap_store::changes::JMAPChanges;
-use jmap::protocol::json::JSONValue;
-use jmap::request::changes::ChangesRequest;
-use store::Store;
-use store::{Collection, JMAPStore};
+use jmap::jmap_store::changes::{ChangesObject, ChangesResult};
+use store::Collection;
 
 use super::MailboxProperties;
 
-pub trait JMAPMailMailboxChanges {
-    fn mailbox_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue>;
-}
+pub struct ChangesMailbox {}
 
-impl<T> JMAPMailMailboxChanges for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn mailbox_changes(&self, request: ChangesRequest) -> jmap::Result<JSONValue> {
-        let mut changes = self.get_jmap_changes(
-            request.account_id,
-            Collection::Mailbox,
-            request.since_state.clone(),
-            request.max_changes,
-        )?;
+impl ChangesObject for ChangesMailbox {
+    fn collection() -> Collection {
+        Collection::Mailbox
+    }
 
-        if changes.has_children_changes {
-            changes.result.as_object_mut().insert(
+    fn handle_result(result: &mut ChangesResult) {
+        if result.has_children_changes {
+            result.arguments.insert(
                 "updatedProperties".to_string(),
                 vec![
                     MailboxProperties::TotalEmails.into(),
@@ -34,7 +23,5 @@ where
                 .into(),
             );
         }
-
-        Ok(changes.result)
     }
 }

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use jmap_mail::mail::{import::JMAPMailImport, MessageField};
 use store::{
-    query::{JMAPIdMapFnc, JMAPStoreQuery},
-    Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag, ThreadId,
+    query::DefaultIdMapper, Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag,
+    ThreadId,
 };
 
 use crate::{jmap_mail_set::delete_email, StoreCompareWith};
@@ -150,12 +150,12 @@ where
 
         for test_num in 0..=5 {
             let message_doc_ids = mail_store
-                .query::<JMAPIdMapFnc>(JMAPStoreQuery::new(
+                .query_store::<DefaultIdMapper>(
                     base_test_num + test_num,
                     Collection::Mail,
                     Filter::None,
                     Comparator::None,
-                ))
+                )
                 .unwrap()
                 .collect::<Vec<u64>>();
             all_message_ids.insert(base_test_num + test_num, message_doc_ids.clone());
