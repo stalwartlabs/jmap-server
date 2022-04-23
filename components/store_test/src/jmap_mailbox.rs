@@ -10,7 +10,7 @@ use jmap_mail::{
     mail::{get::GetMail, import::JMAPMailImport, set::SetMail},
     mailbox::{
         changes::ChangesMailbox, get::GetMailbox, query::QueryMailbox, set::SetMailbox,
-        MailboxProperties,
+        MailboxProperty,
     },
 };
 
@@ -371,7 +371,6 @@ where
                     anchor_offset: 0,
                     limit: 100,
                     calculate_total: true,
-
                     sort_as_tree: true,
                     filter_as_tree: true,
                 }
@@ -608,7 +607,7 @@ where
 
     // Insert email into Inbox
     let message_id = mail_store
-        .mail_import_blob(
+        .mail_import(
             account_id,
             b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
             vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox"))
@@ -618,7 +617,8 @@ where
             None,
         )
         .unwrap()
-        .eval_unwrap_string("/id");
+        .id
+        .to_jmap_string();
 
     // Only email properties must have changed
     let state: JSONValue = mail_store
@@ -638,10 +638,10 @@ where
     assert_eq!(
         state.eval("/updatedProperties").unwrap(),
         JSONValue::Array(vec![
-            MailboxProperties::TotalEmails.into(),
-            MailboxProperties::UnreadEmails.into(),
-            MailboxProperties::TotalThreads.into(),
-            MailboxProperties::UnreadThreads.into(),
+            MailboxProperty::TotalEmails.into(),
+            MailboxProperty::UnreadEmails.into(),
+            MailboxProperty::TotalThreads.into(),
+            MailboxProperty::UnreadThreads.into(),
         ])
     );
     let state = state.eval_unwrap_jmap_state("/newState");
@@ -696,10 +696,10 @@ where
     assert_eq!(
         state.eval("/updatedProperties").unwrap(),
         JSONValue::Array(vec![
-            MailboxProperties::TotalEmails.into(),
-            MailboxProperties::UnreadEmails.into(),
-            MailboxProperties::TotalThreads.into(),
-            MailboxProperties::UnreadThreads.into(),
+            MailboxProperty::TotalEmails.into(),
+            MailboxProperty::UnreadEmails.into(),
+            MailboxProperty::TotalThreads.into(),
+            MailboxProperty::UnreadThreads.into(),
         ])
     );
 
@@ -879,7 +879,6 @@ where
                 anchor_offset: 0,
                 limit: 100,
                 calculate_total: true,
-
                 sort_as_tree: false,
                 filter_as_tree: false,
             }
@@ -901,7 +900,6 @@ where
                     anchor_offset: 0,
                     limit: 100,
                     calculate_total: true,
-
                     sort_as_tree: false,
                     filter_as_tree: false,
                 }

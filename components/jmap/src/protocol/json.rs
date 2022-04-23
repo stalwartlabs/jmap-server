@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use store::field::Number;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -49,6 +50,16 @@ impl JSONNumber {
             JSONNumber::PosInt(i) => *i as i64,
             JSONNumber::NegInt(i) => *i,
             JSONNumber::Float(f) => *f as i64,
+        }
+    }
+}
+
+impl From<&JSONNumber> for Number {
+    fn from(value: &JSONNumber) -> Self {
+        match value {
+            JSONNumber::PosInt(i) => Number::LongInteger(*i),
+            JSONNumber::NegInt(i) => Number::LongInteger(*i as u64),
+            JSONNumber::Float(f) => Number::Float(*f),
         }
     }
 }

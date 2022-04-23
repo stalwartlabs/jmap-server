@@ -5,7 +5,7 @@ use jmap::{
     request::{get::GetRequest, query::QueryRequest},
 };
 use jmap_mail::mail::{
-    get::GetMail, import::JMAPMailImport, query::QueryMail, MailProperties, MessageField,
+    get::GetMail, import::JMAPMailImport, query::QueryMail, MailProperty, MessageField,
 };
 use mail_parser::RfcHeader;
 use std::{
@@ -312,7 +312,7 @@ where
         total_messages += 1;
 
         mail_store
-            .mail_import_blob(
+            .mail_import(
                 account_id,
                 format!(
                     concat!(
@@ -1009,7 +1009,7 @@ where
             .get::<GetMail<T>>(GetRequest {
                 account_id,
                 ids: vec![jmap_id].into(),
-                properties: vec![MailProperties::MessageId.to_string().into()].into(),
+                properties: vec![MailProperty::MessageId.to_string().into()].into(),
                 arguments: build_mail_get_arguments(vec![], false, false, false, 100),
             })
             .unwrap(),

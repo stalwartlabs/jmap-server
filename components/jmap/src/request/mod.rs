@@ -18,6 +18,23 @@ pub trait JSONArgumentParser: Sized {
     fn parse_argument(argument: JSONValue) -> crate::Result<Self>;
 }
 
+impl<T> JSONArgumentParser for Vec<T>
+where
+    T: JSONArgumentParser,
+{
+    fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
+        if let JSONValue::Array(array) = argument {
+            let mut result = Vec::with_capacity(array.len());
+            for value in array {
+                result.push(T::parse_argument(value)?);
+            }
+            Ok(result)
+        } else {
+            Err(MethodError::InvalidArguments("Expected Array.".to_string()))
+        }
+    }
+}
+
 impl JSONArgumentParser for JMAPId {
     fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
         argument

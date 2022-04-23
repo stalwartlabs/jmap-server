@@ -4,7 +4,10 @@ pub mod jmap_store;
 pub mod protocol;
 pub mod request;
 
+use std::fmt::Display;
+
 use error::method::MethodError;
+use store::Collection;
 
 #[derive(Debug, Clone, serde::Serialize, Hash, PartialEq, Eq)]
 pub enum URI {
@@ -23,3 +26,8 @@ pub enum URI {
 }
 
 pub type Result<T> = std::result::Result<T, MethodError>;
+
+pub trait Property: Sized + Display {
+    fn parse(value: &str) -> Option<Self>;
+    fn collection() -> Collection;
+}

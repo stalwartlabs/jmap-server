@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
+use jmap::jmap_store::orm::{JMAPOrm, PropertySchema, TinyORM};
+use jmap_mail::identity::IdentityProperty;
 use jmap_mail::mail::import::JMAPMailImport;
-use jmap_mail::mailbox::set::JMAPMailMailboxSet;
-use jmap_mail::mailbox::Mailbox;
-use store::batch::WriteBatch;
+use jmap_mail::mailbox::MailboxProperty;
+use store::batch::{Document, WriteBatch};
 use store::leb128::Leb128;
 use store::serialize::{
     DeserializeBigEndian, StoreDeserialize, StoreSerialize, FOLLOWER_COMMIT_INDEX_KEY,
@@ -59,8 +60,9 @@ pub enum DocumentUpdate {
         keywords: HashSet<Tag>,
         mailboxes: HashSet<Tag>,
     },
-    UpdateMailbox {
-        mailbox: Mailbox,
+    ORM {
+        collection: Collection,
+        data: Vec<u8>,
     },
 }
 
@@ -372,6 +374,16 @@ pub trait RaftStore {
         update: DocumentUpdate,
         document_batch: &mut WriteBatch,
     ) -> store::Result<()>;
+
+    fn raft_update_orm<U>(
+        &self,
+        document_batch: &mut WriteBatch,
+        account_id: AccountId,
+        document_id: DocumentId,
+        data: Vec<u8>,
+    ) -> store::Result<()>
+    where
+        U: PropertySchema + 'static;
 }
 
 impl<T> RaftStore for JMAPStore<T>
@@ -871,9 +883,49 @@ where
                     None,
                 )?;
             }
-            DocumentUpdate::UpdateMailbox { mailbox } => {
-                self.raft_update_mailbox(document_batch, account_id, document_id, mailbox)?
+            DocumentUpdate::ORM { collection, data } => match collection {
+                Collection::Mailbox => self.raft_update_orm::<MailboxProperty>(
+                    document_batch,
+                    account_id,
+                    document_id,
+                    data,
+                )?,
+                Collection::Identity => self.raft_update_orm::<IdentityProperty>(
+                    document_batch,
+                    account_id,
+                    document_id,
+                    data,
+                )?,
+                _ => (),
+            },
+        }
+        Ok(())
+    }
+
+    fn raft_update_orm<U>(
+        &self,
+        document_batch: &mut WriteBatch,
+        account_id: AccountId,
+        document_id: DocumentId,
+        data: Vec<u8>,
+    ) -> store::Result<()>
+    where
+        U: PropertySchema + 'static,
+    {
+        let changes: TinyORM<U> = TinyORM::deserialize(&data).ok_or_else(|| {
+            StoreError::DeserializeError("Failed to deserialize ORM.".to_string())
+        })?;
+        let mut document = Document::new(U::collection(), document_id);
+        if let Some(current) = self.get_orm::<U>(account_id, document_id)? {
+            if current.merge(&mut document, changes)? {
+                document_batch.update_document(document);
             }
+        } else if TinyORM::<U>::default().merge(&mut document, changes)? {
+            document_batch.insert_document(document);
+        } else {
+            return Err(StoreError::InternalError(
+                "Failed to merge ORM changes.".to_string(),
+            ));
         }
         Ok(())
     }

@@ -21,6 +21,7 @@ pub const BM_TAG_ID: u8 = 3;
 pub const BM_TAG_TEXT: u8 = 4;
 pub const BM_TAG_STATIC: u8 = 5;
 pub const BM_DOCUMENT_IDS: u8 = 6;
+pub const BM_HAS_KEYWORDS: u8 = 7;
 
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
 pub const BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
@@ -167,6 +168,19 @@ impl BitmapKey {
         bytes
     }
 
+    pub fn serialize_has_keywords(
+        account: AccountId,
+        collection: Collection,
+        field: FieldId,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
+        account.to_leb128_bytes(&mut bytes);
+        bytes.push(collection.into());
+        bytes.push(field);
+        bytes.push(BM_HAS_KEYWORDS);
+        bytes
+    }
+
     pub fn serialize_term(
         account: AccountId,
         collection: Collection,
@@ -207,6 +221,10 @@ impl BitmapKey {
             Tag::Text(text) => {
                 bytes.extend_from_slice(text.as_bytes());
                 BM_TAG_TEXT
+            }
+            Tag::Default => {
+                bytes.push(0);
+                BM_TAG_STATIC
             }
         };
         bytes.push(collection.into());

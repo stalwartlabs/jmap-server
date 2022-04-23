@@ -8,7 +8,9 @@ pub mod set;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{error::method::MethodError, protocol::json::JSONValue, request::JSONArgumentParser};
+use jmap::{
+    error::method::MethodError, protocol::json::JSONValue, request::JSONArgumentParser, Property,
+};
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     HeaderOffset, MessagePartId, MessageStructure, RfcHeader,
@@ -18,19 +20,19 @@ use store::{
     bincode,
     blob::BlobIndex,
     serialize::{StoreDeserialize, StoreSerialize},
-    FieldId, StoreError, Tag,
+    Collection, FieldId, StoreError, Tag,
 };
 
 pub const MESSAGE_RAW: BlobIndex = 0;
 pub const MESSAGE_DATA: BlobIndex = 1;
 pub const MESSAGE_PARTS: BlobIndex = 2;
 
-pub type JMAPMailHeaders = HashMap<MailProperties, JSONValue>;
-pub type JMAPMailMimeHeaders = HashMap<MailBodyProperties, JSONValue>;
+pub type JMAPMailHeaders = HashMap<MailProperty, JSONValue>;
+pub type JMAPMailMimeHeaders = HashMap<MailBodyProperty, JSONValue>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageData {
-    pub properties: HashMap<MailProperties, JSONValue>,
+    pub properties: HashMap<MailProperty, JSONValue>,
     pub mime_parts: Vec<MimePart>,
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
@@ -170,6 +172,7 @@ pub enum MessageField {
     MessageIdRef = 135,
     ThreadId = 136,
     Mailbox = 137,
+    HasHeader = 138,
 }
 
 impl From<MessageField> for FieldId {
@@ -189,8 +192,8 @@ pub enum MailHeaderForm {
     URLs,
 }
 
-impl MailHeaderForm {
-    pub fn parse(value: &str) -> Option<MailHeaderForm> {
+impl Property for MailHeaderForm {
+    fn parse(value: &str) -> Option<MailHeaderForm> {
         match value {
             "asText" => Some(MailHeaderForm::Text),
             "asAddresses" => Some(MailHeaderForm::Addresses),
@@ -200,6 +203,10 @@ impl MailHeaderForm {
             "asURLs" => Some(MailHeaderForm::URLs),
             _ => None,
         }
+    }
+
+    fn collection() -> Collection {
+        Collection::Mail
     }
 }
 
@@ -225,8 +232,10 @@ impl MailHeaderProperty {
             all,
         }
     }
+}
 
-    pub fn parse(value: &str) -> Option<MailHeaderProperty> {
+impl Property for MailHeaderProperty {
+    fn parse(value: &str) -> Option<MailHeaderProperty> {
         let mut all = false;
         let mut form = MailHeaderForm::Raw;
         let mut header = None;
@@ -255,6 +264,40 @@ impl MailHeaderProperty {
             all,
         })
     }
+
+    fn collection() -> Collection {
+        Collection::Mail
+    }
+}
+
+impl Display for MailHeaderProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "header:")?;
+        match &self.header {
+            HeaderName::Rfc(rfc) => rfc.fmt(f)?,
+            HeaderName::Other(name) => name.fmt(f)?,
+        }
+        self.form.fmt(f)?;
+        if self.all {
+            write!(f, ":all")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Display for MailHeaderForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MailHeaderForm::Raw => Ok(()),
+            MailHeaderForm::Text => write!(f, ":asText"),
+            MailHeaderForm::Addresses => write!(f, ":asAddresses"),
+            MailHeaderForm::GroupedAddresses => write!(f, ":asGroupedAddresses"),
+            MailHeaderForm::MessageIds => write!(f, ":asMessageIds"),
+            MailHeaderForm::Date => write!(f, ":asDate"),
+            MailHeaderForm::URLs => write!(f, ":asURLs"),
+        }
+    }
 }
 
 impl JSONArgumentParser for MailHeaderProperty {
@@ -268,32 +311,8 @@ impl JSONArgumentParser for MailHeaderProperty {
     }
 }
 
-impl Display for MailHeaderProperty {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "header:")?;
-        match &self.header {
-            HeaderName::Rfc(rfc) => rfc.fmt(f)?,
-            HeaderName::Other(name) => name.fmt(f)?,
-        }
-        match self.form {
-            MailHeaderForm::Raw => (),
-            MailHeaderForm::Text => write!(f, ":asText")?,
-            MailHeaderForm::Addresses => write!(f, ":asAddresses")?,
-            MailHeaderForm::GroupedAddresses => write!(f, ":asGroupedAddresses")?,
-            MailHeaderForm::MessageIds => write!(f, ":asMessageIds")?,
-            MailHeaderForm::Date => write!(f, ":asDate")?,
-            MailHeaderForm::URLs => write!(f, ":asURLs")?,
-        }
-        if self.all {
-            write!(f, ":all")
-        } else {
-            Ok(())
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone)]
-pub enum MailProperties {
+pub enum MailProperty {
     Id,
     BlobId,
     ThreadId,
@@ -322,88 +341,94 @@ pub enum MailProperties {
     Header(MailHeaderProperty),
 }
 
-impl Display for MailProperties {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MailProperties::Id => write!(f, "id"),
-            MailProperties::BlobId => write!(f, "blobId"),
-            MailProperties::ThreadId => write!(f, "threadId"),
-            MailProperties::MailboxIds => write!(f, "mailboxIds"),
-            MailProperties::Keywords => write!(f, "keywords"),
-            MailProperties::Size => write!(f, "size"),
-            MailProperties::ReceivedAt => write!(f, "receivedAt"),
-            MailProperties::MessageId => write!(f, "messageId"),
-            MailProperties::InReplyTo => write!(f, "inReplyTo"),
-            MailProperties::References => write!(f, "references"),
-            MailProperties::Sender => write!(f, "sender"),
-            MailProperties::From => write!(f, "from"),
-            MailProperties::To => write!(f, "to"),
-            MailProperties::Cc => write!(f, "cc"),
-            MailProperties::Bcc => write!(f, "bcc"),
-            MailProperties::ReplyTo => write!(f, "replyTo"),
-            MailProperties::Subject => write!(f, "subject"),
-            MailProperties::SentAt => write!(f, "sentAt"),
-            MailProperties::HasAttachment => write!(f, "hasAttachment"),
-            MailProperties::Preview => write!(f, "preview"),
-            MailProperties::BodyValues => write!(f, "bodyValues"),
-            MailProperties::TextBody => write!(f, "textBody"),
-            MailProperties::HtmlBody => write!(f, "htmlBody"),
-            MailProperties::Attachments => write!(f, "attachments"),
-            MailProperties::BodyStructure => write!(f, "bodyStructure"),
-            MailProperties::Header(header) => header.fmt(f),
-        }
-    }
-}
-
-impl MailProperties {
-    pub fn parse(value: &str) -> Option<MailProperties> {
+impl Property for MailProperty {
+    fn parse(value: &str) -> Option<Self> {
         match value {
-            "id" => Some(MailProperties::Id),
-            "blobId" => Some(MailProperties::BlobId),
-            "threadId" => Some(MailProperties::ThreadId),
-            "mailboxIds" => Some(MailProperties::MailboxIds),
-            "keywords" => Some(MailProperties::Keywords),
-            "size" => Some(MailProperties::Size),
-            "receivedAt" => Some(MailProperties::ReceivedAt),
-            "messageId" => Some(MailProperties::MessageId),
-            "inReplyTo" => Some(MailProperties::InReplyTo),
-            "references" => Some(MailProperties::References),
-            "sender" => Some(MailProperties::Sender),
-            "from" => Some(MailProperties::From),
-            "to" => Some(MailProperties::To),
-            "cc" => Some(MailProperties::Cc),
-            "bcc" => Some(MailProperties::Bcc),
-            "replyTo" => Some(MailProperties::ReplyTo),
-            "subject" => Some(MailProperties::Subject),
-            "sentAt" => Some(MailProperties::SentAt),
-            "hasAttachment" => Some(MailProperties::HasAttachment),
-            "preview" => Some(MailProperties::Preview),
-            "bodyValues" => Some(MailProperties::BodyValues),
-            "textBody" => Some(MailProperties::TextBody),
-            "htmlBody" => Some(MailProperties::HtmlBody),
-            "attachments" => Some(MailProperties::Attachments),
-            "bodyStructure" => Some(MailProperties::BodyStructure),
+            "id" => Some(MailProperty::Id),
+            "blobId" => Some(MailProperty::BlobId),
+            "threadId" => Some(MailProperty::ThreadId),
+            "mailboxIds" => Some(MailProperty::MailboxIds),
+            "keywords" => Some(MailProperty::Keywords),
+            "size" => Some(MailProperty::Size),
+            "receivedAt" => Some(MailProperty::ReceivedAt),
+            "messageId" => Some(MailProperty::MessageId),
+            "inReplyTo" => Some(MailProperty::InReplyTo),
+            "references" => Some(MailProperty::References),
+            "sender" => Some(MailProperty::Sender),
+            "from" => Some(MailProperty::From),
+            "to" => Some(MailProperty::To),
+            "cc" => Some(MailProperty::Cc),
+            "bcc" => Some(MailProperty::Bcc),
+            "replyTo" => Some(MailProperty::ReplyTo),
+            "subject" => Some(MailProperty::Subject),
+            "sentAt" => Some(MailProperty::SentAt),
+            "hasAttachment" => Some(MailProperty::HasAttachment),
+            "preview" => Some(MailProperty::Preview),
+            "bodyValues" => Some(MailProperty::BodyValues),
+            "textBody" => Some(MailProperty::TextBody),
+            "htmlBody" => Some(MailProperty::HtmlBody),
+            "attachments" => Some(MailProperty::Attachments),
+            "bodyStructure" => Some(MailProperty::BodyStructure),
             _ if value.starts_with("header:") => {
-                Some(MailProperties::Header(MailHeaderProperty::parse(value)?))
+                Some(MailProperty::Header(MailHeaderProperty::parse(value)?))
             }
             _ => None,
         }
     }
 
+    fn collection() -> Collection {
+        Collection::Mail
+    }
+}
+
+impl Display for MailProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MailProperty::Id => write!(f, "id"),
+            MailProperty::BlobId => write!(f, "blobId"),
+            MailProperty::ThreadId => write!(f, "threadId"),
+            MailProperty::MailboxIds => write!(f, "mailboxIds"),
+            MailProperty::Keywords => write!(f, "keywords"),
+            MailProperty::Size => write!(f, "size"),
+            MailProperty::ReceivedAt => write!(f, "receivedAt"),
+            MailProperty::MessageId => write!(f, "messageId"),
+            MailProperty::InReplyTo => write!(f, "inReplyTo"),
+            MailProperty::References => write!(f, "references"),
+            MailProperty::Sender => write!(f, "sender"),
+            MailProperty::From => write!(f, "from"),
+            MailProperty::To => write!(f, "to"),
+            MailProperty::Cc => write!(f, "cc"),
+            MailProperty::Bcc => write!(f, "bcc"),
+            MailProperty::ReplyTo => write!(f, "replyTo"),
+            MailProperty::Subject => write!(f, "subject"),
+            MailProperty::SentAt => write!(f, "sentAt"),
+            MailProperty::HasAttachment => write!(f, "hasAttachment"),
+            MailProperty::Preview => write!(f, "preview"),
+            MailProperty::BodyValues => write!(f, "bodyValues"),
+            MailProperty::TextBody => write!(f, "textBody"),
+            MailProperty::HtmlBody => write!(f, "htmlBody"),
+            MailProperty::Attachments => write!(f, "attachments"),
+            MailProperty::BodyStructure => write!(f, "bodyStructure"),
+            MailProperty::Header(header) => header.fmt(f),
+        }
+    }
+}
+
+impl MailProperty {
     pub fn as_rfc_header(&self) -> RfcHeader {
         match self {
-            MailProperties::MessageId => RfcHeader::MessageId,
-            MailProperties::InReplyTo => RfcHeader::InReplyTo,
-            MailProperties::References => RfcHeader::References,
-            MailProperties::Sender => RfcHeader::Sender,
-            MailProperties::From => RfcHeader::From,
-            MailProperties::To => RfcHeader::To,
-            MailProperties::Cc => RfcHeader::Cc,
-            MailProperties::Bcc => RfcHeader::Bcc,
-            MailProperties::ReplyTo => RfcHeader::ReplyTo,
-            MailProperties::Subject => RfcHeader::Subject,
-            MailProperties::SentAt => RfcHeader::Date,
-            MailProperties::Header(MailHeaderProperty {
+            MailProperty::MessageId => RfcHeader::MessageId,
+            MailProperty::InReplyTo => RfcHeader::InReplyTo,
+            MailProperty::References => RfcHeader::References,
+            MailProperty::Sender => RfcHeader::Sender,
+            MailProperty::From => RfcHeader::From,
+            MailProperty::To => RfcHeader::To,
+            MailProperty::Cc => RfcHeader::Cc,
+            MailProperty::Bcc => RfcHeader::Bcc,
+            MailProperty::ReplyTo => RfcHeader::ReplyTo,
+            MailProperty::Subject => RfcHeader::Subject,
+            MailProperty::SentAt => RfcHeader::Date,
+            MailProperty::Header(MailHeaderProperty {
                 header: HeaderName::Rfc(rfc),
                 ..
             }) => *rfc,
@@ -412,25 +437,25 @@ impl MailProperties {
     }
 }
 
-impl Default for MailProperties {
+impl Default for MailProperty {
     fn default() -> Self {
-        MailProperties::Id
+        MailProperty::Id
     }
 }
 
-impl JSONArgumentParser for MailProperties {
+impl JSONArgumentParser for MailProperty {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
         let argument = argument.unwrap_string().ok_or_else(|| {
             MethodError::InvalidArguments("Expected string argument.".to_string())
         })?;
-        MailProperties::parse(&argument).ok_or_else(|| {
+        MailProperty::parse(&argument).ok_or_else(|| {
             MethodError::InvalidArguments(format!("Unknown property: '{}'.", argument))
         })
     }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MailBodyProperties {
+pub enum MailBodyProperty {
     PartId,
     BlobId,
     Size,
@@ -446,57 +471,61 @@ pub enum MailBodyProperties {
     Subparts,
 }
 
-impl MailBodyProperties {
-    pub fn parse(value: &str) -> Option<MailBodyProperties> {
+impl Property for MailBodyProperty {
+    fn parse(value: &str) -> Option<MailBodyProperty> {
         match value {
-            "partId" => Some(MailBodyProperties::PartId),
-            "blobId" => Some(MailBodyProperties::BlobId),
-            "size" => Some(MailBodyProperties::Size),
-            "name" => Some(MailBodyProperties::Name),
-            "type" => Some(MailBodyProperties::Type),
-            "charset" => Some(MailBodyProperties::Charset),
-            "headers" => Some(MailBodyProperties::Headers),
-            "disposition" => Some(MailBodyProperties::Disposition),
-            "cid" => Some(MailBodyProperties::Cid),
-            "language" => Some(MailBodyProperties::Language),
-            "location" => Some(MailBodyProperties::Location),
-            "subParts" => Some(MailBodyProperties::Subparts),
-            _ if value.starts_with("header:") => Some(MailBodyProperties::Header(
-                MailHeaderProperty::parse(value)?,
-            )),
+            "partId" => Some(MailBodyProperty::PartId),
+            "blobId" => Some(MailBodyProperty::BlobId),
+            "size" => Some(MailBodyProperty::Size),
+            "name" => Some(MailBodyProperty::Name),
+            "type" => Some(MailBodyProperty::Type),
+            "charset" => Some(MailBodyProperty::Charset),
+            "headers" => Some(MailBodyProperty::Headers),
+            "disposition" => Some(MailBodyProperty::Disposition),
+            "cid" => Some(MailBodyProperty::Cid),
+            "language" => Some(MailBodyProperty::Language),
+            "location" => Some(MailBodyProperty::Location),
+            "subParts" => Some(MailBodyProperty::Subparts),
+            _ if value.starts_with("header:") => {
+                Some(MailBodyProperty::Header(MailHeaderProperty::parse(value)?))
+            }
             _ => None,
+        }
+    }
+
+    fn collection() -> Collection {
+        Collection::Mail
+    }
+}
+
+impl Display for MailBodyProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MailBodyProperty::PartId => write!(f, "partId"),
+            MailBodyProperty::BlobId => write!(f, "blobId"),
+            MailBodyProperty::Size => write!(f, "size"),
+            MailBodyProperty::Name => write!(f, "name"),
+            MailBodyProperty::Type => write!(f, "type"),
+            MailBodyProperty::Charset => write!(f, "charset"),
+            MailBodyProperty::Header(header) => header.fmt(f),
+            MailBodyProperty::Headers => write!(f, "headers"),
+            MailBodyProperty::Disposition => write!(f, "disposition"),
+            MailBodyProperty::Cid => write!(f, "cid"),
+            MailBodyProperty::Language => write!(f, "language"),
+            MailBodyProperty::Location => write!(f, "location"),
+            MailBodyProperty::Subparts => write!(f, "subParts"),
         }
     }
 }
 
-impl JSONArgumentParser for MailBodyProperties {
+impl JSONArgumentParser for MailBodyProperty {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
         let argument = argument.unwrap_string().ok_or_else(|| {
             MethodError::InvalidArguments("Expected string argument.".to_string())
         })?;
-        MailBodyProperties::parse(&argument).ok_or_else(|| {
+        MailBodyProperty::parse(&argument).ok_or_else(|| {
             MethodError::InvalidArguments(format!("Unknown property: '{}'.", argument))
         })
-    }
-}
-
-impl Display for MailBodyProperties {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MailBodyProperties::PartId => write!(f, "partId"),
-            MailBodyProperties::BlobId => write!(f, "blobId"),
-            MailBodyProperties::Size => write!(f, "size"),
-            MailBodyProperties::Name => write!(f, "name"),
-            MailBodyProperties::Type => write!(f, "type"),
-            MailBodyProperties::Charset => write!(f, "charset"),
-            MailBodyProperties::Header(header) => header.fmt(f),
-            MailBodyProperties::Headers => write!(f, "headers"),
-            MailBodyProperties::Disposition => write!(f, "disposition"),
-            MailBodyProperties::Cid => write!(f, "cid"),
-            MailBodyProperties::Language => write!(f, "language"),
-            MailBodyProperties::Location => write!(f, "location"),
-            MailBodyProperties::Subparts => write!(f, "subParts"),
-        }
     }
 }
 

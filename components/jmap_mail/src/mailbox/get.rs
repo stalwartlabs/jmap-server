@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::get::GetObject;
+use jmap::jmap_store::orm::JMAPOrm;
 use jmap::protocol::json::JSONValue;
 use jmap::request::get::GetRequest;
 use store::roaring::RoaringBitmap;
@@ -12,7 +13,7 @@ use store::{DocumentId, Store};
 
 use crate::mail::{Keyword, MessageField};
 
-use super::{Mailbox, MailboxProperties};
+use super::MailboxProperty;
 
 pub struct GetMailbox<'y, T>
 where
@@ -20,58 +21,47 @@ where
 {
     store: &'y JMAPStore<T>,
     account_id: AccountId,
-    properties: Vec<MailboxProperties>,
     mail_document_ids: Option<RoaringBitmap>,
+    fetch_mailbox: bool,
 }
 
 impl<'y, T> GetObject<'y, T> for GetMailbox<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &mut GetRequest) -> jmap::Result<Self> {
+    type Property = MailboxProperty;
+
+    fn new(
+        store: &'y JMAPStore<T>,
+        request: &mut GetRequest,
+        properties: &[Self::Property],
+    ) -> jmap::Result<Self> {
         Ok(GetMailbox {
             store,
             account_id: request.account_id,
-            properties: std::mem::take(&mut request.properties)
-                .parse_array_items(true)?
-                .unwrap_or_else(|| {
-                    vec![
-                        MailboxProperties::Id,
-                        MailboxProperties::Name,
-                        MailboxProperties::ParentId,
-                        MailboxProperties::Role,
-                        MailboxProperties::SortOrder,
-                        MailboxProperties::IsSubscribed,
-                        MailboxProperties::TotalEmails,
-                        MailboxProperties::UnreadEmails,
-                        MailboxProperties::TotalThreads,
-                        MailboxProperties::UnreadThreads,
-                        MailboxProperties::MyRights,
-                    ]
-                }),
             mail_document_ids: store.get_document_ids(request.account_id, Collection::Mail)?,
+            fetch_mailbox: properties.iter().any(|p| {
+                matches!(
+                    p,
+                    MailboxProperty::Name
+                        | MailboxProperty::ParentId
+                        | MailboxProperty::Role
+                        | MailboxProperty::SortOrder
+                )
+            }),
         })
     }
 
-    fn get_item(&self, jmap_id: JMAPId) -> jmap::Result<Option<JSONValue>> {
+    fn get_item(
+        &self,
+        jmap_id: JMAPId,
+        properties: &[Self::Property],
+    ) -> jmap::Result<Option<JSONValue>> {
         let document_id = jmap_id.get_document_id();
-        let mut mailbox = if self.properties.iter().any(|p| {
-            matches!(
-                p,
-                MailboxProperties::Name
-                    | MailboxProperties::ParentId
-                    | MailboxProperties::Role
-                    | MailboxProperties::SortOrder
-            )
-        }) {
+        let mut mailbox = if self.fetch_mailbox {
             Some(
                 self.store
-                    .get_document_value::<Mailbox>(
-                        self.account_id,
-                        Collection::Mailbox,
-                        document_id,
-                        MailboxProperties::Id.into(),
-                    )?
+                    .get_orm::<MailboxProperty>(self.account_id, document_id)?
                     .ok_or_else(|| {
                         StoreError::InternalError("Mailbox data not found".to_string())
                     })?,
@@ -82,47 +72,50 @@ where
 
         let mut result: HashMap<String, JSONValue> = HashMap::new();
 
-        for property in &self.properties {
+        for property in properties {
             if let Entry::Vacant(entry) = result.entry(property.to_string()) {
                 let value = match property {
-                    MailboxProperties::Id => jmap_id.to_jmap_string().into(),
-                    MailboxProperties::Name => {
-                        std::mem::take(&mut mailbox.as_mut().unwrap().name).into()
+                    MailboxProperty::Id => jmap_id.to_jmap_string().into(),
+                    MailboxProperty::Name | MailboxProperty::Role | MailboxProperty::SortOrder => {
+                        mailbox
+                            .as_mut()
+                            .unwrap()
+                            .remove(property)
+                            .unwrap_or_default()
                     }
-                    MailboxProperties::ParentId => {
-                        if mailbox.as_ref().unwrap().parent_id > 0 {
-                            (mailbox.as_ref().unwrap().parent_id - 1)
-                                .to_jmap_string()
-                                .into()
+                    MailboxProperty::ParentId => {
+                        if let Some(parent_id) =
+                            mailbox.as_ref().unwrap().get_unsigned_int(property)
+                        {
+                            if parent_id > 0 {
+                                (parent_id - 1).to_jmap_string().into()
+                            } else {
+                                JSONValue::Null
+                            }
                         } else {
                             JSONValue::Null
                         }
                     }
-                    MailboxProperties::Role => std::mem::take(&mut mailbox.as_mut().unwrap().role)
-                        .map(|v| v.into())
-                        .unwrap_or_default(),
-                    MailboxProperties::SortOrder => mailbox.as_ref().unwrap().sort_order.into(),
-                    MailboxProperties::IsSubscribed => true.into(), //TODO implement
-                    MailboxProperties::MyRights => JSONValue::Object(HashMap::new()), //TODO implement
-                    MailboxProperties::TotalEmails => self
+                    MailboxProperty::IsSubscribed => true.into(), //TODO implement
+                    MailboxProperty::MyRights => JSONValue::Object(HashMap::new()), //TODO implement
+                    MailboxProperty::TotalEmails => self
                         .get_mailbox_tag(document_id)?
                         .map(|v| v.len())
                         .unwrap_or(0)
                         .into(),
-                    MailboxProperties::UnreadEmails => {
+                    MailboxProperty::UnreadEmails => {
                         self //TODO check unread counts everywhere
                             .get_mailbox_unread_tag(document_id)?
                             .map(|v| v.len())
                             .unwrap_or(0)
                             .into()
                     }
-                    MailboxProperties::TotalThreads => self
+                    MailboxProperty::TotalThreads => self
                         .count_threads(self.get_mailbox_tag(document_id)?)?
                         .into(),
-                    MailboxProperties::UnreadThreads => self
+                    MailboxProperty::UnreadThreads => self
                         .count_threads(self.get_mailbox_unread_tag(document_id)?)?
                         .into(),
-                    MailboxProperties::HasRole => JSONValue::Null,
                 };
 
                 entry.insert(value);
@@ -139,12 +132,24 @@ where
         Ok(document_ids.map(|id| id as JMAPId).collect())
     }
 
-    fn collection() -> Collection {
-        Collection::Mailbox
-    }
-
     fn has_virtual_ids() -> bool {
         false
+    }
+
+    fn default_properties() -> Vec<Self::Property> {
+        vec![
+            MailboxProperty::Id,
+            MailboxProperty::Name,
+            MailboxProperty::ParentId,
+            MailboxProperty::Role,
+            MailboxProperty::SortOrder,
+            MailboxProperty::IsSubscribed,
+            MailboxProperty::TotalEmails,
+            MailboxProperty::UnreadEmails,
+            MailboxProperty::TotalThreads,
+            MailboxProperty::UnreadThreads,
+            MailboxProperty::MyRights,
+        ]
     }
 }
 

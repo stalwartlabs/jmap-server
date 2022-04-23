@@ -10,7 +10,7 @@ use jmap_mail::mail::{
     get::GetMail,
     import::JMAPMailImport,
     parse::{get_message_blob, ParseMail},
-    HeaderName, MailBodyProperties, MailHeaderForm, MailHeaderProperty, MailProperties,
+    HeaderName, MailBodyProperty, MailHeaderForm, MailHeaderProperty, MailProperty,
 };
 use mail_parser::RfcHeader;
 use store::{AccountId, JMAPStore, Store};
@@ -35,20 +35,22 @@ where
                 mail_store
                     .get::<GetMail<T>>(GetRequest {
                         account_id,
-                        ids: vec![mail_store
-                            .mail_import_blob(
-                                account_id,
-                                fs::read(&test_file).unwrap(),
-                                vec![],
-                                vec![],
-                                None,
-                            )
-                            .unwrap()
-                            .eval_unwrap_jmap_id("/id")]
+                        ids: vec![
+                            mail_store
+                                .mail_import(
+                                    account_id,
+                                    fs::read(&test_file).unwrap(),
+                                    vec![],
+                                    vec![],
+                                    None,
+                                )
+                                .unwrap()
+                                .id,
+                        ]
                         .into(),
-                        properties: vec![MailProperties::Attachments.to_string().into()].into(),
+                        properties: vec![MailProperty::Attachments.to_string().into()].into(),
                         arguments: build_mail_get_arguments(
-                            vec![MailBodyProperties::BlobId],
+                            vec![MailBodyProperty::BlobId],
                             false,
                             false,
                             false,
@@ -63,17 +65,17 @@ where
 
         let mut arguments = build_mail_get_arguments(
             vec![
-                MailBodyProperties::PartId,
-                MailBodyProperties::BlobId,
-                MailBodyProperties::Size,
-                MailBodyProperties::Name,
-                MailBodyProperties::Type,
-                MailBodyProperties::Charset,
-                MailBodyProperties::Headers,
-                MailBodyProperties::Disposition,
-                MailBodyProperties::Cid,
-                MailBodyProperties::Language,
-                MailBodyProperties::Location,
+                MailBodyProperty::PartId,
+                MailBodyProperty::BlobId,
+                MailBodyProperty::Size,
+                MailBodyProperty::Name,
+                MailBodyProperty::Type,
+                MailBodyProperty::Charset,
+                MailBodyProperty::Headers,
+                MailBodyProperty::Disposition,
+                MailBodyProperty::Cid,
+                MailBodyProperty::Language,
+                MailBodyProperty::Location,
             ],
             true,
             true,
@@ -84,31 +86,31 @@ where
         arguments.insert(
             "properties".to_string(),
             vec![
-                MailProperties::Id,
-                MailProperties::BlobId,
-                MailProperties::ThreadId,
-                MailProperties::MailboxIds,
-                MailProperties::Keywords,
-                MailProperties::Size,
-                MailProperties::ReceivedAt,
-                MailProperties::MessageId,
-                MailProperties::InReplyTo,
-                MailProperties::References,
-                MailProperties::Sender,
-                MailProperties::From,
-                MailProperties::To,
-                MailProperties::Cc,
-                MailProperties::Bcc,
-                MailProperties::ReplyTo,
-                MailProperties::Subject,
-                MailProperties::SentAt,
-                MailProperties::HasAttachment,
-                MailProperties::Preview,
-                MailProperties::BodyValues,
-                MailProperties::TextBody,
-                MailProperties::HtmlBody,
-                MailProperties::Attachments,
-                MailProperties::BodyStructure,
+                MailProperty::Id,
+                MailProperty::BlobId,
+                MailProperty::ThreadId,
+                MailProperty::MailboxIds,
+                MailProperty::Keywords,
+                MailProperty::Size,
+                MailProperty::ReceivedAt,
+                MailProperty::MessageId,
+                MailProperty::InReplyTo,
+                MailProperty::References,
+                MailProperty::Sender,
+                MailProperty::From,
+                MailProperty::To,
+                MailProperty::Cc,
+                MailProperty::Bcc,
+                MailProperty::ReplyTo,
+                MailProperty::Subject,
+                MailProperty::SentAt,
+                MailProperty::HasAttachment,
+                MailProperty::Preview,
+                MailProperty::BodyValues,
+                MailProperty::TextBody,
+                MailProperty::HtmlBody,
+                MailProperty::Attachments,
+                MailProperty::BodyStructure,
             ]
             .into_iter()
             .map(|p| p.to_string().into())
@@ -178,22 +180,22 @@ where
         .unwrap();
 
     let mut properties = vec![
-        MailProperties::Id,
-        MailProperties::MessageId,
-        MailProperties::InReplyTo,
-        MailProperties::References,
-        MailProperties::Sender,
-        MailProperties::From,
-        MailProperties::To,
-        MailProperties::Cc,
-        MailProperties::Bcc,
-        MailProperties::ReplyTo,
-        MailProperties::Subject,
-        MailProperties::SentAt,
-        MailProperties::Preview,
-        MailProperties::TextBody,
-        MailProperties::HtmlBody,
-        MailProperties::Attachments,
+        MailProperty::Id,
+        MailProperty::MessageId,
+        MailProperty::InReplyTo,
+        MailProperty::References,
+        MailProperty::Sender,
+        MailProperty::From,
+        MailProperty::To,
+        MailProperty::Cc,
+        MailProperty::Bcc,
+        MailProperty::ReplyTo,
+        MailProperty::Subject,
+        MailProperty::SentAt,
+        MailProperty::Preview,
+        MailProperty::TextBody,
+        MailProperty::HtmlBody,
+        MailProperty::Attachments,
     ];
 
     for header in [
@@ -208,32 +210,32 @@ where
         HeaderName::Other("X-AddressesGroup-Single".into()),
         HeaderName::Other("X-AddressesGroup".into()),
     ] {
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: false,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Addresses,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Addresses,
             header: header.clone(),
             all: false,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::GroupedAddresses,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::GroupedAddresses,
             header: header.clone(),
             all: false,
@@ -248,22 +250,22 @@ where
         HeaderName::Other("X-List-Single".into()),
         HeaderName::Other("X-List".into()),
     ] {
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: false,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::URLs,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::URLs,
             header: header.clone(),
             all: false,
@@ -276,22 +278,22 @@ where
         HeaderName::Other("X-Date-Single".into()),
         HeaderName::Other("X-Date".into()),
     ] {
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: false,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Date,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Date,
             header: header.clone(),
             all: false,
@@ -304,22 +306,22 @@ where
         HeaderName::Other("X-Id-Single".into()),
         HeaderName::Other("X-Id".into()),
     ] {
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: false,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::MessageIds,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::MessageIds,
             header: header.clone(),
             all: false,
@@ -332,22 +334,22 @@ where
         HeaderName::Other("X-Text-Single".into()),
         HeaderName::Other("X-Text".into()),
     ] {
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Raw,
             header: header.clone(),
             all: false,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Text,
             header: header.clone(),
             all: true,
         }));
-        properties.push(MailProperties::Header(MailHeaderProperty {
+        properties.push(MailProperty::Header(MailHeaderProperty {
             form: MailHeaderForm::Text,
             header: header.clone(),
             all: false,
@@ -358,20 +360,20 @@ where
     for property in properties {
         let mut arguments = build_mail_get_arguments(
             vec![
-                MailBodyProperties::Size,
-                MailBodyProperties::Name,
-                MailBodyProperties::Type,
-                MailBodyProperties::Charset,
-                MailBodyProperties::Disposition,
-                MailBodyProperties::Cid,
-                MailBodyProperties::Language,
-                MailBodyProperties::Location,
-                MailBodyProperties::Header(MailHeaderProperty::new_other(
+                MailBodyProperty::Size,
+                MailBodyProperty::Name,
+                MailBodyProperty::Type,
+                MailBodyProperty::Charset,
+                MailBodyProperty::Disposition,
+                MailBodyProperty::Cid,
+                MailBodyProperty::Language,
+                MailBodyProperty::Location,
+                MailBodyProperty::Header(MailHeaderProperty::new_other(
                     "X-Custom-Header".into(),
                     MailHeaderForm::Raw,
                     false,
                 )),
-                MailBodyProperties::Header(MailHeaderProperty::new_other(
+                MailBodyProperty::Header(MailHeaderProperty::new_other(
                     "X-Custom-Header-2".into(),
                     MailHeaderForm::Raw,
                     false,

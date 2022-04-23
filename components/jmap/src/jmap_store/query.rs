@@ -18,7 +18,7 @@ pub trait QueryObject<'y, T>: QueryFilterMap + Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &QueryRequest) -> crate::Result<Self>;
+    fn new(store: &'y JMAPStore<T>, request: &QueryRequest) -> crate::Result<Self>;
     fn parse_filter(&mut self, cond: HashMap<String, JSONValue>) -> crate::Result<Filter>;
     fn parse_comparator(
         &mut self,
@@ -66,7 +66,7 @@ where
     where
         V: QueryObject<'y, T>,
     {
-        let mut object = V::init(self, &request)?;
+        let mut object = V::new(self, &request)?;
         let collection = V::collection();
 
         let state: Option<QueryState> = match request.filter.parse_operator() {

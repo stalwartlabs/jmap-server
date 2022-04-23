@@ -56,7 +56,7 @@ impl<'y, T> QueryObject<'y, T> for QueryMail<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &QueryRequest) -> jmap::Result<Self> {
+    fn new(store: &'y JMAPStore<T>, request: &QueryRequest) -> jmap::Result<Self> {
         Ok(QueryMail {
             store,
             account_id: request.account_id,
@@ -183,9 +183,9 @@ where
                         MethodError::InvalidArguments("Expected array.".to_string())
                     })?;
                     let (value, header) = match cond_value.len() {
-                        1 => ("".to_string(), cond_value.pop().unwrap().parse_string()?),
+                        1 => (None, cond_value.pop().unwrap().parse_string()?),
                         2 => (
-                            cond_value.pop().unwrap().parse_string()?,
+                            Some(cond_value.pop().unwrap().parse_string()?),
                             cond_value.pop().unwrap().parse_string()?,
                         ),
                         _ => {
@@ -205,8 +205,14 @@ where
                     };
 
                     // TODO special case for message references
-                    // TODO implement empty header matching
-                    Filter::eq(header.into(), FieldValue::Text(value))
+                    if let Some(value) = value {
+                        Filter::eq(header.into(), FieldValue::Text(value))
+                    } else {
+                        Filter::eq(
+                            MessageField::HasHeader.into(),
+                            FieldValue::Tag(Tag::Static(header.into())),
+                        )
+                    }
                 }
                 "hasKeyword" => {
                     if self.is_immutable_filter {

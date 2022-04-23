@@ -15,6 +15,9 @@ use jmap::protocol::invocation::{Invocation, Method, Object};
 use jmap::protocol::json::JSONValue;
 use jmap::protocol::request::Request;
 use jmap::protocol::response::Response;
+use jmap_mail::identity::changes::ChangesIdentity;
+use jmap_mail::identity::get::GetIdentity;
+use jmap_mail::identity::set::SetIdentity;
 use jmap_mail::mail::changes::ChangesMail;
 use jmap_mail::mail::get::GetMail;
 use jmap_mail::mail::import::ImportMail;
@@ -157,6 +160,13 @@ where
                 .into(),
             (Object::Mailbox, Method::Changes(request)) => {
                 store.changes::<ChangesMailbox>(request)?.into()
+            }
+            (Object::Identity, Method::Get(request)) => {
+                store.get::<GetIdentity<T>>(request)?.into()
+            }
+            (Object::Identity, Method::Set(request)) => store.set::<SetIdentity>(request)?.into(),
+            (Object::Identity, Method::Changes(request)) => {
+                store.changes::<ChangesIdentity>(request)?.into()
             }
             (Object::Core, Method::Echo(arguments)) => arguments,
             _ => {

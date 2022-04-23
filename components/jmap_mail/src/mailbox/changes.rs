@@ -1,7 +1,7 @@
 use jmap::jmap_store::changes::{ChangesObject, ChangesResult};
 use store::Collection;
 
-use super::MailboxProperties;
+use super::MailboxProperty;
 
 pub struct ChangesMailbox {}
 
@@ -15,10 +15,10 @@ impl ChangesObject for ChangesMailbox {
             result.arguments.insert(
                 "updatedProperties".to_string(),
                 vec![
-                    MailboxProperties::TotalEmails.into(),
-                    MailboxProperties::UnreadEmails.into(),
-                    MailboxProperties::TotalThreads.into(),
-                    MailboxProperties::UnreadThreads.into(),
+                    MailboxProperty::TotalEmails.into(),
+                    MailboxProperty::UnreadEmails.into(),
+                    MailboxProperty::TotalThreads.into(),
+                    MailboxProperty::UnreadThreads.into(),
                 ]
                 .into(),
             );

@@ -4,7 +4,7 @@ use crate::mail::Keyword;
 use crate::mail::{parse::get_message_blob, MESSAGE_RAW};
 
 use jmap::error::method::MethodError;
-use jmap::error::set::SetErrorType;
+use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::blob::BlobId;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
@@ -22,7 +22,9 @@ use store::{
 };
 use store::{Collection, DocumentId, JMAPIdPrefix};
 
-use crate::mail::{parse::build_message_document, MessageField};
+use crate::mail::MessageField;
+
+use super::parse::MessageParser;
 
 pub struct ImportMail<'y, T>
 where
@@ -45,7 +47,7 @@ where
 {
     type Item = ImportItem;
 
-    fn init(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> jmap::Result<Self> {
+    fn new(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> jmap::Result<Self> {
         Ok(ImportMail {
             store,
             account_id: request.account_id,
@@ -125,23 +127,23 @@ where
         Ok(emails)
     }
 
-    fn import_item(&self, item: Self::Item) -> jmap::Result<Result<JSONValue, JSONValue>> {
+    fn import_item(&self, item: Self::Item) -> jmap::error::set::Result<JSONValue> {
         if item.mailbox_ids.is_empty() {
-            return Ok(Err(JSONValue::new_invalid_property(
+            return Err(SetError::invalid_property(
                 "mailboxIds",
                 "Message must belong to at least one mailbox.",
-            )));
+            ));
         }
 
         for &mailbox_id in &item.mailbox_ids {
             if !self.mailbox_ids.contains(mailbox_id) {
-                return Ok(Err(JSONValue::new_invalid_property(
+                return Err(SetError::invalid_property(
                     "mailboxIds",
                     format!(
                         "Mailbox {} does not exist.",
                         (mailbox_id as JMAPId).to_jmap_string()
                     ),
-                )));
+                ));
             }
         }
 
@@ -149,18 +151,27 @@ where
             self.store
                 .download_blob(self.account_id, &item.blob_id, get_message_blob)?
         {
-            Ok(Ok(self.store.mail_import_blob(
-                self.account_id,
-                blob,
-                item.mailbox_ids,
-                item.keywords.into_iter().map(|k| k.tag).collect(),
-                item.received_at,
-            )?))
+            Ok(self
+                .store
+                .mail_import(
+                    self.account_id,
+                    blob,
+                    item.mailbox_ids,
+                    item.keywords.into_iter().map(|k| k.tag).collect(),
+                    item.received_at,
+                )
+                .map_err(|_| {
+                    SetError::new(
+                        SetErrorType::Forbidden,
+                        "Failed to insert message, please try again later.",
+                    )
+                })?
+                .into())
         } else {
-            Ok(Err(JSONValue::new_error(
+            Err(SetError::new(
                 SetErrorType::BlobNotFound,
                 format!("BlobId {} not found.", item.blob_id.to_jmap_string()),
-            )))
+            ))
         }
     }
 
@@ -170,18 +181,25 @@ where
 }
 
 pub trait JMAPMailImport {
-    fn mail_import_blob(
+    fn mail_import(
         &self,
         account_id: AccountId,
         blob: Vec<u8>,
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
         received_at: Option<i64>,
-    ) -> jmap::Result<JSONValue>;
+    ) -> jmap::Result<MailImportResult>;
+
+    fn mail_set_thread(
+        &self,
+        batch: &mut WriteBatch,
+        document: &mut Document,
+        reference_ids: Vec<String>,
+        thread_name: String,
+    ) -> store::Result<DocumentId>;
 
     fn mail_merge_threads(
         &self,
-        account_id: AccountId,
         documents: &mut WriteBatch,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
@@ -199,54 +217,99 @@ pub trait JMAPMailImport {
     ) -> store::Result<()>;
 }
 
+pub struct MailImportResult {
+    pub id: JMAPId,
+    pub blob_id: BlobId,
+    pub thread_id: DocumentId,
+    pub size: usize,
+}
+
+impl From<MailImportResult> for JSONValue {
+    fn from(import_result: MailImportResult) -> Self {
+        // Generate JSON object
+        let mut result = HashMap::with_capacity(4);
+        result.insert("id".to_string(), import_result.id.to_jmap_string().into());
+        result.insert(
+            "blobId".to_string(),
+            import_result.blob_id.to_jmap_string().into(),
+        );
+        result.insert(
+            "threadId".to_string(),
+            (import_result.thread_id as JMAPId).to_jmap_string().into(),
+        );
+        result.insert("size".to_string(), import_result.size.into());
+        result.into()
+    }
+}
+
 impl<T> JMAPMailImport for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_import_blob(
+    fn mail_import(
         &self,
         account_id: AccountId,
         blob: Vec<u8>,
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
         received_at: Option<i64>,
-    ) -> jmap::Result<JSONValue> {
-        // Build message document
+    ) -> jmap::Result<MailImportResult> {
         let document_id = self.assign_document_id(account_id, Collection::Mail)?;
         let mut batch = WriteBatch::new(account_id, self.config.is_in_cluster);
         let mut document = Document::new(Collection::Mail, document_id);
-        let blob_len = blob.len();
-        let (reference_ids, thread_name) =
-            build_message_document(&mut document, blob, received_at)?;
+        let size = blob.len();
 
         // Add mailbox tags
-        //TODO validate mailbox ids
-        for mailbox_id in mailbox_ids {
-            document.tag(
-                MessageField::Mailbox,
-                Tag::Id(mailbox_id),
-                DefaultOptions::new(),
-            );
-            batch.log_child_update(Collection::Mailbox, mailbox_id);
+        for mailbox_id in &mailbox_ids {
+            batch.log_child_update(Collection::Mailbox, *mailbox_id);
         }
 
-        // Add keyword tags
-        for keyword in keywords {
-            document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
-        }
+        // Parse message
+        let (reference_ids, thread_name) =
+            document.parse_message(blob, mailbox_ids, keywords, received_at)?;
 
         // Lock account while threads are merged
-        let _lock = self.lock_account(account_id, Collection::Mail);
+        let _lock = self.lock_account(batch.account_id, Collection::Mail);
 
+        // Obtain thread Id
+        let thread_id =
+            self.mail_set_thread(&mut batch, &mut document, reference_ids, thread_name)?;
+
+        // Write document to store
+        let result = MailImportResult {
+            id: JMAPId::from_parts(thread_id, document_id),
+            blob_id: BlobId::new_owned(
+                batch.account_id,
+                Collection::Mail,
+                document.document_id,
+                MESSAGE_RAW,
+            ),
+            thread_id,
+            size,
+        };
+        batch.log_insert(Collection::Mail, result.id);
+        batch.insert_document(document);
+        self.write(batch)?;
+
+        Ok(result)
+    }
+
+    fn mail_set_thread(
+        &self,
+        batch: &mut WriteBatch,
+        document: &mut Document,
+        reference_ids: Vec<String>,
+        thread_name: String,
+    ) -> store::Result<DocumentId> {
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
             // Obtain thread ids for all matching document ids
             let thread_ids = self
                 .get_multi_document_tag_id(
-                    account_id,
+                    batch.account_id,
                     Collection::Mail,
                     self.query_store::<DefaultIdMapper>(
-                        account_id,
+                        batch.account_id,
                         Collection::Mail,
                         Filter::and(vec![
                             Filter::eq(
@@ -269,7 +332,7 @@ where
                     )?
                     .into_iter()
                     .map(|id| id.get_document_id())
-                    .collect::<Vec<u32>>()
+                    .collect::<Vec<DocumentId>>()
                     .into_iter(),
                     MessageField::ThreadId.into(),
                 )?
@@ -285,11 +348,7 @@ where
                 0 => None,
                 _ => {
                     // Merge all matching threads
-                    Some(self.mail_merge_threads(
-                        account_id,
-                        &mut batch,
-                        thread_ids.into_iter().collect(),
-                    )?)
+                    Some(self.mail_merge_threads(batch, thread_ids.into_iter().collect())?)
                 }
             }
         } else {
@@ -300,7 +359,7 @@ where
             batch.log_child_update(Collection::Thread, thread_id);
             thread_id
         } else {
-            let thread_id = self.assign_document_id(account_id, Collection::Thread)?;
+            let thread_id = self.assign_document_id(batch.account_id, Collection::Thread)?;
             batch.log_insert(Collection::Thread, thread_id);
             thread_id
         };
@@ -325,34 +384,11 @@ where
             DefaultOptions::new().sort(),
         );
 
-        let jmap_mail_id = JMAPId::from_parts(thread_id, document_id);
-        batch.log_insert(Collection::Mail, jmap_mail_id);
-        batch.insert_document(document);
-
-        // Write documents to store
-        self.write(batch)?;
-
-        // Generate JSON object
-        let mut values = HashMap::with_capacity(4);
-        values.insert("id".to_string(), jmap_mail_id.to_jmap_string().into());
-        values.insert(
-            "blobId".to_string(),
-            BlobId::new_owned(account_id, Collection::Mail, document_id, MESSAGE_RAW)
-                .to_jmap_string()
-                .into(),
-        );
-        values.insert(
-            "threadId".to_string(),
-            (thread_id as JMAPId).to_jmap_string().into(),
-        );
-        values.insert("size".to_string(), blob_len.into());
-
-        Ok(values.into())
+        Ok(thread_id)
     }
 
     fn mail_merge_threads(
         &self,
-        account_id: AccountId,
         batch: &mut WriteBatch,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId> {
@@ -361,7 +397,7 @@ where
 
         for (pos, document_set) in self
             .get_tags(
-                account_id,
+                batch.account_id,
                 Collection::Mail,
                 MessageField::ThreadId.into(),
                 &thread_ids
@@ -378,7 +414,7 @@ where
             } else {
                 error!(
                     "No tags found for thread id {}, account: {}.",
-                    thread_ids[pos], account_id
+                    thread_ids[pos], batch.account_id
                 );
             }
         }
@@ -430,14 +466,12 @@ where
 
             // Parse and build message document
             let (reference_ids, thread_name) =
-                build_message_document(&mut document, raw_message, received_at.into())?;
+                document.parse_message(raw_message, vec![], vec![], received_at.into())?;
 
-            // Add mailbox tags
             for mailbox in mailboxes {
                 document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
             }
 
-            // Add keyword tags
             for keyword in keywords {
                 document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
             }

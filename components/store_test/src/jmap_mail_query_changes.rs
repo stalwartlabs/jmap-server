@@ -109,7 +109,7 @@ where
         match &change {
             LogAction::Insert(id) => {
                 let jmap_id = mail_store
-                    .mail_import_blob(
+                    .mail_import(
                         account_id,
                         format!(
                             "From: test_{}\nSubject: test_{}\n\ntest",
@@ -127,7 +127,7 @@ where
                         Some(*id as i64),
                     )
                     .unwrap()
-                    .eval_unwrap_jmap_id("/id");
+                    .id;
 
                 id_map.insert(*id, jmap_id);
                 if change_num % 2 == 0 {

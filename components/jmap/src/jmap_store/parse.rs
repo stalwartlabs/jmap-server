@@ -23,7 +23,7 @@ pub trait ParseObject<'y, T>: Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &mut ParseRequest) -> crate::Result<Self>;
+    fn new(store: &'y JMAPStore<T>, request: &mut ParseRequest) -> crate::Result<Self>;
     fn parse_blob(&self, blob_id: BlobId, blob: Vec<u8>) -> crate::Result<Option<JSONValue>>;
     fn inner_blob_fnc() -> InnerBlobFnc;
 }
@@ -48,7 +48,7 @@ where
         if request.blob_ids.len() > self.config.mail_parse_max_items {
             return Err(MethodError::RequestTooLarge);
         }
-        let object = U::init(self, &mut request)?;
+        let object = U::new(self, &mut request)?;
 
         let mut parsed = HashMap::new();
         let mut not_parsable = Vec::new();

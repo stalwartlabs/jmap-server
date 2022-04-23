@@ -2,6 +2,7 @@ pub mod blob;
 pub mod changes;
 pub mod get;
 pub mod import;
+pub mod orm;
 pub mod parse;
 pub mod query;
 pub mod query_changes;

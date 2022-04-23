@@ -11,6 +11,8 @@ use store::{
 
 use crate::mail::MessageField;
 
+use super::ThreadProperty;
+
 pub struct GetThread<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -23,14 +25,24 @@ impl<'y, T> GetObject<'y, T> for GetThread<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &mut GetRequest) -> jmap::Result<Self> {
+    type Property = ThreadProperty;
+
+    fn new(
+        store: &'y JMAPStore<T>,
+        request: &mut GetRequest,
+        _properties: &[Self::Property],
+    ) -> jmap::Result<Self> {
         Ok(GetThread {
             store,
             account_id: request.account_id,
         })
     }
 
-    fn get_item(&self, jmap_id: JMAPId) -> jmap::Result<Option<JSONValue>> {
+    fn get_item(
+        &self,
+        jmap_id: JMAPId,
+        _properties: &[Self::Property],
+    ) -> jmap::Result<Option<JSONValue>> {
         let thread_id = jmap_id.get_document_id();
         if let Some(doc_ids) = self.store.get_tag(
             self.account_id,
@@ -73,11 +85,11 @@ where
         Ok(document_ids.map(|id| id as JMAPId).collect())
     }
 
-    fn collection() -> Collection {
-        Collection::Thread
-    }
-
     fn has_virtual_ids() -> bool {
         true
+    }
+
+    fn default_properties() -> Vec<Self::Property> {
+        vec![]
     }
 }

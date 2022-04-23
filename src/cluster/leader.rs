@@ -3,13 +3,15 @@ use std::task::Poll;
 
 use futures::poll;
 
+use jmap::jmap_store::orm::{JMAPOrm, PropertySchema};
+use jmap_mail::identity::IdentityProperty;
 use jmap_mail::mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
-use jmap_mail::mailbox::{Mailbox, MailboxProperties};
+use jmap_mail::mailbox::MailboxProperty;
 
 use store::leb128::Leb128;
 use store::log::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
-use store::serialize::StoreDeserialize;
+use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::tracing::{debug, error};
 use store::Collections;
 use store::{lz4_flex, AccountId, Collection, DocumentId, Store, StoreError};
@@ -646,7 +648,14 @@ where
 
             if let Some((item, item_size)) = match collection {
                 Collection::Mail => self.fetch_email(account_id, document_id, is_insert).await?,
-                Collection::Mailbox => self.fetch_mailbox(account_id, document_id).await?,
+                Collection::Mailbox => {
+                    self.fetch_orm::<MailboxProperty>(account_id, document_id)
+                        .await?
+                }
+                Collection::Identity => {
+                    self.fetch_orm::<IdentityProperty>(account_id, document_id)
+                        .await?
+                }
                 _ => {
                     return Err(StoreError::InternalError(
                         "Unsupported collection for changes".into(),
@@ -770,30 +779,38 @@ where
         .await
     }
 
-    async fn fetch_mailbox(
+    async fn fetch_orm<U>(
         &self,
         account_id: AccountId,
         document_id: DocumentId,
-    ) -> store::Result<Option<(Update, usize)>> {
+    ) -> store::Result<Option<(Update, usize)>>
+    where
+        U: PropertySchema + 'static,
+    {
         let store = self.store.clone();
         self.spawn_worker(move || {
-            Ok(store
-                .get_document_value::<Mailbox>(
-                    account_id,
-                    Collection::Mailbox,
-                    document_id,
-                    MailboxProperties::Id.into(),
-                )?
-                .map(|mailbox| {
+            Ok(
+                if let Some(orm) = store.get_orm::<U>(account_id, document_id)? {
+                    let data = orm.serialize().ok_or_else(|| {
+                        StoreError::SerializeError("Failed to serialize ORM.".to_string())
+                    })?;
+                    let data_len = data.len();
                     (
                         Update::Document {
                             account_id,
                             document_id,
-                            update: DocumentUpdate::UpdateMailbox { mailbox },
+                            update: DocumentUpdate::ORM {
+                                collection: U::collection(),
+                                data,
+                            },
                         },
-                        std::mem::size_of::<Mailbox>(),
+                        data_len,
                     )
-                }))
+                        .into()
+                } else {
+                    None
+                },
+            )
         })
         .await
     }

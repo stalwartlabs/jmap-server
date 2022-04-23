@@ -1,14 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::error::set::SetError;
 use crate::id::state::JMAPState;
 use crate::id::JMAPIdSerialize;
+use crate::Property;
 use crate::{
     error::{method::MethodError, set::SetErrorType},
     protocol::{json::JSONValue, json_pointer::JSONPointer},
     request::set::SetRequest,
 };
-use store::{batch::WriteBatch, roaring::RoaringBitmap, Collection, JMAPId, JMAPStore, Store};
-use store::{AccountId, JMAPIdPrefix};
+use store::batch::Document;
+use store::parking_lot::MutexGuard;
+use store::{batch::WriteBatch, roaring::RoaringBitmap, JMAPId, JMAPStore, Store};
+use store::{AccountId, Collection, JMAPIdPrefix};
 
 use super::changes::JMAPChanges;
 
@@ -18,6 +22,7 @@ where
     U: SetObjectData<T>,
 {
     pub store: &'y JMAPStore<T>,
+    pub lock: Option<MutexGuard<'y, ()>>,
     pub changes: WriteBatch,
     pub document_ids: RoaringBitmap,
     pub account_id: AccountId,
@@ -44,52 +49,56 @@ pub struct SetResult {
     pub not_destroyed: HashMap<String, JSONValue>,
 }
 
+pub struct CreateItemResult {
+    pub id: JMAPId,
+}
+
 pub trait SetObjectData<T>: Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &JMAPStore<T>, request: &SetRequest) -> crate::Result<Self>;
-    fn collection() -> Collection;
+    fn new(store: &JMAPStore<T>, request: &SetRequest) -> crate::Result<Self>;
 }
 
 pub trait SetObject<'y, T>: Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property;
+    type Property: Property;
     type Helper: SetObjectData<T>;
 
-    fn create(
+    fn new(
         helper: &mut SetObjectHelper<T, Self::Helper>,
         fields: &mut HashMap<String, JSONValue>,
-    ) -> Result<Self, JSONValue>;
-    fn update(
-        helper: &mut SetObjectHelper<T, Self::Helper>,
-        fields: &mut HashMap<String, JSONValue>,
-        jmap_id: JMAPId,
-    ) -> Result<Self, JSONValue>;
+        jmap_id: Option<JMAPId>,
+    ) -> crate::error::set::Result<Self>;
     fn set_field(
         &mut self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
         field: Self::Property,
         value: JSONValue,
-    ) -> Result<(), JSONValue>;
+    ) -> crate::error::set::Result<()>;
     fn patch_field(
         &mut self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
         field: Self::Property,
         property: String,
         value: JSONValue,
-    ) -> Result<(), JSONValue>;
-    fn write(
+    ) -> crate::error::set::Result<()>;
+    fn create(
         self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
-    ) -> crate::Result<Result<Option<JSONValue>, JSONValue>>;
+        document: &mut Document,
+    ) -> crate::error::set::Result<(JMAPId, JSONValue)>;
+    fn update(
+        self,
+        helper: &mut SetObjectHelper<T, Self::Helper>,
+        document: &mut Document,
+    ) -> crate::error::set::Result<Option<JSONValue>>;
     fn delete(
         helper: &mut SetObjectHelper<T, Self::Helper>,
         jmap_id: JMAPId,
-    ) -> crate::Result<Result<(), JSONValue>>;
-    fn parse_property(property: &str) -> Option<Self::Property>;
+    ) -> crate::error::set::Result<()>;
 }
 
 pub trait JMAPSet<T>
@@ -109,8 +118,8 @@ where
     where
         V: SetObject<'y, T>,
     {
-        let collection = V::Helper::collection();
-        let data = V::Helper::init(self, &request)?;
+        let collection = V::Property::collection();
+        let data = V::Helper::new(self, &request)?;
 
         let old_state = self.get_state(request.account_id, collection)?;
         if let Some(if_in_state) = request.if_in_state {
@@ -130,10 +139,8 @@ where
                 } else {
                     not_destroyed.insert(
                         jmap_id_str.to_string(),
-                        JSONValue::new_error(
-                            SetErrorType::InvalidProperties,
-                            "Failed to parse Id.",
-                        ),
+                        SetError::new(SetErrorType::InvalidProperties, "Failed to parse Id.")
+                            .into(),
                     );
                 }
             }
@@ -141,6 +148,7 @@ where
 
         let mut helper = SetObjectHelper {
             store: self,
+            lock: None,
             changes: WriteBatch::new(request.account_id, self.config.is_in_cluster),
             document_ids: self
                 .get_document_ids(request.account_id, collection)?
@@ -158,40 +166,60 @@ where
 
         'create: for (create_id, fields) in request.create {
             if let Some(mut fields) = fields.unwrap_object() {
-                let mut object = match V::create(&mut helper, &mut fields) {
+                let mut object = match V::new(&mut helper, &mut fields, None) {
                     Ok(object) => object,
                     Err(err) => {
-                        helper.not_created.insert(create_id, err);
+                        helper.not_created.insert(create_id, err.into());
                         continue 'create;
                     }
                 };
                 for (field, value) in fields {
-                    if let Some(field) = V::parse_property(&field) {
+                    if let Some(field) = V::Property::parse(&field) {
                         if let Err(err) = object.set_field(&mut helper, field, value) {
-                            helper.not_created.insert(create_id, err);
+                            helper.not_created.insert(create_id, err.into());
                             continue 'create;
                         }
                     } else {
                         helper.not_created.insert(
                             create_id,
-                            JSONValue::new_invalid_property(field, "Unsupported property."),
+                            SetError::invalid_property(field, "Unsupported property.").into(),
                         );
                         continue 'create;
                     }
                 }
 
-                match object.write(&mut helper)? {
-                    Ok(Some(result)) => helper.created.insert(create_id, result),
-                    Err(err) => helper.not_created.insert(create_id, err),
-                    Ok(None) => unreachable!(),
+                let mut document = Document::new(
+                    collection,
+                    helper
+                        .store
+                        .assign_document_id(helper.account_id, collection)?,
+                );
+
+                match object.create(&mut helper, &mut document) {
+                    Ok((jmap_id, result)) => {
+                        helper.document_ids.insert(document.document_id);
+                        helper.changes.insert_document(document);
+                        helper.changes.log_insert(collection, jmap_id);
+                        if helper.lock.is_some() {
+                            self.write(helper.changes)?;
+                            helper.changes =
+                                WriteBatch::new(request.account_id, self.config.is_in_cluster);
+                            helper.lock = None;
+                        }
+                        helper.created.insert(create_id, result);
+                    }
+                    Err(err) => {
+                        helper.not_created.insert(create_id, err.into());
+                    }
                 };
             } else {
                 helper.not_created.insert(
                     create_id,
-                    JSONValue::new_error(
+                    SetError::new(
                         SetErrorType::InvalidProperties,
                         "Failed to parse request, expected object.",
-                    ),
+                    )
+                    .into(),
                 );
             };
         }
@@ -205,10 +233,8 @@ where
             } else {
                 helper.not_updated.insert(
                     jmap_id_str,
-                    JSONValue::new_error(
-                        SetErrorType::InvalidProperties,
-                        "Failed to parse request.",
-                    ),
+                    SetError::new(SetErrorType::InvalidProperties, "Failed to parse request.")
+                        .into(),
                 );
                 continue;
             };
@@ -217,21 +243,21 @@ where
             if !helper.document_ids.contains(document_id) {
                 helper.not_updated.insert(
                     jmap_id_str,
-                    JSONValue::new_error(SetErrorType::NotFound, "ID not found."),
+                    SetError::new(SetErrorType::NotFound, "ID not found.").into(),
                 );
                 continue;
             } else if helper.will_destroy.contains(&jmap_id) {
                 helper.not_updated.insert(
                     jmap_id_str,
-                    JSONValue::new_error(SetErrorType::WillDestroy, "ID will be destroyed."),
+                    SetError::new(SetErrorType::WillDestroy, "ID will be destroyed.").into(),
                 );
                 continue;
             }
 
-            let mut object = match V::update(&mut helper, &mut fields, jmap_id) {
+            let mut object = match V::new(&mut helper, &mut fields, jmap_id.into()) {
                 Ok(object) => object,
                 Err(err) => {
-                    helper.not_updated.insert(jmap_id_str, err);
+                    helper.not_updated.insert(jmap_id_str, err.into());
                     continue 'update;
                 }
             };
@@ -239,15 +265,15 @@ where
             for (field, value) in fields {
                 match JSONPointer::parse(&field).unwrap_or(JSONPointer::Root) {
                     JSONPointer::String(field) => {
-                        if let Some(field) = V::parse_property(&field) {
+                        if let Some(field) = V::Property::parse(&field) {
                             if let Err(err) = object.set_field(&mut helper, field, value) {
-                                helper.not_updated.insert(jmap_id_str, err);
+                                helper.not_updated.insert(jmap_id_str, err.into());
                                 continue 'update;
                             }
                         } else {
                             helper.not_updated.insert(
                                 jmap_id_str,
-                                JSONValue::new_invalid_property(field, "Unsupported property."),
+                                SetError::invalid_property(field, "Unsupported property.").into(),
                             );
                             continue 'update;
                         }
@@ -257,24 +283,25 @@ where
                         if let (JSONPointer::String(property), JSONPointer::String(field)) =
                             (path.pop().unwrap(), path.pop().unwrap())
                         {
-                            if let Some(field) = V::parse_property(&field) {
+                            if let Some(field) = V::Property::parse(&field) {
                                 if let Err(err) =
                                     object.patch_field(&mut helper, field, property, value)
                                 {
-                                    helper.not_updated.insert(jmap_id_str, err);
+                                    helper.not_updated.insert(jmap_id_str, err.into());
                                     continue 'update;
                                 }
                             } else {
                                 helper.not_updated.insert(
                                     format!("{}/{}", field, property),
-                                    JSONValue::new_invalid_property(field, "Unsupported property."),
+                                    SetError::invalid_property(field, "Unsupported property.")
+                                        .into(),
                                 );
                                 continue 'update;
                             }
                         } else {
                             helper.not_updated.insert(
                                 jmap_id_str,
-                                JSONValue::new_invalid_property(field, "Unsupported property."),
+                                SetError::invalid_property(field, "Unsupported property.").into(),
                             );
                             continue 'update;
                         }
@@ -282,18 +309,18 @@ where
                     _ => {
                         helper.not_updated.insert(
                             jmap_id_str,
-                            JSONValue::new_invalid_property(
-                                field.to_string(),
-                                "Unsupported property.",
-                            ),
+                            SetError::invalid_property(field.to_string(), "Unsupported property.")
+                                .into(),
                         );
                         continue 'update;
                     }
                 }
             }
 
-            match object.write(&mut helper)? {
+            let mut document = Document::new(collection, document_id);
+            match object.update(&mut helper, &mut document) {
                 Ok(Some(result)) => {
+                    helper.changes.update_document(document);
                     helper.changes.log_update(collection, jmap_id);
                     helper.updated.insert(jmap_id_str, result);
                 }
@@ -301,7 +328,7 @@ where
                     helper.updated.insert(jmap_id_str, JSONValue::Null);
                 }
                 Err(err) => {
-                    helper.not_updated.insert(jmap_id_str, err);
+                    helper.not_updated.insert(jmap_id_str, err.into());
                 }
             };
         }
@@ -309,8 +336,10 @@ where
         for jmap_id in std::mem::take(&mut helper.will_destroy) {
             let document_id = jmap_id.get_document_id();
             if helper.document_ids.contains(document_id) {
-                if let Err(err) = V::delete(&mut helper, jmap_id)? {
-                    helper.not_destroyed.insert(jmap_id.to_jmap_string(), err);
+                if let Err(err) = V::delete(&mut helper, jmap_id) {
+                    helper
+                        .not_destroyed
+                        .insert(jmap_id.to_jmap_string(), err.into());
                 } else {
                     helper
                         .changes
@@ -321,19 +350,18 @@ where
             } else {
                 helper.not_destroyed.insert(
                     jmap_id.to_jmap_string(),
-                    JSONValue::new_error(SetErrorType::NotFound, "ID not found."),
+                    SetError::new(SetErrorType::NotFound, "ID not found.").into(),
                 );
             }
         }
 
+        if !helper.changes.is_empty() {
+            self.write(helper.changes)?
+        }
+
         Ok(SetResult {
             account_id: request.account_id,
-            new_state: if !helper.changes.is_empty() {
-                self.write(helper.changes)?;
-                self.get_state(request.account_id, collection)?
-            } else {
-                old_state.clone()
-            },
+            new_state: self.get_state(request.account_id, collection)?,
             old_state,
             created: helper.created,
             not_created: helper.not_created,
@@ -342,6 +370,24 @@ where
             destroyed: helper.destroyed,
             not_destroyed: helper.not_destroyed,
         })
+    }
+}
+
+impl<'y, T, U> SetObjectHelper<'y, T, U>
+where
+    T: for<'x> Store<'x> + 'static,
+    U: SetObjectData<T>,
+{
+    pub fn lock(&mut self, collection: Collection) {
+        self.lock = self.store.lock_account(self.account_id, collection).into();
+    }
+}
+
+impl From<CreateItemResult> for JSONValue {
+    fn from(ci_result: CreateItemResult) -> Self {
+        let mut result: HashMap<String, JSONValue> = HashMap::new();
+        result.insert("id".to_string(), ci_result.id.to_jmap_string().into());
+        result.into()
     }
 }
 

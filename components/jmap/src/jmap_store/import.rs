@@ -26,12 +26,12 @@ where
 {
     type Item;
 
-    fn init(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> crate::Result<Self>;
+    fn new(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> crate::Result<Self>;
     fn parse_items(
         &self,
         request: &mut ImportRequest,
     ) -> crate::Result<HashMap<String, Self::Item>>;
-    fn import_item(&self, item: Self::Item) -> crate::Result<Result<JSONValue, JSONValue>>;
+    fn import_item(&self, item: Self::Item) -> crate::error::set::Result<JSONValue>;
     fn collection() -> Collection;
 }
 
@@ -52,7 +52,7 @@ where
     where
         U: ImportObject<'y, T>,
     {
-        let object = U::init(self, &mut request)?;
+        let object = U::new(self, &mut request)?;
         let collection = U::collection();
         let items = object.parse_items(&mut request)?;
 
@@ -67,12 +67,12 @@ where
         let mut not_created = HashMap::with_capacity(items.len());
 
         for (id, item) in items {
-            match object.import_item(item)? {
+            match object.import_item(item) {
                 Ok(value) => {
                     created.insert(id, value);
                 }
                 Err(value) => {
-                    not_created.insert(id, value);
+                    not_created.insert(id, value.into());
                 }
             }
         }

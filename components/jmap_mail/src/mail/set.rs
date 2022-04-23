@@ -1,5 +1,4 @@
-use jmap::error::method::MethodError;
-use jmap::error::set::SetErrorType;
+use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::blob::BlobId;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
@@ -25,8 +24,12 @@ use store::{Collection, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Stor
 use crate::mail::import::JMAPMailImport;
 use crate::mail::parse::get_message_blob;
 use crate::mail::{
-    HeaderName, Keyword, MailHeaderForm, MailHeaderProperty, MailProperties, MessageField,
+    HeaderName, Keyword, MailHeaderForm, MailHeaderProperty, MailProperty, MessageField,
 };
+
+use super::import::MailImportResult;
+use super::parse::MessageParser;
+use super::MESSAGE_RAW;
 
 #[allow(clippy::large_enum_variant)]
 pub enum SetMail {
@@ -38,7 +41,6 @@ pub enum SetMail {
         body_values: Option<HashMap<String, JSONValue>>,
     },
     Update {
-        document: Document,
         keyword_op_list: HashMap<Tag, bool>,
         keyword_op_clear_all: bool,
         mailbox_op_list: HashMap<Tag, bool>,
@@ -54,16 +56,12 @@ impl<T> SetObjectData<T> for SetMailHelper
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &JMAPStore<T>, request: &SetRequest) -> jmap::Result<Self> {
+    fn new(store: &JMAPStore<T>, request: &SetRequest) -> jmap::Result<Self> {
         Ok(SetMailHelper {
             mailbox_ids: store
                 .get_document_ids(request.account_id, Collection::Mailbox)?
                 .unwrap_or_default(),
         })
-    }
-
-    fn collection() -> Collection {
-        Collection::Mail
     }
 }
 
@@ -71,33 +69,29 @@ impl<'y, T> SetObject<'y, T> for SetMail
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property = MailProperties;
+    type Property = MailProperty;
     type Helper = SetMailHelper;
 
-    fn create(
+    fn new(
         _helper: &mut SetObjectHelper<T, SetMailHelper>,
         fields: &mut HashMap<String, JSONValue>,
-    ) -> Result<Self, JSONValue> {
-        Ok(Self::Create {
-            mailbox_ids: HashSet::new(),
-            keywords: HashSet::new(),
-            received_at: None,
-            builder: MessageBuilder::new(),
-            body_values: fields.remove("bodyValues").and_then(|v| v.unwrap_object()),
-        })
-    }
-
-    fn update(
-        _helper: &mut SetObjectHelper<T, SetMailHelper>,
-        _fields: &mut HashMap<String, JSONValue>,
-        jmap_id: JMAPId,
-    ) -> Result<Self, JSONValue> {
-        Ok(SetMail::Update {
-            document: Document::new(Collection::Mail, jmap_id.get_document_id()),
-            keyword_op_list: HashMap::new(),
-            keyword_op_clear_all: false,
-            mailbox_op_list: HashMap::new(),
-            mailbox_op_clear_all: false,
+        jmap_id: Option<JMAPId>,
+    ) -> jmap::error::set::Result<Self> {
+        Ok(if jmap_id.is_none() {
+            Self::Create {
+                mailbox_ids: HashSet::new(),
+                keywords: HashSet::new(),
+                received_at: None,
+                builder: MessageBuilder::new(),
+                body_values: fields.remove("bodyValues").and_then(|v| v.unwrap_object()),
+            }
+        } else {
+            SetMail::Update {
+                keyword_op_list: HashMap::new(),
+                keyword_op_clear_all: false,
+                mailbox_op_list: HashMap::new(),
+                mailbox_op_clear_all: false,
+            }
         })
     }
 
@@ -106,7 +100,7 @@ where
         helper: &mut SetObjectHelper<T, SetMailHelper>,
         field: Self::Property,
         value: JSONValue,
-    ) -> Result<(), JSONValue> {
+    ) -> jmap::error::set::Result<()> {
         match self {
             SetMail::Create {
                 mailbox_ids,
@@ -115,11 +109,11 @@ where
                 builder,
                 body_values,
             } => match field {
-                MailProperties::MailboxIds => {
+                MailProperty::MailboxIds => {
                     let mailboxes = if let Some(mailboxes) = value.unwrap_object() {
                         mailboxes
                     } else {
-                        return Err(JSONValue::new_error(
+                        return Err(SetError::new(
                             SetErrorType::InvalidProperties,
                             "Expected a MailboxId object.".to_string(),
                         ));
@@ -133,29 +127,29 @@ where
                                 if helper.data.mailbox_ids.contains(mailbox_id) {
                                     mailbox_ids.insert(mailbox_id);
                                 } else {
-                                    return Err(JSONValue::new_error(
+                                    return Err(SetError::new(
                                         SetErrorType::InvalidProperties,
                                         format!("mailboxId {} does not exist.", mailbox),
                                     ));
                                 }
                             }
                         } else {
-                            return Err(JSONValue::new_error(
+                            return Err(SetError::new(
                                 SetErrorType::InvalidProperties,
                                 "Expected boolean value in mailboxIds",
                             ));
                         }
                     }
                 }
-                MailProperties::Keywords => {
+                MailProperty::Keywords => {
                     for (keyword, value) in value.unwrap_object().ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             "Expected object containing keywords",
                         )
                     })? {
                         if value.to_bool().ok_or_else(|| {
-                            JSONValue::new_error(
+                            SetError::new(
                                 SetErrorType::InvalidProperties,
                                 "Expected boolean value in keywords",
                             )
@@ -164,83 +158,81 @@ where
                         }
                     }
                 }
-                MailProperties::ReceivedAt => {
+                MailProperty::ReceivedAt => {
                     *received_at = value.parse_json_date()?.into();
                 }
-                MailProperties::MessageId => builder.header(
+                MailProperty::MessageId => builder.header(
                     "Message-ID",
                     MessageId::from(value.parse_json_string_list()?),
                 ),
-                MailProperties::InReplyTo => builder.header(
+                MailProperty::InReplyTo => builder.header(
                     "In-Reply-To",
                     MessageId::from(value.parse_json_string_list()?),
                 ),
-                MailProperties::References => builder.header(
+                MailProperty::References => builder.header(
                     "References",
                     MessageId::from(value.parse_json_string_list()?),
                 ),
-                MailProperties::Sender => {
+                MailProperty::Sender => {
                     builder.header("Sender", Address::List(value.parse_json_addresses()?))
                 }
-                MailProperties::From => {
+                MailProperty::From => {
                     builder.header("From", Address::List(value.parse_json_addresses()?))
                 }
-                MailProperties::To => {
+                MailProperty::To => {
                     builder.header("To", Address::List(value.parse_json_addresses()?))
                 }
-                MailProperties::Cc => {
+                MailProperty::Cc => {
                     builder.header("Cc", Address::List(value.parse_json_addresses()?))
                 }
-                MailProperties::Bcc => {
+                MailProperty::Bcc => {
                     builder.header("Bcc", Address::List(value.parse_json_addresses()?))
                 }
-                MailProperties::ReplyTo => {
+                MailProperty::ReplyTo => {
                     builder.header("Reply-To", Address::List(value.parse_json_addresses()?))
                 }
-                MailProperties::Subject => {
+                MailProperty::Subject => {
                     builder.header("Subject", Text::new(value.parse_json_string()?));
                 }
-                MailProperties::SentAt => {
-                    builder.header("Date", Date::new(value.parse_json_date()?))
-                }
-                MailProperties::TextBody => {
+                MailProperty::SentAt => builder.header("Date", Date::new(value.parse_json_date()?)),
+                MailProperty::TextBody => {
                     builder.text_body = value
                         .parse_body_parts(helper, body_values, "text/plain".into(), true)?
                         .pop()
                         .ok_or_else(|| {
-                            JSONValue::new_error(
+                            SetError::new(
                                 SetErrorType::InvalidProperties,
                                 "No text body part found".to_string(),
                             )
                         })?
                         .into();
                 }
-                MailProperties::HtmlBody => {
+                MailProperty::HtmlBody => {
                     builder.html_body = value
                         .parse_body_parts(helper, body_values, "text/html".into(), true)?
                         .pop()
                         .ok_or_else(|| {
-                            JSONValue::new_error(
+                            SetError::new(
                                 SetErrorType::InvalidProperties,
                                 "No html body part found".to_string(),
                             )
                         })?
                         .into();
                 }
-                MailProperties::Attachments => {
+                MailProperty::Attachments => {
                     builder.attachments = value
                         .parse_body_parts(helper, body_values, None, false)?
                         .into();
                 }
-                MailProperties::BodyStructure => {
+                MailProperty::BodyStructure => {
                     builder.body = value.parse_body_structure(helper, body_values)?.into();
                 }
-                MailProperties::Header(MailHeaderProperty { form, header, all }) => {
+                MailProperty::Header(MailHeaderProperty { form, header, all }) => {
                     if !all {
                         value.parse_header(builder, header, form)?;
                     } else {
                         for value in value.unwrap_array().ok_or_else(|| {
-                            JSONValue::new_error(
+                            SetError::new(
                                 SetErrorType::InvalidProperties,
                                 "Expected an array.".to_string(),
                             )
@@ -250,13 +242,13 @@ where
                     }
                 }
 
-                MailProperties::Id
-                | MailProperties::Size
-                | MailProperties::BlobId
-                | MailProperties::Preview
-                | MailProperties::ThreadId
-                | MailProperties::BodyValues
-                | MailProperties::HasAttachment => (),
+                MailProperty::Id
+                | MailProperty::Size
+                | MailProperty::BlobId
+                | MailProperty::Preview
+                | MailProperty::ThreadId
+                | MailProperty::BodyValues
+                | MailProperty::HasAttachment => (),
             },
             SetMail::Update {
                 keyword_op_list,
@@ -266,7 +258,7 @@ where
                 ..
             } => {
                 match (field, value) {
-                    (MailProperties::Keywords, JSONValue::Object(value)) => {
+                    (MailProperty::Keywords, JSONValue::Object(value)) => {
                         // Add keywords to the list
                         for (keyword, value) in value {
                             if let JSONValue::Bool(true) = value {
@@ -275,7 +267,7 @@ where
                         }
                         *keyword_op_clear_all = true;
                     }
-                    (MailProperties::MailboxIds, JSONValue::Object(value)) => {
+                    (MailProperty::MailboxIds, JSONValue::Object(value)) => {
                         // Add mailbox ids to the list
                         for (mailbox_id, value) in value {
                             match (JMAPId::from_jmap_string(mailbox_id.as_ref()), value) {
@@ -284,7 +276,7 @@ where
                                         .insert(Tag::Id(mailbox_id.get_document_id()), true);
                                 }
                                 (None, _) => {
-                                    return Err(JSONValue::new_invalid_property(
+                                    return Err(SetError::invalid_property(
                                         format!("mailboxIds/{}", mailbox_id),
                                         "Invalid JMAP Id".to_string(),
                                     ));
@@ -295,7 +287,7 @@ where
                         *mailbox_op_clear_all = true;
                     }
                     (field, _) => {
-                        return Err(JSONValue::new_invalid_property(
+                        return Err(SetError::invalid_property(
                             field.to_string(),
                             "Unsupported property or invalid format.",
                         ));
@@ -313,7 +305,7 @@ where
         field: Self::Property,
         property: String,
         value: JSONValue,
-    ) -> Result<(), JSONValue> {
+    ) -> jmap::error::set::Result<()> {
         if let SetMail::Update {
             keyword_op_list,
             mailbox_op_list,
@@ -324,7 +316,7 @@ where
                 JSONValue::Null | JSONValue::Bool(false) => false,
                 JSONValue::Bool(true) => true,
                 _ => {
-                    return Err(JSONValue::new_invalid_property(
+                    return Err(SetError::invalid_property(
                         format!("{}/{}", field, property),
                         "Expected a boolean or null value.",
                     ));
@@ -332,22 +324,22 @@ where
             };
 
             match &field {
-                MailProperties::MailboxIds => match JMAPId::from_jmap_string(property.as_ref()) {
+                MailProperty::MailboxIds => match JMAPId::from_jmap_string(property.as_ref()) {
                     Some(mailbox_id) => {
                         mailbox_op_list.insert(Tag::Id(mailbox_id.get_document_id()), is_set);
                     }
                     None => {
-                        return Err(JSONValue::new_invalid_property(
+                        return Err(SetError::invalid_property(
                             format!("{}/{}", field, property),
                             "Invalid JMAP Id",
                         ));
                     }
                 },
-                MailProperties::Keywords => {
+                MailProperty::Keywords => {
                     keyword_op_list.insert(Keyword::from_jmap(property), is_set);
                 }
                 _ => {
-                    return Err(JSONValue::new_invalid_property(
+                    return Err(SetError::invalid_property(
                         format!("{}/{}", field, property),
                         "Unsupported property.",
                     ));
@@ -357,168 +349,192 @@ where
         Ok(())
     }
 
-    fn write(
+    fn create(
         self,
         helper: &mut SetObjectHelper<T, SetMailHelper>,
-    ) -> jmap::Result<Result<Option<JSONValue>, JSONValue>> {
-        match self {
-            SetMail::Create {
-                mailbox_ids,
-                keywords,
-                received_at,
-                builder,
-                ..
-            } => {
-                if mailbox_ids.is_empty() {
-                    return Ok(Err(JSONValue::new_error(
-                        SetErrorType::InvalidProperties,
-                        "Message has to belong to at least one mailbox.",
-                    )));
-                }
-
-                if builder.headers.is_empty()
-                    && builder.body.is_none()
-                    && builder.html_body.is_none()
-                    && builder.text_body.is_none()
-                    && builder.attachments.is_none()
-                {
-                    return Ok(Err(JSONValue::new_error(
-                        SetErrorType::InvalidProperties,
-                        "Message has to have at least one header or body part.",
-                    )));
-                }
-
-                // TODO: write parsed message directly to store, avoid parsing it again.
-                let mut blob = Vec::with_capacity(1024);
-                builder.write_to(&mut blob).map_err(|_| {
-                    MethodError::ServerFail(StoreError::SerializeError(
-                        "Failed to write to memory.".to_string(),
-                    ))
-                })?;
-
-                helper
-                    .store
-                    .mail_import_blob(
-                        helper.account_id,
-                        blob,
-                        mailbox_ids.into_iter().collect(),
-                        keywords.into_iter().collect(),
-                        received_at,
-                    )
-                    .map(|r| Ok(Some(r)))
+        document: &mut Document,
+    ) -> jmap::error::set::Result<(JMAPId, JSONValue)> {
+        if let SetMail::Create {
+            mailbox_ids,
+            keywords,
+            received_at,
+            builder,
+            ..
+        } = self
+        {
+            if mailbox_ids.is_empty() {
+                return Err(SetError::new(
+                    SetErrorType::InvalidProperties,
+                    "Message has to belong to at least one mailbox.",
+                ));
             }
-            SetMail::Update {
-                mut document,
-                keyword_op_list,
-                keyword_op_clear_all,
-                mailbox_op_list,
-                mailbox_op_clear_all,
-            } => {
-                let mut changed_mailboxes = HashSet::new();
-                if !mailbox_op_list.is_empty() || mailbox_op_clear_all {
-                    // Deserialize mailbox list
-                    let current_mailboxes = helper
-                        .store
-                        .get_document_tags(
-                            helper.account_id,
-                            Collection::Mail,
-                            document.document_id,
-                            MessageField::Mailbox.into(),
-                        )?
-                        .map(|current_mailboxes| current_mailboxes.items)
-                        .unwrap_or_default();
 
-                    let mut has_mailboxes = false;
+            if builder.headers.is_empty()
+                && builder.body.is_none()
+                && builder.html_body.is_none()
+                && builder.text_body.is_none()
+                && builder.attachments.is_none()
+            {
+                return Err(SetError::new(
+                    SetErrorType::InvalidProperties,
+                    "Message has to have at least one header or body part.",
+                ));
+            }
 
-                    for mailbox in &current_mailboxes {
-                        if mailbox_op_clear_all {
-                            // Untag mailbox unless it is in the list of mailboxes to tag
-                            if !mailbox_op_list.get(mailbox).unwrap_or(&false) {
-                                document.tag(
-                                    MessageField::Mailbox,
-                                    mailbox.clone(),
-                                    DefaultOptions::new().clear(),
-                                );
-                                changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
-                            }
-                        } else if !mailbox_op_list.get(mailbox).unwrap_or(&true) {
-                            // Untag mailbox if is marked for untagging
+            // TODO: write parsed message directly to store, avoid parsing it again.
+            let mut blob = Vec::with_capacity(1024);
+            builder.write_to(&mut blob).map_err(|_| {
+                StoreError::SerializeError("Failed to write to memory.".to_string())
+            })?;
+
+            // Add mailbox tags
+            for mailbox_id in &mailbox_ids {
+                helper
+                    .changes
+                    .log_child_update(Collection::Mailbox, *mailbox_id);
+            }
+
+            // Parse message
+            let size = blob.len();
+            let (reference_ids, thread_name) = document.parse_message(
+                blob,
+                mailbox_ids.into_iter().collect(),
+                keywords.into_iter().collect(),
+                received_at,
+            )?;
+
+            // Lock collection
+            helper.lock(Collection::Mail);
+
+            // Obtain thread Id
+            let thread_id = helper.store.mail_set_thread(
+                &mut helper.changes,
+                document,
+                reference_ids,
+                thread_name,
+            )?;
+
+            let id = JMAPId::from_parts(thread_id, document.document_id);
+            Ok((
+                id,
+                MailImportResult {
+                    id,
+                    blob_id: BlobId::new_owned(
+                        helper.account_id,
+                        Collection::Mail,
+                        document.document_id,
+                        MESSAGE_RAW,
+                    ),
+                    thread_id,
+                    size,
+                }
+                .into(),
+            ))
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn update(
+        self,
+        helper: &mut SetObjectHelper<T, SetMailHelper>,
+        document: &mut Document,
+    ) -> jmap::error::set::Result<Option<JSONValue>> {
+        if let SetMail::Update {
+            keyword_op_list,
+            keyword_op_clear_all,
+            mailbox_op_list,
+            mailbox_op_clear_all,
+        } = self
+        {
+            let mut changed_mailboxes = HashSet::new();
+            if !mailbox_op_list.is_empty() || mailbox_op_clear_all {
+                // Deserialize mailbox list
+                let current_mailboxes = helper
+                    .store
+                    .get_document_tags(
+                        helper.account_id,
+                        Collection::Mail,
+                        document.document_id,
+                        MessageField::Mailbox.into(),
+                    )?
+                    .map(|current_mailboxes| current_mailboxes.items)
+                    .unwrap_or_default();
+
+                let mut has_mailboxes = false;
+
+                for mailbox in &current_mailboxes {
+                    if mailbox_op_clear_all {
+                        // Untag mailbox unless it is in the list of mailboxes to tag
+                        if !mailbox_op_list.get(mailbox).unwrap_or(&false) {
                             document.tag(
                                 MessageField::Mailbox,
                                 mailbox.clone(),
                                 DefaultOptions::new().clear(),
                             );
                             changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
-                        } else {
-                            // Keep mailbox in the list
-                            has_mailboxes = true;
                         }
-                    }
-
-                    for (mailbox, do_create) in mailbox_op_list {
-                        if do_create {
-                            let mailbox_id = mailbox.unwrap_id().unwrap_or_default();
-                            // Make sure the mailbox exists
-                            if helper.data.mailbox_ids.contains(mailbox_id) {
-                                // Tag mailbox if it is not already tagged
-                                if !current_mailboxes.contains(&mailbox) {
-                                    document.tag(
-                                        MessageField::Mailbox,
-                                        mailbox,
-                                        DefaultOptions::new(),
-                                    );
-                                    changed_mailboxes.insert(mailbox_id);
-                                }
-                                has_mailboxes = true;
-                            } else {
-                                return Ok(Err(JSONValue::new_invalid_property(
-                                    format!("mailboxIds/{}", mailbox_id),
-                                    "Mailbox does not exist.",
-                                )));
-                            }
-                        }
-                    }
-
-                    // Messages have to be in at least one mailbox
-                    if !has_mailboxes {
-                        return Ok(Err(JSONValue::new_invalid_property(
-                            "mailboxIds",
-                            "Message must belong to at least one mailbox.",
-                        )));
+                    } else if !mailbox_op_list.get(mailbox).unwrap_or(&true) {
+                        // Untag mailbox if is marked for untagging
+                        document.tag(
+                            MessageField::Mailbox,
+                            mailbox.clone(),
+                            DefaultOptions::new().clear(),
+                        );
+                        changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                    } else {
+                        // Keep mailbox in the list
+                        has_mailboxes = true;
                     }
                 }
 
-                if !keyword_op_list.is_empty() || keyword_op_clear_all {
-                    // Deserialize current keywords
-                    let current_keywords = helper
-                        .store
-                        .get_document_tags(
-                            helper.account_id,
-                            Collection::Mail,
-                            document.document_id,
-                            MessageField::Keyword.into(),
-                        )?
-                        .map(|tags| tags.items)
-                        .unwrap_or_default();
-
-                    let mut unread_changed = false;
-                    for keyword in &current_keywords {
-                        if keyword_op_clear_all {
-                            // Untag keyword unless it is in the list of keywords to tag
-                            if !keyword_op_list.get(keyword).unwrap_or(&false) {
-                                document.tag(
-                                    MessageField::Keyword,
-                                    keyword.clone(),
-                                    DefaultOptions::new().clear(),
-                                );
-                                if !unread_changed
-                                    && matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
-                                {
-                                    unread_changed = true;
-                                }
+                for (mailbox, do_create) in mailbox_op_list {
+                    if do_create {
+                        let mailbox_id = mailbox.unwrap_id().unwrap_or_default();
+                        // Make sure the mailbox exists
+                        if helper.data.mailbox_ids.contains(mailbox_id) {
+                            // Tag mailbox if it is not already tagged
+                            if !current_mailboxes.contains(&mailbox) {
+                                document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
+                                changed_mailboxes.insert(mailbox_id);
                             }
-                        } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
-                            // Untag keyword if is marked for untagging
+                            has_mailboxes = true;
+                        } else {
+                            return Err(SetError::invalid_property(
+                                format!("mailboxIds/{}", mailbox_id),
+                                "Mailbox does not exist.",
+                            ));
+                        }
+                    }
+                }
+
+                // Messages have to be in at least one mailbox
+                if !has_mailboxes {
+                    return Err(SetError::invalid_property(
+                        "mailboxIds",
+                        "Message must belong to at least one mailbox.",
+                    ));
+                }
+            }
+
+            if !keyword_op_list.is_empty() || keyword_op_clear_all {
+                // Deserialize current keywords
+                let current_keywords = helper
+                    .store
+                    .get_document_tags(
+                        helper.account_id,
+                        Collection::Mail,
+                        document.document_id,
+                        MessageField::Keyword.into(),
+                    )?
+                    .map(|tags| tags.items)
+                    .unwrap_or_default();
+
+                let mut unread_changed = false;
+                for keyword in &current_keywords {
+                    if keyword_op_clear_all {
+                        // Untag keyword unless it is in the list of keywords to tag
+                        if !keyword_op_list.get(keyword).unwrap_or(&false) {
                             document.tag(
                                 MessageField::Keyword,
                                 keyword.clone(),
@@ -530,70 +546,78 @@ where
                                 unread_changed = true;
                             }
                         }
-                    }
-
-                    for (keyword, do_create) in keyword_op_list {
-                        if do_create {
-                            // Tag keyword if it is not already tagged
-                            if !current_keywords.contains(&keyword) {
-                                document.tag(
-                                    MessageField::Keyword,
-                                    keyword.clone(),
-                                    DefaultOptions::new(),
-                                );
-                                if !unread_changed
-                                    && matches!(&keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
-                                {
-                                    unread_changed = true;
-                                }
-                            }
+                    } else if !keyword_op_list.get(keyword).unwrap_or(&true) {
+                        // Untag keyword if is marked for untagging
+                        document.tag(
+                            MessageField::Keyword,
+                            keyword.clone(),
+                            DefaultOptions::new().clear(),
+                        );
+                        if !unread_changed
+                            && matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
+                        {
+                            unread_changed = true;
                         }
                     }
+                }
 
-                    // Mark mailboxes as changed if the message is tagged/untagged with $seen
-                    if unread_changed {
-                        if let Some(current_mailboxes) = helper.store.get_document_tags(
-                            helper.account_id,
-                            Collection::Mail,
-                            document.document_id,
-                            MessageField::Mailbox.into(),
-                        )? {
-                            for mailbox in current_mailboxes.items {
-                                changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                for (keyword, do_create) in keyword_op_list {
+                    if do_create {
+                        // Tag keyword if it is not already tagged
+                        if !current_keywords.contains(&keyword) {
+                            document.tag(
+                                MessageField::Keyword,
+                                keyword.clone(),
+                                DefaultOptions::new(),
+                            );
+                            if !unread_changed
+                                && matches!(&keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
+                            {
+                                unread_changed = true;
                             }
                         }
                     }
                 }
 
-                // Log mailbox changes
-                if !changed_mailboxes.is_empty() {
-                    for changed_mailbox_id in changed_mailboxes {
-                        helper
-                            .changes
-                            .log_child_update(Collection::Mailbox, changed_mailbox_id);
+                // Mark mailboxes as changed if the message is tagged/untagged with $seen
+                if unread_changed {
+                    if let Some(current_mailboxes) = helper.store.get_document_tags(
+                        helper.account_id,
+                        Collection::Mail,
+                        document.document_id,
+                        MessageField::Mailbox.into(),
+                    )? {
+                        for mailbox in current_mailboxes.items {
+                            changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
+                        }
                     }
-                }
-
-                if !document.is_empty() {
-                    helper.changes.update_document(document);
-                    Ok(Ok(Some(JSONValue::Null)))
-                } else {
-                    Ok(Ok(None))
                 }
             }
+
+            // Log mailbox changes
+            if !changed_mailboxes.is_empty() {
+                for changed_mailbox_id in changed_mailboxes {
+                    helper
+                        .changes
+                        .log_child_update(Collection::Mailbox, changed_mailbox_id);
+                }
+            }
+
+            if !document.is_empty() {
+                Ok(Some(JSONValue::Null))
+            } else {
+                Ok(None)
+            }
+        } else {
+            unreachable!()
         }
     }
 
     fn delete(
         _helper: &mut SetObjectHelper<T, SetMailHelper>,
-
         _jmap_id: JMAPId,
-    ) -> jmap::Result<Result<(), JSONValue>> {
-        Ok(Ok(()))
-    }
-
-    fn parse_property(property: &str) -> Option<Self::Property> {
-        MailProperties::parse(property)
+    ) -> jmap::error::set::Result<()> {
+        Ok(())
     }
 }
 
@@ -603,12 +627,12 @@ pub trait JSONMailValue {
         builder: &mut MessageBuilder,
         header: HeaderName,
         form: MailHeaderForm,
-    ) -> Result<(), JSONValue>;
+    ) -> jmap::error::set::Result<()>;
     fn parse_body_structure<T>(
         self,
         helper: &SetObjectHelper<T, SetMailHelper>,
         body_values: &mut Option<HashMap<String, JSONValue>>,
-    ) -> Result<MimePart, JSONValue>
+    ) -> jmap::error::set::Result<MimePart>
     where
         T: for<'x> Store<'x> + 'static;
     fn parse_body_part<T>(
@@ -617,7 +641,7 @@ pub trait JSONMailValue {
         body_values: &mut Option<HashMap<String, JSONValue>>,
         implicit_type: Option<&'static str>,
         strict_implicit_type: bool,
-    ) -> Result<(MimePart, Option<Vec<JSONValue>>), JSONValue>
+    ) -> jmap::error::set::Result<(MimePart, Option<Vec<JSONValue>>)>
     where
         T: for<'x> Store<'x> + 'static;
     fn parse_body_parts<T>(
@@ -626,14 +650,14 @@ pub trait JSONMailValue {
         body_values: &mut Option<HashMap<String, JSONValue>>,
         implicit_type: Option<&'static str>,
         strict_implicit_type: bool,
-    ) -> Result<Vec<MimePart>, JSONValue>
+    ) -> jmap::error::set::Result<Vec<MimePart>>
     where
         T: for<'x> Store<'x> + 'static;
-    fn parse_json_string(self) -> Result<String, JSONValue>;
-    fn parse_json_date(self) -> Result<i64, JSONValue>;
-    fn parse_json_string_list(self) -> Result<Vec<String>, JSONValue>;
-    fn parse_json_addresses(self) -> Result<Vec<Address>, JSONValue>;
-    fn parse_json_grouped_addresses(self) -> Result<Vec<Address>, JSONValue>;
+    fn parse_json_string(self) -> jmap::error::set::Result<String>;
+    fn parse_json_date(self) -> jmap::error::set::Result<i64>;
+    fn parse_json_string_list(self) -> jmap::error::set::Result<Vec<String>>;
+    fn parse_json_addresses(self) -> jmap::error::set::Result<Vec<Address>>;
+    fn parse_json_grouped_addresses(self) -> jmap::error::set::Result<Vec<Address>>;
 }
 
 impl JSONMailValue for JSONValue {
@@ -642,7 +666,7 @@ impl JSONMailValue for JSONValue {
         builder: &mut MessageBuilder,
         header: HeaderName,
         form: MailHeaderForm,
-    ) -> Result<(), JSONValue> {
+    ) -> jmap::error::set::Result<()> {
         match form {
             MailHeaderForm::Raw => {
                 builder.header(header.unwrap(), Raw::new(self.parse_json_string()?))
@@ -675,7 +699,7 @@ impl JSONMailValue for JSONValue {
         self,
         helper: &SetObjectHelper<T, SetMailHelper>,
         body_values: &mut Option<HashMap<String, JSONValue>>,
-    ) -> Result<MimePart, JSONValue>
+    ) -> jmap::error::set::Result<MimePart>
     where
         T: for<'x> Store<'x> + 'static,
     {
@@ -716,12 +740,12 @@ impl JSONMailValue for JSONValue {
         body_values: &mut Option<HashMap<String, JSONValue>>,
         implicit_type: Option<&'static str>,
         strict_implicit_type: bool,
-    ) -> Result<(MimePart, Option<Vec<JSONValue>>), JSONValue>
+    ) -> jmap::error::set::Result<(MimePart, Option<Vec<JSONValue>>)>
     where
         T: for<'x> Store<'x> + 'static,
     {
         let mut part = self.unwrap_object().ok_or_else(|| {
-            JSONValue::new_error(
+            SetError::new(
                 SetErrorType::InvalidProperties,
                 "Expected an object in body part list.".to_string(),
             )
@@ -733,7 +757,7 @@ impl JSONMailValue for JSONValue {
             .unwrap_or_else(|| implicit_type.unwrap_or("text/plain").to_string());
 
         if strict_implicit_type && implicit_type.unwrap() != content_type {
-            return Err(JSONValue::new_error(
+            return Err(SetError::new(
                 SetErrorType::InvalidProperties,
                 format!(
                     "Expected exactly body part of type \"{}\"",
@@ -750,35 +774,35 @@ impl JSONMailValue for JSONValue {
             } else if let Some(part_id) = part.remove("partId").and_then(|v| v.unwrap_string()) {
                 BodyPart::Text( body_values.as_mut()
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             "Missing \"bodyValues\" object containing partId.".to_string(),
                         )
                     })?
                     .remove(&part_id)
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             format!("Missing body value for partId \"{}\"", part_id),
                         )
                     })?
                     .unwrap_object()
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             format!("Expected a bodyValues object defining partId \"{}\"", part_id),
                         )
                     })?
                     .remove("value")
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             format!("Missing \"value\" field in bodyValues object defining partId \"{}\"", part_id),
                         )
                     })?
                     .unwrap_string()
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             format!("Expected a string \"value\" field in bodyValues object defining partId \"{}\"", part_id),
                         )
@@ -790,28 +814,22 @@ impl JSONMailValue for JSONValue {
                         .download_blob(
                             helper.account_id,
                             &BlobId::from_jmap_string(&blob_id).ok_or_else(|| {
-                                JSONValue::new_error(
-                                    SetErrorType::BlobNotFound,
-                                    "Failed to parse blobId",
-                                )
+                                SetError::new(SetErrorType::BlobNotFound, "Failed to parse blobId")
                             })?,
                             get_message_blob,
                         )
                         .map_err(|_| {
-                            JSONValue::new_error(
-                                SetErrorType::BlobNotFound,
-                                "Failed to fetch blob.",
-                            )
+                            SetError::new(SetErrorType::BlobNotFound, "Failed to fetch blob.")
                         })?
                         .ok_or_else(|| {
-                            JSONValue::new_error(
+                            SetError::new(
                                 SetErrorType::BlobNotFound,
                                 "blobId does not exist on this server.",
                             )
                         })?,
                 )
             } else {
-                return Err(JSONValue::new_error(
+                return Err(SetError::new(
                     SetErrorType::InvalidProperties,
                     "Expected a \"partId\" or \"blobId\" field in body part.".to_string(),
                 ));
@@ -831,7 +849,7 @@ impl JSONMailValue for JSONValue {
                         charset
                             .to_string()
                             .ok_or_else(|| {
-                                JSONValue::new_error(
+                                SetError::new(
                                     SetErrorType::InvalidProperties,
                                     "Expected a string value for \"charset\" field.".to_string(),
                                 )
@@ -904,7 +922,7 @@ impl JSONMailValue for JSONValue {
                         mime_part.headers.insert(
                             header_name.into(),
                             Raw::new(value.unwrap_string().ok_or_else(|| {
-                                JSONValue::new_error(
+                                SetError::new(
                                     SetErrorType::InvalidProperties,
                                     format!("Expected a string value for \"{}\" field.", property),
                                 )
@@ -918,7 +936,7 @@ impl JSONMailValue for JSONValue {
                 if let Some(headers) = value.unwrap_array() {
                     for header in headers {
                         let mut header = header.unwrap_object().ok_or_else(|| {
-                            JSONValue::new_error(
+                            SetError::new(
                                 SetErrorType::InvalidProperties,
                                 "Expected an object for \"headers\" field.".to_string(),
                             )
@@ -928,7 +946,7 @@ impl JSONMailValue for JSONValue {
                                 .remove("name")
                                 .and_then(|v| v.unwrap_string())
                                 .ok_or_else(|| {
-                                    JSONValue::new_error(
+                                    SetError::new(
                                         SetErrorType::InvalidProperties,
                                         "Expected a string value for \"name\" field in \"headers\" field."
                                             .to_string(),
@@ -940,7 +958,7 @@ impl JSONMailValue for JSONValue {
                                     .remove("value")
                                     .and_then(|v| v.unwrap_string())
                                     .ok_or_else(|| {
-                                        JSONValue::new_error(
+                                        SetError::new(
                                         SetErrorType::InvalidProperties,
                                         "Expected a string value for \"value\" field in \"headers\" field."
                                             .to_string(),
@@ -965,12 +983,12 @@ impl JSONMailValue for JSONValue {
         body_values: &mut Option<HashMap<String, JSONValue>>,
         implicit_type: Option<&'static str>,
         strict_implicit_type: bool,
-    ) -> Result<Vec<MimePart>, JSONValue>
+    ) -> jmap::error::set::Result<Vec<MimePart>>
     where
         T: for<'x> Store<'x> + 'static,
     {
         let parts = self.unwrap_array().ok_or_else(|| {
-            JSONValue::new_error(
+            SetError::new(
                 SetErrorType::InvalidProperties,
                 "Expected an array containing body part.".to_string(),
             )
@@ -987,25 +1005,25 @@ impl JSONMailValue for JSONValue {
         Ok(result)
     }
 
-    fn parse_json_string(self) -> Result<String, JSONValue> {
+    fn parse_json_string(self) -> jmap::error::set::Result<String> {
         self.unwrap_string().ok_or_else(|| {
-            JSONValue::new_error(
+            SetError::new(
                 SetErrorType::InvalidProperties,
                 "Expected a String property.".to_string(),
             )
         })
     }
 
-    fn parse_json_date(self) -> Result<i64, JSONValue> {
+    fn parse_json_date(self) -> jmap::error::set::Result<i64> {
         Ok(
             DateTime::parse_from_rfc3339(self.to_string().ok_or_else(|| {
-                JSONValue::new_error(
+                SetError::new(
                     SetErrorType::InvalidProperties,
                     "Expected a UTCDate property.".to_string(),
                 )
             })?)
             .map_err(|_| {
-                JSONValue::new_error(
+                SetError::new(
                     SetErrorType::InvalidProperties,
                     "Expected a valid UTCDate property.".to_string(),
                 )
@@ -1014,9 +1032,9 @@ impl JSONMailValue for JSONValue {
         )
     }
 
-    fn parse_json_string_list(self) -> Result<Vec<String>, JSONValue> {
+    fn parse_json_string_list(self) -> jmap::error::set::Result<Vec<String>> {
         let value = self.unwrap_array().ok_or_else(|| {
-            JSONValue::new_error(
+            SetError::new(
                 SetErrorType::InvalidProperties,
                 "Expected a String array.".to_string(),
             )
@@ -1025,7 +1043,7 @@ impl JSONMailValue for JSONValue {
         let mut list = Vec::with_capacity(value.len());
         for v in value {
             list.push(v.unwrap_string().ok_or_else(|| {
-                JSONValue::new_error(
+                SetError::new(
                     SetErrorType::InvalidProperties,
                     "Expected a String array.".to_string(),
                 )
@@ -1035,9 +1053,9 @@ impl JSONMailValue for JSONValue {
         Ok(list)
     }
 
-    fn parse_json_addresses(self) -> Result<Vec<Address>, JSONValue> {
+    fn parse_json_addresses(self) -> jmap::error::set::Result<Vec<Address>> {
         let value = self.unwrap_array().ok_or_else(|| {
-            JSONValue::new_error(
+            SetError::new(
                 SetErrorType::InvalidProperties,
                 "Expected an array with EmailAddress objects.".to_string(),
             )
@@ -1046,7 +1064,7 @@ impl JSONMailValue for JSONValue {
         let mut result = Vec::with_capacity(value.len());
         for addr in value {
             let mut addr = addr.unwrap_object().ok_or_else(|| {
-                JSONValue::new_error(
+                SetError::new(
                     SetErrorType::InvalidProperties,
                     "Expected an array containing EmailAddress objects.".to_string(),
                 )
@@ -1056,7 +1074,7 @@ impl JSONMailValue for JSONValue {
                 addr.remove("email")
                     .and_then(|n| n.unwrap_string())
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             "Missing 'email' field in EmailAddress object.".to_string(),
                         )
@@ -1067,9 +1085,9 @@ impl JSONMailValue for JSONValue {
         Ok(result)
     }
 
-    fn parse_json_grouped_addresses<'x>(self) -> Result<Vec<Address>, JSONValue> {
+    fn parse_json_grouped_addresses<'x>(self) -> jmap::error::set::Result<Vec<Address>> {
         let value = self.unwrap_array().ok_or_else(|| {
-            JSONValue::new_error(
+            SetError::new(
                 SetErrorType::InvalidProperties,
                 "Expected an array with EmailAddressGroup objects.".to_string(),
             )
@@ -1078,7 +1096,7 @@ impl JSONMailValue for JSONValue {
         let mut result = Vec::with_capacity(value.len());
         for addr in value {
             let mut addr = addr.unwrap_object().ok_or_else(|| {
-                JSONValue::new_error(
+                SetError::new(
                     SetErrorType::InvalidProperties,
                     "Expected an array containing EmailAddressGroup objects.".to_string(),
                 )
@@ -1087,7 +1105,7 @@ impl JSONMailValue for JSONValue {
                 addr.remove("name").and_then(|n| n.unwrap_string()),
                 addr.remove("addresses")
                     .ok_or_else(|| {
-                        JSONValue::new_error(
+                        SetError::new(
                             SetErrorType::InvalidProperties,
                             "Missing 'addresses' field in EmailAddressGroup object.".to_string(),
                         )

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap::error::method::MethodError;
+use jmap::jmap_store::orm::JMAPOrm;
 use jmap::jmap_store::query::QueryObject;
 use jmap::protocol::json::JSONValue;
 use jmap::request::query::QueryRequest;
@@ -11,7 +12,7 @@ use store::{
     Collection, Comparator, FieldComparator, FieldValue, Filter, JMAPId, JMAPStore, StoreError, Tag,
 };
 
-use super::{Mailbox, MailboxProperties};
+use super::MailboxProperty;
 
 pub struct QueryMailbox<'y, T>
 where
@@ -36,7 +37,7 @@ impl<'y, T> QueryObject<'y, T> for QueryMailbox<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &QueryRequest) -> jmap::Result<Self> {
+    fn new(store: &'y JMAPStore<T>, request: &QueryRequest) -> jmap::Result<Self> {
         Ok(QueryMailbox {
             store,
             account_id: request.account_id,
@@ -57,7 +58,7 @@ where
         if let Some((cond_name, cond_value)) = cond.into_iter().next() {
             Ok(match cond_name.as_str() {
                 "parentId" => Filter::eq(
-                    MailboxProperties::ParentId.into(),
+                    MailboxProperty::ParentId.into(),
                     FieldValue::LongInteger(
                         cond_value
                             .parse_jmap_id(true)?
@@ -66,18 +67,16 @@ where
                     ),
                 ),
                 "name" => Filter::eq(
-                    MailboxProperties::Name.into(),
+                    MailboxProperty::Name.into(),
                     FieldValue::Text(cond_value.parse_string()?.to_lowercase()),
                 ),
                 "role" => Filter::eq(
-                    MailboxProperties::Role.into(),
+                    MailboxProperty::Role.into(),
                     FieldValue::Text(cond_value.parse_string()?),
                 ),
                 "hasAnyRole" => {
-                    let filter = Filter::eq(
-                        MailboxProperties::HasRole.into(),
-                        FieldValue::Tag(Tag::Static(0)),
-                    );
+                    let filter =
+                        Filter::eq(MailboxProperty::Role.into(), FieldValue::Tag(Tag::Default));
                     if !cond_value.parse_bool()? {
                         Filter::not(vec![filter])
                     } else {
@@ -106,9 +105,9 @@ where
     ) -> jmap::Result<Comparator> {
         Ok(Comparator::Field(FieldComparator {
             field: match property.as_ref() {
-                "name" => MailboxProperties::Name,
-                "role" => MailboxProperties::Role,
-                "parentId" => MailboxProperties::ParentId,
+                "name" => MailboxProperty::Name,
+                "role" => MailboxProperty::Role,
+                "parentId" => MailboxProperty::ParentId,
                 _ => {
                     return Err(MethodError::UnsupportedSort(format!(
                         "Unsupported sort property '{}'.",
@@ -134,17 +133,14 @@ where
             .get_document_ids(self.account_id, Collection::Mailbox)?
             .unwrap_or_default()
         {
-            let mailbox = self
+            let parent_id = self
                 .store
-                .get_document_value::<Mailbox>(
-                    self.account_id,
-                    Collection::Mailbox,
-                    doc_id,
-                    MailboxProperties::Id.into(),
-                )?
-                .ok_or_else(|| StoreError::InternalError("Mailbox data not found".to_string()))?;
-            hierarchy.insert((doc_id + 1) as JMAPId, mailbox.parent_id);
-            tree.entry(mailbox.parent_id)
+                .get_orm::<MailboxProperty>(self.account_id, doc_id)?
+                .ok_or_else(|| StoreError::InternalError("Mailbox data not found".to_string()))?
+                .get_unsigned_int(&MailboxProperty::ParentId)
+                .unwrap_or_default();
+            hierarchy.insert((doc_id + 1) as JMAPId, parent_id);
+            tree.entry(parent_id)
                 .or_insert_with(HashSet::new)
                 .insert((doc_id + 1) as JMAPId);
         }

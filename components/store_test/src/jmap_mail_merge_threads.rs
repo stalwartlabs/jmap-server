@@ -76,7 +76,7 @@ where
 
         for message in &messages {
             mail_store
-                .mail_import_blob(
+                .mail_import(
                     base_test_num,
                     message.as_bytes().to_vec(),
                     vec![],
@@ -88,7 +88,7 @@ where
 
         for message in messages.iter().rev() {
             mail_store
-                .mail_import_blob(
+                .mail_import(
                     base_test_num + 1,
                     message.as_bytes().to_vec(),
                     vec![],
@@ -101,7 +101,7 @@ where
         for chunk in messages.chunks(5) {
             for message in chunk {
                 mail_store
-                    .mail_import_blob(
+                    .mail_import(
                         base_test_num + 2,
                         message.as_bytes().to_vec(),
                         vec![],
@@ -112,7 +112,7 @@ where
             }
             for message in chunk.iter().rev() {
                 mail_store
-                    .mail_import_blob(
+                    .mail_import(
                         base_test_num + 3,
                         message.as_bytes().to_vec(),
                         vec![],
@@ -126,7 +126,7 @@ where
         for chunk in messages.chunks(5).rev() {
             for message in chunk {
                 mail_store
-                    .mail_import_blob(
+                    .mail_import(
                         base_test_num + 4,
                         message.as_bytes().to_vec(),
                         vec![],
@@ -137,7 +137,7 @@ where
             }
             for message in chunk.iter().rev() {
                 mail_store
-                    .mail_import_blob(
+                    .mail_import(
                         base_test_num + 5,
                         message.as_bytes().to_vec(),
                         vec![],

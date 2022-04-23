@@ -7,8 +7,8 @@ use jmap::{
     request::{get::GetRequest, set::SetRequest},
 };
 use jmap_mail::mail::{
-    get::GetMail, import::JMAPMailImport, parse::get_message_blob, set::SetMail,
-    MailBodyProperties, MailProperties,
+    get::GetMail, import::JMAPMailImport, parse::get_message_blob, set::SetMail, MailBodyProperty,
+    MailProperty,
 };
 use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
 
@@ -185,30 +185,30 @@ where
                     account_id,
                     ids: vec![jmap_id].into(),
                     properties: vec![
-                        MailProperties::Id,
-                        MailProperties::BlobId,
-                        MailProperties::ThreadId,
-                        MailProperties::MailboxIds,
-                        MailProperties::Keywords,
-                        MailProperties::ReceivedAt,
-                        MailProperties::MessageId,
-                        MailProperties::InReplyTo,
-                        MailProperties::References,
-                        MailProperties::Sender,
-                        MailProperties::From,
-                        MailProperties::To,
-                        MailProperties::Cc,
-                        MailProperties::Bcc,
-                        MailProperties::ReplyTo,
-                        MailProperties::Subject,
-                        MailProperties::SentAt,
-                        MailProperties::HasAttachment,
-                        MailProperties::Preview,
-                        MailProperties::BodyValues,
-                        MailProperties::TextBody,
-                        MailProperties::HtmlBody,
-                        MailProperties::Attachments,
-                        MailProperties::BodyStructure,
+                        MailProperty::Id,
+                        MailProperty::BlobId,
+                        MailProperty::ThreadId,
+                        MailProperty::MailboxIds,
+                        MailProperty::Keywords,
+                        MailProperty::ReceivedAt,
+                        MailProperty::MessageId,
+                        MailProperty::InReplyTo,
+                        MailProperty::References,
+                        MailProperty::Sender,
+                        MailProperty::From,
+                        MailProperty::To,
+                        MailProperty::Cc,
+                        MailProperty::Bcc,
+                        MailProperty::ReplyTo,
+                        MailProperty::Subject,
+                        MailProperty::SentAt,
+                        MailProperty::HasAttachment,
+                        MailProperty::Preview,
+                        MailProperty::BodyValues,
+                        MailProperty::TextBody,
+                        MailProperty::HtmlBody,
+                        MailProperty::Attachments,
+                        MailProperty::BodyStructure,
                     ]
                     .into_iter()
                     .map(|p| p.to_string().into())
@@ -216,17 +216,17 @@ where
                     .into(),
                     arguments: build_mail_get_arguments(
                         vec![
-                            MailBodyProperties::PartId,
-                            MailBodyProperties::BlobId,
-                            MailBodyProperties::Size,
-                            MailBodyProperties::Name,
-                            MailBodyProperties::Type,
-                            MailBodyProperties::Charset,
-                            MailBodyProperties::Headers,
-                            MailBodyProperties::Disposition,
-                            MailBodyProperties::Cid,
-                            MailBodyProperties::Language,
-                            MailBodyProperties::Location,
+                            MailBodyProperty::PartId,
+                            MailBodyProperty::BlobId,
+                            MailBodyProperty::Size,
+                            MailBodyProperty::Name,
+                            MailBodyProperty::Type,
+                            MailBodyProperty::Charset,
+                            MailBodyProperty::Headers,
+                            MailBodyProperty::Disposition,
+                            MailBodyProperty::Cid,
+                            MailBodyProperty::Language,
+                            MailBodyProperty::Location,
                         ],
                         true,
                         true,
@@ -295,7 +295,7 @@ where
             .get::<GetMail<T>>(GetRequest {
                 account_id,
                 ids: vec![JMAPId::from_jmap_string(message_id).unwrap()].into(),
-                properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
+                properties: vec![MailProperty::MailboxIds, MailProperty::Keywords]
                     .into_iter()
                     .map(|p| p.to_string().into())
                     .collect::<Vec<_>>()
@@ -473,7 +473,7 @@ fn jmap_mail_update<T>(
                         JMAPId::from_jmap_string(&message_id_3).unwrap()
                     ]
                     .into(),
-                    properties: vec![MailProperties::MailboxIds, MailProperties::Keywords]
+                    properties: vec![MailProperty::MailboxIds, MailProperty::Keywords]
                         .into_iter()
                         .map(|p| p.to_string().into())
                         .collect::<Vec<_>>()
@@ -498,7 +498,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     mail_store
-        .mail_import_blob(
+        .mail_import(
             account_id,
             raw_message,
             mailboxes.into_iter().map(|m| m.get_document_id()).collect(),
@@ -509,7 +509,7 @@ where
             received_at,
         )
         .unwrap()
-        .eval_unwrap_jmap_id("/id")
+        .id
 }
 
 pub fn update_email<T>(

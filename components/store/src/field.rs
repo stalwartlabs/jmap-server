@@ -198,7 +198,7 @@ impl<T> Field<T> {
 impl Tag {
     pub fn len(&self) -> usize {
         match self {
-            Tag::Static(_) => std::mem::size_of::<TagId>(),
+            Tag::Static(_) | Tag::Default => std::mem::size_of::<TagId>(),
             Tag::Id(_) => std::mem::size_of::<DocumentId>(),
             Tag::Text(text) => text.len(),
         }
@@ -262,6 +262,10 @@ impl StoreSerialize for Tags {
                     bytes.push(BM_TAG_TEXT);
                     text.len().to_leb128_bytes(&mut bytes);
                     bytes.extend_from_slice(text.as_bytes());
+                }
+                Tag::Default => {
+                    bytes.push(BM_TAG_STATIC);
+                    bytes.push(0);
                 }
             }
         }

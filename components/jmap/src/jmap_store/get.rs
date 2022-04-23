@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use store::{
-    roaring::RoaringBitmap, AccountId, Collection, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore,
-    Store,
+    roaring::RoaringBitmap, AccountId, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore, Store,
 };
 
 use crate::{
     error::method::MethodError,
     id::{state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::get::GetRequest,
+    request::{get::GetRequest, JSONArgumentParser},
+    Property,
 };
 
 use super::changes::JMAPChanges;
@@ -18,13 +18,23 @@ pub trait GetObject<'y, T>: Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn init(store: &'y JMAPStore<T>, request: &mut GetRequest) -> crate::Result<Self>;
-    fn get_item(&self, jmap_id: JMAPId) -> crate::Result<Option<JSONValue>>;
+    type Property: JSONArgumentParser + Property;
+
+    fn new(
+        store: &'y JMAPStore<T>,
+        request: &mut GetRequest,
+        properties: &[Self::Property],
+    ) -> crate::Result<Self>;
+    fn get_item(
+        &self,
+        jmap_id: JMAPId,
+        properties: &[Self::Property],
+    ) -> crate::Result<Option<JSONValue>>;
     fn map_ids<W>(&self, document_ids: W) -> crate::Result<Vec<JMAPId>>
     where
         W: Iterator<Item = DocumentId>;
     fn has_virtual_ids() -> bool;
-    fn collection() -> Collection;
+    fn default_properties() -> Vec<Self::Property>;
 }
 
 #[derive(Default)]
@@ -52,9 +62,12 @@ where
     where
         U: GetObject<'y, T>,
     {
-        let collection = U::collection();
+        let collection = U::Property::collection();
         let has_virtual_ids = U::has_virtual_ids();
-        let object = U::init(self, &mut request)?;
+        let properties: Vec<U::Property> = std::mem::take(&mut request.properties)
+            .parse_array_items(true)?
+            .unwrap_or_else(|| U::default_properties());
+        let object = U::new(self, &mut request, &properties)?;
 
         let document_ids = if !has_virtual_ids {
             self.get_document_ids(request.account_id, collection)?
@@ -80,7 +93,7 @@ where
 
         for jmap_id in request_ids {
             if has_virtual_ids || document_ids.contains(jmap_id.get_document_id()) {
-                if let Some(result) = object.get_item(jmap_id)? {
+                if let Some(result) = object.get_item(jmap_id, &properties)? {
                     list.push(result);
                     continue;
                 }

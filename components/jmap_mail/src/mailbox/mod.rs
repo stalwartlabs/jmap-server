@@ -6,112 +6,114 @@ pub mod set;
 use std::fmt::Display;
 
 use jmap::error::method::MethodError;
+use jmap::jmap_store::orm::PropertySchema;
 use jmap::protocol::json::JSONValue;
 use jmap::request::JSONArgumentParser;
+use jmap::Property;
 
-use store::serialize::{StoreDeserialize, StoreSerialize};
+use store::{Collection, FieldId};
 
-use store::{bincode, FieldId, JMAPId};
-
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct Mailbox {
-    pub name: String,
-    pub parent_id: JMAPId,
-    pub role: Option<String>,
-    pub sort_order: u32,
-}
-
-impl StoreSerialize for Mailbox {
-    fn serialize(&self) -> Option<Vec<u8>> {
-        bincode::serialize(self).ok()
-    }
-}
-
-impl StoreDeserialize for Mailbox {
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        bincode::deserialize(bytes).ok()
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
-pub enum MailboxProperties {
+pub enum MailboxProperty {
     Id = 0,
     Name = 1,
     ParentId = 2,
     Role = 3,
-    HasRole = 4,
-    SortOrder = 5,
-    IsSubscribed = 6,
-    TotalEmails = 7,
-    UnreadEmails = 8,
-    TotalThreads = 9,
-    UnreadThreads = 10,
-    MyRights = 11,
+    SortOrder = 4,
+    IsSubscribed = 5,
+    TotalEmails = 6,
+    UnreadEmails = 7,
+    TotalThreads = 8,
+    UnreadThreads = 9,
+    MyRights = 10,
 }
 
-impl MailboxProperties {
-    pub fn as_str(&self) -> &'static str {
+impl Property for MailboxProperty {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "id" => Some(MailboxProperty::Id),
+            "name" => Some(MailboxProperty::Name),
+            "parentId" => Some(MailboxProperty::ParentId),
+            "role" => Some(MailboxProperty::Role),
+            "sortOrder" => Some(MailboxProperty::SortOrder),
+            "isSubscribed" => Some(MailboxProperty::IsSubscribed),
+            "totalEmails" => Some(MailboxProperty::TotalEmails),
+            "unreadEmails" => Some(MailboxProperty::UnreadEmails),
+            "totalThreads" => Some(MailboxProperty::TotalThreads),
+            "unreadThreads" => Some(MailboxProperty::UnreadThreads),
+            "myRights" => Some(MailboxProperty::MyRights),
+            _ => None,
+        }
+    }
+
+    fn collection() -> Collection {
+        Collection::Mailbox
+    }
+}
+
+impl Display for MailboxProperty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MailboxProperties::Id => "id",
-            MailboxProperties::Name => "name",
-            MailboxProperties::ParentId => "parentId",
-            MailboxProperties::Role => "role",
-            MailboxProperties::HasRole => "hasRole",
-            MailboxProperties::SortOrder => "sortOrder",
-            MailboxProperties::IsSubscribed => "isSubscribed",
-            MailboxProperties::TotalEmails => "totalEmails",
-            MailboxProperties::UnreadEmails => "unreadEmails",
-            MailboxProperties::TotalThreads => "totalThreads",
-            MailboxProperties::UnreadThreads => "unreadThreads",
-            MailboxProperties::MyRights => "myRights",
+            MailboxProperty::Id => write!(f, "id"),
+            MailboxProperty::Name => write!(f, "name"),
+            MailboxProperty::ParentId => write!(f, "parentId"),
+            MailboxProperty::Role => write!(f, "role"),
+            MailboxProperty::SortOrder => write!(f, "sortOrder"),
+            MailboxProperty::IsSubscribed => write!(f, "isSubscribed"),
+            MailboxProperty::TotalEmails => write!(f, "totalEmails"),
+            MailboxProperty::UnreadEmails => write!(f, "unreadEmails"),
+            MailboxProperty::TotalThreads => write!(f, "totalThreads"),
+            MailboxProperty::UnreadThreads => write!(f, "unreadThreads"),
+            MailboxProperty::MyRights => write!(f, "myRights"),
         }
     }
 }
 
-impl Display for MailboxProperties {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
+impl PropertySchema for MailboxProperty {
+    fn required() -> &'static [Self] {
+        &[MailboxProperty::Name]
+    }
+
+    fn sorted() -> &'static [Self] {
+        &[
+            MailboxProperty::Name,
+            MailboxProperty::ParentId,
+            MailboxProperty::SortOrder,
+        ]
+    }
+
+    fn tokenized() -> &'static [Self] {
+        &[MailboxProperty::Name]
+    }
+
+    fn keywords() -> &'static [Self] {
+        &[MailboxProperty::Role]
+    }
+
+    fn tags() -> &'static [Self] {
+        &[MailboxProperty::Role]
     }
 }
 
-impl From<MailboxProperties> for FieldId {
-    fn from(field: MailboxProperties) -> Self {
+impl From<MailboxProperty> for FieldId {
+    fn from(field: MailboxProperty) -> Self {
         field as FieldId
     }
 }
 
-impl From<MailboxProperties> for JSONValue {
-    fn from(value: MailboxProperties) -> Self {
-        JSONValue::String(value.as_str().to_string())
+impl From<MailboxProperty> for JSONValue {
+    fn from(value: MailboxProperty) -> Self {
+        JSONValue::String(value.to_string())
     }
 }
 
-impl MailboxProperties {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "id" => Some(MailboxProperties::Id),
-            "name" => Some(MailboxProperties::Name),
-            "parentId" => Some(MailboxProperties::ParentId),
-            "role" => Some(MailboxProperties::Role),
-            "sortOrder" => Some(MailboxProperties::SortOrder),
-            "isSubscribed" => Some(MailboxProperties::IsSubscribed),
-            "totalEmails" => Some(MailboxProperties::TotalEmails),
-            "unreadEmails" => Some(MailboxProperties::UnreadEmails),
-            "totalThreads" => Some(MailboxProperties::TotalThreads),
-            "unreadThreads" => Some(MailboxProperties::UnreadThreads),
-            "myRights" => Some(MailboxProperties::MyRights),
-            _ => None,
-        }
-    }
-}
-
-impl JSONArgumentParser for MailboxProperties {
+impl JSONArgumentParser for MailboxProperty {
     fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
         let argument = argument.unwrap_string().ok_or_else(|| {
             MethodError::InvalidArguments("Expected string argument.".to_string())
         })?;
-        MailboxProperties::parse(&argument).ok_or_else(|| {
+        MailboxProperty::parse(&argument).ok_or_else(|| {
             MethodError::InvalidArguments(format!("Unknown mailbox property: '{}'.", argument))
         })
     }

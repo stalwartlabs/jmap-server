@@ -108,18 +108,28 @@ impl JMAPIdPrefix for JMAPId {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Collection {
-    Mail = 0,
-    Mailbox = 1,
-    Thread = 2,
-    None = 3,
+    Account = 0,
+    PushSubscription = 1,
+    Mail = 2,
+    Mailbox = 3,
+    Thread = 4,
+    Identity = 5,
+    EmailSubmission = 6,
+    VacationResponse = 7,
+    None = 8,
 }
 
 impl From<u8> for Collection {
     fn from(value: u8) -> Self {
         match value {
-            0 => Collection::Mail,
-            1 => Collection::Mailbox,
-            2 => Collection::Thread,
+            0 => Collection::Account,
+            1 => Collection::PushSubscription,
+            2 => Collection::Mail,
+            3 => Collection::Mailbox,
+            4 => Collection::Thread,
+            5 => Collection::Identity,
+            6 => Collection::EmailSubmission,
+            7 => Collection::VacationResponse,
             _ => {
                 debug_assert!(false, "Invalid collection value: {}", value);
                 Collection::None
@@ -236,6 +246,7 @@ pub enum Tag {
     Static(TagId),
     Id(Integer),
     Text(String),
+    Default,
 }
 
 #[derive(Debug)]
