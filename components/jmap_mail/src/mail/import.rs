@@ -9,6 +9,7 @@ use jmap::id::blob::BlobId;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::import::ImportObject;
+use jmap::jmap_store::set::CreateItemResult;
 use jmap::protocol::json::JSONValue;
 use jmap::request::import::ImportRequest;
 use store::batch::Document;
@@ -222,6 +223,12 @@ pub struct MailImportResult {
     pub blob_id: BlobId,
     pub thread_id: DocumentId,
     pub size: usize,
+}
+
+impl CreateItemResult for MailImportResult {
+    fn get_id(&self) -> JMAPId {
+        self.id
+    }
 }
 
 impl From<MailImportResult> for JSONValue {

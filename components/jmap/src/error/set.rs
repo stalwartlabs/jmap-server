@@ -53,6 +53,7 @@ impl SetError {
             properties: None,
         }
     }
+
     pub fn new(error_type: SetErrorType, description: impl Into<String>) -> Self {
         SetError {
             error_type,
@@ -60,11 +61,20 @@ impl SetError {
             properties: None,
         }
     }
+
     pub fn invalid_property(property: impl Into<String>, description: impl Into<String>) -> Self {
         SetError {
             error_type: SetErrorType::InvalidProperties,
             description: description.into().into(),
             properties: vec![property.into().into()].into(),
+        }
+    }
+
+    pub fn forbidden(description: impl Into<String>) -> Self {
+        SetError {
+            error_type: SetErrorType::Forbidden,
+            description: description.into().into(),
+            properties: None,
         }
     }
 }

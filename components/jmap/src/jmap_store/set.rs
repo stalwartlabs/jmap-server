@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::error::set::SetError;
 use crate::id::state::JMAPState;
 use crate::id::JMAPIdSerialize;
+use crate::protocol::invocation::Invocation;
 use crate::Property;
 use crate::{
     error::{method::MethodError, set::SetErrorType},
@@ -47,17 +48,28 @@ pub struct SetResult {
     pub not_updated: HashMap<String, JSONValue>,
     pub destroyed: Vec<JSONValue>,
     pub not_destroyed: HashMap<String, JSONValue>,
+    pub next_invocation: Option<Invocation>,
 }
 
-pub struct CreateItemResult {
+pub struct DefaultCreateItem {
     pub id: JMAPId,
 }
+
+#[derive(Default)]
+pub struct DefaultUpdateItem {}
+
+pub trait CreateItemResult: Into<JSONValue> {
+    fn get_id(&self) -> JMAPId;
+}
+
+pub trait UpdateItemResult: Into<JSONValue> {}
 
 pub trait SetObjectData<T>: Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn new(store: &JMAPStore<T>, request: &SetRequest) -> crate::Result<Self>;
+    fn new(store: &JMAPStore<T>, request: &mut SetRequest) -> crate::Result<Self>;
+    fn unwrap_invocation(self) -> Option<Invocation>;
 }
 
 pub trait SetObject<'y, T>: Sized
@@ -65,6 +77,8 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     type Property: Property;
+    type CreateItemResult: CreateItemResult;
+    type UpdateItemResult: UpdateItemResult;
     type Helper: SetObjectData<T>;
 
     fn new(
@@ -88,13 +102,14 @@ where
     fn create(
         self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
+        create_id: &str,
         document: &mut Document,
-    ) -> crate::error::set::Result<(JMAPId, JSONValue)>;
+    ) -> crate::error::set::Result<Self::CreateItemResult>;
     fn update(
         self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
         document: &mut Document,
-    ) -> crate::error::set::Result<Option<JSONValue>>;
+    ) -> crate::error::set::Result<Option<Self::UpdateItemResult>>;
     fn delete(
         helper: &mut SetObjectHelper<T, Self::Helper>,
         jmap_id: JMAPId,
@@ -114,12 +129,13 @@ impl<T> JMAPSet<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn set<'y, 'z: 'y, V>(&'z self, request: SetRequest) -> crate::Result<SetResult>
+    fn set<'y, 'z: 'y, V>(&'z self, mut request: SetRequest) -> crate::Result<SetResult>
     where
         V: SetObject<'y, T>,
     {
         let collection = V::Property::collection();
-        let data = V::Helper::new(self, &request)?;
+        let data = V::Helper::new(self, &mut request)?;
+        let mut change_id = None;
 
         let old_state = self.get_state(request.account_id, collection)?;
         if let Some(if_in_state) = request.if_in_state {
@@ -195,18 +211,18 @@ where
                         .assign_document_id(helper.account_id, collection)?,
                 );
 
-                match object.create(&mut helper, &mut document) {
-                    Ok((jmap_id, result)) => {
+                match object.create(&mut helper, &create_id, &mut document) {
+                    Ok(result) => {
                         helper.document_ids.insert(document.document_id);
                         helper.changes.insert_document(document);
-                        helper.changes.log_insert(collection, jmap_id);
+                        helper.changes.log_insert(collection, result.get_id());
                         if helper.lock.is_some() {
-                            self.write(helper.changes)?;
+                            change_id = self.write(helper.changes)?;
                             helper.changes =
                                 WriteBatch::new(request.account_id, self.config.is_in_cluster);
                             helper.lock = None;
                         }
-                        helper.created.insert(create_id, result);
+                        helper.created.insert(create_id, result.into());
                     }
                     Err(err) => {
                         helper.not_created.insert(create_id, err.into());
@@ -322,7 +338,7 @@ where
                 Ok(Some(result)) => {
                     helper.changes.update_document(document);
                     helper.changes.log_update(collection, jmap_id);
-                    helper.updated.insert(jmap_id_str, result);
+                    helper.updated.insert(jmap_id_str, result.into());
                 }
                 Ok(None) => {
                     helper.updated.insert(jmap_id_str, JSONValue::Null);
@@ -356,12 +372,16 @@ where
         }
 
         if !helper.changes.is_empty() {
-            self.write(helper.changes)?
+            change_id = self.write(helper.changes)?;
         }
 
         Ok(SetResult {
             account_id: request.account_id,
-            new_state: self.get_state(request.account_id, collection)?,
+            new_state: if let Some(change_id) = change_id {
+                change_id.into()
+            } else {
+                old_state.clone()
+            },
             old_state,
             created: helper.created,
             not_created: helper.not_created,
@@ -369,6 +389,7 @@ where
             not_updated: helper.not_updated,
             destroyed: helper.destroyed,
             not_destroyed: helper.not_destroyed,
+            next_invocation: helper.data.unwrap_invocation(),
         })
     }
 }
@@ -383,13 +404,33 @@ where
     }
 }
 
-impl From<CreateItemResult> for JSONValue {
-    fn from(ci_result: CreateItemResult) -> Self {
+impl DefaultCreateItem {
+    pub fn new(id: JMAPId) -> Self {
+        Self { id }
+    }
+}
+
+impl From<DefaultCreateItem> for JSONValue {
+    fn from(ci_result: DefaultCreateItem) -> Self {
         let mut result: HashMap<String, JSONValue> = HashMap::new();
         result.insert("id".to_string(), ci_result.id.to_jmap_string().into());
         result.into()
     }
 }
+
+impl CreateItemResult for DefaultCreateItem {
+    fn get_id(&self) -> JMAPId {
+        self.id
+    }
+}
+
+impl From<DefaultUpdateItem> for JSONValue {
+    fn from(_: DefaultUpdateItem) -> Self {
+        JSONValue::Null
+    }
+}
+
+impl UpdateItemResult for DefaultUpdateItem {}
 
 impl From<SetResult> for JSONValue {
     fn from(set_result: SetResult) -> Self {

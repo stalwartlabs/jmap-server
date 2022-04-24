@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use store::{AccountId, JMAPConfig};
 
 use crate::{
@@ -122,5 +124,42 @@ impl Invocation {
 
     pub fn is_set(&self) -> bool {
         matches!(self.call, Method::Set(_))
+    }
+}
+
+impl Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Object::Core => write!(f, "Core"),
+            Object::Mailbox => write!(f, "Mailbox"),
+            Object::Thread => write!(f, "Thread"),
+            Object::Email => write!(f, "Email"),
+            Object::SearchSnippet => write!(f, "SearchSnippet"),
+            Object::Identity => write!(f, "Identity"),
+            Object::EmailSubmission => write!(f, "EmailSubmission"),
+            Object::VacationResponse => write!(f, "VacationResponse"),
+            Object::PushSubscription => write!(f, "PushSubscription"),
+        }
+    }
+}
+
+impl Display for Method {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Method::Echo(..) => write!(f, "echo"),
+            Method::Get(..) => write!(f, "get"),
+            Method::Set(..) => write!(f, "set"),
+            Method::Query(..) => write!(f, "query"),
+            Method::QueryChanges(..) => write!(f, "queryChanges"),
+            Method::Changes(..) => write!(f, "changes"),
+            Method::Import(..) => write!(f, "import"),
+            Method::Parse(..) => write!(f, "parse"),
+        }
+    }
+}
+
+impl Display for Invocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.obj, self.call)
     }
 }

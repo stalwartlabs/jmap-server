@@ -11,6 +11,7 @@ use crate::{
     blob::BlobEntries,
     field::{Keywords, Tags, TextIndex, TokenIterator, UpdateField},
     leb128::Leb128,
+    log::ChangeId,
     serialize::{BitmapKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
     term_index::{TermIndex, TermIndexBuilder},
     AccountId, Collections, ColumnFamily, Direction, DocumentId, FieldId, JMAPStore, Store,
@@ -21,10 +22,11 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn write(&self, batch: WriteBatch) -> crate::Result<()> {
+    pub fn write(&self, batch: WriteBatch) -> crate::Result<Option<ChangeId>> {
         let mut write_batch = Vec::with_capacity(batch.documents.len());
         let mut bitmap_list = HashMap::new();
         let mut tombstones = HashMap::new();
+        let mut change_id = None;
 
         for document in batch.documents {
             let (is_insert, document) = match document {
@@ -615,6 +617,7 @@ where
                 LogKey::serialize_raft(&raft_id),
                 bytes,
             ));
+            change_id = raft_id.index.into();
 
             // Serialize raft tombstones
             if !tombstones.is_empty() {
@@ -650,7 +653,9 @@ where
         }
 
         // Submit write batch
-        self.db.write(write_batch)
+        self.db.write(write_batch)?;
+
+        Ok(change_id)
     }
 }
 

@@ -11,7 +11,7 @@ use jmap::protocol::json::JSONValue;
 use jmap::request::JSONArgumentParser;
 use jmap::Property;
 
-use store::{Collection, FieldId};
+use store::{field::TextIndex, Collection, FieldId};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
@@ -83,12 +83,11 @@ impl PropertySchema for MailboxProperty {
         ]
     }
 
-    fn tokenized() -> &'static [Self] {
-        &[MailboxProperty::Name]
-    }
-
-    fn keywords() -> &'static [Self] {
-        &[MailboxProperty::Role]
+    fn indexed() -> &'static [(Self, TextIndex)] {
+        &[
+            (MailboxProperty::Name, TextIndex::Tokenized),
+            (MailboxProperty::Role, TextIndex::Keyword),
+        ]
     }
 
     fn tags() -> &'static [Self] {

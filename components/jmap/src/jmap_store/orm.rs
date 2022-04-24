@@ -1,5 +1,5 @@
 use store::batch::Document;
-use store::field::{DefaultOptions, Options, Text};
+use store::field::{DefaultOptions, Options, Text, TextIndex};
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::{AccountId, DocumentId, JMAPStore, Store, StoreError, Tag};
 
@@ -21,8 +21,7 @@ pub trait PropertySchema:
 {
     fn required() -> &'static [Self];
     fn sorted() -> &'static [Self];
-    fn tokenized() -> &'static [Self];
-    fn keywords() -> &'static [Self];
+    fn indexed() -> &'static [(Self, TextIndex)];
     fn tags() -> &'static [Self];
 }
 
@@ -78,7 +77,11 @@ where
             .and_then(|value| value.to_string())
     }
 
-    pub fn validate(&self, changes: &TinyORM<T>) -> crate::error::set::Result<()> {
+    pub fn merge_validate(
+        self,
+        document: &mut Document,
+        changes: TinyORM<T>,
+    ) -> crate::error::set::Result<bool> {
         for property in T::required() {
             let is_null = if let Some(value) = changes.properties.get(property) {
                 match value {
@@ -99,48 +102,56 @@ where
             }
         }
 
-        Ok(())
+        self.merge(document, changes).map_err(|err| err.into())
     }
 
     pub fn merge(mut self, document: &mut Document, changes: TinyORM<T>) -> store::Result<bool> {
         let sorted = T::sorted();
-        let tokenized = T::tokenized();
-        let keywords = T::keywords();
+        let indexed = T::indexed();
         let tags = T::tags();
 
         for (property, value) in changes.properties {
             let is_sorted = sorted.contains(&property);
-            let is_tokenized = tokenized.contains(&property);
-            let is_keyword = keywords.contains(&property);
             let is_tagged = tags.contains(&property);
+            let (is_indexed, index_type) = indexed
+                .iter()
+                .filter_map(|(p, index_type)| {
+                    if p == &property {
+                        Some((true, index_type))
+                    } else {
+                        None
+                    }
+                })
+                .next()
+                .unwrap_or((false, &TextIndex::None));
 
             if let Some(current_value) = self.properties.get(&property) {
                 if current_value == &value {
                     continue;
-                }
-
-                if is_sorted || is_tokenized || is_keyword {
+                } else if is_sorted || is_indexed {
                     match &current_value {
                         JSONValue::String(text) => {
-                            let options = if is_sorted {
-                                DefaultOptions::new().clear().sort()
-                            } else {
-                                DefaultOptions::new().clear()
-                            };
-                            if is_tokenized {
-                                document.text(property, Text::tokenized(text.clone()), options);
-                            } else if is_keyword {
-                                document.text(property, Text::keyword(text.clone()), options);
-                            }
-                        }
-                        JSONValue::Number(number) => {
-                            if is_sorted {
-                                document.number(
+                            if is_sorted || is_indexed {
+                                document.text(
                                     property,
-                                    number,
-                                    DefaultOptions::new().sort().clear(),
+                                    match index_type {
+                                        TextIndex::None => Text::not_indexed(text.clone()),
+                                        TextIndex::Keyword => Text::keyword(text.clone()),
+                                        TextIndex::Tokenized => Text::tokenized(text.clone()),
+                                        TextIndex::Full(language) => {
+                                            Text::fulltext_lang(text.clone(), *language)
+                                        }
+                                    },
+                                    if is_sorted {
+                                        DefaultOptions::new().clear().sort()
+                                    } else {
+                                        DefaultOptions::new().clear()
+                                    },
                                 );
                             }
+                        }
+                        JSONValue::Number(number) if is_sorted => {
+                            document.number(property, number, DefaultOptions::new().sort().clear());
                         }
                         value => {
                             debug_assert!(false, "ORM unsupported type: {:?}", value);
@@ -151,20 +162,17 @@ where
 
             match &value {
                 JSONValue::String(text) => {
-                    if is_tokenized {
+                    if is_sorted || is_indexed {
                         document.text(
                             property,
-                            Text::tokenized(text.clone()),
-                            if is_sorted {
-                                DefaultOptions::new().sort()
-                            } else {
-                                DefaultOptions::new()
+                            match index_type {
+                                TextIndex::None => Text::not_indexed(text.clone()),
+                                TextIndex::Keyword => Text::keyword(text.clone()),
+                                TextIndex::Tokenized => Text::tokenized(text.clone()),
+                                TextIndex::Full(language) => {
+                                    Text::fulltext_lang(text.clone(), *language)
+                                }
                             },
-                        );
-                    } else if is_keyword {
-                        document.text(
-                            property,
-                            Text::keyword(text.clone()),
                             if is_sorted {
                                 DefaultOptions::new().sort()
                             } else {

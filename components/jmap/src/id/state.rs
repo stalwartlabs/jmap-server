@@ -25,6 +25,12 @@ impl Default for JMAPState {
     }
 }
 
+impl From<ChangeId> for JMAPState {
+    fn from(change_id: ChangeId) -> Self {
+        JMAPState::Exact(change_id)
+    }
+}
+
 impl JMAPState {
     pub fn new_initial() -> Self {
         JMAPState::Initial
@@ -40,6 +46,14 @@ impl JMAPState {
             to_id,
             items_sent,
         })
+    }
+
+    pub fn get_change_id(&self) -> Option<ChangeId> {
+        match self {
+            JMAPState::Exact(id) => Some(*id),
+            JMAPState::Intermediate(intermediate) => Some(intermediate.to_id),
+            JMAPState::Initial => None,
+        }
     }
 }
 

@@ -8,7 +8,7 @@ use crate::{
     error::method::MethodError,
     id::{state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::{get::GetRequest, JSONArgumentParser},
+    request::get::GetRequest,
     Property,
 };
 
@@ -18,7 +18,7 @@ pub trait GetObject<'y, T>: Sized
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property: JSONArgumentParser + Property;
+    type Property: Property;
 
     fn new(
         store: &'y JMAPStore<T>,
@@ -33,7 +33,7 @@ where
     fn map_ids<W>(&self, document_ids: W) -> crate::Result<Vec<JMAPId>>
     where
         W: Iterator<Item = DocumentId>;
-    fn has_virtual_ids() -> bool;
+    fn is_virtual() -> bool;
     fn default_properties() -> Vec<Self::Property>;
 }
 
@@ -63,13 +63,20 @@ where
         U: GetObject<'y, T>,
     {
         let collection = U::Property::collection();
-        let has_virtual_ids = U::has_virtual_ids();
-        let properties: Vec<U::Property> = std::mem::take(&mut request.properties)
-            .parse_array_items(true)?
+        let is_virtual = U::is_virtual();
+        let properties: Vec<U::Property> = request
+            .properties
+            .to_array()
+            .map(|properties| {
+                properties
+                    .iter()
+                    .filter_map(|property| property.to_string().and_then(U::Property::parse))
+                    .collect::<Vec<U::Property>>()
+            })
             .unwrap_or_else(|| U::default_properties());
         let object = U::new(self, &mut request, &properties)?;
 
-        let document_ids = if !has_virtual_ids {
+        let document_ids = if !is_virtual {
             self.get_document_ids(request.account_id, collection)?
                 .unwrap_or_default()
         } else {
@@ -92,7 +99,7 @@ where
         let mut list = Vec::with_capacity(request_ids.len());
 
         for jmap_id in request_ids {
-            if has_virtual_ids || document_ids.contains(jmap_id.get_document_id()) {
+            if is_virtual || document_ids.contains(jmap_id.get_document_id()) {
                 if let Some(result) = object.get_item(jmap_id, &properties)? {
                     list.push(result);
                     continue;

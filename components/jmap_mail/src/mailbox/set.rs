@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use crate::mail::MessageField;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
-use jmap::jmap_store::set::{CreateItemResult, SetObject, SetObjectData, SetObjectHelper};
+use jmap::jmap_store::set::{
+    DefaultCreateItem, DefaultUpdateItem, SetObject, SetObjectData, SetObjectHelper,
+};
+use jmap::protocol::invocation::Invocation;
 use jmap::protocol::json::{JSONNumber, JSONValue};
 use jmap::request::set::SetRequest;
 use store::batch::Document;
@@ -31,7 +34,7 @@ impl<T> SetObjectData<T> for SetMailboxHelper
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn new(_store: &JMAPStore<T>, request: &SetRequest) -> jmap::Result<Self> {
+    fn new(_store: &JMAPStore<T>, request: &mut SetRequest) -> jmap::Result<Self> {
         Ok(SetMailboxHelper {
             on_destroy_remove_emails: request
                 .arguments
@@ -39,6 +42,10 @@ where
                 .and_then(|v| v.to_bool())
                 .unwrap_or(false),
         })
+    }
+
+    fn unwrap_invocation(self) -> Option<Invocation> {
+        None
     }
 }
 
@@ -48,6 +55,8 @@ where
 {
     type Property = MailboxProperty;
     type Helper = SetMailboxHelper;
+    type CreateItemResult = DefaultCreateItem;
+    type UpdateItemResult = DefaultUpdateItem;
 
     fn new(
         helper: &mut SetObjectHelper<T, SetMailboxHelper>,
@@ -161,31 +170,31 @@ where
     fn create(
         mut self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
+        _create_id: &str,
         document: &mut Document,
-    ) -> jmap::error::set::Result<(JMAPId, JSONValue)> {
+    ) -> jmap::error::set::Result<Self::CreateItemResult> {
         // Assign parentId if the field is missing
         if !self.mailbox.has_property(&MailboxProperty::ParentId) {
             self.mailbox.set(MailboxProperty::ParentId, 0u64.into());
         }
-        let id = document.document_id as JMAPId;
-        let mailbox = TinyORM::<MailboxProperty>::default();
 
         self.validate(helper, None)?;
-        mailbox.validate(&self.mailbox)?;
-        mailbox.merge(document, self.mailbox)?;
-        Ok((id, CreateItemResult { id }.into()))
+        TinyORM::default().merge_validate(document, self.mailbox)?;
+        Ok(DefaultCreateItem::new(document.document_id as JMAPId))
     }
 
     fn update(
         self,
         helper: &mut SetObjectHelper<T, Self::Helper>,
         document: &mut Document,
-    ) -> jmap::error::set::Result<Option<JSONValue>> {
+    ) -> jmap::error::set::Result<Option<Self::UpdateItemResult>> {
         self.validate(helper, document.document_id.into())?;
-        let mailbox = self.current_mailbox.unwrap();
-        mailbox.validate(&self.mailbox)?;
-        if mailbox.merge(document, self.mailbox)? {
-            Ok(Some(JSONValue::Null))
+        if self
+            .current_mailbox
+            .unwrap()
+            .merge_validate(document, self.mailbox)?
+        {
+            Ok(Some(DefaultUpdateItem::default()))
         } else {
             Ok(None)
         }

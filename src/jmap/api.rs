@@ -4,13 +4,13 @@ use actix_web::{web, HttpResponse};
 
 use jmap::error::method::MethodError;
 use jmap::error::request::{RequestError, RequestLimitError};
-use jmap::jmap_store::changes::JMAPChanges;
-use jmap::jmap_store::get::JMAPGet;
-use jmap::jmap_store::import::JMAPImport;
-use jmap::jmap_store::parse::JMAPParse;
-use jmap::jmap_store::query::JMAPQuery;
-use jmap::jmap_store::query_changes::JMAPQueryChanges;
-use jmap::jmap_store::set::JMAPSet;
+use jmap::jmap_store::changes::{ChangesResult, JMAPChanges};
+use jmap::jmap_store::get::{GetResult, JMAPGet};
+use jmap::jmap_store::import::{ImportResult, JMAPImport};
+use jmap::jmap_store::parse::{JMAPParse, ParseResult};
+use jmap::jmap_store::query::{JMAPQuery, QueryResult};
+use jmap::jmap_store::query_changes::{JMAPQueryChanges, QueryChangesResult};
+use jmap::jmap_store::set::{JMAPSet, SetResult};
 use jmap::protocol::invocation::{Invocation, Method, Object};
 use jmap::protocol::json::JSONValue;
 use jmap::protocol::request::Request;
@@ -30,6 +30,7 @@ use jmap_mail::mailbox::query::QueryMailbox;
 use jmap_mail::mailbox::set::SetMailbox;
 use jmap_mail::thread::changes::ChangesThread;
 use jmap_mail::thread::get::GetThread;
+use store::log::ChangeId;
 use store::tracing::debug;
 use store::Store;
 
@@ -103,13 +104,42 @@ where
                 let is_set = invocation.is_set();
 
                 match handle_method_call(invocation, &core).await {
-                    Ok(result) => response.push_response(
-                        name,
-                        call_id,
-                        result,
-                        is_set && (include_created_ids || call_num < total_method_calls - 1),
-                    ),
-                    Err(err) => response.push_error(call_id, err),
+                    Ok(result) => {
+                        // Add result
+                        let mut change_id = result.change_id;
+                        response.push_response(
+                            name,
+                            call_id.clone(),
+                            result.result,
+                            is_set && (include_created_ids || call_num < total_method_calls - 1),
+                        );
+
+                        // Execute next invocation
+                        if let Some(next_invocation) = result.next_invocation {
+                            let name = next_invocation.to_string();
+                            match handle_method_call(next_invocation, &core).await {
+                                Ok(result) => {
+                                    if result.change_id.is_some() {
+                                        change_id = result.change_id;
+                                    }
+                                    response.push_response(name, call_id, result.result, false);
+                                }
+                                Err(err) => {
+                                    response.push_error(call_id, err);
+                                }
+                            }
+                        }
+
+                        // Wait for cluster
+                        if core.store.config.is_in_cluster && core.is_leader() {
+                            if let Some(_change_id) = change_id {
+                                //Todo wait for changes to propagate
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        response.push_error(call_id, err);
+                    }
                 }
             }
             Err(err) => response.push_error(call_id, err),
@@ -123,10 +153,16 @@ where
     response
 }
 
+pub struct InvocationResult {
+    result: JSONValue,
+    next_invocation: Option<Invocation>,
+    change_id: Option<ChangeId>,
+}
+
 pub async fn handle_method_call<T>(
     invocation: Invocation,
     core: &web::Data<JMAPServer<T>>,
-) -> jmap::Result<JSONValue>
+) -> jmap::Result<InvocationResult>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -168,11 +204,79 @@ where
             (Object::Identity, Method::Changes(request)) => {
                 store.changes::<ChangesIdentity>(request)?.into()
             }
-            (Object::Core, Method::Echo(arguments)) => arguments,
+            (Object::Core, Method::Echo(arguments)) => InvocationResult::new(arguments),
             _ => {
                 return Err(MethodError::ServerUnavailable);
             }
         })
     })
     .await
+}
+
+impl InvocationResult {
+    pub fn new(result: JSONValue) -> Self {
+        Self {
+            result,
+            next_invocation: None,
+            change_id: None,
+        }
+    }
+}
+
+impl From<SetResult> for InvocationResult {
+    fn from(mut result: SetResult) -> Self {
+        InvocationResult {
+            next_invocation: Option::take(&mut result.next_invocation),
+            change_id: if result.new_state != result.old_state {
+                result.new_state.get_change_id()
+            } else {
+                None
+            },
+            result: result.into(),
+        }
+    }
+}
+
+impl From<GetResult> for InvocationResult {
+    fn from(result: GetResult) -> Self {
+        InvocationResult::new(result.into())
+    }
+}
+
+impl From<ChangesResult> for InvocationResult {
+    fn from(result: ChangesResult) -> Self {
+        InvocationResult::new(result.into())
+    }
+}
+
+impl From<QueryResult> for InvocationResult {
+    fn from(result: QueryResult) -> Self {
+        InvocationResult::new(result.into())
+    }
+}
+
+impl From<QueryChangesResult> for InvocationResult {
+    fn from(result: QueryChangesResult) -> Self {
+        InvocationResult::new(result.into())
+    }
+}
+
+impl From<ImportResult> for InvocationResult {
+    fn from(result: ImportResult) -> Self {
+        InvocationResult {
+            change_id: if result.new_state != result.old_state {
+                result.new_state.get_change_id()
+            } else {
+                None
+            },
+            result: result.into(),
+            next_invocation: None,
+        }
+    }
+}
+
+impl From<ParseResult> for InvocationResult {
+    fn from(result: ParseResult) -> Self {
+        InvocationResult::new(result.into())
+    }
 }

@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use store::field::Number;
+use store::{
+    chrono::{LocalResult, SecondsFormat, TimeZone, Utc},
+    field::Number,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -202,6 +205,15 @@ impl JSONValue {
             JSONValue::Bool(bool) => Some(*bool),
             _ => None,
         }
+    }
+
+    pub fn into_utc_date(self) -> JSONValue {
+        if let Some(timestamp) = self.unwrap_unsigned_int() {
+            if let LocalResult::Single(timestamp) = Utc.timestamp_opt(timestamp as i64, 0) {
+                return timestamp.to_rfc3339_opts(SecondsFormat::Secs, true).into();
+            }
+        }
+        JSONValue::Null
     }
 
     pub fn unwrap_array(self) -> Option<Vec<JSONValue>> {

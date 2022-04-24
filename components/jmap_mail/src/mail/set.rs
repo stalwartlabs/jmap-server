@@ -2,7 +2,8 @@ use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::blob::BlobId;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
-use jmap::jmap_store::set::{SetObject, SetObjectData, SetObjectHelper};
+use jmap::jmap_store::set::{DefaultUpdateItem, SetObject, SetObjectData, SetObjectHelper};
+use jmap::protocol::invocation::Invocation;
 use jmap::protocol::json::JSONValue;
 use jmap::request::set::SetRequest;
 use mail_builder::headers::address::Address;
@@ -56,12 +57,16 @@ impl<T> SetObjectData<T> for SetMailHelper
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn new(store: &JMAPStore<T>, request: &SetRequest) -> jmap::Result<Self> {
+    fn new(store: &JMAPStore<T>, request: &mut SetRequest) -> jmap::Result<Self> {
         Ok(SetMailHelper {
             mailbox_ids: store
                 .get_document_ids(request.account_id, Collection::Mailbox)?
                 .unwrap_or_default(),
         })
+    }
+
+    fn unwrap_invocation(self) -> Option<Invocation> {
+        None
     }
 }
 
@@ -71,6 +76,8 @@ where
 {
     type Property = MailProperty;
     type Helper = SetMailHelper;
+    type CreateItemResult = MailImportResult;
+    type UpdateItemResult = DefaultUpdateItem;
 
     fn new(
         _helper: &mut SetObjectHelper<T, SetMailHelper>,
@@ -352,8 +359,9 @@ where
     fn create(
         self,
         helper: &mut SetObjectHelper<T, SetMailHelper>,
+        _create_id: &str,
         document: &mut Document,
-    ) -> jmap::error::set::Result<(JMAPId, JSONValue)> {
+    ) -> jmap::error::set::Result<Self::CreateItemResult> {
         if let SetMail::Create {
             mailbox_ids,
             keywords,
@@ -414,22 +422,17 @@ where
                 thread_name,
             )?;
 
-            let id = JMAPId::from_parts(thread_id, document.document_id);
-            Ok((
-                id,
-                MailImportResult {
-                    id,
-                    blob_id: BlobId::new_owned(
-                        helper.account_id,
-                        Collection::Mail,
-                        document.document_id,
-                        MESSAGE_RAW,
-                    ),
-                    thread_id,
-                    size,
-                }
-                .into(),
-            ))
+            Ok(MailImportResult {
+                id: JMAPId::from_parts(thread_id, document.document_id),
+                blob_id: BlobId::new_owned(
+                    helper.account_id,
+                    Collection::Mail,
+                    document.document_id,
+                    MESSAGE_RAW,
+                ),
+                thread_id,
+                size,
+            })
         } else {
             unreachable!()
         }
@@ -439,7 +442,7 @@ where
         self,
         helper: &mut SetObjectHelper<T, SetMailHelper>,
         document: &mut Document,
-    ) -> jmap::error::set::Result<Option<JSONValue>> {
+    ) -> jmap::error::set::Result<Option<Self::UpdateItemResult>> {
         if let SetMail::Update {
             keyword_op_list,
             keyword_op_clear_all,
@@ -604,7 +607,7 @@ where
             }
 
             if !document.is_empty() {
-                Ok(Some(JSONValue::Null))
+                Ok(Some(DefaultUpdateItem::default()))
             } else {
                 Ok(None)
             }

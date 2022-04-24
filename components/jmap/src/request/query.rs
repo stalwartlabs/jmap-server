@@ -20,12 +20,6 @@ pub struct QueryRequest {
     pub arguments: HashMap<String, JSONValue>,
 }
 
-#[derive(Debug)]
-pub struct QueryResult {
-    pub is_immutable: bool,
-    pub result: JSONValue,
-}
-
 #[derive(Debug, Clone)]
 pub struct Comparator {
     pub property: String,

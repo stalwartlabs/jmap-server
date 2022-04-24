@@ -79,7 +79,7 @@ where
         Ok(document_ids.map(|id| id as JMAPId).collect())
     }
 
-    fn has_virtual_ids() -> bool {
+    fn is_virtual() -> bool {
         false
     }
 

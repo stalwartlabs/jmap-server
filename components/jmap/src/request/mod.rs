@@ -140,16 +140,14 @@ impl JSONValue {
 
     pub fn parse_utc_date(self, optional: bool) -> crate::Result<Option<i64>> {
         match self {
-            JSONValue::String(date_time) => Ok(Some(
-                DateTime::parse_from_rfc3339(&date_time)
-                    .map_err(|_| {
-                        MethodError::InvalidArguments(format!(
-                            "Failed to parse UTC Date '{}'",
-                            date_time
-                        ))
-                    })?
-                    .timestamp(),
-            )),
+            JSONValue::String(date_time) => {
+                Ok(Some(parse_utc_date(&date_time).ok_or_else(|| {
+                    MethodError::InvalidArguments(format!(
+                        "Failed to parse UTC Date '{}'",
+                        date_time
+                    ))
+                })?))
+            }
             JSONValue::Null if optional => Ok(None),
             _ => Err(MethodError::InvalidArguments(
                 "Expected UTC date.".to_string(),
@@ -210,6 +208,13 @@ impl JSONValue {
 
         Ok(())
     }
+}
+
+pub fn parse_utc_date(date_time: &str) -> Option<i64> {
+    DateTime::parse_from_rfc3339(date_time)
+        .ok()?
+        .timestamp()
+        .into()
 }
 
 #[cfg(test)]

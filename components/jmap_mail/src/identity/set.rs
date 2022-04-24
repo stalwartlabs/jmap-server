@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use super::IdentityProperty;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
-use jmap::jmap_store::set::CreateItemResult;
+use jmap::jmap_store::set::{DefaultCreateItem, DefaultUpdateItem};
+use jmap::protocol::invocation::Invocation;
 use jmap::{
     jmap_store::set::{SetObject, SetObjectData, SetObjectHelper},
     protocol::json::JSONValue,
@@ -24,8 +25,12 @@ impl<T> SetObjectData<T> for SetIdentityHelper
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn new(_store: &JMAPStore<T>, _request: &SetRequest) -> jmap::Result<Self> {
+    fn new(_store: &JMAPStore<T>, _request: &mut SetRequest) -> jmap::Result<Self> {
         Ok(SetIdentityHelper {})
+    }
+
+    fn unwrap_invocation(self) -> Option<Invocation> {
+        None
     }
 }
 
@@ -35,6 +40,8 @@ where
 {
     type Property = IdentityProperty;
     type Helper = SetIdentityHelper;
+    type CreateItemResult = DefaultCreateItem;
+    type UpdateItemResult = DefaultUpdateItem;
 
     fn new(
         helper: &mut SetObjectHelper<T, Self::Helper>,
@@ -68,7 +75,7 @@ where
                 self.identity.set(field, value);
             }
             (IdentityProperty::Email, JSONValue::String(email))
-                if email.contains('@') && email.len() < 255 =>
+                if email.contains('@') && email.len() < 255 && self.current_identity.is_none() =>
             {
                 self.identity.set(field, value);
             }
@@ -118,24 +125,24 @@ where
     fn create(
         self,
         _helper: &mut SetObjectHelper<T, Self::Helper>,
+        _create_id: &str,
         document: &mut Document,
-    ) -> jmap::error::set::Result<(JMAPId, JSONValue)> {
-        let id = document.document_id as JMAPId;
-        let identity = TinyORM::<IdentityProperty>::default();
-        identity.validate(&self.identity)?;
-        identity.merge(document, self.identity)?;
-        Ok((id, CreateItemResult { id }.into()))
+    ) -> jmap::error::set::Result<Self::CreateItemResult> {
+        TinyORM::default().merge_validate(document, self.identity)?;
+        Ok(DefaultCreateItem::new(document.document_id as JMAPId))
     }
 
     fn update(
         self,
         _helper: &mut SetObjectHelper<T, Self::Helper>,
         document: &mut Document,
-    ) -> jmap::error::set::Result<Option<JSONValue>> {
-        let identity = self.current_identity.unwrap();
-        identity.validate(&self.identity)?;
-        if identity.merge(document, self.identity)? {
-            Ok(Some(JSONValue::Null))
+    ) -> jmap::error::set::Result<Option<Self::UpdateItemResult>> {
+        if self
+            .current_identity
+            .unwrap()
+            .merge_validate(document, self.identity)?
+        {
+            Ok(Some(DefaultUpdateItem::default()))
         } else {
             Ok(None)
         }

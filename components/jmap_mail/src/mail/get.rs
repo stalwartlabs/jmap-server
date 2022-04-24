@@ -124,6 +124,7 @@ where
             &message_data_bytes[read_bytes..read_bytes + message_data_len],
         )
         .ok_or(StoreError::DataCorruption)?;
+
         let (message_raw, mut message_outline) = match &self.fetch_raw {
             FetchRaw::All => (
                 Some(
@@ -195,67 +196,67 @@ where
                             JSONValue::Null
                         }
                     }
-                    MailProperty::MessageId => add_rfc_header(
+                    MailProperty::MessageId => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::MessageId,
                         MailHeaderForm::MessageIds,
                         false,
                     )?,
-                    MailProperty::InReplyTo => add_rfc_header(
+                    MailProperty::InReplyTo => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::InReplyTo,
                         MailHeaderForm::MessageIds,
                         false,
                     )?,
-                    MailProperty::References => add_rfc_header(
+                    MailProperty::References => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::References,
                         MailHeaderForm::MessageIds,
                         false,
                     )?,
-                    MailProperty::Sender => add_rfc_header(
+                    MailProperty::Sender => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::Sender,
                         MailHeaderForm::Addresses,
                         false,
                     )?,
-                    MailProperty::From => add_rfc_header(
+                    MailProperty::From => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::From,
                         MailHeaderForm::Addresses,
                         false,
                     )?,
-                    MailProperty::To => add_rfc_header(
+                    MailProperty::To => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::To,
                         MailHeaderForm::Addresses,
                         false,
                     )?,
-                    MailProperty::Cc => add_rfc_header(
+                    MailProperty::Cc => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::Cc,
                         MailHeaderForm::Addresses,
                         false,
                     )?,
-                    MailProperty::Bcc => add_rfc_header(
+                    MailProperty::Bcc => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::Bcc,
                         MailHeaderForm::Addresses,
                         false,
                     )?,
-                    MailProperty::ReplyTo => add_rfc_header(
+                    MailProperty::ReplyTo => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::ReplyTo,
                         MailHeaderForm::Addresses,
                         false,
                     )?,
-                    MailProperty::Subject => add_rfc_header(
+                    MailProperty::Subject => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::Subject,
                         MailHeaderForm::Text,
                         false,
                     )?,
-                    MailProperty::SentAt => add_rfc_header(
+                    MailProperty::SentAt => get_rfc_header(
                         &mut message_data.properties,
                         RfcHeader::Date,
                         MailHeaderForm::Date,
@@ -266,7 +267,7 @@ where
                         header: HeaderName::Rfc(header),
                         all,
                     }) => {
-                        add_rfc_header(&mut message_data.properties, *header, form.clone(), *all)?
+                        get_rfc_header(&mut message_data.properties, *header, form.clone(), *all)?
                     }
                     MailProperty::Id => JSONValue::String(jmap_id.to_jmap_string()),
                     MailProperty::BlobId => JSONValue::String(
@@ -543,7 +544,7 @@ where
             .collect::<Vec<JMAPId>>())
     }
 
-    fn has_virtual_ids() -> bool {
+    fn is_virtual() -> bool {
         false
     }
 
@@ -849,7 +850,7 @@ fn add_body_part(
     body_part
 }
 
-fn add_rfc_header(
+pub fn get_rfc_header(
     message_headers: &mut JMAPMailHeaders,
     header: RfcHeader,
     form: MailHeaderForm,

@@ -11,6 +11,8 @@ impl JMAPIdSerialize for JMAPId {
     {
         if id.as_bytes().get(0)? == &b'i' {
             JMAPId::from_str_radix(id.get(1..)?, 16).ok()?.into()
+        } else if id == "singleton" {
+            0.into()
         } else {
             None
         }

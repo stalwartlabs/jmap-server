@@ -1,10 +1,7 @@
 use std::fmt::Display;
 
-use jmap::{
-    error::method::MethodError, jmap_store::orm::PropertySchema, protocol::json::JSONValue,
-    request::JSONArgumentParser, Property,
-};
-use store::Collection;
+use jmap::{jmap_store::orm::PropertySchema, Property};
+use store::{field::TextIndex, Collection};
 
 pub mod changes;
 pub mod get;
@@ -52,11 +49,7 @@ impl PropertySchema for IdentityProperty {
         &[]
     }
 
-    fn tokenized() -> &'static [Self] {
-        &[]
-    }
-
-    fn keywords() -> &'static [Self] {
+    fn indexed() -> &'static [(Self, TextIndex)] {
         &[]
     }
 
@@ -77,17 +70,6 @@ impl Display for IdentityProperty {
             IdentityProperty::HtmlSignature => write!(f, "htmlSignature"),
             IdentityProperty::MayDelete => write!(f, "mayDelete"),
         }
-    }
-}
-
-impl JSONArgumentParser for IdentityProperty {
-    fn parse_argument(argument: JSONValue) -> jmap::Result<Self> {
-        let argument = argument.unwrap_string().ok_or_else(|| {
-            MethodError::InvalidArguments("Expected string argument.".to_string())
-        })?;
-        IdentityProperty::parse(&argument).ok_or_else(|| {
-            MethodError::InvalidArguments(format!("Unknown identity property: '{}'.", argument))
-        })
     }
 }
 
