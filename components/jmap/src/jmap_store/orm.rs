@@ -1,5 +1,5 @@
 use store::batch::Document;
-use store::field::{DefaultOptions, Options, Text, TextIndex};
+use store::field::{DefaultOptions, Options, Text};
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::{AccountId, DocumentId, JMAPStore, Store, StoreError, Tag};
 

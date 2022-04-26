@@ -1,10 +1,14 @@
 use std::convert::TryInto;
 
+use naive_cityhash::cityhash64;
+use xxhash_rust::xxh3::xxh3_64;
+
 use crate::{
+    blob::BlobId,
     leb128::Leb128,
     log::ChangeId,
     log::{LogIndex, RaftId},
-    AccountId, Collection, DocumentId, FieldId, Float, Integer, LongInteger, Tag, TermId,
+    AccountId, Collection, DocumentId, FieldId, Float, Integer, LongInteger, Tag,
 };
 
 pub const COLLECTION_PREFIX_LEN: usize =
@@ -14,22 +18,26 @@ pub const ACCOUNT_KEY_LEN: usize = std::mem::size_of::<AccountId>()
     + std::mem::size_of::<Collection>()
     + std::mem::size_of::<DocumentId>();
 
-pub const BM_KEYWORD: u8 = 0;
-pub const BM_TERM_EXACT: u8 = 1;
-pub const BM_TERM_STEMMED: u8 = 2;
-pub const BM_TAG_ID: u8 = 3;
-pub const BM_TAG_TEXT: u8 = 4;
-pub const BM_TAG_STATIC: u8 = 5;
-pub const BM_DOCUMENT_IDS: u8 = 6;
-pub const BM_HAS_KEYWORDS: u8 = 7;
+pub const BM_DOCUMENT_IDS: u8 = 0;
+pub const BM_TERM: u8 = 0x01;
+pub const BM_TAG: u8 = 0x02;
+
+pub const TERM_EXACT: u8 = 0x00;
+pub const TERM_STEMMED: u8 = 0x10;
+pub const TERM_STRING: u8 = 0x20;
+pub const TERM_HASH: u8 = 0x40;
+
+pub const TAG_ID: u8 = 0x00;
+pub const TAG_TEXT: u8 = 0x10;
+pub const TAG_STATIC: u8 = 0x20;
+pub const TAG_BYTES: u8 = 0x40;
 
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
 pub const BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
 pub const TEMP_BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
 
-pub const LAST_TERM_ID_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
-pub const FOLLOWER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 3];
-pub const LEADER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 4];
+pub const FOLLOWER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
+pub const LEADER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 3];
 
 pub struct ValueKey {}
 pub struct BitmapKey {}
@@ -87,28 +95,17 @@ impl ValueKey {
         bytes
     }
 
-    pub fn serialize_document_keywords_list(
-        account: AccountId,
-        collection: Collection,
-        document: DocumentId,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
-        account.to_leb128_bytes(&mut bytes);
-        bytes.push(collection.into());
-        document.to_leb128_bytes(&mut bytes);
-        bytes.push(ValueKey::KEYWORDS);
-        bytes
-    }
-
     pub fn serialize_document_blob(
         account: AccountId,
         collection: Collection,
         document: DocumentId,
+        index: u32,
     ) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
         account.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
         document.to_leb128_bytes(&mut bytes);
+        index.to_leb128_bytes(&mut bytes);
         bytes.push(ValueKey::BLOBS);
         bytes
     }
@@ -122,10 +119,12 @@ impl ValueKey {
         bytes
     }
 
-    pub fn serialize_blob(hash: &[u8]) -> Vec<u8> {
-        let mut key = Vec::with_capacity(hash.len() + BLOB_KEY_PREFIX.len());
+    pub fn serialize_blob(id: &BlobId) -> Vec<u8> {
+        let mut key =
+            Vec::with_capacity(id.hash.len() + std::mem::size_of::<u32>() + BLOB_KEY_PREFIX.len());
         key.extend_from_slice(BLOB_KEY_PREFIX);
-        key.extend_from_slice(hash);
+        key.extend_from_slice(&id.hash);
+        id.size.to_leb128_bytes(&mut key);
         key
     }
 
@@ -153,51 +152,44 @@ impl BitmapKey {
         bytes
     }
 
-    pub fn serialize_keyword(
-        account: AccountId,
-        collection: Collection,
-        field: FieldId,
-        text: &str,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + text.len() + 1);
-        account.to_leb128_bytes(&mut bytes);
-        bytes.extend_from_slice(text.as_bytes());
-        bytes.push(collection.into());
-        bytes.push(field);
-        bytes.push(BM_KEYWORD);
-        bytes
-    }
-
-    pub fn serialize_has_keywords(
-        account: AccountId,
-        collection: Collection,
-        field: FieldId,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
-        account.to_leb128_bytes(&mut bytes);
-        bytes.push(collection.into());
-        bytes.push(field);
-        bytes.push(BM_HAS_KEYWORDS);
-        bytes
-    }
-
     pub fn serialize_term(
         account: AccountId,
         collection: Collection,
         field: FieldId,
-        term_id: TermId,
+        term: &str,
         is_exact: bool,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<TermId>() + 2);
+        let (mut bytes, bm_type) = match term.len() as u32 {
+            1..=9 => {
+                let mut bytes =
+                    Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<u64>() + 3);
+                bytes.extend_from_slice(term.as_bytes());
+                (bytes, TERM_STRING)
+            }
+            10..=20 => {
+                let mut bytes =
+                    Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<u64>() + 3);
+                bytes.extend_from_slice(&xxh3_64(term.as_bytes()).to_be_bytes());
+                term.len().to_leb128_bytes(&mut bytes);
+                (bytes, TERM_HASH)
+            }
+            21..=u32::MAX => {
+                let mut bytes =
+                    Vec::with_capacity(ACCOUNT_KEY_LEN + (std::mem::size_of::<u64>() * 2) + 3);
+                bytes.extend_from_slice(&xxh3_64(term.as_bytes()).to_be_bytes());
+                bytes.extend_from_slice(&cityhash64(term.as_bytes()).to_be_bytes());
+                term.len().to_leb128_bytes(&mut bytes);
+                (bytes, TERM_HASH)
+            }
+            0 => {
+                panic!("Term cannot be empty");
+            }
+        };
+
         account.to_leb128_bytes(&mut bytes);
-        term_id.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
         bytes.push(field);
-        bytes.push(if is_exact {
-            BM_TERM_EXACT
-        } else {
-            BM_TERM_STEMMED
-        });
+        bytes.push(BM_TERM | bm_type | if is_exact { TERM_EXACT } else { TERM_HASH });
         bytes
     }
 
@@ -208,28 +200,32 @@ impl BitmapKey {
         tag: &Tag,
     ) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + tag.len() + 1);
-        account.to_leb128_bytes(&mut bytes);
         let bm_type = match tag {
             Tag::Static(id) => {
                 bytes.push(*id);
-                BM_TAG_STATIC
+                TAG_STATIC
             }
             Tag::Id(id) => {
                 (*id).to_leb128_bytes(&mut bytes);
-                BM_TAG_ID
+                TAG_ID
             }
             Tag::Text(text) => {
                 bytes.extend_from_slice(text.as_bytes());
-                BM_TAG_TEXT
+                TAG_TEXT
+            }
+            Tag::Bytes(value) => {
+                bytes.extend_from_slice(value);
+                TAG_BYTES
             }
             Tag::Default => {
                 bytes.push(0);
-                BM_TAG_STATIC
+                TAG_STATIC
             }
         };
+        account.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
         bytes.push(field);
-        bytes.push(bm_type);
+        bytes.push(BM_TAG | bm_type);
         bytes
     }
 

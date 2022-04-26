@@ -73,13 +73,12 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
-    use nlp::{tokenizers::tokenize, Language};
+    use nlp::{tokenizers::Tokenizer, Language};
 
     use crate::{
-        serialize::StoreDeserialize,
-        term_index::{MatchTerm, TermIndex, TermIndexBuilder},
+        serialize::{StoreDeserialize, StoreSerialize},
+        term_index::{TermIndex, TermIndexBuilder},
     };
 
     use super::*;
@@ -178,33 +177,22 @@ mod tests {
 
         for (parts, tests) in inputs {
             let mut builder = TermIndexBuilder::new();
-            let mut term_dict = HashMap::new();
 
             for (field_num, part) in parts.iter().enumerate() {
                 let mut terms = Vec::new();
-                for token in tokenize(part, Language::English, 40) {
-                    let dict_len = term_dict.len() as u64 + 1;
-                    terms.push(Term::from_token(
-                        *term_dict
-                            .entry(token.word.to_string())
-                            .or_insert_with(|| dict_len),
-                        0,
-                        &token,
-                    ));
+                for token in Tokenizer::new(part, Language::English, 40) {
+                    terms.push(builder.add_token(token));
                 }
-                builder.add_item(field_num as u8, 0, terms);
+                builder.add_terms(field_num as u8, 0, terms);
             }
 
-            let compressed_term_index = builder.compress();
+            let compressed_term_index = builder.serialize().unwrap();
             let term_index = TermIndex::deserialize(&compressed_term_index[..]).unwrap();
 
             for (match_words, snippets) in tests {
                 let mut match_terms = Vec::new();
                 for word in &match_words {
-                    match_terms.push(MatchTerm {
-                        id: *term_dict.get(*word).unwrap_or(&0),
-                        id_stemmed: 0,
-                    });
+                    match_terms.push(term_index.get_match_term(word, None));
                 }
 
                 let term_groups = term_index

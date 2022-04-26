@@ -2,41 +2,53 @@ use std::borrow::Cow;
 
 use rust_stemmers::Algorithm;
 
-use crate::{tokenizers::Token, Language};
+use crate::{tokenizers::Tokenizer, Language};
 
-pub struct Stemmer {
-    stemmer: rust_stemmers::Stemmer,
+#[derive(Debug, PartialEq)]
+pub struct StemmedToken<'x> {
+    pub word: Cow<'x, str>,
+    pub stemmed_word: Option<Cow<'x, str>>,
+    pub offset: u32, // Word offset in the text part
+    pub len: u8,     // Word length
 }
 
-impl Stemmer {
-    pub fn new(language: Language) -> Option<Stemmer> {
-        Stemmer {
-            stemmer: rust_stemmers::Stemmer::create(STEMMER_MAP[language as usize]?),
-        }
-        .into()
-    }
+pub struct Stemmer<'x> {
+    stemmer: Option<rust_stemmers::Stemmer>,
+    tokenizer: Tokenizer<'x>,
+}
 
-    pub fn stem<'x>(&self, token: &Token<'x>) -> Option<Token<'x>> {
-        if let Cow::Owned(text) = self.stemmer.stem(&token.word) {
-            if text.len() != token.len as usize || text != token.word {
-                Some(Token {
-                    word: text.into(),
-                    len: token.len,
-                    offset: token.offset,
-                    is_exact: false,
-                })
-            } else {
-                None
-            }
-        } else {
-            None
+impl<'x> Stemmer<'x> {
+    pub fn new(text: &'x str, language: Language, max_token_length: usize) -> Stemmer<'x> {
+        Stemmer {
+            tokenizer: Tokenizer::new(text, language, max_token_length),
+            stemmer: STEMMER_MAP[language as usize].map(rust_stemmers::Stemmer::create),
         }
+    }
+}
+
+impl<'x> Iterator for Stemmer<'x> {
+    type Item = StemmedToken<'x>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let token = self.tokenizer.next()?;
+        Some(StemmedToken {
+            stemmed_word: self.stemmer.as_ref().and_then(|stemmer| {
+                match stemmer.stem(&token.word) {
+                    Cow::Owned(text) if text.len() != token.len as usize || text != token.word => {
+                        Some(text.into())
+                    }
+                    _ => None,
+                }
+            }),
+            word: token.word,
+            offset: token.offset,
+            len: token.len,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tokenizers::tokenize;
 
     use super::*;
 
@@ -51,11 +63,9 @@ mod tests {
             ("querer queremos quer", Language::Spanish, "quer"),
         ];
 
-        for input in inputs {
-            let stemmer = Stemmer::new(input.1).unwrap();
-            for token in tokenize(input.0, input.1, 40) {
-                let token = stemmer.stem(&token).unwrap_or(token);
-                assert_eq!(token.word, input.2);
+        for (input, language, result) in inputs {
+            for token in Stemmer::new(input, language, 40) {
+                assert_eq!(token.stemmed_word.unwrap(), result);
             }
         }
     }

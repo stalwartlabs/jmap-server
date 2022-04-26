@@ -12,7 +12,6 @@ pub mod mutex_map;
 pub mod query;
 pub mod search_snippet;
 pub mod serialize;
-pub mod term;
 pub mod term_index;
 pub mod update;
 
@@ -24,6 +23,7 @@ use std::{
     time::Duration,
 };
 
+use blob::BlobStoreWrapper;
 use config::EnvSettings;
 use id::{IdAssigner, IdCacheKey};
 use log::{LogIndex, RaftId};
@@ -32,8 +32,7 @@ use mutex_map::MutexMap;
 use nlp::Language;
 use parking_lot::{Mutex, MutexGuard};
 use roaring::RoaringBitmap;
-use serde::{Deserialize, Serialize};
-use serialize::{StoreDeserialize, LAST_TERM_ID_KEY};
+use serialize::StoreDeserialize;
 
 pub use bincode;
 pub use chrono;
@@ -72,6 +71,12 @@ impl Display for StoreError {
     }
 }
 
+impl From<std::io::Error> for StoreError {
+    fn from(err: std::io::Error) -> Self {
+        StoreError::InternalError(format!("I/O failure: {}", err))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub type AccountId = u32;
@@ -82,7 +87,6 @@ pub type TagId = u8;
 pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
-pub type TermId = u64;
 pub type JMAPId = u64;
 
 pub trait JMAPIdPrefix {
@@ -105,18 +109,19 @@ impl JMAPIdPrefix for JMAPId {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum Collection {
-    Account = 0,
-    PushSubscription = 1,
-    Mail = 2,
-    Mailbox = 3,
-    Thread = 4,
-    Identity = 5,
-    EmailSubmission = 6,
-    VacationResponse = 7,
-    None = 8,
+    Blob = 0,
+    Account = 1,
+    PushSubscription = 2,
+    Mail = 3,
+    Mailbox = 4,
+    Thread = 5,
+    Identity = 6,
+    EmailSubmission = 7,
+    VacationResponse = 8,
+    None = 9,
 }
 
 impl From<u8> for Collection {
@@ -246,6 +251,7 @@ pub enum Tag {
     Static(TagId),
     Id(Integer),
     Text(String),
+    Bytes(Vec<u8>),
     Default,
 }
 
@@ -500,16 +506,12 @@ where
 
 pub struct JMAPStore<T> {
     pub db: T,
+    pub blob: BlobStoreWrapper,
     pub config: JMAPConfig,
 
     pub account_lock: MutexMap<()>,
-    pub blob_lock: MutexMap<()>,
 
     pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
-
-    pub term_id_cache: Cache<String, TermId>,
-    pub term_id_lock: MutexMap<()>,
-    pub term_id_last: AtomicU64,
 
     pub raft_term: AtomicU64,
     pub raft_index: AtomicU64,
@@ -518,10 +520,7 @@ pub struct JMAPStore<T> {
 pub struct JMAPConfig {
     pub is_in_cluster: bool,
 
-    pub blob_base_path: PathBuf,
-    pub blob_hash_levels: Vec<usize>,
     pub blob_temp_ttl: u64,
-
     pub default_language: Language,
 
     pub max_size_upload: usize,
@@ -545,12 +544,6 @@ pub struct JMAPConfig {
 impl From<&EnvSettings> for JMAPConfig {
     fn from(settings: &EnvSettings) -> Self {
         JMAPConfig {
-            blob_base_path: PathBuf::from(
-                settings
-                    .get("db-path")
-                    .unwrap_or_else(|| "stalwart-jmap".to_string()),
-            ),
-            blob_hash_levels: vec![1],
             max_size_upload: 50000000,
             max_concurrent_upload: 8,
             max_size_request: 10000000,
@@ -580,29 +573,12 @@ where
     pub fn new(db: T, config: JMAPConfig, settings: &EnvSettings) -> Self {
         let mut store = Self {
             config,
-            term_id_last: db
-                .get::<TermId>(ColumnFamily::Values, LAST_TERM_ID_KEY)
-                .unwrap()
-                .unwrap_or(0)
-                .into(),
-            term_id_cache: Cache::builder()
-                .initial_capacity(1024)
-                .max_capacity(
-                    settings
-                        .parse("term-cache-size")
-                        .unwrap_or(32 * 1024 * 1024),
-                )
-                .time_to_idle(Duration::from_millis(
-                    settings.parse("term-cache-ttl").unwrap_or(10 * 60 * 1000),
-                ))
-                .build(),
-            term_id_lock: MutexMap::with_capacity(1024),
+            blob: BlobStoreWrapper::new(settings).unwrap(),
             doc_id_cache: Cache::builder()
                 .initial_capacity(128)
                 .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
                 .time_to_idle(Duration::from_secs(60 * 60))
                 .build(),
-            blob_lock: MutexMap::with_capacity(1024),
             account_lock: MutexMap::with_capacity(1024),
             raft_index: 0.into(),
             raft_term: 0.into(),
@@ -611,7 +587,7 @@ where
 
         // Obtain last Raft ID
         let raft_id = store
-            .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))
+            .get_prev_raft_id(RaftId::new(LogIndex::MAX, LogIndex::MAX))
             .unwrap()
             .map(|mut id| {
                 id.index += 1;

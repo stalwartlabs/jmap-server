@@ -1,12 +1,12 @@
 use crate::{
+    batch::MAX_TOKEN_LENGTH,
     bitmap::bitmap_op,
-    field::TokenIterator,
     serialize::{BitmapKey, IndexKey, ValueKey},
     term_index::TermIndex,
     AccountId, Collection, ColumnFamily, Comparator, Direction, DocumentId, FieldId, FieldValue,
     Filter, FilterOperator, JMAPId, JMAPStore, LogicalOperator, Store, StoreError,
 };
-use nlp::Language;
+use nlp::{stemmer::Stemmer, tokenizers::Tokenizer, Language};
 use roaring::RoaringBitmap;
 use std::{
     collections::HashSet,
@@ -136,11 +136,12 @@ where
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
-                                    self.get_bitmap(&BitmapKey::serialize_keyword(
+                                    self.get_bitmap(&BitmapKey::serialize_term(
                                         account_id,
                                         collection,
                                         filter_cond.field,
                                         &keyword,
+                                        true,
                                     ))?,
                                     &document_ids,
                                 );
@@ -151,13 +152,14 @@ where
                                     state.op,
                                     &mut state.bm,
                                     self.get_bitmaps_intersection(
-                                        TokenIterator::new(&text, Language::English, false)
+                                        Tokenizer::new(&text, Language::English, MAX_TOKEN_LENGTH)
                                             .map(|token| {
-                                                BitmapKey::serialize_keyword(
+                                                BitmapKey::serialize_term(
                                                     account_id,
                                                     collection,
                                                     field_cond_field,
                                                     &token.word,
+                                                    true,
                                                 )
                                             })
                                             .collect(),
@@ -166,126 +168,130 @@ where
                                 );
                             }
                             FieldValue::FullText(query) => {
-                                if let Some(match_terms) =
-                                    self.get_match_terms(TokenIterator::new(
-                                        query.text.as_ref(),
-                                        query.language,
-                                        !query.match_phrase,
-                                    ))?
-                                {
-                                    if query.match_phrase {
-                                        let mut requested_ids = HashSet::new();
-                                        let mut keys = Vec::new();
-                                        for match_term in &match_terms {
-                                            if !requested_ids.contains(&match_term.id) {
-                                                requested_ids.insert(match_term.id);
-                                                keys.push(BitmapKey::serialize_term(
+                                if query.match_phrase {
+                                    let mut words = HashSet::new();
+                                    let field = filter_cond.field;
+
+                                    // Retrieve the Term Index for each candidate and match the exact phrase
+
+                                    if let Some(candidates) = self.get_bitmaps_intersection(
+                                        Tokenizer::new(
+                                            &query.text,
+                                            query.language,
+                                            MAX_TOKEN_LENGTH,
+                                        )
+                                        .into_iter()
+                                        .filter_map(|token| {
+                                            if !words.contains(token.word.as_ref()) {
+                                                let key = BitmapKey::serialize_term(
                                                     account_id,
                                                     collection,
-                                                    filter_cond.field,
-                                                    match_term.id,
+                                                    field,
+                                                    &token.word,
                                                     true,
-                                                ));
+                                                );
+                                                words.insert(token.word.into_owned());
+                                                key.into()
+                                            } else {
+                                                None
                                             }
-                                        }
-
-                                        // Retrieve the Term Index for each candidate and match the exact phrase
-                                        let mut candidates = self.get_bitmaps_intersection(keys)?;
-                                        if let Some(candidates) = &mut candidates {
-                                            if match_terms.len() > 1 {
-                                                let mut results = RoaringBitmap::new();
-                                                for document_id in candidates.iter() {
-                                                    if let Some(term_index) =
-                                                        self.db.get::<TermIndex>(
-                                                            ColumnFamily::Values,
-                                                            &ValueKey::serialize_term_index(
-                                                                account_id,
-                                                                collection,
-                                                                document_id,
-                                                            ),
-                                                        )?
-                                                    {
-                                                        if term_index
-                                                            .match_terms(
-                                                                &match_terms,
-                                                                None,
-                                                                true,
-                                                                false,
-                                                                false,
-                                                            )
-                                                            .map_err(|e| {
-                                                                StoreError::InternalError(format!(
-                                                                "Corrupted TermIndex for {}: {:?}",
-                                                                document_id, e
-                                                            ))
-                                                            })?
-                                                            .is_some()
-                                                        {
-                                                            results.insert(document_id);
-                                                        }
-                                                    }
+                                        })
+                                        .collect(),
+                                    )? {
+                                        let mut results = RoaringBitmap::new();
+                                        for document_id in candidates.iter() {
+                                            if let Some(term_index) = self.db.get::<TermIndex>(
+                                                ColumnFamily::Values,
+                                                &ValueKey::serialize_term_index(
+                                                    account_id,
+                                                    collection,
+                                                    document_id,
+                                                ),
+                                            )? {
+                                                if term_index
+                                                    .match_terms(
+                                                        &words
+                                                            .iter()
+                                                            .map(|w| {
+                                                                term_index.get_match_term(w, None)
+                                                            })
+                                                            .collect::<Vec<_>>(),
+                                                        None,
+                                                        true,
+                                                        false,
+                                                        false,
+                                                    )
+                                                    .map_err(|e| {
+                                                        StoreError::InternalError(format!(
+                                                            "Corrupted TermIndex for {}: {:?}",
+                                                            document_id, e
+                                                        ))
+                                                    })?
+                                                    .is_some()
+                                                {
+                                                    results.insert(document_id);
                                                 }
-                                                *candidates = results;
                                             }
                                         }
-
                                         bitmap_op(
                                             state.op,
                                             &mut state.bm,
-                                            candidates,
+                                            results.into(),
                                             &document_ids,
                                         );
                                     } else {
-                                        let mut requested_ids = HashSet::new();
-                                        let mut text_bitmap = None;
-
-                                        for match_term in &match_terms {
-                                            let mut keys =
-                                                Vec::with_capacity(match_terms.len() * 2);
-
-                                            for term_op in [
-                                                (match_term.id, true),
-                                                (match_term.id, false),
-                                                (match_term.id_stemmed, true),
-                                                (match_term.id_stemmed, false),
-                                            ] {
-                                                if !requested_ids.contains(&term_op) {
-                                                    requested_ids.insert(term_op);
-                                                    keys.push(BitmapKey::serialize_term(
-                                                        account_id,
-                                                        collection,
-                                                        filter_cond.field,
-                                                        term_op.0,
-                                                        term_op.1,
-                                                    ));
-                                                }
-                                            }
-
-                                            // Term already matched on a previous iteration
-                                            if keys.is_empty() {
-                                                continue;
-                                            }
-
-                                            bitmap_op(
-                                                LogicalOperator::And,
-                                                &mut text_bitmap,
-                                                self.get_bitmaps_union(keys)?,
-                                                &document_ids,
-                                            );
-
-                                            if text_bitmap.as_ref().unwrap().is_empty() {
-                                                break;
-                                            }
-                                        }
-                                        bitmap_op(
-                                            state.op,
-                                            &mut state.bm,
-                                            text_bitmap,
-                                            &document_ids,
-                                        );
+                                        bitmap_op(state.op, &mut state.bm, None, &document_ids);
                                     }
                                 } else {
-                                    bitmap_op(state.op, &mut state.bm, None, &document_ids);
+                                    let mut requested_keys = HashSet::new();
+                                    let mut text_bitmap = None;
+
+                                    for token in
+                                        Stemmer::new(&query.text, query.language, MAX_TOKEN_LENGTH)
+                                    {
+                                        let mut keys = Vec::new();
+
+                                        for (word, is_exact) in [
+                                            (token.word.as_ref().into(), true),
+                                            (token.word.as_ref().into(), false),
+                                            (token.stemmed_word.as_ref().map(|w| w.as_ref()), true),
+                                            (
+                                                token.stemmed_word.as_ref().map(|w| w.as_ref()),
+                                                false,
+                                            ),
+                                        ] {
+                                            if let Some(word) = word {
+                                                let key = BitmapKey::serialize_term(
+                                                    account_id,
+                                                    collection,
+                                                    filter_cond.field,
+                                                    word,
+                                                    is_exact,
+                                                );
+                                                if !requested_keys.contains(&key) {
+                                                    requested_keys.insert(key.clone());
+                                                    keys.push(key);
+                                                }
+                                            }
+                                        }
+
+                                        // Term already matched on a previous iteration
+                                        if keys.is_empty() {
+                                            continue;
+                                        }
+
+                                        bitmap_op(
+                                            LogicalOperator::And,
+                                            &mut text_bitmap,
+                                            self.get_bitmaps_union(keys)?,
+                                            &document_ids,
+                                        );
+
+                                        if text_bitmap.as_ref().unwrap().is_empty() {
+                                            break;
+                                        }
+                                    }
+                                    bitmap_op(state.op, &mut state.bm, text_bitmap, &document_ids);
                                 }
                             }
                             FieldValue::Integer(i) => {

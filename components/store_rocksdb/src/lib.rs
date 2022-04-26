@@ -8,7 +8,7 @@ use store::{
     bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITLIST, IS_BITMAP},
     config::EnvSettings,
     roaring::RoaringBitmap,
-    serialize::{StoreDeserialize, LAST_TERM_ID_KEY},
+    serialize::StoreDeserialize,
     Result, Store, StoreError,
 };
 
@@ -274,37 +274,22 @@ impl RocksDB {
 }
 
 pub fn numeric_value_merge(
-    key: &[u8],
+    _key: &[u8],
     value: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    if key == LAST_TERM_ID_KEY {
-        let mut value = if let Some(value) = value {
-            usize::from_le_bytes(value.try_into().ok()?)
-        } else {
-            0
-        };
-        for op in operands.iter() {
-            value += usize::from_le_bytes(op.try_into().ok()?);
-        }
-        //println!("Merging last term: {}", value);
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<usize>());
-        bytes.extend_from_slice(&value.to_le_bytes());
-        Some(bytes)
+    let mut value = if let Some(value) = value {
+        i64::from_le_bytes(value.try_into().ok()?)
     } else {
-        let mut value = if let Some(value) = value {
-            i64::from_le_bytes(value.try_into().ok()?)
-        } else {
-            0
-        };
-        for op in operands.iter() {
-            value += i64::from_le_bytes(op.try_into().ok()?);
-        }
-        //println!("Merging key {:?}: {}", key, value);
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<i64>());
-        bytes.extend_from_slice(&value.to_le_bytes());
-        Some(bytes)
+        0
+    };
+    for op in operands.iter() {
+        value += i64::from_le_bytes(op.try_into().ok()?);
     }
+    //println!("Merging key {:?}: {}", key, value);
+    let mut bytes = Vec::with_capacity(std::mem::size_of::<i64>());
+    bytes.extend_from_slice(&value.to_le_bytes());
+    Some(bytes)
 }
 
 pub fn bitmap_merge(

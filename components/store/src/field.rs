@@ -1,20 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Deref,
-};
+use std::{collections::HashSet, ops::Deref};
 
-use nlp::{
-    lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
-    stemmer::Stemmer,
-    tokenizers::{tokenize, Token},
-    Language,
-};
+use nlp::Language;
 
 use crate::{
-    batch::MAX_TOKEN_LENGTH,
-    blob::BlobIndex,
     leb128::Leb128,
-    serialize::{StoreDeserialize, StoreSerialize, BM_TAG_ID, BM_TAG_STATIC, BM_TAG_TEXT},
+    serialize::{StoreDeserialize, StoreSerialize, TAG_BYTES, TAG_ID, TAG_STATIC, TAG_TEXT},
     DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
 };
 
@@ -94,20 +84,20 @@ impl DefaultOptions {
 
 pub trait Options {
     fn store(self) -> Self;
-    fn store_blob(self, index: BlobIndex) -> Self;
     fn sort(self) -> Self;
     fn clear(self) -> Self;
+    fn term_index(self) -> Self;
 
     fn is_store(&self) -> bool;
     fn is_sort(&self) -> bool;
-    fn is_store_blob(&self) -> Option<BlobIndex>;
     fn is_clear(&self) -> bool;
+    fn build_term_index(&self) -> bool;
 }
 
-pub const F_STORE: u64 = 0x01 << 32;
-pub const F_SORT: u64 = 0x02 << 32;
-pub const F_CLEAR: u64 = 0x04 << 32;
-pub const F_STORE_BLOB: u64 = 0x08 << 32;
+pub const F_STORE: u64 = 0x01;
+pub const F_SORT: u64 = 0x02;
+pub const F_CLEAR: u64 = 0x04;
+pub const F_TERM_INDEX: u64 = 0x08;
 
 impl Options for u64 {
     fn store(mut self) -> Self {
@@ -115,13 +105,13 @@ impl Options for u64 {
         self
     }
 
-    fn store_blob(mut self, index: BlobIndex) -> Self {
-        self |= F_STORE_BLOB | (index as u64);
+    fn sort(mut self) -> Self {
+        self |= F_SORT;
         self
     }
 
-    fn sort(mut self) -> Self {
-        self |= F_SORT;
+    fn term_index(mut self) -> Self {
+        self |= F_TERM_INDEX;
         self
     }
 
@@ -138,16 +128,12 @@ impl Options for u64 {
         self & F_SORT != 0
     }
 
-    fn is_store_blob(&self) -> Option<BlobIndex> {
-        if self & F_STORE_BLOB != 0 {
-            Some((self & 0xFFFFFFFF) as BlobIndex)
-        } else {
-            None
-        }
-    }
-
     fn is_clear(&self) -> bool {
         self & F_CLEAR != 0
+    }
+
+    fn build_term_index(&self) -> bool {
+        self & F_TERM_INDEX != 0
     }
 }
 
@@ -171,11 +157,6 @@ impl<T> Field<T> {
     }
 
     #[inline(always)]
-    pub fn get_blob_index(&self) -> Option<BlobIndex> {
-        self.options.is_store_blob()
-    }
-
-    #[inline(always)]
     pub fn is_sorted(&self) -> bool {
         self.options.is_sort()
     }
@@ -190,6 +171,11 @@ impl<T> Field<T> {
         self.options.is_clear()
     }
 
+    #[inline(always)]
+    pub fn build_term_index(&self) -> bool {
+        self.options.build_term_index()
+    }
+
     pub fn size_of(&self) -> usize {
         std::mem::size_of::<T>()
     }
@@ -201,6 +187,7 @@ impl Tag {
             Tag::Static(_) | Tag::Default => std::mem::size_of::<TagId>(),
             Tag::Id(_) => std::mem::size_of::<DocumentId>(),
             Tag::Text(text) => text.len(),
+            Tag::Bytes(bytes) => bytes.len(),
         }
     }
 
@@ -251,20 +238,25 @@ impl StoreSerialize for Tags {
         for tag in &self.items {
             match tag {
                 Tag::Static(id) => {
-                    bytes.push(BM_TAG_STATIC);
+                    bytes.push(TAG_STATIC);
                     bytes.push(*id);
                 }
                 Tag::Id(id) => {
-                    bytes.push(BM_TAG_ID);
+                    bytes.push(TAG_ID);
                     (*id).to_leb128_bytes(&mut bytes);
                 }
                 Tag::Text(text) => {
-                    bytes.push(BM_TAG_TEXT);
+                    bytes.push(TAG_TEXT);
                     text.len().to_leb128_bytes(&mut bytes);
                     bytes.extend_from_slice(text.as_bytes());
                 }
+                Tag::Bytes(value) => {
+                    bytes.push(TAG_BYTES);
+                    value.len().to_leb128_bytes(&mut bytes);
+                    bytes.extend_from_slice(value);
+                }
                 Tag::Default => {
-                    bytes.push(BM_TAG_STATIC);
+                    bytes.push(TAG_STATIC);
                     bytes.push(0);
                 }
             }
@@ -329,186 +321,27 @@ impl AsRef<DocumentId> for DocumentIdTag {
 
 impl StoreDeserialize for DocumentIdTag {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        debug_assert_eq!(bytes[1], BM_TAG_ID);
+        debug_assert_eq!(bytes[1], TAG_ID);
         Some(DocumentIdTag {
             item: DocumentId::from_leb128_bytes(bytes.get(2..)?)?.0,
         })
     }
 }
 
-#[derive(Default)]
-pub struct Keywords {
-    pub items: HashMap<String, Vec<FieldId>>,
-    pub changed: bool,
-}
-
-impl Keywords {
-    pub fn insert(&mut self, keyword: String, field: FieldId) {
-        let fields = self.items.entry(keyword).or_insert_with(Vec::new);
-        if !fields.contains(&field) {
-            fields.push(field);
-            self.changed = true;
-        }
-    }
-
-    pub fn remove(&mut self, keyword: &str, field: &FieldId) {
-        if let Some(fields) = self.items.get_mut(keyword) {
-            if let Some(idx) = fields.iter().position(|f| *f == *field) {
-                if fields.len() > 1 {
-                    fields.remove(idx);
-                } else {
-                    self.items.remove(keyword);
-                }
-                self.changed = true;
-            }
-        }
-    }
-
-    pub fn has_changed(&self) -> bool {
-        self.changed
-    }
-}
-
-impl StoreSerialize for Keywords {
-    fn serialize(&self) -> Option<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(self.items.len() * 10);
-        self.items.len().to_leb128_bytes(&mut bytes);
-        for (string, fields) in &self.items {
-            fields.len().to_leb128_bytes(&mut bytes);
-            for field in fields {
-                bytes.push(*field);
-            }
-            string.len().to_leb128_bytes(&mut bytes);
-            bytes.extend_from_slice(string.as_bytes());
-        }
-        Some(bytes)
-    }
-}
-
-impl StoreDeserialize for Keywords {
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let mut bytes_it = bytes.iter();
-        let total_strings = usize::from_leb128_it(&mut bytes_it)?;
-        let mut strings = HashMap::with_capacity(total_strings);
-        for _ in 0..total_strings {
-            let total_fields = usize::from_leb128_it(&mut bytes_it)?;
-            let mut fields = Vec::with_capacity(total_fields);
-            for _ in 0..total_fields {
-                fields.push(*bytes_it.next()?);
-            }
-            let text_len = usize::from_leb128_it(&mut bytes_it)?;
-            let text = if text_len > 0 {
-                let mut str_bytes = Vec::with_capacity(text_len);
-                for _ in 0..text_len {
-                    str_bytes.push(*bytes_it.next()?);
-                }
-                String::from_utf8(str_bytes).ok()?
-            } else {
-                "".to_string()
-            };
-            strings.insert(text, fields);
-        }
-
-        Some(Keywords {
-            items: strings,
-            changed: false,
-        })
-    }
-}
-
 #[derive(Debug)]
-pub enum TextIndex {
-    None,
-    Keyword,
-    Tokenized,
-    Full(Language),
-}
-
-#[derive(Debug)]
-pub struct Text {
-    pub text: String,
-    pub index: TextIndex,
-}
-
-impl Text {
-    pub fn keyword(keyword: String) -> Self {
-        Text {
-            text: keyword,
-            index: TextIndex::Keyword,
-        }
-    }
-
-    pub fn tokenized(text: String) -> Self {
-        Text {
-            text,
-            index: TextIndex::Tokenized,
-        }
-    }
-
-    pub fn not_indexed(text: String) -> Self {
-        Text {
-            text,
-            index: TextIndex::None,
-        }
-    }
-
-    pub fn fulltext(text: String, detector: &mut LanguageDetector) -> Self {
-        Self {
-            index: TextIndex::Full(detector.detect(text.as_ref(), MIN_LANGUAGE_SCORE)),
-            text,
-        }
-    }
-
-    pub fn fulltext_lang(text: String, language: Language) -> Self {
-        Self {
-            text,
-            index: TextIndex::Full(language),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.text.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-pub struct TokenIterator<'x> {
-    tokenizer: Box<dyn Iterator<Item = Token<'x>> + Send + 'x>,
-    stemmer: Option<Stemmer>,
-    pub stemmed_token: Option<Token<'x>>,
-}
-
-impl<'x> TokenIterator<'x> {
-    pub fn new(text: &'x str, language: Language, stemming: bool) -> Self {
-        TokenIterator {
-            tokenizer: tokenize(text, language, MAX_TOKEN_LENGTH),
-            stemmer: if stemming {
-                Stemmer::new(language)
-            } else {
-                None
-            },
-            stemmed_token: None,
-        }
-    }
-}
-
-impl<'x> Iterator for TokenIterator<'x> {
-    type Item = Token<'x>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(stemmer) = &self.stemmer {
-            if self.stemmed_token.is_some() {
-                std::mem::take(&mut self.stemmed_token)
-            } else {
-                let token = self.tokenizer.next()?;
-                self.stemmed_token = stemmer.stem(&token);
-                Some(token)
-            }
-        } else {
-            self.tokenizer.next()
-        }
-    }
+pub enum Text {
+    None {
+        value: String,
+    },
+    Keyword {
+        value: String,
+    },
+    Tokenized {
+        value: String,
+    },
+    Full {
+        value: String,
+        part_id: u32,
+        language: Language,
+    },
 }

@@ -3,17 +3,20 @@ use std::{
     iter::FromIterator,
 };
 
-use nlp::Language;
+use nlp::{
+    stemmer::Stemmer,
+    tokenizers::{Token, Tokenizer},
+    Language,
+};
 
 use crate::{
-    batch::{Change, WriteAction, WriteBatch},
+    batch::{Change, WriteAction, WriteBatch, MAX_TOKEN_LENGTH},
     bitmap::{clear_bit, set_clear_bits},
-    blob::BlobEntries,
-    field::{Keywords, Tags, TextIndex, TokenIterator, UpdateField},
+    field::{Options, Tags, Text, UpdateField},
     leb128::Leb128,
     log::ChangeId,
     serialize::{BitmapKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
-    term_index::{TermIndex, TermIndexBuilder},
+    term_index::{Term, TermIndex, TermIndexBuilder},
     AccountId, Collections, ColumnFamily, Direction, DocumentId, FieldId, JMAPStore, Store,
     StoreError, WriteOperation,
 };
@@ -29,7 +32,7 @@ where
         let mut change_id = None;
 
         for document in batch.documents {
-            let (is_insert, document) = match document {
+            let (is_insert, mut document) = match document {
                 WriteAction::Insert(document) => {
                     // Add document id to collection
                     bitmap_list
@@ -77,128 +80,128 @@ where
                     for (key, value) in
                         self.db
                             .iterator(ColumnFamily::Values, &prefix, Direction::Forward)?
-                    {
-                        if !key.starts_with(&prefix) {
-                            break;
-                        } else if key.len() > prefix.len()
-                            && DocumentId::from_leb128_bytes(&key[prefix.len()..])
-                                .ok_or(StoreError::DataCorruption)?
-                                .0
-                                == document_id
-                        {
-                            if key[..] == term_index_key[..] {
-                                // Delete terms
-                                let term_index =
-                                    TermIndex::deserialize(&value).ok_or_else(|| {
-                                        StoreError::InternalError(
-                                            "Failed to deserialize blob entries.".to_string(),
-                                        )
-                                    })?;
+                    { /*
+                         if !key.starts_with(&prefix) {
+                             break;
+                         } else if key.len() > prefix.len()
+                             && DocumentId::from_leb128_bytes(&key[prefix.len()..])
+                                 .ok_or(StoreError::DataCorruption)?
+                                 .0
+                                 == document_id
+                         {
+                             if key[..] == term_index_key[..] {
+                                 // Delete terms
+                                 let term_index =
+                                     TermIndex::deserialize(&value).ok_or_else(|| {
+                                         StoreError::InternalError(
+                                             "Failed to deserialize blob entries.".to_string(),
+                                         )
+                                     })?;
 
-                                for term_group in
-                                    term_index.uncompress_all_terms().map_err(|_| {
-                                        StoreError::InternalError(
-                                            "Failed to uncompress term index.".to_string(),
-                                        )
-                                    })?
-                                {
-                                    for exact_term_id in term_group.exact_terms {
-                                        write_batch.push(WriteOperation::merge(
-                                            ColumnFamily::Bitmaps,
-                                            BitmapKey::serialize_term(
-                                                batch.account_id,
-                                                collection,
-                                                term_group.field_id,
-                                                exact_term_id,
-                                                true,
-                                            ),
-                                            merge_value.clone(),
-                                        ));
-                                    }
-                                    for stemmed_term_id in term_group.stemmed_terms {
-                                        write_batch.push(WriteOperation::merge(
-                                            ColumnFamily::Bitmaps,
-                                            BitmapKey::serialize_term(
-                                                batch.account_id,
-                                                collection,
-                                                term_group.field_id,
-                                                stemmed_term_id,
-                                                false,
-                                            ),
-                                            merge_value.clone(),
-                                        ));
-                                    }
-                                }
-                            } else if key.ends_with(&[ValueKey::BLOBS]) {
-                                // Decrement blob count
+                                 for term_group in
+                                     term_index.uncompress_all_terms().map_err(|_| {
+                                         StoreError::InternalError(
+                                             "Failed to uncompress term index.".to_string(),
+                                         )
+                                     })?
+                                 {
+                                     for exact_term_id in term_group.exact_terms {
+                                         write_batch.push(WriteOperation::merge(
+                                             ColumnFamily::Bitmaps,
+                                             BitmapKey::serialize_term(
+                                                 batch.account_id,
+                                                 collection,
+                                                 term_group.field_id,
+                                                 exact_term_id,
+                                                 true,
+                                             ),
+                                             merge_value.clone(),
+                                         ));
+                                     }
+                                     for stemmed_term_id in term_group.stemmed_terms {
+                                         write_batch.push(WriteOperation::merge(
+                                             ColumnFamily::Bitmaps,
+                                             BitmapKey::serialize_term(
+                                                 batch.account_id,
+                                                 collection,
+                                                 term_group.field_id,
+                                                 stemmed_term_id,
+                                                 false,
+                                             ),
+                                             merge_value.clone(),
+                                         ));
+                                     }
+                                 }
+                             } else if key.ends_with(&[ValueKey::BLOBS]) {
+                                 // Decrement blob count
 
-                                BlobEntries::deserialize(&value)
-                                    .ok_or_else(|| {
-                                        StoreError::InternalError(
-                                            "Failed to deserialize blob entries.".to_string(),
-                                        )
-                                    })?
-                                    .items
-                                    .into_iter()
-                                    .for_each(|key| {
-                                        write_batch.push(WriteOperation::merge(
-                                            ColumnFamily::Values,
-                                            key.as_key(),
-                                            (-1i64).serialize().unwrap(),
-                                        ));
-                                    });
-                            } else if key.ends_with(&[ValueKey::TAGS]) {
-                                // Remove tags
+                                 BlobEntries::deserialize(&value)
+                                     .ok_or_else(|| {
+                                         StoreError::InternalError(
+                                             "Failed to deserialize blob entries.".to_string(),
+                                         )
+                                     })?
+                                     .items
+                                     .into_iter()
+                                     .for_each(|key| {
+                                         write_batch.push(WriteOperation::merge(
+                                             ColumnFamily::Values,
+                                             key.as_key(),
+                                             (-1i64).serialize().unwrap(),
+                                         ));
+                                     });
+                             } else if key.ends_with(&[ValueKey::TAGS]) {
+                                 // Remove tags
 
-                                let field_id = key[key.len() - 2];
-                                for tag in Tags::deserialize(&value)
-                                    .ok_or_else(|| {
-                                        StoreError::InternalError(
-                                            "Failed to deserialize tag list.".to_string(),
-                                        )
-                                    })?
-                                    .items
-                                {
-                                    write_batch.push(WriteOperation::merge(
-                                        ColumnFamily::Bitmaps,
-                                        BitmapKey::serialize_tag(
-                                            batch.account_id,
-                                            collection,
-                                            field_id,
-                                            &tag,
-                                        ),
-                                        merge_value.clone(),
-                                    ));
-                                }
-                            } else if key.ends_with(&[ValueKey::KEYWORDS]) {
-                                // Remove keywords
+                                 let field_id = key[key.len() - 2];
+                                 for tag in Tags::deserialize(&value)
+                                     .ok_or_else(|| {
+                                         StoreError::InternalError(
+                                             "Failed to deserialize tag list.".to_string(),
+                                         )
+                                     })?
+                                     .items
+                                 {
+                                     write_batch.push(WriteOperation::merge(
+                                         ColumnFamily::Bitmaps,
+                                         BitmapKey::serialize_tag(
+                                             batch.account_id,
+                                             collection,
+                                             field_id,
+                                             &tag,
+                                         ),
+                                         merge_value.clone(),
+                                     ));
+                                 }
+                             } else if key.ends_with(&[ValueKey::KEYWORDS]) {
+                                 // Remove keywords
 
-                                for (keyword, fields) in Keywords::deserialize(&value)
-                                    .ok_or_else(|| {
-                                        StoreError::InternalError(
-                                            "Failed to deserialize keywords list.".to_string(),
-                                        )
-                                    })?
-                                    .items
-                                {
-                                    for field in fields {
-                                        write_batch.push(WriteOperation::merge(
-                                            ColumnFamily::Bitmaps,
-                                            BitmapKey::serialize_keyword(
-                                                batch.account_id,
-                                                collection,
-                                                field,
-                                                &keyword,
-                                            ),
-                                            merge_value.clone(),
-                                        ));
-                                    }
-                                }
-                            }
+                                 for (keyword, fields) in Keywords::deserialize(&value)
+                                     .ok_or_else(|| {
+                                         StoreError::InternalError(
+                                             "Failed to deserialize keywords list.".to_string(),
+                                         )
+                                     })?
+                                     .items
+                                 {
+                                     for field in fields {
+                                         write_batch.push(WriteOperation::merge(
+                                             ColumnFamily::Bitmaps,
+                                             BitmapKey::serialize_term(
+                                                 batch.account_id,
+                                                 collection,
+                                                 field,
+                                                 &keyword,
+                                             ),
+                                             merge_value.clone(),
+                                         ));
+                                     }
+                                 }
+                             }
 
-                            write_batch
-                                .push(WriteOperation::delete(ColumnFamily::Values, key.to_vec()));
-                        }
+                             write_batch
+                                 .push(WriteOperation::delete(ColumnFamily::Values, key.to_vec()));
+                         }*/
                     }
 
                     // Delete indexes
@@ -223,298 +226,209 @@ where
                 }
             };
 
-            // Tags and keywords
-            let mut tagged_fields: HashMap<FieldId, Tags> = HashMap::new();
-            let mut keywords = if !is_insert && document.has_keywords {
-                self.db
-                    .get(
-                        ColumnFamily::Values,
-                        &ValueKey::serialize_document_keywords_list(
-                            batch.account_id,
-                            document.collection,
-                            document.document_id,
-                        ),
-                    )?
-                    .unwrap_or_default()
-            } else {
-                Keywords::default()
-            };
-
             // Full text term positions
             let mut term_index = TermIndexBuilder::new();
-            let mut blob_fields = Vec::new();
 
-            for field in document.fields {
-                // TODO improve code below
-                match field {
-                    UpdateField::Text(t) => {
-                        let is_stored = t.is_stored();
-                        let is_clear = t.is_clear();
-                        let is_sorted = t.is_sorted();
-                        let blob_index = t.get_blob_index();
+            // Process text fields
+            document.finalize();
+            for field in document.text_fields {
+                let is_stored = field.is_stored();
+                let is_clear = field.is_clear();
+                let is_sorted = field.is_sorted();
+                let build_term_index = field.build_term_index();
 
-                        match t.value.index {
-                            TextIndex::Keyword => {
+                let text = match field.value {
+                    Text::None { value } => value,
+                    Text::Keyword { value } => {
+                        merge_bitmap_clear(
+                            bitmap_list.entry(BitmapKey::serialize_term(
+                                batch.account_id,
+                                document.collection,
+                                field.field,
+                                &value,
+                                true,
+                            )),
+                            document.document_id,
+                            !is_clear,
+                        );
+                        if build_term_index {
+                            let term = term_index.add_token(Token {
+                                word: value.clone().into(),
+                                offset: 0,
+                                len: value.len() as u8,
+                            });
+                            term_index.add_terms(field.field, 0, vec![term]);
+                        }
+                        value
+                    }
+                    Text::Tokenized { value } => {
+                        let mut terms = Vec::new();
+
+                        for token in Tokenizer::new(&value, Language::English, MAX_TOKEN_LENGTH) {
+                            merge_bitmap_clear(
+                                bitmap_list.entry(BitmapKey::serialize_term(
+                                    batch.account_id,
+                                    document.collection,
+                                    field.field,
+                                    &token.word,
+                                    true,
+                                )),
+                                document.document_id,
+                                !is_clear,
+                            );
+                            if build_term_index {
+                                terms.push(term_index.add_token(token));
+                            }
+                        }
+
+                        if !terms.is_empty() {
+                            term_index.add_terms(field.field, 0, terms);
+                        }
+
+                        value
+                    }
+                    Text::Full {
+                        value,
+                        part_id,
+                        language,
+                    } => {
+                        let mut terms = Vec::new();
+
+                        for token in Stemmer::new(&value, language, MAX_TOKEN_LENGTH) {
+                            merge_bitmap_clear(
+                                bitmap_list.entry(BitmapKey::serialize_term(
+                                    batch.account_id,
+                                    document.collection,
+                                    field.field,
+                                    &token.word,
+                                    true,
+                                )),
+                                document.document_id,
+                                !is_clear,
+                            );
+
+                            if let Some(stemmed_word) = token.stemmed_word.as_ref() {
                                 merge_bitmap_clear(
-                                    bitmap_list.entry(BitmapKey::serialize_keyword(
+                                    bitmap_list.entry(BitmapKey::serialize_term(
                                         batch.account_id,
                                         document.collection,
-                                        t.field,
-                                        &t.value.text,
+                                        field.field,
+                                        stemmed_word,
+                                        false,
                                     )),
                                     document.document_id,
                                     !is_clear,
                                 );
-                                if !is_clear {
-                                    keywords.insert(t.value.text.clone(), t.field);
-                                } else {
-                                    keywords.remove(&t.value.text, &t.field);
-                                }
-                            }
-                            TextIndex::Tokenized => {
-                                for token in
-                                    TokenIterator::new(&t.value.text, Language::English, false)
-                                {
-                                    merge_bitmap_clear(
-                                        bitmap_list.entry(BitmapKey::serialize_keyword(
-                                            batch.account_id,
-                                            document.collection,
-                                            t.field,
-                                            &token.word,
-                                        )),
-                                        document.document_id,
-                                        !is_clear,
-                                    );
-                                    if !is_clear {
-                                        keywords.insert(token.word.into_owned(), t.field);
-                                    } else {
-                                        keywords.remove(token.word.as_ref(), &t.field);
-                                    }
-                                }
-                            }
-                            TextIndex::Full(language) => {
-                                let terms = self.get_terms(TokenIterator::new(
-                                    &t.value.text,
-                                    if language == Language::Unknown {
-                                        document.default_language
-                                    } else {
-                                        language
-                                    },
-                                    true,
-                                ))?;
-
-                                if !terms.is_empty() {
-                                    for term in &terms {
-                                        merge_bitmap_clear(
-                                            bitmap_list.entry(BitmapKey::serialize_term(
-                                                batch.account_id,
-                                                document.collection,
-                                                t.field,
-                                                term.id,
-                                                true,
-                                            )),
-                                            document.document_id,
-                                            !is_clear,
-                                        );
-
-                                        if term.id_stemmed != term.id {
-                                            merge_bitmap_clear(
-                                                bitmap_list.entry(BitmapKey::serialize_term(
-                                                    batch.account_id,
-                                                    document.collection,
-                                                    t.field,
-                                                    term.id_stemmed,
-                                                    false,
-                                                )),
-                                                document.document_id,
-                                                !is_clear,
-                                            );
-                                        }
-                                    }
-
-                                    if !is_clear {
-                                        term_index.add_item(
-                                            t.field,
-                                            blob_index.unwrap_or(0),
-                                            terms,
-                                        );
-                                    }
-                                }
-                            }
-                            TextIndex::None => {}
-                        };
-
-                        if let Some(blob_index) = blob_index {
-                            blob_fields.push((blob_index, t.value.text.as_bytes().to_vec()));
-                        } else if !is_clear {
-                            if is_stored {
-                                write_batch.push(WriteOperation::set(
-                                    ColumnFamily::Values,
-                                    ValueKey::serialize_value(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        t.field,
-                                    ),
-                                    t.value.text.as_bytes().to_vec(),
-                                ));
                             }
 
-                            if is_sorted {
-                                write_batch.push(WriteOperation::set(
-                                    ColumnFamily::Indexes,
-                                    IndexKey::serialize(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        t.field,
-                                        t.value.text.as_bytes(),
-                                    ),
-                                    vec![],
-                                ));
-                            }
-                        } else {
-                            if is_stored {
-                                write_batch.push(WriteOperation::delete(
-                                    ColumnFamily::Values,
-                                    ValueKey::serialize_value(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        t.field,
-                                    ),
-                                ));
-                            }
-
-                            if is_sorted {
-                                write_batch.push(WriteOperation::delete(
-                                    ColumnFamily::Indexes,
-                                    IndexKey::serialize(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        t.field,
-                                        t.value.text.as_bytes(),
-                                    ),
-                                ));
+                            if build_term_index {
+                                terms.push(term_index.add_stemmed_token(token));
                             }
                         }
-                    }
-                    UpdateField::Tag(tag) => {
-                        let field = tag.get_field();
-                        let set = !tag.is_clear();
 
-                        bitmap_list
-                            .entry(BitmapKey::serialize_tag(
-                                batch.account_id,
-                                document.collection,
-                                field,
-                                &tag.value,
-                            ))
-                            .or_insert_with(HashMap::new)
-                            .insert(document.document_id, set);
-
-                        match tagged_fields.entry(field) {
-                            Entry::Occupied(mut entry) => {
-                                if set {
-                                    entry.get_mut().insert(tag.value);
-                                } else {
-                                    entry.get_mut().remove(&tag.value);
-                                }
-                            }
-                            Entry::Vacant(entry) => {
-                                let mut tag_list = if !is_insert {
-                                    self.get_document_tags(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        field,
-                                    )?
-                                    .unwrap_or_default()
-                                } else {
-                                    Tags::default()
-                                };
-                                if set {
-                                    tag_list.insert(tag.value);
-                                } else {
-                                    tag_list.remove(&tag.value);
-                                }
-                                entry.insert(tag_list);
-                            }
+                        if !terms.is_empty() {
+                            term_index.add_terms(field.field, part_id, terms);
                         }
-                    }
-                    UpdateField::Binary(b) => {
-                        if let Some(blob_index) = b.get_blob_index() {
-                            blob_fields.push((blob_index, b.value));
-                        } else {
-                            write_batch.push(WriteOperation::set(
-                                ColumnFamily::Values,
-                                ValueKey::serialize_value(
-                                    batch.account_id,
-                                    document.collection,
-                                    document.document_id,
-                                    b.get_field(),
-                                ),
-                                b.value,
-                            ));
-                        }
-                    }
-                    UpdateField::Number(number) => {
-                        if !number.is_clear() {
-                            if number.is_stored() {
-                                write_batch.push(WriteOperation::set(
-                                    ColumnFamily::Values,
-                                    ValueKey::serialize_value(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        number.get_field(),
-                                    ),
-                                    number.value.serialize().unwrap(),
-                                ));
-                            }
 
-                            if number.is_sorted() {
-                                write_batch.push(WriteOperation::set(
-                                    ColumnFamily::Indexes,
-                                    IndexKey::serialize(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        number.get_field(),
-                                        &number.value.to_be_bytes(),
-                                    ),
-                                    vec![],
-                                ));
-                            }
-                        } else {
-                            if number.is_stored() {
-                                write_batch.push(WriteOperation::delete(
-                                    ColumnFamily::Values,
-                                    ValueKey::serialize_value(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        number.get_field(),
-                                    ),
-                                ));
-                            }
-
-                            if number.is_sorted() {
-                                write_batch.push(WriteOperation::delete(
-                                    ColumnFamily::Indexes,
-                                    IndexKey::serialize(
-                                        batch.account_id,
-                                        document.collection,
-                                        document.document_id,
-                                        number.get_field(),
-                                        &number.value.to_be_bytes(),
-                                    ),
-                                ));
-                            }
-                        }
+                        value
                     }
                 };
+
+                if is_stored {
+                    let key = ValueKey::serialize_value(
+                        batch.account_id,
+                        document.collection,
+                        document.document_id,
+                        field.field,
+                    );
+                    if !is_clear {
+                        write_batch.push(WriteOperation::set(
+                            ColumnFamily::Values,
+                            key,
+                            text.as_bytes().to_vec(),
+                        ));
+                    } else {
+                        write_batch.push(WriteOperation::delete(ColumnFamily::Values, key));
+                    }
+                }
+
+                if is_sorted {
+                    let key = IndexKey::serialize(
+                        batch.account_id,
+                        document.collection,
+                        document.document_id,
+                        field.field,
+                        text.as_bytes(),
+                    );
+                    if !is_clear {
+                        write_batch.push(WriteOperation::set(ColumnFamily::Indexes, key, vec![]));
+                    } else {
+                        write_batch.push(WriteOperation::delete(ColumnFamily::Indexes, key));
+                    }
+                }
+            }
+
+            // Process numeric values
+            for field in document.number_fields {
+                if field.is_stored() {
+                    let key = ValueKey::serialize_value(
+                        batch.account_id,
+                        document.collection,
+                        document.document_id,
+                        field.field,
+                    );
+                    if !field.is_clear() {
+                        write_batch.push(WriteOperation::set(
+                            ColumnFamily::Values,
+                            key,
+                            field.value.serialize().unwrap(),
+                        ));
+                    } else {
+                        write_batch.push(WriteOperation::delete(ColumnFamily::Values, key));
+                    }
+                }
+
+                if field.is_sorted() {
+                    let key = IndexKey::serialize(
+                        batch.account_id,
+                        document.collection,
+                        document.document_id,
+                        field.field,
+                        &field.value.to_be_bytes(),
+                    );
+                    if !field.is_clear() {
+                        write_batch.push(WriteOperation::set(ColumnFamily::Indexes, key, vec![]));
+                    } else {
+                        write_batch.push(WriteOperation::delete(ColumnFamily::Indexes, key));
+                    }
+                }
+            }
+
+            // Process tags
+            for field in document.tag_fields {
+                bitmap_list
+                    .entry(BitmapKey::serialize_tag(
+                        batch.account_id,
+                        document.collection,
+                        field.field,
+                        &field.value,
+                    ))
+                    .or_insert_with(HashMap::new)
+                    .insert(document.document_id, !field.is_clear());
+            }
+
+            // Process binary fields
+            for field in document.binary_fields {
+                write_batch.push(WriteOperation::set(
+                    ColumnFamily::Values,
+                    ValueKey::serialize_value(
+                        batch.account_id,
+                        document.collection,
+                        document.document_id,
+                        field.get_field(),
+                    ),
+                    field.value,
+                ));
             }
 
             // Compress and store TermIndex
@@ -526,67 +440,34 @@ where
                         document.collection,
                         document.document_id,
                     ),
-                    term_index.compress(),
+                    term_index.serialize().ok_or_else(|| {
+                        StoreError::InternalError("Failed to serialize Term Index.".to_string())
+                    })?,
                 ));
             }
 
-            // Store external blobs
-            if !blob_fields.is_empty() {
-                let mut blob_entries = BlobEntries::new();
-
-                blob_fields.sort_unstable_by_key(|(blob_index, _)| *blob_index);
-
-                for (_, blob) in blob_fields {
-                    let blob_entry = self.store_blob(&blob)?;
-
-                    // Increment blob count
-                    write_batch.push(WriteOperation::merge(
-                        ColumnFamily::Values,
-                        blob_entry.as_key(),
-                        (1i64).serialize().unwrap(),
-                    ));
-
-                    blob_entries.add(blob_entry);
-                }
-
-                write_batch.push(WriteOperation::set(
+            // Store external blobs references
+            for (id, index, options) in document.blobs {
+                let is_set = !options.is_clear();
+                // Increment blob count
+                write_batch.push(WriteOperation::merge(
                     ColumnFamily::Values,
-                    ValueKey::serialize_document_blob(
-                        batch.account_id,
-                        document.collection,
-                        document.document_id,
-                    ),
-                    blob_entries.serialize().unwrap(),
+                    ValueKey::serialize_blob(&id),
+                    if is_set { 1i64 } else { -1i64 }.serialize().unwrap(),
                 ));
-            }
 
-            // Store tag lists
-            for (field_id, tag_list) in tagged_fields {
-                if tag_list.has_changed() {
-                    write_batch.push(WriteOperation::set(
-                        ColumnFamily::Values,
-                        ValueKey::serialize_document_tag_list(
-                            batch.account_id,
-                            document.collection,
-                            document.document_id,
-                            field_id,
-                        ),
-                        tag_list.serialize().unwrap(),
-                    ));
-                }
-            }
-
-            // Store keyword lists
-            if keywords.has_changed() {
-                write_batch.push(WriteOperation::set(
-                    ColumnFamily::Values,
-                    ValueKey::serialize_document_keywords_list(
-                        batch.account_id,
-                        document.collection,
-                        document.document_id,
-                    ),
-                    keywords.serialize().unwrap(),
-                ));
+                // Store reference to blob
+                let key = ValueKey::serialize_document_blob(
+                    batch.account_id,
+                    document.collection,
+                    document.document_id,
+                    index,
+                );
+                write_batch.push(if is_set {
+                    WriteOperation::set(ColumnFamily::Values, key, id.serialize().unwrap())
+                } else {
+                    WriteOperation::delete(ColumnFamily::Values, key)
+                });
             }
         }
 

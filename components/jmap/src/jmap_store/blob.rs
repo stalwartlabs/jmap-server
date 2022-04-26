@@ -1,8 +1,8 @@
-use store::{blob::BlobIndex, AccountId, JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
 use crate::id::blob::BlobId;
 
-pub type InnerBlobFnc = fn(&[u8], BlobIndex) -> Option<Vec<u8>>;
+pub type InnerBlobFnc = fn(&[u8], u32) -> Option<Vec<u8>>;
 
 pub trait JMAPBlobStore {
     fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<BlobId>;

@@ -1,8 +1,16 @@
-use std::{collections::HashSet, convert::TryInto};
+use std::{
+    collections::{BTreeMap, HashSet},
+    convert::TryInto,
+};
 
-use nlp::tokenizers::Token;
+use fst::{Map, MapBuilder};
+use nlp::{stemmer::StemmedToken, tokenizers::Token};
 
-use crate::{blob::BlobIndex, leb128::Leb128, serialize::StoreDeserialize, FieldId, TermId};
+use crate::{
+    leb128::Leb128,
+    serialize::{StoreDeserialize, StoreSerialize},
+    FieldId,
+};
 
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
@@ -14,6 +22,7 @@ pub enum Error {
     InvalidArgument,
 }
 
+pub type TermId = u32;
 pub type Result<T> = std::result::Result<T, Error>;
 
 const LENGTH_SIZE: usize = std::mem::size_of::<u32>();
@@ -29,30 +38,32 @@ pub struct Term {
 #[derive(Debug)]
 pub struct TermGroup {
     pub field_id: FieldId,
-    pub blob_id: BlobIndex,
+    pub part_id: u32,
     pub terms: Vec<Term>,
 }
 
 pub struct TermIndexBuilderItem {
     field: FieldId,
-    blob_id: BlobIndex,
+    part_id: u32,
     terms: Vec<Term>,
 }
 
 pub struct TermIndexBuilder {
+    terms: BTreeMap<String, u32>,
     items: Vec<TermIndexBuilderItem>,
 }
 
 #[derive(Debug)]
 pub struct TermIndexItem {
     pub field_id: FieldId,
-    pub blob_id: BlobIndex,
+    pub part_id: u32,
     pub terms_len: usize,
     pub terms: Vec<u8>,
 }
 
 #[derive(Debug)]
 pub struct TermIndex {
+    pub fst_map: Map<Vec<u8>>,
     pub items: Vec<TermIndexItem>,
 }
 
@@ -60,26 +71,6 @@ pub struct TermIndex {
 pub struct MatchTerm {
     pub id: TermId,
     pub id_stemmed: TermId,
-}
-
-impl Term {
-    pub fn new(id: TermId, id_stemmed: TermId, offset: u32, len: u8) -> Self {
-        Term {
-            id,
-            id_stemmed,
-            offset,
-            len,
-        }
-    }
-
-    pub fn from_token(id: TermId, id_stemmed: TermId, token: &Token) -> Self {
-        Term {
-            id,
-            id_stemmed,
-            offset: token.offset,
-            len: token.len,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -211,13 +202,53 @@ impl BitPacker for TermIndexPacker {
 #[allow(clippy::new_without_default)]
 impl TermIndexBuilder {
     pub fn new() -> TermIndexBuilder {
-        TermIndexBuilder { items: Vec::new() }
+        TermIndexBuilder {
+            items: Vec::new(),
+            terms: BTreeMap::new(),
+        }
     }
 
-    pub fn add_item(&mut self, field: FieldId, blob_id: BlobIndex, terms: Vec<Term>) {
+    pub fn add_token(&mut self, token: Token) -> Term {
+        let id = self.terms.len() as u32;
+        let id = self
+            .terms
+            .entry(token.word.into_owned())
+            .or_insert_with(|| id);
+        Term {
+            id: *id,
+            id_stemmed: *id,
+            offset: token.offset,
+            len: token.len,
+        }
+    }
+
+    pub fn add_stemmed_token(&mut self, token: StemmedToken) -> Term {
+        let id = self.terms.len() as u32;
+        let id = *self
+            .terms
+            .entry(token.word.into_owned())
+            .or_insert_with(|| id);
+        let id_stemmed = if let Some(stemmed_word) = token.stemmed_word {
+            let id_stemmed = self.terms.len() as u32;
+            *self
+                .terms
+                .entry(stemmed_word.into_owned())
+                .or_insert_with(|| id_stemmed)
+        } else {
+            id
+        };
+        Term {
+            id,
+            id_stemmed,
+            offset: token.offset,
+            len: token.len,
+        }
+    }
+
+    pub fn add_terms(&mut self, field: FieldId, part_id: u32, terms: Vec<Term>) {
         self.items.push(TermIndexBuilderItem {
             field,
-            blob_id,
+            part_id,
             terms,
         });
     }
@@ -225,13 +256,28 @@ impl TermIndexBuilder {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+}
 
-    pub fn compress(self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(1024);
+impl StoreSerialize for TermIndexBuilder {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        // Build FST
+        let mut fst_map = MapBuilder::memory();
+        for (word, id) in &self.terms {
+            fst_map.insert(word.as_bytes(), *id as u64);
+        }
+
+        let fst_bytes = fst_map.into_inner().ok()?;
+        let mut bytes = Vec::with_capacity(fst_bytes.len() + 1024);
+
+        // Write FST map
+        fst_bytes.len().to_leb128_bytes(&mut bytes);
+        bytes.extend_from_slice(&fst_bytes);
+
+        // Write terms
         let mut bitpacker = TermIndexPacker::new();
         let mut compressed = vec![0u8; 4 * BitPacker8x::BLOCK_LEN];
 
-        for term_index in self.items {
+        for term_index in &self.items {
             let mut ids = Vec::with_capacity(term_index.terms.len() * 4);
             let mut offsets = Vec::with_capacity(term_index.terms.len());
             let mut lengths = Vec::with_capacity(term_index.terms.len());
@@ -239,16 +285,14 @@ impl TermIndexBuilder {
             let header_pos = bytes.len();
             bytes.extend_from_slice(&[0u8; LENGTH_SIZE]);
             bytes.push(term_index.field);
-            term_index.blob_id.to_leb128_bytes(&mut bytes);
+            term_index.part_id.to_leb128_bytes(&mut bytes);
             term_index.terms.len().to_leb128_bytes(&mut bytes);
 
             let terms_pos = bytes.len();
 
-            for term in term_index.terms {
-                ids.push((term.id >> 32) as u32);
-                ids.push((term.id & 0xFFFFFFFF) as u32);
-                ids.push((term.id_stemmed >> 32) as u32);
-                ids.push((term.id_stemmed & 0xFFFFFFFF) as u32);
+            for term in &term_index.terms {
+                ids.push(term.id);
+                ids.push(term.id_stemmed);
                 offsets.push(term.offset as u32);
                 lengths.push(term.len);
             }
@@ -303,14 +347,20 @@ impl TermIndexBuilder {
             bytes[header_pos..header_pos + LENGTH_SIZE].copy_from_slice(&len.to_le_bytes());
         }
 
-        bytes
+        bytes.into()
     }
 }
 
 impl StoreDeserialize for TermIndex {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let mut term_index = TermIndex { items: Vec::new() };
-        let mut pos = 0;
+        let (fst_len, bytes_read) = usize::from_leb128_bytes(bytes)?;
+
+        let mut term_index = TermIndex {
+            items: Vec::new(),
+            fst_map: Map::new(bytes.get(bytes_read..bytes_read + fst_len)?.to_vec()).ok()?,
+        };
+
+        let mut pos = bytes_read + fst_len;
 
         while pos < bytes.len() {
             let item_len =
@@ -320,7 +370,7 @@ impl StoreDeserialize for TermIndex {
             let field = bytes.get(pos)?;
             pos += 1;
 
-            let (blob_id, bytes_read) = BlobIndex::from_leb128_bytes(bytes.get(pos..)?)?;
+            let (part_id, bytes_read) = u32::from_leb128_bytes(bytes.get(pos..)?)?;
             pos += bytes_read;
 
             let (terms_len, bytes_read) = usize::from_leb128_bytes(bytes.get(pos..)?)?;
@@ -328,7 +378,7 @@ impl StoreDeserialize for TermIndex {
 
             term_index.items.push(TermIndexItem {
                 field_id: *field,
-                blob_id,
+                part_id,
                 terms_len,
                 terms: bytes.get(pos..pos + item_len)?.to_vec(),
             });
@@ -341,6 +391,19 @@ impl StoreDeserialize for TermIndex {
 }
 
 impl TermIndex {
+    pub fn get_match_term(&self, word: &str, stemmed_word: Option<&str>) -> MatchTerm {
+        let id = self
+            .fst_map
+            .get(word.as_bytes())
+            .map(|id| id as u32)
+            .unwrap_or(u32::MAX);
+        let id_stemmed = stemmed_word
+            .and_then(|word| self.fst_map.get(word.as_bytes()).map(|id| id as u32))
+            .unwrap_or(id);
+
+        MatchTerm { id, id_stemmed }
+    }
+
     fn skip_items(&self, bytes: &[u8], mut remaining_items: usize) -> Result<usize> {
         let mut pos = 0;
         while remaining_items > 0 {
@@ -457,9 +520,9 @@ impl TermIndex {
 
                 byte_pos += bytes_read;
 
-                for encoded_term in chunk.chunks_exact(4) {
-                    let term_id = ((encoded_term[0] as u64) << 32) | encoded_term[1] as u64;
-                    let term_id_stemmed = ((encoded_term[2] as u64) << 32) | encoded_term[3] as u64;
+                for encoded_term in chunk.chunks_exact(2) {
+                    let term_id = encoded_term[0];
+                    let term_id_stemmed = encoded_term[1];
 
                     if match_phrase {
                         let match_pos = partial_match.len();
@@ -558,7 +621,7 @@ impl TermIndex {
 
                 result.push(TermGroup {
                     field_id: item.field_id,
-                    blob_id: item.blob_id,
+                    part_id: item.part_id,
                     terms,
                 });
 
@@ -595,9 +658,9 @@ impl TermIndex {
 
                 byte_pos += bytes_read;
 
-                for encoded_term in chunk.chunks_exact(4) {
-                    let term_id = ((encoded_term[0] as u64) << 32) | encoded_term[1] as u64;
-                    let term_id_stemmed = ((encoded_term[2] as u64) << 32) | encoded_term[3] as u64;
+                for encoded_term in chunk.chunks_exact(8) {
+                    let term_id = encoded_term[0];
+                    let term_id_stemmed = encoded_term[1];
 
                     terms.exact_terms.insert(term_id);
                     if term_id != term_id_stemmed {
@@ -623,19 +686,13 @@ pub struct UncompressedTerms {
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use nlp::{
-        stemmer::Stemmer,
-        tokenizers::{tokenize, Token},
-        Language,
-    };
-
-    use crate::{
-        blob::BlobIndex,
-        serialize::StoreDeserialize,
-        term_index::{MatchTerm, Term, TermIndexBuilder},
-    };
+    use nlp::{stemmer::Stemmer, Language};
 
     use super::TermIndex;
+    use crate::{
+        serialize::{StoreDeserialize, StoreSerialize},
+        term_index::TermIndexBuilder,
+    };
 
     #[test]
     #[allow(clippy::bind_instead_of_map)]
@@ -738,37 +795,27 @@ mod tests {
         ];
 
         let mut builder = TermIndexBuilder::new();
-        let stemmer = Stemmer::new(Language::English).unwrap();
-        let mut term_dict = HashMap::new();
-        let mut term_id_dict = HashMap::new();
+        let mut stemmed_word_ids = HashMap::new();
 
         // Build the term index
-        for (blob_id, (text, field_id)) in parts.iter().enumerate() {
+        for (part_id, (text, field_id)) in parts.iter().enumerate() {
             let mut terms = Vec::new();
-            for token in tokenize(text, Language::English, 40) {
-                let dict_len = term_dict.len() as u64 + 1;
-                let term_id = *term_dict
-                    .entry(token.word.to_string())
-                    .or_insert_with(|| dict_len);
-                let dict_len = term_dict.len() as u64 + 1;
-                let term_id_stemmed = if let Some(stemmed_token) = stemmer.stem(&token) {
-                    *term_dict
-                        .entry(stemmed_token.word.to_string())
-                        .or_insert_with(|| dict_len)
+            for token in Stemmer::new(text, Language::English, 40) {
+                let stemmed_word = if token.stemmed_word.is_some() {
+                    token.stemmed_word.clone()
                 } else {
-                    0
+                    None
                 };
-                terms.push(Term::from_token(term_id, term_id_stemmed, &token));
+                let term = builder.add_stemmed_token(token);
+                if let Some(stemmed_word) = stemmed_word {
+                    stemmed_word_ids.insert(term.id_stemmed, stemmed_word.into_owned());
+                }
+                terms.push(term);
             }
-            builder.add_item(*field_id, blob_id as BlobIndex, terms);
+            builder.add_terms(*field_id, part_id as u32, terms);
         }
 
-        // Build the term id dictionary
-        for (term, term_id) in term_dict.iter() {
-            term_id_dict.insert(term_id, term);
-        }
-
-        let compressed_term_index = builder.compress();
+        let compressed_term_index = builder.serialize().unwrap();
         let term_index = TermIndex::deserialize(&compressed_term_index[..]).unwrap();
 
         assert_eq!(15, term_index.uncompress_all_terms().unwrap().len());
@@ -799,16 +846,12 @@ mod tests {
         for (words, field_id, match_phrase, match_count) in tests {
             let mut match_terms = Vec::new();
             for word in &words {
-                match_terms.push(MatchTerm {
-                    id: *term_dict.get(*word).unwrap_or(&0),
-                    id_stemmed: if let Some(stemmed_token) =
-                        stemmer.stem(&Token::new(0, 0, (*word).into()))
-                    {
-                        *term_dict.get(stemmed_token.word.as_ref()).unwrap_or(&0)
-                    } else {
-                        0
-                    },
-                });
+                let stemmed_token = Stemmer::new(word, Language::English, 40)
+                    .next()
+                    .and_then(|w| w.stemmed_word);
+                match_terms.push(
+                    term_index.get_match_term(word, stemmed_token.as_ref().map(|w| w.as_ref())),
+                );
             }
 
             let result = term_index
@@ -839,11 +882,11 @@ mod tests {
 
             for term_group in &result {
                 'outer: for term in &term_group.terms {
-                    let text_word = parts[term_group.blob_id as usize].0
+                    let text_word = parts[term_group.part_id as usize].0
                         [term.offset as usize..term.offset as usize + term.len as usize]
                         .to_lowercase();
-                    let token_stemmed_word = if term.id_stemmed > 0 {
-                        term_id_dict.get(&term.id_stemmed)
+                    let token_stemmed_word = if term.id_stemmed != term.id {
+                        stemmed_word_ids.get(&term.id_stemmed)
                     } else {
                         None
                     };

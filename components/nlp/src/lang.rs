@@ -13,6 +13,7 @@ struct WeightedAverage {
     confidence: f64,
 }
 
+#[derive(Debug)]
 pub struct LanguageDetector {
     lang_detected: HashMap<Language, WeightedAverage>,
 }
@@ -123,7 +124,7 @@ impl LanguageDetector {
         }
     }
 
-    pub fn most_frequent_language(&self) -> Option<&Language> {
+    pub fn most_frequent_language(&self) -> Option<Language> {
         self.lang_detected
             .iter()
             .max_by(|(_, a), (_, b)| {
@@ -131,7 +132,7 @@ impl LanguageDetector {
                     .partial_cmp(&((b.confidence / b.weight as f64) * b.occurrences as f64))
                     .unwrap_or(std::cmp::Ordering::Less)
             })
-            .map(|(l, _)| l)
+            .map(|(l, _)| *l)
     }
 }
 
@@ -215,6 +216,6 @@ mod tests {
             w.weight += lang.2;
             w.confidence += lang.1 * lang.2 as f64;
         }
-        assert_eq!(detector.most_frequent_language(), Some(&Language::Japanese));
+        assert_eq!(detector.most_frequent_language(), Some(Language::Japanese));
     }
 }

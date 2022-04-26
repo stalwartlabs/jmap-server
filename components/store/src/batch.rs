@@ -1,9 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use nlp::Language;
+use nlp::{
+    lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
+    Language,
+};
 
 use crate::{
-    field::{Field, Number, Text, TextIndex, UpdateField},
+    blob::BlobId,
+    field::{Field, Number, Text},
     leb128::Leb128,
     AccountId, Collection, DocumentId, FieldId, JMAPId, Tag,
 };
@@ -16,10 +20,15 @@ pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 pub struct Document {
     pub collection: Collection,
     pub document_id: DocumentId,
-    pub default_language: Language,
-    pub fields: Vec<UpdateField>,
-    pub has_keywords: bool,
+    pub lang_detect: Option<LanguageDetector>,
+
+    pub text_fields: Vec<Field<Text>>,
+    pub number_fields: Vec<Field<Number>>,
+    pub binary_fields: Vec<Field<Vec<u8>>>,
+    pub tag_fields: Vec<Field<Tag>>,
+    pub blobs: Vec<(BlobId, u32, u64)>,
 }
+
 #[derive(Debug)]
 pub enum WriteAction {
     Insert(Document),
@@ -54,56 +63,94 @@ impl Document {
         Document {
             collection,
             document_id,
-            default_language: Language::English,
-            fields: Vec::new(),
-            has_keywords: false,
+            lang_detect: None,
+            text_fields: Vec::new(),
+            number_fields: Vec::new(),
+            binary_fields: Vec::new(),
+            tag_fields: Vec::new(),
+            blobs: Vec::new(),
         }
     }
 
-    pub fn set_default_language(&mut self, language: Language) {
-        self.default_language = language;
+    pub fn text_keyword(&mut self, field: impl Into<FieldId>, value: String, options: u64) {
+        self.text_fields
+            .push(Field::new(field.into(), Text::Keyword { value }, options));
     }
 
-    pub fn text(&mut self, field: impl Into<FieldId>, value: Text, options: u64) {
-        if !self.has_keywords && matches!(value.index, TextIndex::Keyword | TextIndex::Tokenized) {
-            self.has_keywords = true;
-        }
-        self.fields
-            .push(UpdateField::Text(Field::new(field.into(), value, options)));
+    pub fn text_tokenized(&mut self, field: impl Into<FieldId>, value: String, options: u64) {
+        self.text_fields
+            .push(Field::new(field.into(), Text::Tokenized { value }, options));
+    }
+
+    pub fn text_full(
+        &mut self,
+        field: impl Into<FieldId>,
+        value: String,
+        language: Language,
+        part_id: u32,
+        options: u64,
+    ) {
+        self.text_fields.push(Field::new(
+            field.into(),
+            Text::Full {
+                part_id,
+                language: if !matches!(language, Language::Unknown) {
+                    language
+                } else {
+                    self.lang_detect
+                        .get_or_insert_with(LanguageDetector::new)
+                        .detect(value.as_ref(), MIN_LANGUAGE_SCORE)
+                },
+                value,
+            },
+            options,
+        ));
     }
 
     pub fn binary(&mut self, field: impl Into<FieldId>, value: Vec<u8>, options: u64) {
-        self.fields.push(UpdateField::Binary(Field::new(
-            field.into(),
-            value,
-            options,
-        )));
+        self.binary_fields
+            .push(Field::new(field.into(), value, options));
     }
 
     pub fn number(&mut self, field: impl Into<FieldId>, value: impl Into<Number>, options: u64) {
-        self.fields.push(UpdateField::Number(Field::new(
-            field.into(),
-            value.into(),
-            options,
-        )));
+        self.number_fields
+            .push(Field::new(field.into(), value.into(), options));
     }
 
     pub fn tag(&mut self, field: impl Into<FieldId>, value: Tag, options: u64) {
-        self.fields
-            .push(UpdateField::Tag(Field::new(field.into(), value, options)));
+        self.tag_fields
+            .push(Field::new(field.into(), value, options));
+    }
+
+    pub fn blob(&mut self, index: u32, blob: BlobId, options: u64) {
+        self.blobs.push((blob, index, options));
+    }
+
+    pub fn finalize(&mut self) {
+        if let Some(lang_detect) = &self.lang_detect {
+            let default_language = lang_detect
+                .most_frequent_language()
+                .unwrap_or(Language::English);
+            for text in self.text_fields.iter_mut() {
+                if let Text::Full {
+                    value,
+                    part_id,
+                    language,
+                } = &mut text.value
+                {
+                    if *language == Language::Unknown {
+                        *language = default_language;
+                    }
+                }
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.fields.is_empty()
-    }
-}
-
-impl IntoIterator for Document {
-    type Item = UpdateField;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.fields.into_iter()
+        self.text_fields.is_empty()
+            && self.number_fields.is_empty()
+            && self.binary_fields.is_empty()
+            && self.tag_fields.is_empty()
     }
 }
 

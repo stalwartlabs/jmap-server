@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use store::{blob::BlobIndex, AccountId, Collection, DocumentId};
+use store::{AccountId, Collection, DocumentId};
 
 use crate::{error::method::MethodError, protocol::json::JSONValue};
 
@@ -12,7 +12,7 @@ pub struct OwnedBlob {
     pub account_id: AccountId,
     pub collection: Collection,
     pub document: DocumentId,
-    pub blob_index: BlobIndex,
+    pub blob_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -25,7 +25,7 @@ pub struct TemporaryBlob {
 #[derive(Clone, Debug)]
 pub struct InnerBlob<T> {
     pub blob_id: T,
-    pub blob_index: BlobIndex,
+    pub blob_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -41,7 +41,7 @@ impl BlobId {
         account_id: AccountId,
         collection: Collection,
         document: DocumentId,
-        blob_index: BlobIndex,
+        blob_index: u32,
     ) -> Self {
         BlobId::Owned(OwnedBlob {
             account_id,
@@ -59,7 +59,7 @@ impl BlobId {
         })
     }
 
-    pub fn new_inner(blob_id: BlobId, blob_index: BlobIndex) -> Option<Self> {
+    pub fn new_inner(blob_id: BlobId, blob_index: u32) -> Option<Self> {
         match blob_id {
             BlobId::Owned(blob_id) => BlobId::InnerOwned(InnerBlob {
                 blob_id,
@@ -98,7 +98,7 @@ impl JMAPIdSerialize for BlobId {
                     account_id: AccountId::from_leb128_it(&mut it)?,
                     collection: it.next()?.into(),
                     document: DocumentId::from_leb128_it(&mut it)?,
-                    blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                    blob_index: u32::from_leb128_it(&mut it)?,
                 }))
             }
             b't' => {
@@ -119,7 +119,7 @@ impl JMAPIdSerialize for BlobId {
                         timestamp: u64::from_leb128_it(&mut it)?,
                         hash: u64::from_leb128_it(&mut it)?,
                     },
-                    blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                    blob_index: u32::from_leb128_it(&mut it)?,
                 }))
             }
             b'p' => {
@@ -130,9 +130,9 @@ impl JMAPIdSerialize for BlobId {
                         account_id: AccountId::from_leb128_it(&mut it)?,
                         collection: it.next()?.into(),
                         document: DocumentId::from_leb128_it(&mut it)?,
-                        blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                        blob_index: u32::from_leb128_it(&mut it)?,
                     },
-                    blob_index: BlobIndex::from_leb128_it(&mut it)?,
+                    blob_index: u32::from_leb128_it(&mut it)?,
                 }))
             }
             _ => None,
