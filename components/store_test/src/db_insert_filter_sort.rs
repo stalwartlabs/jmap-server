@@ -7,7 +7,7 @@ use std::{
 use nlp::Language;
 use store::{
     batch::{Document, WriteBatch},
-    field::{DefaultOptions, Options, Text},
+    field::{IndexOptions, Options, Text},
     query::DefaultIdMapper,
     Collection, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
     TextQuery,
@@ -103,7 +103,7 @@ where
                                         builder.text(
                                             pos as u8,
                                             Text::tokenized(field.to_lowercase()),
-                                            DefaultOptions::new().sort(),
+                                            IndexOptions::new().sort(),
                                         );
                                     }
                                 }
@@ -115,7 +115,7 @@ where
                                                 field.to_lowercase(),
                                                 Language::English,
                                             ),
-                                            DefaultOptions::new().sort(),
+                                            IndexOptions::new().sort(),
                                         );
                                     }
                                 }
@@ -123,7 +123,7 @@ where
                                     builder.number(
                                         pos as u8,
                                         field.parse::<u32>().unwrap_or(0),
-                                        DefaultOptions::new().store().sort(),
+                                        IndexOptions::new().store().sort(),
                                     );
                                 }
                                 FieldType::Keyword => {
@@ -131,7 +131,7 @@ where
                                         builder.text(
                                             pos as u8,
                                             Text::keyword(field.to_lowercase()),
-                                            DefaultOptions::new().store().sort(),
+                                            IndexOptions::new().store().sort(),
                                         );
                                     }
                                 }

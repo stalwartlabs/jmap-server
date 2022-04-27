@@ -73,9 +73,9 @@ pub struct Field<T> {
     pub value: T,
 }
 
-pub struct DefaultOptions {}
+pub struct IndexOptions {}
 
-impl DefaultOptions {
+impl IndexOptions {
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> u64 {
         0
@@ -86,18 +86,26 @@ pub trait Options {
     fn store(self) -> Self;
     fn sort(self) -> Self;
     fn clear(self) -> Self;
-    fn term_index(self) -> Self;
+    fn build_term_index(self) -> Self;
+    fn keyword(self) -> Self;
+    fn tokenize(self) -> Self;
+    fn full_text(self, part_id: u32) -> Self;
 
     fn is_store(&self) -> bool;
     fn is_sort(&self) -> bool;
     fn is_clear(&self) -> bool;
-    fn build_term_index(&self) -> bool;
+    fn is_build_term_index(&self) -> bool;
+    fn get_text_options(&self) -> u64;
 }
 
-pub const F_STORE: u64 = 0x01;
-pub const F_SORT: u64 = 0x02;
-pub const F_CLEAR: u64 = 0x04;
-pub const F_TERM_INDEX: u64 = 0x08;
+pub const F_STORE: u64 = 0x01 << 32;
+pub const F_SORT: u64 = 0x02 << 32;
+pub const F_CLEAR: u64 = 0x04 << 32;
+pub const F_BUILD_TERM_INDEX: u64 = 0x08 << 32;
+pub const F_NONE: u64 = 0;
+pub const F_KEYWORD: u64 = 1;
+pub const F_TOKENIZE: u64 = 2;
+pub const F_FULL_TEXT: u64 = 3;
 
 impl Options for u64 {
     fn store(mut self) -> Self {
@@ -110,9 +118,21 @@ impl Options for u64 {
         self
     }
 
-    fn term_index(mut self) -> Self {
-        self |= F_TERM_INDEX;
+    fn build_term_index(mut self) -> Self {
+        self |= F_BUILD_TERM_INDEX;
         self
+    }
+
+    fn keyword(self) -> Self {
+        self | F_KEYWORD
+    }
+
+    fn tokenize(self) -> Self {
+        self | F_TOKENIZE
+    }
+
+    fn full_text(self, part_id: u32) -> Self {
+        self | (F_FULL_TEXT + part_id as u64)
     }
 
     fn clear(mut self) -> Self {
@@ -132,8 +152,12 @@ impl Options for u64 {
         self & F_CLEAR != 0
     }
 
-    fn build_term_index(&self) -> bool {
-        self & F_TERM_INDEX != 0
+    fn is_build_term_index(&self) -> bool {
+        self & F_BUILD_TERM_INDEX != 0
+    }
+
+    fn get_text_options(&self) -> u64 {
+        *self & 0xFFFFFFFF
     }
 }
 
@@ -172,8 +196,8 @@ impl<T> Field<T> {
     }
 
     #[inline(always)]
-    pub fn build_term_index(&self) -> bool {
-        self.options.build_term_index()
+    pub fn is_build_term_index(&self) -> bool {
+        self.options.is_build_term_index()
     }
 
     pub fn size_of(&self) -> usize {
@@ -203,131 +227,6 @@ impl Tag {
     }
 }
 
-#[derive(Default)]
-pub struct Tags {
-    pub items: HashSet<Tag>,
-    pub changed: bool,
-}
-
-impl Tags {
-    pub fn insert(&mut self, item: Tag) {
-        if self.items.insert(item) && !self.changed {
-            self.changed = true;
-        }
-    }
-
-    pub fn remove(&mut self, item: &Tag) {
-        if self.items.remove(item) && !self.changed {
-            self.changed = true;
-        }
-    }
-
-    pub fn contains(&self, item: &Tag) -> bool {
-        self.items.contains(item)
-    }
-
-    pub fn has_changed(&self) -> bool {
-        self.changed
-    }
-}
-
-impl StoreSerialize for Tags {
-    fn serialize(&self) -> Option<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(self.items.len() * std::mem::size_of::<Tag>());
-        self.items.len().to_leb128_bytes(&mut bytes);
-        for tag in &self.items {
-            match tag {
-                Tag::Static(id) => {
-                    bytes.push(TAG_STATIC);
-                    bytes.push(*id);
-                }
-                Tag::Id(id) => {
-                    bytes.push(TAG_ID);
-                    (*id).to_leb128_bytes(&mut bytes);
-                }
-                Tag::Text(text) => {
-                    bytes.push(TAG_TEXT);
-                    text.len().to_leb128_bytes(&mut bytes);
-                    bytes.extend_from_slice(text.as_bytes());
-                }
-                Tag::Bytes(value) => {
-                    bytes.push(TAG_BYTES);
-                    value.len().to_leb128_bytes(&mut bytes);
-                    bytes.extend_from_slice(value);
-                }
-                Tag::Default => {
-                    bytes.push(TAG_STATIC);
-                    bytes.push(0);
-                }
-            }
-        }
-        Some(bytes)
-    }
-}
-
-impl StoreDeserialize for Tags {
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let mut bytes_it = bytes.iter();
-        let total_tags = usize::from_leb128_it(&mut bytes_it)?;
-        let mut tags = HashSet::with_capacity(total_tags);
-        for _ in 0..total_tags {
-            match *bytes_it.next()? {
-                BM_TAG_STATIC => {
-                    tags.insert(Tag::Static(*bytes_it.next()?));
-                }
-                BM_TAG_ID => {
-                    tags.insert(Tag::Id(DocumentId::from_leb128_it(&mut bytes_it)?));
-                }
-                BM_TAG_TEXT => {
-                    let text_len = usize::from_leb128_it(&mut bytes_it)?;
-                    if text_len > 0 {
-                        let mut str_bytes = Vec::with_capacity(text_len);
-                        for _ in 0..text_len {
-                            str_bytes.push(*bytes_it.next()?);
-                        }
-                        tags.insert(Tag::Text(String::from_utf8(str_bytes).ok()?));
-                    } else {
-                        tags.insert(Tag::Text("".to_string()));
-                    }
-                }
-                _ => return None,
-            }
-        }
-
-        Some(Tags {
-            items: tags,
-            changed: false,
-        })
-    }
-}
-
-pub struct DocumentIdTag {
-    pub item: DocumentId,
-}
-
-impl Deref for DocumentIdTag {
-    type Target = DocumentId;
-
-    fn deref(&self) -> &Self::Target {
-        &self.item
-    }
-}
-
-impl AsRef<DocumentId> for DocumentIdTag {
-    fn as_ref(&self) -> &DocumentId {
-        &self.item
-    }
-}
-
-impl StoreDeserialize for DocumentIdTag {
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        debug_assert_eq!(bytes[1], TAG_ID);
-        Some(DocumentIdTag {
-            item: DocumentId::from_leb128_bytes(bytes.get(2..)?)?.0,
-        })
-    }
-}
-
 #[derive(Debug)]
 pub enum Text {
     None {
@@ -338,6 +237,7 @@ pub enum Text {
     },
     Tokenized {
         value: String,
+        language: Language,
     },
     Full {
         value: String,

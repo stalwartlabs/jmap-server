@@ -1,11 +1,12 @@
+use nlp::Language;
 use store::batch::Document;
-use store::field::{DefaultOptions, Options, Text};
+use store::field::{IndexOptions, Options, Text};
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::{AccountId, DocumentId, JMAPStore, Store, StoreError, Tag};
 
 use crate::error::set::SetError;
 use crate::{protocol::json::JSONValue, Property};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 pub trait PropertySchema:
@@ -15,21 +16,29 @@ pub trait PropertySchema:
     + Copy
     + Into<u8>
     + serde::Serialize
-    + serde::de::DeserializeOwned
+    + for<'de> serde::Deserialize<'de>
     + Sync
     + Send
 {
     fn required() -> &'static [Self];
-    fn sorted() -> &'static [Self];
-    fn indexed() -> &'static [(Self, TextIndex)];
-    fn tags() -> &'static [Self];
+    fn indexed() -> &'static [(Self, u64)];
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct TinyORM<T>
 where
     T: PropertySchema,
 {
+    #[serde(bound(
+        serialize = "HashMap<T, JSONValue>: serde::Serialize",
+        deserialize = "HashMap<T, JSONValue>: serde::Deserialize<'de>"
+    ))]
     properties: HashMap<T, JSONValue>,
+    #[serde(bound(
+        serialize = "HashMap<T, HashSet<Tag>>: serde::Serialize",
+        deserialize = "HashMap<T, HashSet<Tag>>: serde::Deserialize<'de>"
+    ))]
+    tags: HashMap<T, HashSet<Tag>>,
 }
 
 impl<T> Default for TinyORM<T>
@@ -38,7 +47,8 @@ where
 {
     fn default() -> Self {
         Self {
-            properties: Default::default(),
+            properties: HashMap::new(),
+            tags: HashMap::new(),
         }
     }
 }
@@ -53,6 +63,13 @@ where
         Self::default()
     }
 
+    pub fn track_changes(source: &TinyORM<T>) -> TinyORM<T> {
+        TinyORM {
+            properties: HashMap::new(),
+            tags: source.tags.clone(),
+        }
+    }
+
     pub fn set(&mut self, property: T, value: JSONValue) {
         self.properties.insert(property, value);
     }
@@ -63,6 +80,23 @@ where
 
     pub fn has_property(&self, property: &T) -> bool {
         self.properties.contains_key(property)
+    }
+
+    pub fn tag(&mut self, property: T, tag: Tag) {
+        self.tags
+            .entry(property)
+            .or_insert_with(HashSet::new)
+            .insert(tag);
+    }
+
+    pub fn untag(&mut self, property: &T, tag: &Tag) {
+        self.tags.get_mut(property).map(|set| set.remove(tag));
+    }
+
+    pub fn untag_all(&mut self, property: &T) {
+        if let Some(set) = self.tags.get_mut(property) {
+            set.clear()
+        }
     }
 
     pub fn get_unsigned_int(&self, property: &T) -> Option<u64> {
@@ -106,14 +140,10 @@ where
     }
 
     pub fn merge(mut self, document: &mut Document, changes: TinyORM<T>) -> store::Result<bool> {
-        let sorted = T::sorted();
         let indexed = T::indexed();
-        let tags = T::tags();
 
         for (property, value) in changes.properties {
-            let is_sorted = sorted.contains(&property);
-            let is_tagged = tags.contains(&property);
-            let (is_indexed, index_type) = indexed
+            let (is_indexed, index_options) = indexed
                 .iter()
                 .filter_map(|(p, index_type)| {
                     if p == &property {
@@ -123,35 +153,23 @@ where
                     }
                 })
                 .next()
-                .unwrap_or((false, &TextIndex::None));
+                .unwrap_or((false, &0));
 
             if let Some(current_value) = self.properties.get(&property) {
                 if current_value == &value {
                     continue;
-                } else if is_sorted || is_indexed {
+                } else if is_indexed {
                     match &current_value {
                         JSONValue::String(text) => {
-                            if is_sorted || is_indexed {
-                                document.text(
-                                    property,
-                                    match index_type {
-                                        TextIndex::None => Text::not_indexed(text.clone()),
-                                        TextIndex::Keyword => Text::keyword(text.clone()),
-                                        TextIndex::Tokenized => Text::tokenized(text.clone()),
-                                        TextIndex::Full(language) => {
-                                            Text::fulltext_lang(text.clone(), *language)
-                                        }
-                                    },
-                                    if is_sorted {
-                                        DefaultOptions::new().clear().sort()
-                                    } else {
-                                        DefaultOptions::new().clear()
-                                    },
-                                );
-                            }
+                            document.text(
+                                property,
+                                text.clone(),
+                                Language::Unknown,
+                                (*index_options).clear(),
+                            );
                         }
-                        JSONValue::Number(number) if is_sorted => {
-                            document.number(property, number, DefaultOptions::new().sort().clear());
+                        JSONValue::Number(number) => {
+                            document.number(property, number, (*index_options).clear());
                         }
                         value => {
                             debug_assert!(false, "ORM unsupported type: {:?}", value);
@@ -162,40 +180,20 @@ where
 
             match &value {
                 JSONValue::String(text) => {
-                    if is_sorted || is_indexed {
-                        document.text(
-                            property,
-                            match index_type {
-                                TextIndex::None => Text::not_indexed(text.clone()),
-                                TextIndex::Keyword => Text::keyword(text.clone()),
-                                TextIndex::Tokenized => Text::tokenized(text.clone()),
-                                TextIndex::Full(language) => {
-                                    Text::fulltext_lang(text.clone(), *language)
-                                }
-                            },
-                            if is_sorted {
-                                DefaultOptions::new().sort()
-                            } else {
-                                DefaultOptions::new()
-                            },
-                        );
+                    if is_indexed {
+                        document.text(property, text.clone(), Language::Unknown, *index_options);
                     }
-                    if is_tagged && !self.properties.contains_key(&property) {
-                        document.tag(property, Tag::Default, DefaultOptions::new());
-                    }
+
                     self.properties.insert(property, value);
                 }
                 JSONValue::Number(number) => {
-                    if is_sorted {
-                        document.number(property, number, DefaultOptions::new().sort());
+                    if is_indexed {
+                        document.number(property, number, *index_options);
                     }
                     self.properties.insert(property, value);
                 }
                 JSONValue::Null => {
-                    let had_value = self.properties.remove(&property).is_some();
-                    if had_value && is_tagged {
-                        document.tag(property, Tag::Default, DefaultOptions::new().clear());
-                    }
+                    self.properties.remove(&property);
                 }
                 _ => {
                     self.properties.insert(property, value);
@@ -203,18 +201,100 @@ where
             }
         }
 
+        if self.tags != changes.tags {
+            for (property, tags) in &self.tags {
+                if let Some(changed_tags) = changes.tags.get(property) {
+                    if tags != changed_tags {
+                        for tag in tags {
+                            if !changed_tags.contains(tag) {
+                                document.tag(*property, tag.clone(), IndexOptions::new().clear());
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (property, changed_tags) in &changes.tags {
+                if let Some(tags) = self.tags.get(property) {
+                    if changed_tags != tags {
+                        for changed_tag in changed_tags {
+                            if !tags.contains(changed_tag) {
+                                document.tag(*property, changed_tag.clone(), IndexOptions::new());
+                            }
+                        }
+                    }
+                } else {
+                    for changed_tag in changed_tags {
+                        document.tag(*property, changed_tag.clone(), IndexOptions::new());
+                    }
+                }
+            }
+
+            self.tags = changes.tags;
+        }
+
         if !document.is_empty() {
             document.binary(
                 Self::FIELD_ID,
-                rmp_serde::encode::to_vec(&self.properties).map_err(|_| {
+                self.serialize().ok_or_else(|| {
                     StoreError::SerializeError("Failed to serialize ORM object.".to_string())
                 })?,
-                DefaultOptions::new().store(),
+                IndexOptions::new().store(),
             );
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    pub fn delete(self, document: &mut Document) {
+        TinyORM::<T>::delete_orm(document);
+
+        let indexed = T::indexed();
+        if indexed.is_empty() && self.tags.is_empty() {
+            return;
+        }
+
+        for (property, value) in self.properties {
+            let (is_indexed, index_options) = indexed
+                .iter()
+                .filter_map(|(p, index_type)| {
+                    if p == &property {
+                        Some((true, index_type))
+                    } else {
+                        None
+                    }
+                })
+                .next()
+                .unwrap_or((false, &0));
+            if is_indexed {
+                match value {
+                    JSONValue::String(text) => {
+                        document.text(property, text, Language::Unknown, index_options.clear());
+                    }
+                    JSONValue::Number(number) => {
+                        document.number(property, &number, index_options.clear());
+                    }
+                    value => {
+                        debug_assert!(false, "ORM unsupported type: {:?}", value);
+                    }
+                }
+            }
+        }
+
+        for (property, tags) in self.tags {
+            for tag in tags {
+                document.tag(property, tag, IndexOptions::new().clear());
+            }
+        }
+    }
+
+    pub fn delete_orm(document: &mut Document) {
+        document.binary(
+            Self::FIELD_ID,
+            Vec::with_capacity(0),
+            IndexOptions::new().clear(),
+        );
     }
 }
 
@@ -223,7 +303,10 @@ where
     T: PropertySchema,
 {
     fn from(properties: HashMap<T, JSONValue>) -> Self {
-        TinyORM { properties }
+        TinyORM {
+            properties,
+            ..Default::default()
+        }
     }
 }
 
@@ -232,7 +315,7 @@ where
     T: PropertySchema,
 {
     fn serialize(&self) -> Option<Vec<u8>> {
-        rmp_serde::encode::to_vec(&self.properties).ok()
+        rmp_serde::encode::to_vec(&self).ok()
     }
 }
 
@@ -241,9 +324,7 @@ where
     T: PropertySchema,
 {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        Some(TinyORM {
-            properties: rmp_serde::decode::from_slice(bytes).ok()?,
-        })
+        rmp_serde::decode::from_slice(bytes).ok()
     }
 }
 

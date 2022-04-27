@@ -161,16 +161,16 @@ where
         Ok(if let Some(document_ids) = document_ids {
             let mut thread_ids = HashSet::new();
             self.store
-                .get_multi_document_tag_id(
+                .get_multi_document_value(
                     self.account_id,
                     Collection::Mail,
                     document_ids.into_iter(),
                     MessageField::ThreadId.into(),
                 )?
                 .into_iter()
-                .for_each(|thread_id| {
+                .for_each(|thread_id: Option<DocumentId>| {
                     if let Some(thread_id) = thread_id {
-                        thread_ids.insert(*thread_id);
+                        thread_ids.insert(thread_id);
                     }
                 });
             thread_ids.len()

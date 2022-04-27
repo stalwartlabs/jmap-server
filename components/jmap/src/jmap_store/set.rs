@@ -112,7 +112,7 @@ where
     ) -> crate::error::set::Result<Option<Self::UpdateItemResult>>;
     fn delete(
         helper: &mut SetObjectHelper<T, Self::Helper>,
-        jmap_id: JMAPId,
+        document: &mut Document,
     ) -> crate::error::set::Result<()>;
 }
 
@@ -351,15 +351,14 @@ where
 
         for jmap_id in std::mem::take(&mut helper.will_destroy) {
             let document_id = jmap_id.get_document_id();
+            let mut document = Document::new(collection, document_id);
             if helper.document_ids.contains(document_id) {
-                if let Err(err) = V::delete(&mut helper, jmap_id) {
+                if let Err(err) = V::delete(&mut helper, &mut document) {
                     helper
                         .not_destroyed
                         .insert(jmap_id.to_jmap_string(), err.into());
                 } else {
-                    helper
-                        .changes
-                        .delete_document(collection, jmap_id.get_document_id());
+                    helper.changes.delete_document(document);
                     helper.changes.log_delete(collection, jmap_id);
                     helper.destroyed.push(jmap_id.to_jmap_string().into());
                 }

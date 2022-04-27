@@ -4,7 +4,7 @@ use naive_cityhash::cityhash64;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{
-    blob::BlobId,
+    blob::{BlobId, BLOB_HASH_LEN},
     leb128::Leb128,
     log::ChangeId,
     log::{LogIndex, RaftId},
@@ -33,23 +33,17 @@ pub const TAG_STATIC: u8 = 0x20;
 pub const TAG_BYTES: u8 = 0x40;
 
 pub const INTERNAL_KEY_PREFIX: u8 = 0;
-pub const BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 0];
-pub const TEMP_BLOB_KEY_PREFIX: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
 
-pub const FOLLOWER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
-pub const LEADER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 3];
+pub const FOLLOWER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 1];
+pub const LEADER_COMMIT_INDEX_KEY: &[u8; 2] = &[INTERNAL_KEY_PREFIX, 2];
 
 pub struct ValueKey {}
 pub struct BitmapKey {}
 pub struct IndexKey {}
 pub struct LogKey {}
+pub struct BlobKey {}
 
 impl ValueKey {
-    pub const VALUE: u8 = 0;
-    pub const TAGS: u8 = 1;
-    pub const KEYWORDS: u8 = 2;
-    pub const BLOBS: u8 = 3;
-
     pub fn serialize_account(account: AccountId) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
         account.to_leb128_bytes(&mut bytes);
@@ -71,61 +65,12 @@ impl ValueKey {
         document: DocumentId,
         field: FieldId,
     ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>() + 1);
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>());
         account.to_leb128_bytes(&mut bytes);
         bytes.push(collection.into());
         document.to_leb128_bytes(&mut bytes);
         bytes.push(field);
-        bytes.push(ValueKey::VALUE);
         bytes
-    }
-
-    pub fn serialize_document_tag_list(
-        account: AccountId,
-        collection: Collection,
-        document: DocumentId,
-        field: FieldId,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>() + 1);
-        account.to_leb128_bytes(&mut bytes);
-        bytes.push(collection.into());
-        document.to_leb128_bytes(&mut bytes);
-        bytes.push(field);
-        bytes.push(ValueKey::TAGS);
-        bytes
-    }
-
-    pub fn serialize_document_blob(
-        account: AccountId,
-        collection: Collection,
-        document: DocumentId,
-        index: u32,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
-        account.to_leb128_bytes(&mut bytes);
-        bytes.push(collection.into());
-        document.to_leb128_bytes(&mut bytes);
-        index.to_leb128_bytes(&mut bytes);
-        bytes.push(ValueKey::BLOBS);
-        bytes
-    }
-
-    pub fn serialize_temporary_blob(account: AccountId, hash: u64, timestamp: u64) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + TEMP_BLOB_KEY_PREFIX.len());
-        bytes.extend_from_slice(TEMP_BLOB_KEY_PREFIX);
-        timestamp.to_leb128_bytes(&mut bytes);
-        hash.to_leb128_bytes(&mut bytes);
-        account.to_leb128_bytes(&mut bytes);
-        bytes
-    }
-
-    pub fn serialize_blob(id: &BlobId) -> Vec<u8> {
-        let mut key =
-            Vec::with_capacity(id.hash.len() + std::mem::size_of::<u32>() + BLOB_KEY_PREFIX.len());
-        key.extend_from_slice(BLOB_KEY_PREFIX);
-        key.extend_from_slice(&id.hash);
-        id.size.to_leb128_bytes(&mut key);
-        key
     }
 
     pub fn serialize_term_index(
@@ -142,6 +87,41 @@ impl ValueKey {
         bytes.push(collection.into());
         document.to_leb128_bytes(&mut bytes);
         bytes
+    }
+}
+
+impl BlobKey {
+    pub fn serialize_link(
+        id: &BlobId,
+        account: AccountId,
+        collection: Collection,
+        document: DocumentId,
+    ) -> Vec<u8> {
+        let mut key =
+            Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<u32>() + ACCOUNT_KEY_LEN);
+        key.extend_from_slice(&id.hash);
+        id.size.to_leb128_bytes(&mut key);
+        account.to_leb128_bytes(&mut key);
+        key.push(collection.into());
+        document.to_leb128_bytes(&mut key);
+        key
+    }
+
+    pub fn serialize_prefix(id: &BlobId, account: AccountId) -> Vec<u8> {
+        let mut key = Vec::with_capacity(
+            BLOB_HASH_LEN + std::mem::size_of::<u32>() + std::mem::size_of::<AccountId>(),
+        );
+        key.extend_from_slice(&id.hash);
+        id.size.to_leb128_bytes(&mut key);
+        account.to_leb128_bytes(&mut key);
+        key
+    }
+
+    pub fn serialize(id: &BlobId) -> Vec<u8> {
+        let mut key = Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<u32>());
+        key.extend_from_slice(&id.hash);
+        id.size.to_leb128_bytes(&mut key);
+        key
     }
 }
 

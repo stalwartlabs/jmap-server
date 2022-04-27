@@ -64,7 +64,7 @@ impl<'x> Store<'x> for RocksDB {
         let cf_bitmaps = self.cf_handle(store::ColumnFamily::Bitmaps)?;
         let cf_values = self.cf_handle(store::ColumnFamily::Values)?;
         let cf_indexes = self.cf_handle(store::ColumnFamily::Indexes)?;
-        let cf_terms = self.cf_handle(store::ColumnFamily::Terms)?;
+        let cf_blobs = self.cf_handle(store::ColumnFamily::Blobs)?;
         let cf_logs = self.cf_handle(store::ColumnFamily::Logs)?;
 
         for op in batch {
@@ -75,7 +75,7 @@ impl<'x> Store<'x> for RocksDB {
                             store::ColumnFamily::Bitmaps => &cf_bitmaps,
                             store::ColumnFamily::Values => &cf_values,
                             store::ColumnFamily::Indexes => &cf_indexes,
-                            store::ColumnFamily::Terms => &cf_terms,
+                            store::ColumnFamily::Blobs => &cf_blobs,
                             store::ColumnFamily::Logs => &cf_logs,
                         },
                         key,
@@ -88,7 +88,7 @@ impl<'x> Store<'x> for RocksDB {
                             store::ColumnFamily::Bitmaps => &cf_bitmaps,
                             store::ColumnFamily::Values => &cf_values,
                             store::ColumnFamily::Indexes => &cf_indexes,
-                            store::ColumnFamily::Terms => &cf_terms,
+                            store::ColumnFamily::Blobs => &cf_blobs,
                             store::ColumnFamily::Logs => &cf_logs,
                         },
                         key,
@@ -100,7 +100,7 @@ impl<'x> Store<'x> for RocksDB {
                             store::ColumnFamily::Bitmaps => &cf_bitmaps,
                             store::ColumnFamily::Values => &cf_values,
                             store::ColumnFamily::Indexes => &cf_indexes,
-                            store::ColumnFamily::Terms => &cf_terms,
+                            store::ColumnFamily::Blobs => &cf_blobs,
                             store::ColumnFamily::Logs => &cf_logs,
                         },
                         key,
@@ -185,17 +185,8 @@ impl<'x> Store<'x> for RocksDB {
                 .get("db-path")
                 .unwrap_or_else(|| "stalwart-jmap".to_string()),
         );
-        let mut blob_path = path.clone();
         let mut idx_path = path;
-        blob_path.push("blobs");
         idx_path.push("idx");
-        std::fs::create_dir_all(&blob_path).map_err(|err| {
-            StoreError::InternalError(format!(
-                "Failed to create blob directory {}: {:?}",
-                blob_path.display(),
-                err
-            ))
-        })?;
         std::fs::create_dir_all(&idx_path).map_err(|err| {
             StoreError::InternalError(format!(
                 "Failed to create index directory {}: {:?}",
@@ -227,9 +218,9 @@ impl<'x> Store<'x> for RocksDB {
         };
 
         // Term index
-        let cf_terms = {
+        let cf_blobs = {
             let cf_opts = Options::default();
-            ColumnFamilyDescriptor::new("terms", cf_opts)
+            ColumnFamilyDescriptor::new("blobs", cf_opts)
         };
 
         // Raft log and change log
@@ -246,7 +237,7 @@ impl<'x> Store<'x> for RocksDB {
             db: DBWithThreadMode::open_cf_descriptors(
                 &db_opts,
                 idx_path,
-                vec![cf_bitmaps, cf_values, cf_indexes, cf_terms, cf_log],
+                vec![cf_bitmaps, cf_values, cf_indexes, cf_blobs, cf_log],
             )
             .map_err(|e| StoreError::InternalError(e.into_string()))?,
         })
@@ -261,7 +252,7 @@ impl RocksDB {
                 store::ColumnFamily::Bitmaps => "bitmaps",
                 store::ColumnFamily::Values => "values",
                 store::ColumnFamily::Indexes => "indexes",
-                store::ColumnFamily::Terms => "terms",
+                store::ColumnFamily::Blobs => "blobs",
                 store::ColumnFamily::Logs => "logs",
             })
             .ok_or_else(|| {

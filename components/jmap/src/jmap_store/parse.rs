@@ -4,7 +4,7 @@ use store::{AccountId, JMAPId, JMAPStore, Store};
 
 use crate::{
     error::method::MethodError,
-    id::{blob::BlobId, JMAPIdSerialize},
+    id::{blob::JMAPBlob, JMAPIdSerialize},
     protocol::json::JSONValue,
     request::parse::ParseRequest,
 };
@@ -24,7 +24,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn new(store: &'y JMAPStore<T>, request: &mut ParseRequest) -> crate::Result<Self>;
-    fn parse_blob(&self, blob_id: BlobId, blob: Vec<u8>) -> crate::Result<Option<JSONValue>>;
+    fn parse_blob(&self, blob_id: JMAPBlob, blob: Vec<u8>) -> crate::Result<Option<JSONValue>>;
     fn inner_blob_fnc() -> InnerBlobFnc;
 }
 

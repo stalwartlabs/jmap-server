@@ -63,19 +63,19 @@ where
         _fields: &mut HashMap<String, JSONValue>,
         jmap_id: Option<JMAPId>,
     ) -> jmap::error::set::Result<Self> {
-        Ok(SetMailbox {
-            current_mailbox: if let Some(jmap_id) = jmap_id {
-                helper
-                    .store
-                    .get_orm::<MailboxProperty>(helper.account_id, jmap_id.get_document_id())?
-                    .ok_or_else(|| {
-                        SetError::new(SetErrorType::NotFound, "Mailbox not found.".to_string())
-                    })?
-                    .into()
-            } else {
-                None
-            },
-            ..Default::default()
+        Ok(if let Some(jmap_id) = jmap_id {
+            let current_mailbox = helper
+                .store
+                .get_orm::<MailboxProperty>(helper.account_id, jmap_id.get_document_id())?
+                .ok_or_else(|| {
+                    SetError::new(SetErrorType::NotFound, "Mailbox not found.".to_string())
+                })?;
+            SetMailbox {
+                mailbox: TinyORM::track_changes(&current_mailbox),
+                current_mailbox: current_mailbox.into(),
+            }
+        } else {
+            SetMailbox::default()
         })
     }
 
@@ -86,70 +86,73 @@ where
         value: JSONValue,
     ) -> jmap::error::set::Result<()> {
         //TODO implement isSubscribed
-        self.mailbox.set(
-            field,
-            match (field, &value) {
-                (MailboxProperty::Name, JSONValue::String(name)) => {
-                    if name.len() < 255 {
-                        Ok(value)
-                    } else {
-                        Err(SetError::invalid_property(
-                            field.to_string(),
-                            "Mailbox name is too long.".to_string(),
-                        ))
-                    }
+        let value = match (field, &value) {
+            (MailboxProperty::Name, JSONValue::String(name)) => {
+                if name.len() < 255 {
+                    Ok(value)
+                } else {
+                    Err(SetError::invalid_property(
+                        field.to_string(),
+                        "Mailbox name is too long.".to_string(),
+                    ))
                 }
-                (MailboxProperty::ParentId, JSONValue::String(mailbox_parent_id_str)) => {
-                    match helper.resolve_reference(mailbox_parent_id_str) {
-                        Ok(mailbox_parent_id) => {
-                            if helper.will_destroy.contains(&mailbox_parent_id) {
-                                return Err(SetError::new(
-                                    SetErrorType::WillDestroy,
-                                    "Parent ID will be destroyed.",
-                                ));
-                            } else if !helper
-                                .document_ids
-                                .contains(mailbox_parent_id as DocumentId)
-                            {
-                                return Err(SetError::new(
-                                    SetErrorType::InvalidProperties,
-                                    "Parent ID does not exist.",
-                                ));
-                            }
-                            Ok((mailbox_parent_id + 1).into())
-                        }
-                        Err(err) => {
-                            return Err(SetError::invalid_property(
-                                field.to_string(),
-                                err.to_string(),
+            }
+            (MailboxProperty::ParentId, JSONValue::String(mailbox_parent_id_str)) => {
+                match helper.resolve_reference(mailbox_parent_id_str) {
+                    Ok(mailbox_parent_id) => {
+                        if helper.will_destroy.contains(&mailbox_parent_id) {
+                            return Err(SetError::new(
+                                SetErrorType::WillDestroy,
+                                "Parent ID will be destroyed.",
+                            ));
+                        } else if !helper
+                            .document_ids
+                            .contains(mailbox_parent_id as DocumentId)
+                        {
+                            return Err(SetError::new(
+                                SetErrorType::InvalidProperties,
+                                "Parent ID does not exist.",
                             ));
                         }
+                        Ok((mailbox_parent_id + 1).into())
                     }
-                }
-                (MailboxProperty::ParentId, JSONValue::Null) => Ok(0u64.into()),
-                (MailboxProperty::Role, JSONValue::String(role)) => {
-                    let role = role.to_lowercase();
-                    if [
-                        "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
-                    ]
-                    .contains(&role.as_str())
-                    {
-                        Ok(role.into())
-                    } else {
-                        Err(SetError::invalid_property(
+                    Err(err) => {
+                        return Err(SetError::invalid_property(
                             field.to_string(),
-                            "Invalid role.".to_string(),
-                        ))
+                            err.to_string(),
+                        ));
                     }
                 }
-                (MailboxProperty::Role, JSONValue::Null) => Ok(value),
-                (MailboxProperty::SortOrder, JSONValue::Number(JSONNumber::PosInt(_))) => Ok(value),
-                (_, _) => Err(SetError::invalid_property(
-                    field.to_string(),
-                    "Unexpected value.".to_string(),
-                )),
-            }?,
-        );
+            }
+            (MailboxProperty::ParentId, JSONValue::Null) => Ok(0u64.into()),
+            (MailboxProperty::Role, JSONValue::String(role)) => {
+                let role = role.to_lowercase();
+                if [
+                    "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
+                ]
+                .contains(&role.as_str())
+                {
+                    self.mailbox.tag(field, Tag::Default);
+                    Ok(role.into())
+                } else {
+                    Err(SetError::invalid_property(
+                        field.to_string(),
+                        "Invalid role.".to_string(),
+                    ))
+                }
+            }
+            (MailboxProperty::Role, JSONValue::Null) => {
+                self.mailbox.untag(&field, &Tag::Default);
+                Ok(value)
+            }
+            (MailboxProperty::SortOrder, JSONValue::Number(JSONNumber::PosInt(_))) => Ok(value),
+            (_, _) => Err(SetError::invalid_property(
+                field.to_string(),
+                "Unexpected value.".to_string(),
+            )),
+        }?;
+
+        self.mailbox.set(field, value);
 
         Ok(())
     }
@@ -202,10 +205,9 @@ where
 
     fn delete(
         helper: &mut SetObjectHelper<T, SetMailboxHelper>,
-        jmap_id: JMAPId,
+        document: &mut Document,
     ) -> jmap::error::set::Result<()> {
         // Verify that this mailbox does not have sub-mailboxes
-        let document_id = jmap_id.get_document_id();
         if !helper
             .store
             .query_store::<DefaultIdMapper>(
@@ -214,7 +216,7 @@ where
                 Filter::new_condition(
                     MailboxProperty::ParentId.into(),
                     ComparisonOperator::Equal,
-                    FieldValue::LongInteger((document_id + 1) as LongInteger),
+                    FieldValue::LongInteger((document.document_id + 1) as LongInteger),
                 ),
                 Comparator::None,
             )?
@@ -231,7 +233,7 @@ where
             helper.account_id,
             Collection::Mail,
             MessageField::Mailbox.into(),
-            Tag::Id(document_id),
+            Tag::Id(document.document_id),
         )? {
             if !helper.data.on_destroy_remove_emails {
                 return Err(SetError::new(
@@ -244,7 +246,8 @@ where
             let message_doc_ids = message_doc_ids.into_iter().collect::<Vec<_>>();
 
             // Obtain thread ids for all messages to be deleted
-            for (thread_id, message_doc_id) in helper
+            //TODO
+            /*for (thread_id, message_doc_id) in helper
                 .store
                 .get_multi_document_tag_id(
                     helper.account_id,
@@ -264,9 +267,16 @@ where
                         JMAPId::from_parts(*thread_id, message_doc_id),
                     );
                 }
-            }
+            }*/
         }
 
+        // Delete index
+        if let Some(orm) = helper
+            .store
+            .get_orm::<MailboxProperty>(helper.account_id, document.document_id)?
+        {
+            orm.delete(document);
+        }
         Ok(())
     }
 }

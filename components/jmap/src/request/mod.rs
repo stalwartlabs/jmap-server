@@ -9,7 +9,7 @@ pub mod set;
 use store::{chrono::DateTime, DocumentId, JMAPId};
 
 use crate::{
-    id::blob::BlobId,
+    id::blob::JMAPBlob,
     protocol::{json::JSONValue, response::Response},
     MethodError,
 };
@@ -52,10 +52,10 @@ impl JSONArgumentParser for DocumentId {
     }
 }
 
-impl JSONArgumentParser for BlobId {
+impl JSONArgumentParser for JMAPBlob {
     fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
         argument
-            .parse_blob_id(false)?
+            .parse_blob(false)?
             .ok_or_else(|| MethodError::InvalidArguments("Failed to parse Blob Id.".to_string()))
     }
 }

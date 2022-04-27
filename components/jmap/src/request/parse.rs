@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use store::AccountId;
 
 use crate::{
-    id::blob::BlobId,
+    id::blob::JMAPBlob,
     protocol::{json::JSONValue, response::Response},
 };
 
 #[derive(Debug, Clone)]
 pub struct ParseRequest {
     pub account_id: AccountId,
-    pub blob_ids: Vec<BlobId>,
+    pub blob_ids: Vec<JMAPBlob>,
     pub arguments: HashMap<String, JSONValue>,
 }
 
@@ -25,7 +25,9 @@ impl ParseRequest {
         invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
-                "blobIds" => request.blob_ids = value.parse_array_items::<BlobId>(false)?.unwrap(),
+                "blobIds" => {
+                    request.blob_ids = value.parse_array_items::<JMAPBlob>(false)?.unwrap()
+                }
                 _ => {
                     request.arguments.insert(name, value);
                 }

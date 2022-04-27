@@ -34,7 +34,7 @@ where
 {
     fn filter_map_id(&mut self, document_id: store::DocumentId) -> store::Result<Option<JMAPId>> {
         Ok(
-            if let Some(thread_id) = self.store.get_document_tag_id(
+            if let Some(thread_id) = self.store.get_document_value(
                 self.account_id,
                 Collection::Mail,
                 document_id,
@@ -422,7 +422,7 @@ where
                     MessageField::ThreadId.into(),
                     Tag::Id(
                         self.store
-                            .get_document_tag_id(
+                            .get_document_value(
                                 self.account_id,
                                 Collection::Mail,
                                 tagged_doc_id,

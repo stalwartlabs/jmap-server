@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use jmap::{jmap_store::orm::PropertySchema, Property};
-use store::{field::TextIndex, Collection};
+use store::Collection;
 
 pub mod changes;
 pub mod get;
@@ -45,15 +45,7 @@ impl PropertySchema for IdentityProperty {
         &[IdentityProperty::Email]
     }
 
-    fn sorted() -> &'static [Self] {
-        &[]
-    }
-
-    fn indexed() -> &'static [(Self, TextIndex)] {
-        &[]
-    }
-
-    fn tags() -> &'static [Self] {
+    fn indexed() -> &'static [(Self, u64)] {
         &[]
     }
 }

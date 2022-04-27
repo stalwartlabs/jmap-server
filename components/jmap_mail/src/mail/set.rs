@@ -1,5 +1,4 @@
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::id::blob::BlobId;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::set::{DefaultUpdateItem, SetObject, SetObjectData, SetObjectHelper};
@@ -18,7 +17,7 @@ use mail_builder::MessageBuilder;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::batch::Document;
 use store::chrono::DateTime;
-use store::field::{DefaultOptions, Options};
+use store::field::{IndexOptions, Options};
 use store::roaring::RoaringBitmap;
 use store::{Collection, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError, Tag};
 
@@ -30,7 +29,6 @@ use crate::mail::{
 
 use super::import::MailImportResult;
 use super::parse::MessageParser;
-use super::MESSAGE_RAW;
 
 #[allow(clippy::large_enum_variant)]
 pub enum SetMail {
@@ -473,7 +471,7 @@ where
                             document.tag(
                                 MessageField::Mailbox,
                                 mailbox.clone(),
-                                DefaultOptions::new().clear(),
+                                IndexOptions::new().clear(),
                             );
                             changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                         }
@@ -482,7 +480,7 @@ where
                         document.tag(
                             MessageField::Mailbox,
                             mailbox.clone(),
-                            DefaultOptions::new().clear(),
+                            IndexOptions::new().clear(),
                         );
                         changed_mailboxes.insert(mailbox.unwrap_id().unwrap_or_default());
                     } else {
@@ -498,7 +496,7 @@ where
                         if helper.data.mailbox_ids.contains(mailbox_id) {
                             // Tag mailbox if it is not already tagged
                             if !current_mailboxes.contains(&mailbox) {
-                                document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
+                                document.tag(MessageField::Mailbox, mailbox, IndexOptions::new());
                                 changed_mailboxes.insert(mailbox_id);
                             }
                             has_mailboxes = true;
@@ -541,7 +539,7 @@ where
                             document.tag(
                                 MessageField::Keyword,
                                 keyword.clone(),
-                                DefaultOptions::new().clear(),
+                                IndexOptions::new().clear(),
                             );
                             if !unread_changed
                                 && matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
@@ -554,7 +552,7 @@ where
                         document.tag(
                             MessageField::Keyword,
                             keyword.clone(),
-                            DefaultOptions::new().clear(),
+                            IndexOptions::new().clear(),
                         );
                         if !unread_changed
                             && matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )
@@ -571,7 +569,7 @@ where
                             document.tag(
                                 MessageField::Keyword,
                                 keyword.clone(),
-                                DefaultOptions::new(),
+                                IndexOptions::new(),
                             );
                             if !unread_changed
                                 && matches!(&keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN )

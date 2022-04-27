@@ -1,7 +1,6 @@
 use roaring::RoaringBitmap;
 
 use crate::{
-    field::{DocumentIdTag, Tags},
     serialize::{BitmapKey, StoreDeserialize, ValueKey},
     AccountId, Collection, ColumnFamily, DocumentId, FieldId, JMAPStore, Store, Tag,
 };
@@ -93,51 +92,5 @@ where
         }
 
         Ok(result)
-    }
-
-    pub fn get_document_tags(
-        &self,
-        account: AccountId,
-        collection: Collection,
-        document: DocumentId,
-        field: FieldId,
-    ) -> crate::Result<Option<Tags>> {
-        self.db.get(
-            ColumnFamily::Values,
-            &ValueKey::serialize_document_tag_list(account, collection, document, field),
-        )
-    }
-
-    pub fn get_document_tag_id(
-        &self,
-        account: AccountId,
-        collection: Collection,
-        document: DocumentId,
-        field: FieldId,
-    ) -> crate::Result<Option<DocumentId>> {
-        Ok(self
-            .db
-            .get::<DocumentIdTag>(
-                ColumnFamily::Values,
-                &ValueKey::serialize_document_tag_list(account, collection, document, field),
-            )?
-            .map(|t| t.item))
-    }
-
-    pub fn get_multi_document_tag_id(
-        &self,
-        account: AccountId,
-        collection: Collection,
-        documents: impl Iterator<Item = DocumentId>,
-        field: FieldId,
-    ) -> crate::Result<Vec<Option<DocumentIdTag>>> {
-        self.db.multi_get(
-            ColumnFamily::Values,
-            documents
-                .map(|document| {
-                    ValueKey::serialize_document_tag_list(account, collection, document, field)
-                })
-                .collect::<Vec<_>>(),
-        )
     }
 }

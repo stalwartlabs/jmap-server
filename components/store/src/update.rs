@@ -12,10 +12,10 @@ use nlp::{
 use crate::{
     batch::{Change, WriteAction, WriteBatch, MAX_TOKEN_LENGTH},
     bitmap::{clear_bit, set_clear_bits},
-    field::{Options, Tags, Text, UpdateField},
+    field::{Options, Text, UpdateField},
     leb128::Leb128,
     log::ChangeId,
-    serialize::{BitmapKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
+    serialize::{BitmapKey, BlobKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
     term_index::{Term, TermIndex, TermIndexBuilder},
     AccountId, Collections, ColumnFamily, Direction, DocumentId, FieldId, JMAPStore, Store,
     StoreError, WriteOperation,
@@ -32,7 +32,7 @@ where
         let mut change_id = None;
 
         for document in batch.documents {
-            let (is_insert, mut document) = match document {
+            let mut document = match document {
                 WriteAction::Insert(document) => {
                     // Add document id to collection
                     bitmap_list
@@ -43,186 +43,29 @@ where
                         .or_insert_with(HashMap::new)
                         .insert(document.document_id, true);
 
-                    (true, document)
+                    document
                 }
-                WriteAction::Update(document) => (false, document),
-                WriteAction::Tombstone {
-                    collection,
-                    document_id,
-                } => {
+                WriteAction::Update(document) => document,
+                WriteAction::Tombstone(document) => {
                     debug_assert!(!batch.changes.is_empty());
                     // Tombstone a document id
                     tombstones
-                        .entry(collection)
+                        .entry(document.collection)
                         .or_insert_with(HashSet::new)
-                        .insert(document_id);
+                        .insert(document.document_id);
                     continue;
                 }
-                WriteAction::Delete {
-                    collection,
-                    document_id,
-                } => {
+                WriteAction::Delete(document) => {
                     // Remove document id from collection
                     bitmap_list
                         .entry(BitmapKey::serialize_document_ids(
                             batch.account_id,
-                            collection,
+                            document.collection,
                         ))
                         .or_insert_with(HashMap::new)
-                        .insert(document_id, false);
+                        .insert(document.document_id, false);
 
-                    let term_index_key =
-                        ValueKey::serialize_term_index(batch.account_id, collection, document_id);
-
-                    // Delete values
-                    let prefix = ValueKey::serialize_collection(batch.account_id, collection);
-                    let merge_value = clear_bit(document_id);
-                    for (key, value) in
-                        self.db
-                            .iterator(ColumnFamily::Values, &prefix, Direction::Forward)?
-                    { /*
-                         if !key.starts_with(&prefix) {
-                             break;
-                         } else if key.len() > prefix.len()
-                             && DocumentId::from_leb128_bytes(&key[prefix.len()..])
-                                 .ok_or(StoreError::DataCorruption)?
-                                 .0
-                                 == document_id
-                         {
-                             if key[..] == term_index_key[..] {
-                                 // Delete terms
-                                 let term_index =
-                                     TermIndex::deserialize(&value).ok_or_else(|| {
-                                         StoreError::InternalError(
-                                             "Failed to deserialize blob entries.".to_string(),
-                                         )
-                                     })?;
-
-                                 for term_group in
-                                     term_index.uncompress_all_terms().map_err(|_| {
-                                         StoreError::InternalError(
-                                             "Failed to uncompress term index.".to_string(),
-                                         )
-                                     })?
-                                 {
-                                     for exact_term_id in term_group.exact_terms {
-                                         write_batch.push(WriteOperation::merge(
-                                             ColumnFamily::Bitmaps,
-                                             BitmapKey::serialize_term(
-                                                 batch.account_id,
-                                                 collection,
-                                                 term_group.field_id,
-                                                 exact_term_id,
-                                                 true,
-                                             ),
-                                             merge_value.clone(),
-                                         ));
-                                     }
-                                     for stemmed_term_id in term_group.stemmed_terms {
-                                         write_batch.push(WriteOperation::merge(
-                                             ColumnFamily::Bitmaps,
-                                             BitmapKey::serialize_term(
-                                                 batch.account_id,
-                                                 collection,
-                                                 term_group.field_id,
-                                                 stemmed_term_id,
-                                                 false,
-                                             ),
-                                             merge_value.clone(),
-                                         ));
-                                     }
-                                 }
-                             } else if key.ends_with(&[ValueKey::BLOBS]) {
-                                 // Decrement blob count
-
-                                 BlobEntries::deserialize(&value)
-                                     .ok_or_else(|| {
-                                         StoreError::InternalError(
-                                             "Failed to deserialize blob entries.".to_string(),
-                                         )
-                                     })?
-                                     .items
-                                     .into_iter()
-                                     .for_each(|key| {
-                                         write_batch.push(WriteOperation::merge(
-                                             ColumnFamily::Values,
-                                             key.as_key(),
-                                             (-1i64).serialize().unwrap(),
-                                         ));
-                                     });
-                             } else if key.ends_with(&[ValueKey::TAGS]) {
-                                 // Remove tags
-
-                                 let field_id = key[key.len() - 2];
-                                 for tag in Tags::deserialize(&value)
-                                     .ok_or_else(|| {
-                                         StoreError::InternalError(
-                                             "Failed to deserialize tag list.".to_string(),
-                                         )
-                                     })?
-                                     .items
-                                 {
-                                     write_batch.push(WriteOperation::merge(
-                                         ColumnFamily::Bitmaps,
-                                         BitmapKey::serialize_tag(
-                                             batch.account_id,
-                                             collection,
-                                             field_id,
-                                             &tag,
-                                         ),
-                                         merge_value.clone(),
-                                     ));
-                                 }
-                             } else if key.ends_with(&[ValueKey::KEYWORDS]) {
-                                 // Remove keywords
-
-                                 for (keyword, fields) in Keywords::deserialize(&value)
-                                     .ok_or_else(|| {
-                                         StoreError::InternalError(
-                                             "Failed to deserialize keywords list.".to_string(),
-                                         )
-                                     })?
-                                     .items
-                                 {
-                                     for field in fields {
-                                         write_batch.push(WriteOperation::merge(
-                                             ColumnFamily::Bitmaps,
-                                             BitmapKey::serialize_term(
-                                                 batch.account_id,
-                                                 collection,
-                                                 field,
-                                                 &keyword,
-                                             ),
-                                             merge_value.clone(),
-                                         ));
-                                     }
-                                 }
-                             }
-
-                             write_batch
-                                 .push(WriteOperation::delete(ColumnFamily::Values, key.to_vec()));
-                         }*/
-                    }
-
-                    // Delete indexes
-                    let prefix = IndexKey::serialize_collection(batch.account_id, collection);
-                    for (key, _) in
-                        self.db
-                            .iterator(ColumnFamily::Indexes, &prefix, Direction::Forward)?
-                    {
-                        if !key.starts_with(&prefix) {
-                            break;
-                        } else if key.len() > prefix.len()
-                            && IndexKey::deserialize_document_id(&key)
-                                .ok_or(StoreError::DataCorruption)?
-                                == document_id
-                        {
-                            write_batch
-                                .push(WriteOperation::delete(ColumnFamily::Indexes, key.to_vec()));
-                        }
-                    }
-
-                    continue;
+                    document
                 }
             };
 
@@ -235,7 +78,7 @@ where
                 let is_stored = field.is_stored();
                 let is_clear = field.is_clear();
                 let is_sorted = field.is_sorted();
-                let build_term_index = field.build_term_index();
+                let build_term_index = field.is_build_term_index();
 
                 let text = match field.value {
                     Text::None { value } => value,
@@ -261,10 +104,10 @@ where
                         }
                         value
                     }
-                    Text::Tokenized { value } => {
+                    Text::Tokenized { value, language } => {
                         let mut terms = Vec::new();
 
-                        for token in Tokenizer::new(&value, Language::English, MAX_TOKEN_LENGTH) {
+                        for token in Tokenizer::new(&value, language, MAX_TOKEN_LENGTH) {
                             merge_bitmap_clear(
                                 bitmap_list.entry(BitmapKey::serialize_term(
                                     batch.account_id,
@@ -419,16 +262,17 @@ where
 
             // Process binary fields
             for field in document.binary_fields {
-                write_batch.push(WriteOperation::set(
-                    ColumnFamily::Values,
-                    ValueKey::serialize_value(
-                        batch.account_id,
-                        document.collection,
-                        document.document_id,
-                        field.get_field(),
-                    ),
-                    field.value,
-                ));
+                let key = ValueKey::serialize_value(
+                    batch.account_id,
+                    document.collection,
+                    document.document_id,
+                    field.get_field(),
+                );
+                write_batch.push(if !field.is_clear() {
+                    WriteOperation::set(ColumnFamily::Values, key, field.value)
+                } else {
+                    WriteOperation::delete(ColumnFamily::Values, key)
+                });
             }
 
             // Compress and store TermIndex
@@ -447,26 +291,19 @@ where
             }
 
             // Store external blobs references
-            for (id, index, options) in document.blobs {
+            for (id, options) in document.blobs {
                 let is_set = !options.is_clear();
-                // Increment blob count
-                write_batch.push(WriteOperation::merge(
-                    ColumnFamily::Values,
-                    ValueKey::serialize_blob(&id),
-                    if is_set { 1i64 } else { -1i64 }.serialize().unwrap(),
-                ));
-
                 // Store reference to blob
-                let key = ValueKey::serialize_document_blob(
+                let key = BlobKey::serialize_link(
+                    &id,
                     batch.account_id,
                     document.collection,
                     document.document_id,
-                    index,
                 );
                 write_batch.push(if is_set {
-                    WriteOperation::set(ColumnFamily::Values, key, id.serialize().unwrap())
+                    WriteOperation::set(ColumnFamily::Blobs, key, vec![])
                 } else {
-                    WriteOperation::delete(ColumnFamily::Values, key)
+                    WriteOperation::delete(ColumnFamily::Blobs, key)
                 });
             }
         }

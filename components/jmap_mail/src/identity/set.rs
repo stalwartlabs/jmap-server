@@ -149,9 +149,15 @@ where
     }
 
     fn delete(
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _jmap_id: store::JMAPId,
+        helper: &mut SetObjectHelper<T, Self::Helper>,
+        document: &mut Document,
     ) -> jmap::error::set::Result<()> {
+        if let Some(orm) = helper
+            .store
+            .get_orm::<IdentityProperty>(helper.account_id, document.document_id)?
+        {
+            orm.delete(document);
+        }
         Ok(())
     }
 }

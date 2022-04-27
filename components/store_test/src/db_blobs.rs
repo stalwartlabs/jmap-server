@@ -3,7 +3,7 @@ use std::sync::Arc;
 use store::{
     batch::{Document, WriteBatch},
     blob::{BlobEntries, BlobIndex},
-    field::{DefaultOptions, Options},
+    field::{IndexOptions, Options},
     serialize::{StoreDeserialize, BLOB_KEY_PREFIX},
     Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
@@ -85,7 +85,7 @@ where
                         document.binary(
                             0,
                             blob.clone(),
-                            DefaultOptions::new().store_blob(blob_index as BlobIndex),
+                            IndexOptions::new().store_blob(blob_index as BlobIndex),
                         );
                     }
                     db.write(WriteBatch::insert(account, document)).unwrap();

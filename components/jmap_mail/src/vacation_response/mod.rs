@@ -4,7 +4,7 @@ pub mod set;
 use std::fmt::Display;
 
 use jmap::{jmap_store::orm::PropertySchema, Property};
-use store::{field::TextIndex, Collection};
+use store::Collection;
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
@@ -56,15 +56,7 @@ impl PropertySchema for VacationResponseProperty {
         &[]
     }
 
-    fn sorted() -> &'static [Self] {
-        &[]
-    }
-
-    fn indexed() -> &'static [(Self, TextIndex)] {
-        &[]
-    }
-
-    fn tags() -> &'static [Self] {
+    fn indexed() -> &'static [(Self, u64)] {
         &[]
     }
 }

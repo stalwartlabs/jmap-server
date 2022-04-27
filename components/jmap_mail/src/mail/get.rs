@@ -9,12 +9,11 @@ use crate::mail::{
         header_to_jmap_url,
     },
     HeaderName, JMAPMailHeaders, Keyword, MailBodyProperty, MailHeaderForm, MailHeaderProperty,
-    MailProperty, MessageData, MessageField, MessageOutline, MimePart, MimePartType, MESSAGE_DATA,
-    MESSAGE_PARTS, MESSAGE_RAW,
+    MailProperty, MessageData, MessageField, MessageOutline, MimePart, MimePartType,
 };
 use jmap::{
     error::method::MethodError,
-    id::{blob::BlobId, JMAPIdSerialize},
+    id::{blob::JMAPBlob, JMAPIdSerialize},
     jmap_store::get::GetObject,
     protocol::json::JSONValue,
     request::get::GetRequest,
@@ -30,7 +29,7 @@ use mail_parser::{
     },
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{blob::BlobIndex, leb128::Leb128, AccountId, Collection, JMAPId, JMAPStore};
+use store::{blob::BlobId, leb128::Leb128, AccountId, Collection, JMAPId, JMAPStore};
 use store::{serialize::StoreDeserialize, JMAPIdPrefix};
 use store::{DocumentId, Store, StoreError};
 
@@ -57,10 +56,6 @@ pub struct MailGetArguments {
     pub fetch_html_body_values: bool,
     pub fetch_all_body_values: bool,
     pub max_body_value_bytes: usize,
-}
-
-trait BlobIdClone {
-    fn clone_with_index(&self, blob_index: BlobIndex) -> Self;
 }
 
 impl<'y, T> GetObject<'y, T> for GetMail<'y, T>
@@ -791,11 +786,11 @@ fn add_body_part(
             MailBodyProperty::BlobId if part_id.is_some() => {
                 body_part.insert(
                     "blobId".into(),
-                    JSONValue::String(
-                        base_blob_id
-                            .clone_with_index(mime_part.blob_index)
-                            .to_jmap_string(),
-                    ),
+                    mime_part
+                        .blob_id
+                        .as_ref()
+                        .map(|id| JMAPBlob::from(id).to_jmap_string())
+                        .into(),
                 );
             }
             MailBodyProperty::Header(header) if has_raw_headers => {
@@ -1197,29 +1192,6 @@ impl MailGetArguments {
             fetch_all_body_values,
             max_body_value_bytes,
         })
-    }
-}
-
-impl BlobIdClone for BlobId {
-    fn clone_with_index(&self, blob_index: BlobIndex) -> Self {
-        match self {
-            BlobId::Owned(owned) => {
-                let mut owned = owned.clone();
-                owned.blob_index = blob_index + MESSAGE_PARTS;
-                BlobId::Owned(owned)
-            }
-            BlobId::InnerOwned(inner) => {
-                let mut inner = inner.clone();
-                inner.blob_index = blob_index;
-                BlobId::InnerOwned(inner)
-            }
-            BlobId::InnerTemporary(inner) => {
-                let mut inner = inner.clone();
-                inner.blob_index = blob_index;
-                BlobId::InnerTemporary(inner)
-            }
-            BlobId::Temporary(_) => unreachable!(),
-        }
     }
 }
 

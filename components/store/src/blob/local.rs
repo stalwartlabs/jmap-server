@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{config::EnvSettings, mutex_map::MutexMap, StoreError};
+use crate::{config::EnvSettings, StoreError};
 
 use super::{BlobId, BlobStore};
 

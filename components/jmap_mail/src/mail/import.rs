@@ -1,31 +1,46 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::mail::parse::get_message_blob;
 use crate::mail::Keyword;
-use crate::mail::{parse::get_message_blob, MESSAGE_RAW};
 
 use jmap::error::method::MethodError;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::id::blob::BlobId;
+use jmap::id::blob::JMAPBlob;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::import::ImportObject;
 use jmap::jmap_store::set::CreateItemResult;
 use jmap::protocol::json::JSONValue;
 use jmap::request::import::ImportRequest;
-use store::batch::Document;
-use store::field::{DefaultOptions, Options};
+use mail_parser::decoders::html::{html_to_text, text_to_html};
+use mail_parser::parsers::fields::thread::thread_name;
+use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
+use nlp::Language;
+use store::batch::{Document, MAX_ID_LENGTH};
+use store::blob::BlobId;
+use store::chrono::{LocalResult, SecondsFormat, TimeZone, Utc};
+use store::field::{IndexOptions, Options};
+use store::leb128::Leb128;
 use store::query::DefaultIdMapper;
+use store::serialize::StoreSerialize;
 use store::tracing::debug;
 use store::tracing::log::error;
 use store::{
     batch::WriteBatch, field::Text, roaring::RoaringBitmap, AccountId, Comparator, FieldValue,
     Filter, JMAPId, JMAPStore, Store, Tag, ThreadId,
 };
-use store::{Collection, DocumentId, JMAPIdPrefix};
+use store::{Collection, DocumentId, Integer, JMAPIdPrefix, LongInteger, StoreError};
 
 use crate::mail::MessageField;
 
-use super::parse::MessageParser;
+use super::parse::{
+    empty_text_mime_headers, header_to_jmap_address, header_to_jmap_date, header_to_jmap_id,
+    header_to_jmap_text, header_to_jmap_url, mime_header_to_jmap, mime_parts_to_jmap,
+    MessageParser,
+};
+use super::{
+    MailHeaderForm, MailHeaderProperty, MailProperty, MessageData, MessageOutline, MimePart,
+};
 
 pub struct ImportMail<'y, T>
 where
@@ -36,7 +51,7 @@ where
     pub mailbox_ids: RoaringBitmap,
 }
 pub struct ImportItem {
-    pub blob_id: BlobId,
+    pub blob_id: JMAPBlob,
     pub mailbox_ids: Vec<DocumentId>,
     pub keywords: Vec<Keyword>,
     pub received_at: Option<i64>,
@@ -86,7 +101,7 @@ where
                     .ok_or_else(|| {
                         MethodError::InvalidArguments(format!("Missing blobId for {}.", id))
                     })?
-                    .parse_blob_id(false)?
+                    .parse_blob(false)?
                     .unwrap(),
                 mailbox_ids: item_value
                     .remove("mailboxIds")
@@ -156,7 +171,8 @@ where
                 .store
                 .mail_import(
                     self.account_id,
-                    blob,
+                    item.blob_id.id,
+                    &blob,
                     item.mailbox_ids,
                     item.keywords.into_iter().map(|k| k.tag).collect(),
                     item.received_at,
@@ -185,11 +201,20 @@ pub trait JMAPMailImport {
     fn mail_import(
         &self,
         account_id: AccountId,
-        blob: Vec<u8>,
+        blob_id: BlobId,
+        blob: &[u8],
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
         received_at: Option<i64>,
     ) -> jmap::Result<MailImportResult>;
+
+    fn mail_parse(
+        &self,
+        document: &mut Document,
+        blob_id: BlobId,
+        raw_message: &[u8],
+        received_at: Option<i64>,
+    ) -> store::Result<(Vec<String>, String)>;
 
     fn mail_set_thread(
         &self,
@@ -220,7 +245,7 @@ pub trait JMAPMailImport {
 
 pub struct MailImportResult {
     pub id: JMAPId,
-    pub blob_id: BlobId,
+    pub blob_id: JMAPBlob,
     pub thread_id: DocumentId,
     pub size: usize,
 }
@@ -256,7 +281,8 @@ where
     fn mail_import(
         &self,
         account_id: AccountId,
-        blob: Vec<u8>,
+        blob_id: BlobId,
+        blob: &[u8],
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
         received_at: Option<i64>,
@@ -266,14 +292,25 @@ where
         let mut document = Document::new(Collection::Mail, document_id);
         let size = blob.len();
 
-        // Add mailbox tags
-        for mailbox_id in &mailbox_ids {
-            batch.log_child_update(Collection::Mailbox, *mailbox_id);
+        // Parse message
+        let jmap_blob: JMAPBlob = (&blob_id).into();
+        let (reference_ids, thread_name) =
+            self.mail_parse(&mut document, blob_id, blob, received_at)?;
+
+        // Add keyword tags
+        for keyword in keywords {
+            document.tag(MessageField::Keyword, keyword, IndexOptions::new());
         }
 
-        // Parse message
-        let (reference_ids, thread_name) =
-            document.parse_message(blob, mailbox_ids, keywords, received_at)?;
+        // Add mailbox tags
+        for mailbox_id in mailbox_ids {
+            batch.log_child_update(Collection::Mailbox, mailbox_id);
+            document.tag(
+                MessageField::Mailbox,
+                Tag::Id(mailbox_id),
+                IndexOptions::new(),
+            );
+        }
 
         // Lock account while threads are merged
         let _lock = self.lock_account(batch.account_id, Collection::Mail);
@@ -285,12 +322,7 @@ where
         // Write document to store
         let result = MailImportResult {
             id: JMAPId::from_parts(thread_id, document_id),
-            blob_id: BlobId::new_owned(
-                batch.account_id,
-                Collection::Mail,
-                document.document_id,
-                MESSAGE_RAW,
-            ),
+            blob_id: jmap_blob,
             thread_id,
             size,
         };
@@ -299,6 +331,460 @@ where
         self.write(batch)?;
 
         Ok(result)
+    }
+
+    fn mail_parse(
+        &self,
+        document: &mut Document,
+        blob_id: BlobId,
+        raw_message: &[u8],
+        received_at: Option<i64>,
+    ) -> store::Result<(Vec<String>, String)> {
+        let message = Message::parse(&raw_message).ok_or_else(|| {
+            StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
+        })?;
+        let mut total_parts = message.parts.len();
+        let mut message_data = MessageData {
+            properties: HashMap::with_capacity(message.headers_rfc.len() + 3),
+            mime_parts: Vec::with_capacity(total_parts + 1),
+            html_body: message.html_body,
+            text_body: message.text_body,
+            attachments: message.attachments,
+            raw_message: blob_id,
+        };
+        let mut message_outline = MessageOutline {
+            body_offset: message.offset_body,
+            body_structure: message.structure,
+            headers: Vec::with_capacity(total_parts + 1),
+            received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
+        };
+        let mut has_attachments = false;
+
+        message_data
+            .properties
+            .insert(MailProperty::Size, message.raw_message.len().into());
+
+        document.number(
+            MessageField::Size,
+            message.raw_message.len() as Integer,
+            IndexOptions::new().sort(),
+        );
+
+        message_data.properties.insert(
+            MailProperty::ReceivedAt,
+            if let LocalResult::Single(received_at) =
+                Utc.timestamp_opt(message_outline.received_at, 0)
+            {
+                JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
+            } else {
+                JSONValue::Null
+            },
+        );
+
+        document.number(
+            MessageField::ReceivedAt,
+            message_outline.received_at as LongInteger,
+            IndexOptions::new().sort(),
+        );
+
+        let mut reference_ids = Vec::new();
+        let mut mime_parts = HashMap::with_capacity(5);
+        let mut base_subject = None;
+
+        for (header_name, header_value) in message.headers_rfc {
+            // Add headers to document
+            document.parse_header(header_name, &header_value);
+
+            // Tag header
+            document.tag(
+                MessageField::HasHeader,
+                Tag::Static(header_name.into()),
+                IndexOptions::new(),
+            );
+
+            // Build JMAP headers
+            match header_name {
+                RfcHeader::MessageId
+                | RfcHeader::InReplyTo
+                | RfcHeader::References
+                | RfcHeader::ResentMessageId => {
+                    // Build a list containing all IDs that appear in the header
+                    match &header_value {
+                        HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
+                            reference_ids.push(text.to_string())
+                        }
+                        HeaderValue::TextList(list) => {
+                            reference_ids.extend(list.iter().filter_map(|text| {
+                                if text.len() <= MAX_ID_LENGTH {
+                                    Some(text.to_string())
+                                } else {
+                                    None
+                                }
+                            }));
+                        }
+                        HeaderValue::Collection(col) => {
+                            for item in col {
+                                match item {
+                                    HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
+                                        reference_ids.push(text.to_string())
+                                    }
+                                    HeaderValue::TextList(list) => {
+                                        reference_ids.extend(list.iter().filter_map(|text| {
+                                            if text.len() <= MAX_ID_LENGTH {
+                                                Some(text.to_string())
+                                            } else {
+                                                None
+                                            }
+                                        }))
+                                    }
+                                    _ => (),
+                                }
+                            }
+                        }
+                        _ => (),
+                    }
+                    let (value, is_collection) = header_to_jmap_id(header_value);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            MailHeaderForm::MessageIds,
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
+                    // Build sort index
+                    document.add_addr_sort(header_name, &header_value);
+                    let (value, is_grouped, is_collection) =
+                        header_to_jmap_address(header_value, false);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            if is_grouped {
+                                MailHeaderForm::GroupedAddresses
+                            } else {
+                                MailHeaderForm::Addresses
+                            },
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::ReplyTo
+                | RfcHeader::Sender
+                | RfcHeader::ResentTo
+                | RfcHeader::ResentFrom
+                | RfcHeader::ResentBcc
+                | RfcHeader::ResentCc
+                | RfcHeader::ResentSender => {
+                    let (value, is_grouped, is_collection) =
+                        header_to_jmap_address(header_value, false);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            if is_grouped {
+                                MailHeaderForm::GroupedAddresses
+                            } else {
+                                MailHeaderForm::Addresses
+                            },
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::Date | RfcHeader::ResentDate => {
+                    let (value, is_collection) = header_to_jmap_date(header_value);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            MailHeaderForm::Date,
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::ListArchive
+                | RfcHeader::ListHelp
+                | RfcHeader::ListOwner
+                | RfcHeader::ListPost
+                | RfcHeader::ListSubscribe
+                | RfcHeader::ListUnsubscribe => {
+                    let (value, is_collection) = header_to_jmap_url(header_value);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            MailHeaderForm::URLs,
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::Subject => {
+                    if let HeaderValue::Text(subject) = &header_value {
+                        let thread_name = thread_name(subject);
+
+                        document.text(
+                            RfcHeader::Subject,
+                            subject.to_string(),
+                            Language::Unknown,
+                            IndexOptions::new().full_text(0),
+                        );
+
+                        base_subject = Some(if !thread_name.is_empty() {
+                            thread_name.to_string()
+                        } else {
+                            "!".to_string()
+                        });
+                    }
+                    let (value, is_collection) = header_to_jmap_text(header_value);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            MailHeaderForm::Text,
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId => {
+                    let (value, is_collection) = header_to_jmap_text(header_value);
+                    message_data.properties.insert(
+                        MailProperty::Header(MailHeaderProperty::new_rfc(
+                            header_name,
+                            MailHeaderForm::Text,
+                            is_collection,
+                        )),
+                        value,
+                    );
+                }
+                RfcHeader::ContentType
+                | RfcHeader::ContentDisposition
+                | RfcHeader::ContentId
+                | RfcHeader::ContentLanguage
+                | RfcHeader::ContentLocation => {
+                    mime_header_to_jmap(&mut mime_parts, header_name, header_value);
+                }
+                RfcHeader::ContentTransferEncoding
+                | RfcHeader::ContentDescription
+                | RfcHeader::MimeVersion
+                | RfcHeader::Received
+                | RfcHeader::ReturnPath => (),
+            }
+        }
+
+        message_data.mime_parts.push(MimePart::new_part(mime_parts));
+        message_outline.headers.push(
+            message
+                .headers_raw
+                .into_iter()
+                .map(|(k, v)| (k.into(), v))
+                .collect(),
+        );
+
+        let mut extra_mime_parts = Vec::new();
+
+        for (part_id, part) in message.parts.into_iter().enumerate() {
+            match part {
+                MessagePart::Html(html) => {
+                    let text = html_to_text(html.body.as_ref());
+                    let text_len = text.len();
+                    let html_len = html.body.len();
+                    let (text_part_id, field) = if let Some(pos) =
+                        message_data.text_body.iter().position(|&p| p == part_id)
+                    {
+                        message_data.text_body[pos] = total_parts;
+                        extra_mime_parts.push(MimePart::new_text(
+                            empty_text_mime_headers(false, text_len),
+                            self.blob_store(text.as_bytes())?,
+                            false,
+                        ));
+                        total_parts += 1;
+                        (total_parts - 1, MessageField::Body)
+                    } else if message_data.html_body.contains(&part_id) {
+                        (part_id, MessageField::Body)
+                    } else {
+                        has_attachments = true;
+                        (part_id, MessageField::Attachment)
+                    };
+
+                    document.text(
+                        field.clone(),
+                        text,
+                        Language::Unknown,
+                        IndexOptions::new().full_text(text_part_id as u32),
+                    );
+
+                    message_data.mime_parts.push(MimePart::new_html(
+                        mime_parts_to_jmap(html.headers_rfc, html_len),
+                        self.blob_store(html.body.as_bytes())?,
+                        html.is_encoding_problem,
+                    ));
+                    message_outline.headers.push(
+                        html.headers_raw
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v))
+                            .collect(),
+                    );
+                }
+                MessagePart::Text(text) => {
+                    let text_len = text.body.len();
+                    let field = if let Some(pos) =
+                        message_data.html_body.iter().position(|&p| p == part_id)
+                    {
+                        let html = text_to_html(text.body.as_ref());
+                        let html_len = html.len();
+
+                        extra_mime_parts.push(MimePart::new_html(
+                            empty_text_mime_headers(true, html_len),
+                            self.blob_store(html.as_bytes())?,
+                            false,
+                        ));
+                        message_data.html_body[pos] = total_parts;
+                        total_parts += 1;
+                        MessageField::Body
+                    } else if message_data.text_body.contains(&part_id) {
+                        MessageField::Body
+                    } else {
+                        has_attachments = true;
+                        MessageField::Attachment
+                    };
+
+                    message_data.mime_parts.push(MimePart::new_text(
+                        mime_parts_to_jmap(text.headers_rfc, text_len),
+                        self.blob_store(text.body.as_bytes())?,
+                        text.is_encoding_problem,
+                    ));
+                    message_outline.headers.push(
+                        text.headers_raw
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v))
+                            .collect(),
+                    );
+
+                    document.text(
+                        field,
+                        text.body.into_owned(),
+                        Language::Unknown,
+                        IndexOptions::new().full_text(part_id as u32),
+                    );
+                }
+                MessagePart::Binary(binary) => {
+                    if !has_attachments {
+                        has_attachments = true;
+                    }
+                    message_data.mime_parts.push(MimePart::new_binary(
+                        mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                        self.blob_store(binary.body.as_ref())?,
+                        binary.is_encoding_problem,
+                    ));
+                    message_outline.headers.push(
+                        binary
+                            .headers_raw
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v))
+                            .collect(),
+                    );
+                }
+                MessagePart::InlineBinary(binary) => {
+                    message_data.mime_parts.push(MimePart::new_binary(
+                        mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                        self.blob_store(binary.body.as_ref())?,
+                        binary.is_encoding_problem,
+                    ));
+                    message_outline.headers.push(
+                        binary
+                            .headers_raw
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v))
+                            .collect(),
+                    );
+                }
+                MessagePart::Message(nested_message) => {
+                    if !has_attachments {
+                        has_attachments = true;
+                    }
+
+                    let (blob_id, part_len) = match nested_message.body {
+                        MessageAttachment::Parsed(mut message) => {
+                            document.parse_attached_message(&mut message);
+                            (
+                                self.blob_store(message.raw_message.as_ref())?,
+                                message.raw_message.len(),
+                            )
+                        }
+                        MessageAttachment::Raw(raw_message) => {
+                            if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
+                                document.parse_attached_message(message);
+                            }
+
+                            (self.blob_store(raw_message.as_ref())?, raw_message.len())
+                        }
+                    };
+
+                    message_data.mime_parts.push(MimePart::new_binary(
+                        mime_parts_to_jmap(nested_message.headers_rfc, part_len),
+                        blob_id,
+                        false,
+                    ));
+
+                    message_outline.headers.push(
+                        nested_message
+                            .headers_raw
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v))
+                            .collect(),
+                    );
+                }
+                MessagePart::Multipart(part) => {
+                    message_data
+                        .mime_parts
+                        .push(MimePart::new_part(mime_parts_to_jmap(part.headers_rfc, 0)));
+                    message_outline.headers.push(
+                        part.headers_raw
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v))
+                            .collect(),
+                    );
+                }
+            };
+        }
+
+        if !extra_mime_parts.is_empty() {
+            message_data.mime_parts.append(&mut extra_mime_parts);
+        }
+
+        message_data
+            .properties
+            .insert(MailProperty::HasAttachment, has_attachments.into());
+
+        if has_attachments {
+            document.tag(MessageField::Attachment, Tag::Default, IndexOptions::new());
+        }
+
+        let mut message_data = message_data
+            .serialize()
+            .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
+        let mut message_outline = message_outline.serialize().ok_or_else(|| {
+            StoreError::SerializeError("Failed to serialize message outline".into())
+        })?;
+        let mut buf = Vec::with_capacity(
+            message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
+        );
+        message_data.len().to_leb128_bytes(&mut buf);
+        buf.append(&mut message_data);
+        buf.append(&mut message_outline);
+
+        let blob_id = self.blob_store(&buf)?;
+
+        // TODO search by "header exists"
+        // TODO use content language when available
+        // TODO index PDF, Doc, Excel, etc.
+
+        Ok((
+            reference_ids,
+            base_subject.unwrap_or_else(|| "!".to_string()),
+        ))
     }
 
     fn mail_set_thread(
@@ -312,7 +798,7 @@ where
         let thread_id = if !reference_ids.is_empty() {
             // Obtain thread ids for all matching document ids
             let thread_ids = self
-                .get_multi_document_tag_id(
+                .get_multi_document_value(
                     batch.account_id,
                     Collection::Mail,
                     self.query_store::<DefaultIdMapper>(
@@ -344,7 +830,7 @@ where
                     MessageField::ThreadId.into(),
                 )?
                 .into_iter()
-                .filter_map(|id| Some(*id?))
+                .filter_map(|id: Option<DocumentId>| Some(id?))
                 .collect::<HashSet<ThreadId>>();
 
             match thread_ids.len() {
@@ -374,21 +860,29 @@ where
         for reference_id in reference_ids {
             document.text(
                 MessageField::MessageIdRef,
-                Text::keyword(reference_id),
-                DefaultOptions::new(),
+                reference_id,
+                Language::Unknown,
+                IndexOptions::new().keyword(),
             );
         }
 
         document.tag(
             MessageField::ThreadId,
             Tag::Id(thread_id),
-            DefaultOptions::new(),
+            IndexOptions::new(),
+        );
+
+        document.number(
+            MessageField::ThreadId,
+            thread_id,
+            IndexOptions::new().store(),
         );
 
         document.text(
             MessageField::ThreadName,
-            Text::keyword(thread_name),
-            DefaultOptions::new().sort(),
+            thread_name,
+            Language::Unknown,
+            IndexOptions::new().keyword().sort(),
         );
 
         Ok(thread_id)
@@ -437,12 +931,17 @@ where
                 document.tag(
                     MessageField::ThreadId,
                     Tag::Id(thread_id),
-                    DefaultOptions::new(),
+                    IndexOptions::new(),
                 );
                 document.tag(
                     MessageField::ThreadId,
                     Tag::Id(delete_thread_id),
-                    DefaultOptions::new().clear(),
+                    IndexOptions::new().clear(),
+                );
+                document.number(
+                    MessageField::ThreadId,
+                    thread_id,
+                    IndexOptions::new().store(),
                 );
                 batch.log_move(
                     Collection::Mail,
@@ -468,7 +967,7 @@ where
         keywords: HashSet<Tag>,
         insert: Option<(Vec<u8>, i64)>,
     ) -> store::Result<()> {
-        if let Some((raw_message, received_at)) = insert {
+        /*if let Some((raw_message, received_at)) = insert {
             let mut document = Document::new(Collection::Mail, document_id);
 
             // Parse and build message document
@@ -476,18 +975,18 @@ where
                 document.parse_message(raw_message, vec![], vec![], received_at.into())?;
 
             for mailbox in mailboxes {
-                document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
+                document.tag(MessageField::Mailbox, mailbox, IndexOptions::new());
             }
 
             for keyword in keywords {
-                document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
+                document.tag(MessageField::Keyword, keyword, IndexOptions::new());
             }
 
             for reference_id in reference_ids {
                 document.text(
                     MessageField::MessageIdRef,
                     Text::keyword(reference_id),
-                    DefaultOptions::new(),
+                    IndexOptions::new(),
                 );
             }
 
@@ -495,12 +994,12 @@ where
             document.tag(
                 MessageField::ThreadId,
                 Tag::Id(thread_id),
-                DefaultOptions::new(),
+                IndexOptions::new(),
             );
             document.text(
                 MessageField::ThreadName,
                 Text::keyword(thread_name),
-                DefaultOptions::new().sort(),
+                IndexOptions::new().sort(),
             );
 
             batch.insert_document(document);
@@ -520,14 +1019,14 @@ where
                             document.tag(
                                 MessageField::Mailbox,
                                 current_mailbox.clone(),
-                                DefaultOptions::new().clear(),
+                                IndexOptions::new().clear(),
                             );
                         }
                     }
 
                     for mailbox in mailboxes {
                         if !current_mailboxes.contains(&mailbox) {
-                            document.tag(MessageField::Mailbox, mailbox, DefaultOptions::new());
+                            document.tag(MessageField::Mailbox, mailbox, IndexOptions::new());
                         }
                     }
                 }
@@ -556,14 +1055,14 @@ where
                         document.tag(
                             MessageField::Keyword,
                             current_keyword.clone(),
-                            DefaultOptions::new().clear(),
+                            IndexOptions::new().clear(),
                         );
                     }
                 }
 
                 for keyword in keywords {
                     if !current_keywords.contains(&keyword) {
-                        document.tag(MessageField::Keyword, keyword, DefaultOptions::new());
+                        document.tag(MessageField::Keyword, keyword, IndexOptions::new());
                     }
                 }
             }
@@ -579,12 +1078,12 @@ where
                     document.tag(
                         MessageField::ThreadId,
                         Tag::Id(thread_id),
-                        DefaultOptions::new(),
+                        IndexOptions::new(),
                     );
                     document.tag(
                         MessageField::ThreadId,
                         Tag::Id(current_thread_id),
-                        DefaultOptions::new().clear(),
+                        IndexOptions::new().clear(),
                     );
                 }
             } else {
@@ -598,7 +1097,7 @@ where
             if !document.is_empty() {
                 batch.update_document(document);
             }
-        }
+        }*/
         Ok(())
     }
 }

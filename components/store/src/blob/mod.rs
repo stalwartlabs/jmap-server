@@ -1,7 +1,6 @@
 use std::{convert::TryInto, fmt::Display, ops::Range};
 
 use sha2::{Digest, Sha256};
-use tracing::error;
 
 use crate::{
     config::EnvSettings,
@@ -19,7 +18,7 @@ pub mod store;
 
 pub const BLOB_HASH_LEN: usize = 32;
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BlobId {
     pub hash: [u8; BLOB_HASH_LEN],
     pub size: u32,
@@ -34,6 +33,15 @@ impl From<&[u8]> for BlobId {
         BlobId {
             hash: hasher.finalize().into(),
             size: bytes.len() as u32,
+        }
+    }
+}
+
+impl From<usize> for BlobId {
+    fn from(size: usize) -> Self {
+        BlobId {
+            hash: [0; BLOB_HASH_LEN],
+            size: size as u32,
         }
     }
 }

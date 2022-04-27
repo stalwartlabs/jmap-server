@@ -5,7 +5,7 @@ use std::{
 };
 
 use jmap::{
-    id::{blob::BlobId, JMAPIdSerialize},
+    id::{blob::JMAPBlob, JMAPIdSerialize},
     jmap_store::{blob::InnerBlobFnc, parse::ParseObject},
     protocol::json::JSONValue,
     request::parse::ParseRequest,
@@ -19,11 +19,14 @@ use mail_parser::{
     Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader,
     RfcHeaders,
 };
-use nlp::lang::{LanguageDetector, MIN_LANGUAGE_SCORE};
+use nlp::{
+    lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
+    Language,
+};
 use store::{
     batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
-    blob::BlobIndex,
-    field::{DefaultOptions, Options, Text},
+    blob::BlobId,
+    field::{IndexOptions, Options, Text},
     leb128::Leb128,
     serialize::StoreSerialize,
     AccountId, Integer, JMAPStore, LongInteger, Store, StoreError, Tag,
@@ -40,8 +43,7 @@ use crate::mail::{
         transform_rfc_header, MailGetArguments,
     },
     HeaderName, JMAPMailMimeHeaders, MailBodyProperty, MailHeaderForm, MailHeaderProperty,
-    MailProperty, MessageData, MessageField, MessageOutline, MimePart, MimePartType, MESSAGE_DATA,
-    MESSAGE_PARTS, MESSAGE_RAW,
+    MailProperty, MessageData, MessageField, MessageOutline, MimePart, MimePartType,
 };
 
 pub struct ParseMail {
@@ -87,7 +89,7 @@ where
         })
     }
 
-    fn parse_blob(&self, blob_id: BlobId, blob: Vec<u8>) -> jmap::Result<Option<JSONValue>> {
+    fn parse_blob(&self, blob_id: JMAPBlob, blob: Vec<u8>) -> jmap::Result<Option<JSONValue>> {
         Ok(Message::parse(&blob)
             .map(|message| self.build_message_response(message, &blob_id, &blob)))
     }
@@ -101,7 +103,7 @@ impl ParseMail {
     fn build_message_response(
         &self,
         mut message: Message,
-        blob_id: &BlobId,
+        blob_id: &JMAPBlob,
         raw_message: &[u8],
     ) -> JSONValue {
         let mut total_parts = message.parts.len();
@@ -116,8 +118,6 @@ impl ParseMail {
             received_at: 0,
         };
         let mut has_attachments = false;
-
-        let base_blob_id = BlobId::new_inner(blob_id.clone(), 0).unwrap_or_else(|| blob_id.clone());
 
         // Add MIME headers
         {
@@ -134,7 +134,7 @@ impl ParseMail {
                     mime_header_to_jmap(&mut mime_headers, header_name, header_value);
                 }
             }
-            mime_parts.push(MimePart::new_other(mime_headers, 0, false));
+            mime_parts.push(MimePart::new_part(mime_headers));
         }
 
         message_outline.headers.push(
@@ -157,7 +157,7 @@ impl ParseMail {
                         let value = html_to_text(html.body.as_ref()).into_bytes();
                         extra_mime_parts.push(MimePart::new_text(
                             empty_text_mime_headers(false, value.len()),
-                            blobs.len() as BlobIndex,
+                            blobs.len().into(),
                             false,
                         ));
                         blobs.push(value);
@@ -167,7 +167,7 @@ impl ParseMail {
                     }
                     mime_parts.push(MimePart::new_html(
                         mime_parts_to_jmap(html.headers_rfc, html.body.len()),
-                        blobs.len() as BlobIndex,
+                        blobs.len().into(),
                         html.is_encoding_problem,
                     ));
                     blobs.push(html.body.into_owned().into_bytes());
@@ -184,7 +184,7 @@ impl ParseMail {
                         let value_len = value.len();
                         extra_mime_parts.push(MimePart::new_html(
                             empty_text_mime_headers(true, value_len),
-                            blobs.len() as BlobIndex,
+                            blobs.len().into(),
                             false,
                         ));
                         blobs.push(value.into_bytes());
@@ -195,7 +195,7 @@ impl ParseMail {
                     }
                     mime_parts.push(MimePart::new_text(
                         mime_parts_to_jmap(text.headers_rfc, text.body.len()),
-                        blobs.len() as BlobIndex,
+                        blobs.len().into(),
                         text.is_encoding_problem,
                     ));
                     blobs.push(text.body.into_owned().into_bytes());
@@ -210,9 +210,9 @@ impl ParseMail {
                     if !has_attachments {
                         has_attachments = true;
                     }
-                    mime_parts.push(MimePart::new_other(
+                    mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        blobs.len() as BlobIndex,
+                        blobs.len().into(),
                         binary.is_encoding_problem,
                     ));
                     blobs.push(binary.body.into_owned());
@@ -225,9 +225,9 @@ impl ParseMail {
                     );
                 }
                 MessagePart::InlineBinary(binary) => {
-                    mime_parts.push(MimePart::new_other(
+                    mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        blobs.len() as BlobIndex,
+                        blobs.len().into(),
                         binary.is_encoding_problem,
                     ));
                     blobs.push(binary.body.into_owned());
@@ -244,7 +244,7 @@ impl ParseMail {
                         has_attachments = true;
                     }
                     let blob_index = blobs.len();
-                    mime_parts.push(MimePart::new_other(
+                    mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(
                             nested_message.headers_rfc,
                             match nested_message.body {
@@ -260,7 +260,7 @@ impl ParseMail {
                                 }
                             },
                         ),
-                        blob_index as BlobIndex,
+                        blob_index.into(),
                         false,
                     ));
                     message_outline.headers.push(
@@ -272,11 +272,7 @@ impl ParseMail {
                     );
                 }
                 MessagePart::Multipart(part) => {
-                    mime_parts.push(MimePart::new_other(
-                        mime_parts_to_jmap(part.headers_rfc, 0),
-                        0,
-                        false,
-                    ));
+                    mime_parts.push(MimePart::new_part(mime_parts_to_jmap(part.headers_rfc, 0)));
                     message_outline.headers.push(
                         part.headers_raw
                             .into_iter()
@@ -451,8 +447,9 @@ impl ParseMail {
                                         .get(0)
                                         .and_then(|p| mime_parts.get(p + 1))
                                         .unwrap()
-                                        .blob_index
-                                        as usize],
+                                        .blob_id
+                                        .unwrap()
+                                        .size as usize],
                                 ),
                                 256,
                             )
@@ -465,8 +462,9 @@ impl ParseMail {
                                         .get(0)
                                         .and_then(|p| mime_parts.get(p + 1))
                                         .unwrap()
-                                        .blob_index
-                                        as usize],
+                                        .blob_id
+                                        .unwrap()
+                                        .size as usize],
                                 ),
                                 256,
                             )
@@ -513,7 +511,7 @@ impl ParseMail {
                                         add_body_value(
                                             mime_part,
                                             String::from_utf8_lossy(
-                                                &blobs[mime_part.blob_index as usize],
+                                                &blobs[mime_part.blob_id.unwrap().size as usize],
                                             )
                                             .into_owned(),
                                             &self.arguments,
@@ -531,7 +529,7 @@ impl ParseMail {
                         &self.arguments.body_properties,
                         Some(raw_message),
                         Some(&message_outline),
-                        &base_blob_id,
+                        &blob_id.id,
                     ),
 
                     MailProperty::HtmlBody => add_body_parts(
@@ -540,7 +538,7 @@ impl ParseMail {
                         &self.arguments.body_properties,
                         Some(raw_message),
                         Some(&message_outline),
-                        &base_blob_id,
+                        &blob_id.id,
                     ),
 
                     MailProperty::Attachments => add_body_parts(
@@ -549,7 +547,7 @@ impl ParseMail {
                         &self.arguments.body_properties,
                         Some(raw_message),
                         Some(&message_outline),
-                        &base_blob_id,
+                        &blob_id.id,
                     ),
 
                     MailProperty::BodyStructure => {
@@ -558,7 +556,7 @@ impl ParseMail {
                             &mime_parts,
                             &self.arguments.body_properties,
                             Some(raw_message),
-                            &base_blob_id,
+                            &blob_id.id,
                         ) {
                             body_structure
                         } else {
@@ -573,7 +571,7 @@ impl ParseMail {
     }
 }
 
-pub fn get_message_blob(raw_message: &[u8], blob_index: BlobIndex) -> Option<Vec<u8>> {
+pub fn get_message_blob(raw_message: &[u8], blob_index: u32) -> Option<Vec<u8>> {
     let message = Message::parse(raw_message)?;
     let mut blob_pos = 0;
 
@@ -632,18 +630,7 @@ pub fn get_message_blob(raw_message: &[u8], blob_index: BlobIndex) -> Option<Vec
 }
 
 pub trait MessageParser {
-    fn parse_message(
-        &mut self,
-        raw_message: Vec<u8>,
-        mailbox_ids: Vec<DocumentId>,
-        keywords: Vec<Tag>,
-        received_at: Option<i64>,
-    ) -> store::Result<(Vec<String>, String)>;
-    fn parse_attached_message(
-        &mut self,
-        message: &mut Message,
-        language_detector: &mut LanguageDetector,
-    );
+    fn parse_attached_message(&mut self, message: &mut Message);
     fn parse_address(&mut self, header_name: RfcHeader, address: &Addr);
     fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group);
     fn parse_text(&mut self, header_name: RfcHeader, text: &str);
@@ -653,554 +640,13 @@ pub trait MessageParser {
 }
 
 impl MessageParser for Document {
-    fn parse_message(
-        &mut self,
-        raw_message: Vec<u8>,
-        mailbox_ids: Vec<DocumentId>,
-        keywords: Vec<Tag>,
-        received_at: Option<i64>,
-    ) -> store::Result<(Vec<String>, String)> {
-        let message = Message::parse(&raw_message).ok_or_else(|| {
-            StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
-        })?;
-        let mut total_parts = message.parts.len();
-        let mut total_blobs = 0;
-        let mut message_data = MessageData {
-            properties: HashMap::with_capacity(message.headers_rfc.len() + 3),
-            mime_parts: Vec::with_capacity(total_parts + 1),
-            html_body: message.html_body,
-            text_body: message.text_body,
-            attachments: message.attachments,
-        };
-        let mut message_outline = MessageOutline {
-            body_offset: message.offset_body,
-            body_structure: message.structure,
-            headers: Vec::with_capacity(total_parts + 1),
-            received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
-        };
-        let mut language_detector = LanguageDetector::new();
-        let mut has_attachments = false;
-
-        // Add keyword tags
-        for keyword in keywords {
-            self.tag(MessageField::Keyword, keyword, DefaultOptions::new());
-        }
-
-        // Add mailbox tags
-        for mailbox_id in mailbox_ids {
-            self.tag(
-                MessageField::Mailbox,
-                Tag::Id(mailbox_id),
-                DefaultOptions::new(),
-            );
-        }
-
-        message_data
-            .properties
-            .insert(MailProperty::Size, message.raw_message.len().into());
-
-        self.number(
-            MessageField::Size,
-            message.raw_message.len() as Integer,
-            DefaultOptions::new().sort(),
-        );
-
-        message_data.properties.insert(
-            MailProperty::ReceivedAt,
-            if let LocalResult::Single(received_at) =
-                Utc.timestamp_opt(message_outline.received_at, 0)
-            {
-                JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
-            } else {
-                JSONValue::Null
-            },
-        );
-
-        self.number(
-            MessageField::ReceivedAt,
-            message_outline.received_at as LongInteger,
-            DefaultOptions::new().sort(),
-        );
-
-        let mut reference_ids = Vec::new();
-        let mut mime_parts = HashMap::with_capacity(5);
-        let mut base_subject = None;
-
-        for (header_name, header_value) in message.headers_rfc {
-            // Add headers to document
-            self.parse_header(header_name, &header_value);
-
-            // Tag header
-            self.tag(
-                MessageField::HasHeader,
-                Tag::Static(header_name.into()),
-                DefaultOptions::new(),
-            );
-
-            // Build JMAP headers
-            match header_name {
-                RfcHeader::MessageId
-                | RfcHeader::InReplyTo
-                | RfcHeader::References
-                | RfcHeader::ResentMessageId => {
-                    // Build a list containing all IDs that appear in the header
-                    match &header_value {
-                        HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                            reference_ids.push(text.to_string())
-                        }
-                        HeaderValue::TextList(list) => {
-                            reference_ids.extend(list.iter().filter_map(|text| {
-                                if text.len() <= MAX_ID_LENGTH {
-                                    Some(text.to_string())
-                                } else {
-                                    None
-                                }
-                            }));
-                        }
-                        HeaderValue::Collection(col) => {
-                            for item in col {
-                                match item {
-                                    HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                                        reference_ids.push(text.to_string())
-                                    }
-                                    HeaderValue::TextList(list) => {
-                                        reference_ids.extend(list.iter().filter_map(|text| {
-                                            if text.len() <= MAX_ID_LENGTH {
-                                                Some(text.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        }))
-                                    }
-                                    _ => (),
-                                }
-                            }
-                        }
-                        _ => (),
-                    }
-                    let (value, is_collection) = header_to_jmap_id(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::MessageIds,
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
-                    // Build sort index
-                    self.add_addr_sort(header_name, &header_value);
-                    let (value, is_grouped, is_collection) =
-                        header_to_jmap_address(header_value, false);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            if is_grouped {
-                                MailHeaderForm::GroupedAddresses
-                            } else {
-                                MailHeaderForm::Addresses
-                            },
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::ReplyTo
-                | RfcHeader::Sender
-                | RfcHeader::ResentTo
-                | RfcHeader::ResentFrom
-                | RfcHeader::ResentBcc
-                | RfcHeader::ResentCc
-                | RfcHeader::ResentSender => {
-                    let (value, is_grouped, is_collection) =
-                        header_to_jmap_address(header_value, false);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            if is_grouped {
-                                MailHeaderForm::GroupedAddresses
-                            } else {
-                                MailHeaderForm::Addresses
-                            },
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::Date | RfcHeader::ResentDate => {
-                    let (value, is_collection) = header_to_jmap_date(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::Date,
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::ListArchive
-                | RfcHeader::ListHelp
-                | RfcHeader::ListOwner
-                | RfcHeader::ListPost
-                | RfcHeader::ListSubscribe
-                | RfcHeader::ListUnsubscribe => {
-                    let (value, is_collection) = header_to_jmap_url(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::URLs,
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::Subject => {
-                    if let HeaderValue::Text(subject) = &header_value {
-                        let (thread_name, language) = match thread_name(subject) {
-                            thread_name if !thread_name.is_empty() => (
-                                thread_name.to_string(),
-                                language_detector.detect(thread_name, MIN_LANGUAGE_SCORE),
-                            ),
-                            _ => (
-                                "!".to_string(),
-                                language_detector.detect(subject, MIN_LANGUAGE_SCORE),
-                            ),
-                        };
-
-                        self.text(
-                            RfcHeader::Subject,
-                            Text::fulltext_lang(subject.to_string(), language),
-                            DefaultOptions::new(),
-                        );
-
-                        base_subject = Some(thread_name);
-                    }
-                    let (value, is_collection) = header_to_jmap_text(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::Text,
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId => {
-                    let (value, is_collection) = header_to_jmap_text(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::Text,
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::ContentType
-                | RfcHeader::ContentDisposition
-                | RfcHeader::ContentId
-                | RfcHeader::ContentLanguage
-                | RfcHeader::ContentLocation => {
-                    mime_header_to_jmap(&mut mime_parts, header_name, header_value);
-                }
-                RfcHeader::ContentTransferEncoding
-                | RfcHeader::ContentDescription
-                | RfcHeader::MimeVersion
-                | RfcHeader::Received
-                | RfcHeader::ReturnPath => (),
-            }
-        }
-
-        message_data
-            .mime_parts
-            .push(MimePart::new_other(mime_parts, 0, false));
-        message_outline.headers.push(
-            message
-                .headers_raw
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
-        );
-
-        let mut extra_mime_parts = Vec::new();
-
-        for (part_id, part) in message.parts.into_iter().enumerate() {
-            match part {
-                MessagePart::Html(html) => {
-                    let text = html_to_text(html.body.as_ref());
-                    let text_len = text.len();
-                    let html_len = html.body.len();
-                    let field = if let Some(pos) =
-                        message_data.text_body.iter().position(|&p| p == part_id)
-                    {
-                        message_data.text_body[pos] = total_parts;
-                        extra_mime_parts.push(MimePart::new_text(
-                            empty_text_mime_headers(false, text_len),
-                            total_blobs,
-                            false,
-                        ));
-                        total_parts += 1;
-                        MessageField::Body
-                    } else if message_data.html_body.contains(&part_id) {
-                        MessageField::Body
-                    } else {
-                        has_attachments = true;
-                        MessageField::Attachment
-                    };
-
-                    self.text(
-                        field.clone(),
-                        Text::fulltext(text, &mut language_detector),
-                        if field == MessageField::Body {
-                            let blob_index = total_blobs;
-                            total_blobs += 1;
-                            DefaultOptions::new().store_blob(blob_index + MESSAGE_PARTS)
-                        } else {
-                            DefaultOptions::new()
-                        },
-                    );
-
-                    self.text(
-                        field,
-                        Text::not_indexed(html.body.into_owned()),
-                        DefaultOptions::new().store_blob(total_blobs + MESSAGE_PARTS),
-                    );
-
-                    message_data.mime_parts.push(MimePart::new_html(
-                        mime_parts_to_jmap(html.headers_rfc, html_len),
-                        total_blobs,
-                        html.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        html.headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-
-                    total_blobs += 1;
-                }
-                MessagePart::Text(text) => {
-                    let text_len = text.body.len();
-                    let field = if let Some(pos) =
-                        message_data.html_body.iter().position(|&p| p == part_id)
-                    {
-                        let html = text_to_html(text.body.as_ref());
-                        let html_len = html.len();
-                        self.text(
-                            MessageField::Body,
-                            Text::not_indexed(html),
-                            DefaultOptions::new().store_blob(total_blobs + MESSAGE_PARTS),
-                        );
-                        extra_mime_parts.push(MimePart::new_html(
-                            empty_text_mime_headers(true, html_len),
-                            total_blobs,
-                            false,
-                        ));
-                        message_data.html_body[pos] = total_parts;
-                        total_blobs += 1;
-                        total_parts += 1;
-                        MessageField::Body
-                    } else if message_data.text_body.contains(&part_id) {
-                        MessageField::Body
-                    } else {
-                        has_attachments = true;
-                        MessageField::Attachment
-                    };
-
-                    self.text(
-                        field,
-                        Text::fulltext(text.body.into_owned(), &mut language_detector),
-                        DefaultOptions::new().store_blob(total_blobs + MESSAGE_PARTS),
-                    );
-
-                    message_data.mime_parts.push(MimePart::new_text(
-                        mime_parts_to_jmap(text.headers_rfc, text_len),
-                        total_blobs,
-                        text.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        text.headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-
-                    total_blobs += 1;
-                }
-                MessagePart::Binary(binary) => {
-                    if !has_attachments {
-                        has_attachments = true;
-                    }
-                    message_data.mime_parts.push(MimePart::new_other(
-                        mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        total_blobs,
-                        binary.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        binary
-                            .headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-
-                    self.binary(
-                        MessageField::Attachment,
-                        binary.body.into_owned(),
-                        DefaultOptions::new().store_blob(total_blobs + MESSAGE_PARTS),
-                    );
-                    total_blobs += 1;
-                }
-                MessagePart::InlineBinary(binary) => {
-                    message_data.mime_parts.push(MimePart::new_other(
-                        mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        total_blobs,
-                        binary.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        binary
-                            .headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-                    self.binary(
-                        MessageField::Attachment,
-                        binary.body.into_owned(),
-                        DefaultOptions::new().store_blob(total_blobs + MESSAGE_PARTS),
-                    );
-                    total_blobs += 1;
-                }
-                MessagePart::Message(nested_message) => {
-                    if !has_attachments {
-                        has_attachments = true;
-                    }
-                    message_data.mime_parts.push(MimePart::new_other(
-                        mime_parts_to_jmap(
-                            nested_message.headers_rfc,
-                            match nested_message.body {
-                                MessageAttachment::Parsed(mut message) => {
-                                    self.parse_attached_message(
-                                        &mut message,
-                                        &mut language_detector,
-                                    );
-                                    let message_size = message.raw_message.len();
-                                    self.binary(
-                                        MessageField::Attachment,
-                                        message.raw_message.into_owned(),
-                                        DefaultOptions::new()
-                                            .store_blob(total_blobs + MESSAGE_PARTS),
-                                    );
-                                    message_size
-                                }
-                                MessageAttachment::Raw(raw_message) => {
-                                    if let Some(message) = &mut Message::parse(raw_message.as_ref())
-                                    {
-                                        self.parse_attached_message(message, &mut language_detector)
-                                    }
-                                    let message_size = raw_message.len();
-                                    self.binary(
-                                        MessageField::Attachment,
-                                        raw_message.into_owned(),
-                                        DefaultOptions::new()
-                                            .store_blob(total_blobs + MESSAGE_PARTS),
-                                    );
-                                    message_size
-                                }
-                            },
-                        ),
-                        total_blobs,
-                        false,
-                    ));
-                    total_blobs += 1;
-                    message_outline.headers.push(
-                        nested_message
-                            .headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-                }
-                MessagePart::Multipart(part) => {
-                    message_data.mime_parts.push(MimePart::new_other(
-                        mime_parts_to_jmap(part.headers_rfc, 0),
-                        0,
-                        false,
-                    ));
-                    message_outline.headers.push(
-                        part.headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-                }
-            };
-        }
-
-        if !extra_mime_parts.is_empty() {
-            message_data.mime_parts.append(&mut extra_mime_parts);
-        }
-
-        message_data.properties.insert(
-            MailProperty::HasAttachment,
-            JSONValue::Bool(has_attachments),
-        );
-
-        if has_attachments {
-            self.tag(MessageField::Attachment, Tag::Id(0), DefaultOptions::new());
-        }
-
-        self.binary(
-            MessageField::Internal,
-            raw_message,
-            DefaultOptions::new().store_blob(MESSAGE_RAW),
-        );
-
-        let mut message_data = message_data
-            .serialize()
-            .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
-        let mut message_outline = message_outline.serialize().ok_or_else(|| {
-            StoreError::SerializeError("Failed to serialize message outline".into())
-        })?;
-        let mut buf = Vec::with_capacity(
-            message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
-        );
-        message_data.len().to_leb128_bytes(&mut buf);
-        buf.append(&mut message_data);
-        buf.append(&mut message_outline);
-
-        self.binary(
-            MessageField::Internal,
-            buf,
-            DefaultOptions::new().store_blob(MESSAGE_DATA),
-        );
-
-        if let Some(default_language) = language_detector.most_frequent_language() {
-            self.set_default_language(*default_language);
-        }
-
-        // TODO search by "header exists"
-        // TODO use content language when available
-        // TODO index PDF, Doc, Excel, etc.
-
-        Ok((
-            reference_ids,
-            base_subject.unwrap_or_else(|| "!".to_string()),
-        ))
-    }
-
-    fn parse_attached_message(
-        &mut self,
-        message: &mut Message,
-        language_detector: &mut LanguageDetector,
-    ) {
+    fn parse_attached_message(&mut self, message: &mut Message) {
         if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
             self.text(
                 MessageField::Attachment,
-                Text::fulltext(subject.into_owned(), language_detector),
-                DefaultOptions::new(),
+                subject.into_owned(),
+                Language::Unknown,
+                IndexOptions::new().full_text(0),
             );
         }
         for part in message.parts.drain(..) {
@@ -1208,15 +654,17 @@ impl MessageParser for Document {
                 MessagePart::Text(text) => {
                     self.text(
                         MessageField::Attachment,
-                        Text::fulltext(text.body.into_owned(), language_detector),
-                        DefaultOptions::new(),
+                        text.body.into_owned(),
+                        Language::Unknown,
+                        IndexOptions::new().full_text(0),
                     );
                 }
                 MessagePart::Html(html) => {
                     self.text(
                         MessageField::Attachment,
-                        Text::fulltext(html_to_text(&html.body), language_detector),
-                        DefaultOptions::new(),
+                        html_to_text(&html.body),
+                        Language::Unknown,
+                        IndexOptions::new().full_text(0),
                     );
                 }
                 _ => (),
@@ -1232,8 +680,9 @@ impl MessageParser for Document {
             if addr.len() <= MAX_TOKEN_LENGTH {
                 self.text(
                     header_name,
-                    Text::keyword(addr.to_lowercase()),
-                    DefaultOptions::new(),
+                    addr.to_lowercase(),
+                    Language::Unknown,
+                    IndexOptions::new().keyword(),
                 );
             }
         };
@@ -1261,8 +710,9 @@ impl MessageParser for Document {
                 if text.len() <= MAX_TOKEN_LENGTH {
                     self.text(
                         header_name,
-                        Text::keyword(text.to_lowercase()),
-                        DefaultOptions::new(),
+                        text.to_lowercase(),
+                        Language::Unknown,
+                        IndexOptions::new().keyword(),
                     );
                 }
             }
@@ -1272,8 +722,9 @@ impl MessageParser for Document {
             _ => {
                 self.text(
                     header_name,
-                    Text::tokenized(text.to_string()),
-                    DefaultOptions::new(),
+                    text.to_string(),
+                    Language::Unknown,
+                    IndexOptions::new().tokenize(),
                 );
             }
         }
@@ -1283,16 +734,18 @@ impl MessageParser for Document {
         if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
             self.text(
                 header_name,
-                Text::keyword(content_type.c_type.to_string()),
-                DefaultOptions::new(),
+                content_type.c_type.to_string(),
+                Language::Unknown,
+                IndexOptions::new().keyword(),
             );
         }
         if let Some(subtype) = &content_type.c_subtype {
             if subtype.len() <= MAX_TOKEN_LENGTH {
                 self.text(
                     header_name,
-                    Text::keyword(subtype.to_string()),
-                    DefaultOptions::new(),
+                    subtype.to_string(),
+                    Language::Unknown,
+                    IndexOptions::new().keyword(),
                 );
             }
         }
@@ -1301,14 +754,16 @@ impl MessageParser for Document {
                 if key == "name" || key == "filename" {
                     self.text(
                         header_name,
-                        Text::tokenized(value.to_string()),
-                        DefaultOptions::new(),
+                        value.to_string(),
+                        Language::Unknown,
+                        IndexOptions::new().tokenize(),
                     );
                 } else if value.len() <= MAX_TOKEN_LENGTH {
                     self.text(
                         header_name,
-                        Text::keyword(value.to_lowercase()),
-                        DefaultOptions::new(),
+                        value.to_lowercase(),
+                        Language::Unknown,
+                        IndexOptions::new().keyword(),
                     );
                 }
             }
@@ -1370,8 +825,9 @@ impl MessageParser for Document {
             }
             self.text(
                 header_name,
-                Text::tokenized(text),
-                DefaultOptions::new().sort(),
+                text,
+                Language::Unknown,
+                IndexOptions::new().tokenize().sort(),
             );
         };
     }
@@ -1407,7 +863,7 @@ impl MessageParser for Document {
                     self.number(
                         header_name,
                         date_time.to_timestamp() as u64,
-                        DefaultOptions::new().sort(),
+                        IndexOptions::new().sort(),
                     );
                 }
             }
@@ -1631,7 +1087,7 @@ pub fn header_to_jmap_address(
     }
 }
 
-fn empty_text_mime_headers(is_html: bool, size: usize) -> JMAPMailMimeHeaders {
+pub fn empty_text_mime_headers(is_html: bool, size: usize) -> JMAPMailMimeHeaders {
     let mut mime_parts = HashMap::with_capacity(2);
     mime_parts.insert(MailBodyProperty::Size, size.into());
     mime_parts.insert(
@@ -1645,7 +1101,7 @@ fn empty_text_mime_headers(is_html: bool, size: usize) -> JMAPMailMimeHeaders {
     mime_parts
 }
 
-fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
+pub fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
     let mut mime_parts = HashMap::with_capacity(headers.len());
     if size > 0 {
         mime_parts.insert(MailBodyProperty::Size, size.into());
@@ -1663,7 +1119,7 @@ fn mime_parts_to_jmap(headers: RfcHeaders, size: usize) -> JMAPMailMimeHeaders {
     mime_parts
 }
 
-fn mime_header_to_jmap(
+pub fn mime_header_to_jmap(
     mime_parts: &mut JMAPMailMimeHeaders,
     header: RfcHeader,
     value: HeaderValue,

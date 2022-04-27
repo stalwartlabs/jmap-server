@@ -154,8 +154,9 @@ where
 
     fn delete(
         _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _jmap_id: store::JMAPId,
+        document: &mut Document,
     ) -> jmap::error::set::Result<()> {
+        TinyORM::<Self::Property>::delete_orm(document);
         Ok(())
     }
 }

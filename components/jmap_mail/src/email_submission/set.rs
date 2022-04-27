@@ -18,7 +18,7 @@ use jmap::{
 };
 use mail_parser::RfcHeader;
 use store::batch::Document;
-use store::field::{DefaultOptions, Options};
+use store::field::{IndexOptions, Options};
 use store::leb128::Leb128;
 use store::serialize::StoreDeserialize;
 use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError};
@@ -371,7 +371,7 @@ where
                     "Identity not found.",
                 )
             })?;
-        document.binary(0, blob, DefaultOptions::new().store_blob(MESSAGE_RAW));
+        document.binary(0, blob, IndexOptions::new().store_blob(MESSAGE_RAW));
 
         // Insert envelope
         self.email_submission
@@ -415,7 +415,7 @@ where
 
     fn delete(
         _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _jmap_id: store::JMAPId,
+        _document: &mut Document,
     ) -> jmap::error::set::Result<()> {
         Err(SetError::forbidden(concat!(
             "Deleting Email Submissions is not allowed, ",

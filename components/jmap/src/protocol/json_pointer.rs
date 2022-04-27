@@ -4,7 +4,7 @@ use store::JMAPId;
 
 use crate::{
     error::method::MethodError,
-    id::{blob::BlobId, state::JMAPState},
+    id::{blob::JMAPBlob, state::JMAPState},
 };
 
 use super::json::JSONValue;
@@ -280,8 +280,8 @@ impl JSONValue {
         self.eval(pointer).unwrap().to_jmap_state().unwrap()
     }
 
-    pub fn eval_unwrap_blob_id(&self, pointer: &str) -> BlobId {
-        self.eval(pointer).unwrap().to_blob_id().unwrap()
+    pub fn eval_unwrap_blob(&self, pointer: &str) -> JMAPBlob {
+        self.eval(pointer).unwrap().to_blob().unwrap()
     }
 }
 

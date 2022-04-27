@@ -1,6 +1,9 @@
 use std::io::Write;
 
-use store::{AccountId, Collection, DocumentId};
+use store::{
+    blob::{BlobId, BLOB_HASH_LEN},
+    AccountId, Collection, DocumentId,
+};
 
 use crate::{error::method::MethodError, protocol::json::JSONValue};
 
@@ -29,184 +32,91 @@ pub struct InnerBlob<T> {
 }
 
 #[derive(Clone, Debug)]
-pub enum BlobId {
-    Owned(OwnedBlob),
-    Temporary(TemporaryBlob),
-    InnerOwned(InnerBlob<OwnedBlob>),
-    InnerTemporary(InnerBlob<TemporaryBlob>),
+pub struct JMAPBlob {
+    pub id: BlobId,
+    pub inner_id: Option<u32>,
 }
 
-impl BlobId {
-    pub fn new_owned(
-        account_id: AccountId,
-        collection: Collection,
-        document: DocumentId,
-        blob_index: u32,
-    ) -> Self {
-        BlobId::Owned(OwnedBlob {
-            account_id,
-            collection,
-            document,
-            blob_index,
-        })
+impl JMAPBlob {
+    pub fn new(id: BlobId) -> Self {
+        JMAPBlob { id, inner_id: None }
     }
 
-    pub fn new_temporary(account_id: AccountId, timestamp: u64, hash: u64) -> Self {
-        BlobId::Temporary(TemporaryBlob {
-            account_id,
-            timestamp,
-            hash,
-        })
-    }
-
-    pub fn new_inner(blob_id: BlobId, blob_index: u32) -> Option<Self> {
-        match blob_id {
-            BlobId::Owned(blob_id) => BlobId::InnerOwned(InnerBlob {
-                blob_id,
-                blob_index,
-            })
-            .into(),
-            BlobId::Temporary(blob_id) => BlobId::InnerTemporary(InnerBlob {
-                blob_id,
-                blob_index,
-            })
-            .into(),
-            BlobId::InnerOwned(_) | BlobId::InnerTemporary(_) => None,
-        }
-    }
-
-    pub fn owner_id(&self) -> AccountId {
-        match self {
-            BlobId::Owned(blob_id) => blob_id.account_id,
-            BlobId::Temporary(blob_id) => blob_id.account_id,
-            BlobId::InnerOwned(blob_id) => blob_id.blob_id.account_id,
-            BlobId::InnerTemporary(blob_id) => blob_id.blob_id.account_id,
+    pub fn new_inner(id: BlobId, inner_id: u32) -> Self {
+        JMAPBlob {
+            id,
+            inner_id: inner_id.into(),
         }
     }
 }
 
-impl JMAPIdSerialize for BlobId {
+impl From<&BlobId> for JMAPBlob {
+    fn from(id: &BlobId) -> Self {
+        JMAPBlob::new(id.clone())
+    }
+}
+
+impl From<BlobId> for JMAPBlob {
+    fn from(id: BlobId) -> Self {
+        JMAPBlob::new(id)
+    }
+}
+
+impl JMAPIdSerialize for JMAPBlob {
     fn from_jmap_string(id: &str) -> Option<Self>
     where
         Self: Sized,
     {
-        match id.as_bytes().get(0)? {
-            b'o' => {
-                let mut it = hex_reader(id, 1);
+        let is_inner = id.as_bytes().get(0)? == &b'i';
+        let mut it = hex_reader(id, 1);
+        let mut id = BlobId {
+            hash: [0; BLOB_HASH_LEN],
+            size: 0,
+        };
 
-                Some(BlobId::Owned(OwnedBlob {
-                    account_id: AccountId::from_leb128_it(&mut it)?,
-                    collection: it.next()?.into(),
-                    document: DocumentId::from_leb128_it(&mut it)?,
-                    blob_index: u32::from_leb128_it(&mut it)?,
-                }))
-            }
-            b't' => {
-                let mut it = hex_reader(id, 1);
-
-                Some(BlobId::Temporary(TemporaryBlob {
-                    account_id: AccountId::from_leb128_it(&mut it)?,
-                    timestamp: u64::from_leb128_it(&mut it)?,
-                    hash: u64::from_leb128_it(&mut it)?,
-                }))
-            }
-            b'q' => {
-                let mut it = hex_reader(id, 1);
-
-                Some(BlobId::InnerTemporary(InnerBlob {
-                    blob_id: TemporaryBlob {
-                        account_id: AccountId::from_leb128_it(&mut it)?,
-                        timestamp: u64::from_leb128_it(&mut it)?,
-                        hash: u64::from_leb128_it(&mut it)?,
-                    },
-                    blob_index: u32::from_leb128_it(&mut it)?,
-                }))
-            }
-            b'p' => {
-                let mut it = hex_reader(id, 1);
-
-                Some(BlobId::InnerOwned(InnerBlob {
-                    blob_id: OwnedBlob {
-                        account_id: AccountId::from_leb128_it(&mut it)?,
-                        collection: it.next()?.into(),
-                        document: DocumentId::from_leb128_it(&mut it)?,
-                        blob_index: u32::from_leb128_it(&mut it)?,
-                    },
-                    blob_index: u32::from_leb128_it(&mut it)?,
-                }))
-            }
-            _ => None,
+        for pos in 0..BLOB_HASH_LEN {
+            id.hash[pos] = it.next()?;
         }
+        id.size = u32::from_leb128_it(&mut it)?;
+
+        Some(JMAPBlob {
+            id,
+            inner_id: if is_inner {
+                u32::from_leb128_it(&mut it)?.into()
+            } else {
+                None
+            },
+        })
     }
 
     #[allow(clippy::unused_io_amount)]
     fn to_jmap_string(&self) -> String {
-        let mut writer = HexWriter::with_capacity(10);
-        match self {
-            BlobId::Owned(blob_id) => {
-                writer.result.push('o');
-                blob_id.account_id.to_leb128_writer(&mut writer).unwrap();
-                writer.write(&[blob_id.collection as u8]).unwrap();
-                blob_id.document.to_leb128_writer(&mut writer).unwrap();
-                blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
-            }
-            BlobId::Temporary(blob_id) => {
-                writer.result.push('t');
-                blob_id.account_id.to_leb128_writer(&mut writer).unwrap();
-                blob_id.timestamp.to_leb128_writer(&mut writer).unwrap();
-                blob_id.hash.to_leb128_writer(&mut writer).unwrap();
-            }
-            BlobId::InnerOwned(blob_id) => {
-                writer.result.push('p');
-                blob_id
-                    .blob_id
-                    .account_id
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
-                writer.write(&[blob_id.blob_id.collection as u8]).unwrap();
-                blob_id
-                    .blob_id
-                    .document
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
-                blob_id
-                    .blob_id
-                    .blob_index
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
-                blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
-            }
-            BlobId::InnerTemporary(blob_id) => {
-                writer.result.push('q');
-                blob_id
-                    .blob_id
-                    .account_id
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
-                blob_id
-                    .blob_id
-                    .timestamp
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
-                blob_id.blob_id.hash.to_leb128_writer(&mut writer).unwrap();
-                blob_id.blob_index.to_leb128_writer(&mut writer).unwrap();
-            }
+        let mut writer = HexWriter::with_capacity(40);
+        if let Some(inner_id) = self.inner_id {
+            writer.result.push('i');
+            writer.write(&self.id.hash).unwrap();
+            self.id.size.to_leb128_writer(&mut writer).unwrap();
+            inner_id.to_leb128_writer(&mut writer).unwrap();
+        } else {
+            writer.result.push('b');
+            writer.write(&self.id.hash).unwrap();
+            self.id.size.to_leb128_writer(&mut writer).unwrap();
         }
         writer.result
     }
 }
 
 impl JSONValue {
-    pub fn to_blob_id(&self) -> Option<BlobId> {
+    pub fn to_blob(&self) -> Option<JMAPBlob> {
         match self {
-            JSONValue::String(string) => BlobId::from_jmap_string(string),
+            JSONValue::String(string) => JMAPBlob::from_jmap_string(string),
             _ => None,
         }
     }
 
-    pub fn parse_blob_id(self, optional: bool) -> crate::Result<Option<BlobId>> {
+    pub fn parse_blob(self, optional: bool) -> crate::Result<Option<JMAPBlob>> {
         match self {
-            JSONValue::String(string) => Ok(Some(BlobId::from_jmap_string(&string).ok_or_else(
+            JSONValue::String(string) => Ok(Some(JMAPBlob::from_jmap_string(&string).ok_or_else(
                 || MethodError::InvalidArguments("Failed to parse blobId.".to_string()),
             )?)),
             JSONValue::Null if optional => Ok(None),

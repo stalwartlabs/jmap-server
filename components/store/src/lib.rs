@@ -434,7 +434,7 @@ pub enum ColumnFamily {
     Bitmaps,
     Values,
     Indexes,
-    Terms,
+    Blobs,
     Logs,
 }
 

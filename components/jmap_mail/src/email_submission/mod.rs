@@ -1,7 +1,10 @@
 use std::fmt::Display;
 
 use jmap::{jmap_store::orm::PropertySchema, Property};
-use store::{field::TextIndex, Collection};
+use store::{
+    field::{IndexOptions, Options},
+    Collection,
+};
 
 pub mod changes;
 pub mod get;
@@ -53,21 +56,23 @@ impl PropertySchema for EmailSubmissionProperty {
         ]
     }
 
-    fn sorted() -> &'static [Self] {
+    fn indexed() -> &'static [(Self, u64)] {
         &[
-            EmailSubmissionProperty::EmailId,
-            EmailSubmissionProperty::IdentityId,
-            EmailSubmissionProperty::ThreadId,
-            EmailSubmissionProperty::SendAt,
+            (
+                EmailSubmissionProperty::UndoStatus,
+                IndexOptions::new().keyword(),
+            ),
+            (EmailSubmissionProperty::EmailId, IndexOptions::new().sort()),
+            (
+                EmailSubmissionProperty::IdentityId,
+                IndexOptions::new().sort(),
+            ),
+            (
+                EmailSubmissionProperty::ThreadId,
+                IndexOptions::new().sort(),
+            ),
+            (EmailSubmissionProperty::SendAt, IndexOptions::new().sort()),
         ]
-    }
-
-    fn tags() -> &'static [Self] {
-        &[]
-    }
-
-    fn indexed() -> &'static [(Self, TextIndex)] {
-        &[(EmailSubmissionProperty::UndoStatus, TextIndex::Keyword)]
     }
 }
 

@@ -14,7 +14,7 @@ use jmap_mail::mail::{
 };
 use store::{
     batch::{Document, WriteBatch},
-    field::DefaultOptions,
+    field::IndexOptions,
     AccountId, JMAPId, JMAPStore, Store, Tag,
 };
 use store::{Collection, JMAPIdPrefix};
@@ -158,7 +158,7 @@ where
                 document.tag(
                     MessageField::ThreadId,
                     Tag::Id(thread_id),
-                    DefaultOptions::new(),
+                    IndexOptions::new(),
                 );
                 batch.update_document(document);
                 batch.log_move(Collection::Mail, id, new_id);

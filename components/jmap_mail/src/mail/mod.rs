@@ -18,14 +18,10 @@ use mail_parser::{
 
 use store::{
     bincode,
-    blob::BlobIndex,
+    blob::BlobId,
     serialize::{StoreDeserialize, StoreSerialize},
     Collection, FieldId, StoreError, Tag,
 };
-
-pub const MESSAGE_RAW: BlobIndex = 0;
-pub const MESSAGE_DATA: BlobIndex = 1;
-pub const MESSAGE_PARTS: BlobIndex = 2;
 
 pub type JMAPMailHeaders = HashMap<MailProperty, JSONValue>;
 pub type JMAPMailMimeHeaders = HashMap<MailBodyProperty, JSONValue>;
@@ -37,6 +33,7 @@ pub struct MessageData {
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
     pub attachments: Vec<MessagePartId>,
+    pub raw_message: BlobId,
 }
 
 impl StoreSerialize for MessageData {
@@ -112,7 +109,7 @@ pub enum MimePartType {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MimePart {
     pub headers: JMAPMailMimeHeaders,
-    pub blob_index: BlobIndex,
+    pub blob_id: Option<BlobId>,
     pub is_encoding_problem: bool,
     pub mime_type: MimePartType,
 }
@@ -120,12 +117,12 @@ pub struct MimePart {
 impl MimePart {
     pub fn new_html(
         headers: JMAPMailMimeHeaders,
-        blob_index: BlobIndex,
+        blob_id: BlobId,
         is_encoding_problem: bool,
     ) -> Self {
         MimePart {
             headers,
-            blob_index,
+            blob_id: blob_id.into(),
             is_encoding_problem,
             mime_type: MimePartType::Html,
         }
@@ -133,26 +130,35 @@ impl MimePart {
 
     pub fn new_text(
         headers: JMAPMailMimeHeaders,
-        blob_index: BlobIndex,
+        blob_id: BlobId,
         is_encoding_problem: bool,
     ) -> Self {
         MimePart {
             headers,
-            blob_index,
+            blob_id: blob_id.into(),
             is_encoding_problem,
             mime_type: MimePartType::Text,
         }
     }
 
-    pub fn new_other(
+    pub fn new_binary(
         headers: JMAPMailMimeHeaders,
-        blob_index: BlobIndex,
+        blob_id: BlobId,
         is_encoding_problem: bool,
     ) -> Self {
         MimePart {
             headers,
-            blob_index,
+            blob_id: blob_id.into(),
             is_encoding_problem,
+            mime_type: MimePartType::Other,
+        }
+    }
+
+    pub fn new_part(headers: JMAPMailMimeHeaders) -> Self {
+        MimePart {
+            headers,
+            blob_id: None,
+            is_encoding_problem: false,
             mime_type: MimePartType::Other,
         }
     }
