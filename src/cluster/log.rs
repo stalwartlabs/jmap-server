@@ -1034,7 +1034,8 @@ where
                                 "Committing delete document {} from account {}, {:?}",
                                 doc_id, document_batch.account_id, collection
                             );
-                            document_batch.delete_document(collection, doc_id);
+                            //TODO
+                            //document_batch.delete_document(collection, doc_id);
                         }
                     }
 
@@ -1166,7 +1167,8 @@ where
                                 }
 
                                 for document_id in document_ids {
-                                    document_batch.delete_document(collection, document_id);
+                                    //TODO
+                                    //document_batch.delete_document(collection, document_id);
                                 }
                             }
                         }

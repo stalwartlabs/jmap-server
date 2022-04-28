@@ -18,7 +18,6 @@ pub mod update;
 use std::{
     fmt::Display,
     ops::Deref,
-    path::PathBuf,
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
@@ -253,6 +252,15 @@ pub enum Tag {
     Text(String),
     Bytes(Vec<u8>),
     Default,
+}
+
+impl Tag {
+    pub fn as_id(&self) -> Integer {
+        match self {
+            Tag::Id(id) => *id,
+            _ => panic!("Tag is not an ID"),
+        }
+    }
 }
 
 #[derive(Debug)]

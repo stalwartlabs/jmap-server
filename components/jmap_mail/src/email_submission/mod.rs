@@ -1,10 +1,7 @@
 use std::fmt::Display;
 
 use jmap::{jmap_store::orm::PropertySchema, Property};
-use store::{
-    field::{IndexOptions, Options},
-    Collection,
-};
+use store::{field::Options, Collection};
 
 pub mod changes;
 pub mod get;
@@ -60,18 +57,15 @@ impl PropertySchema for EmailSubmissionProperty {
         &[
             (
                 EmailSubmissionProperty::UndoStatus,
-                IndexOptions::new().keyword(),
+                <u64 as Options>::F_KEYWORD,
             ),
-            (EmailSubmissionProperty::EmailId, IndexOptions::new().sort()),
+            (EmailSubmissionProperty::EmailId, <u64 as Options>::F_SORT),
             (
                 EmailSubmissionProperty::IdentityId,
-                IndexOptions::new().sort(),
+                <u64 as Options>::F_SORT,
             ),
-            (
-                EmailSubmissionProperty::ThreadId,
-                IndexOptions::new().sort(),
-            ),
-            (EmailSubmissionProperty::SendAt, IndexOptions::new().sort()),
+            (EmailSubmissionProperty::ThreadId, <u64 as Options>::F_SORT),
+            (EmailSubmissionProperty::SendAt, <u64 as Options>::F_SORT),
         ]
     }
 }

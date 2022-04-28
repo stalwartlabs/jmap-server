@@ -102,8 +102,9 @@ where
                                     if !field.is_empty() {
                                         builder.text(
                                             pos as u8,
-                                            Text::tokenized(field.to_lowercase()),
-                                            IndexOptions::new().sort(),
+                                            field.to_lowercase(),
+                                            Language::English,
+                                            IndexOptions::new().sort().tokenize(),
                                         );
                                     }
                                 }
@@ -111,11 +112,12 @@ where
                                     if !field.is_empty() {
                                         builder.text(
                                             pos as u8,
-                                            Text::fulltext_lang(
-                                                field.to_lowercase(),
-                                                Language::English,
-                                            ),
-                                            IndexOptions::new().sort(),
+                                            field.to_lowercase(),
+                                            Language::English,
+                                            IndexOptions::new()
+                                                .sort()
+                                                .full_text(0)
+                                                .build_term_index(),
                                         );
                                     }
                                 }
@@ -130,8 +132,9 @@ where
                                     if !field.is_empty() {
                                         builder.text(
                                             pos as u8,
-                                            Text::keyword(field.to_lowercase()),
-                                            IndexOptions::new().store().sort(),
+                                            field.to_lowercase(),
+                                            Language::Unknown,
+                                            IndexOptions::new().store().sort().keyword(),
                                         );
                                     }
                                 }

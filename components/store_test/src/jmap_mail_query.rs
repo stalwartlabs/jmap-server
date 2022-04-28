@@ -314,6 +314,7 @@ where
         mail_store
             .mail_import(
                 account_id,
+                0.into(),
                 format!(
                     concat!(
                         "From: {}\nCc: {}\nMessage-ID: <{}>\n",
@@ -330,7 +331,7 @@ where
                     values_str["creditLine"],
                     values_str["inscription"]
                 )
-                .into_bytes(),
+                .as_bytes(),
                 vec![
                     values_int["year"] as DocumentId,
                     (values_int["acquisitionYear"] + 1000) as DocumentId,
@@ -411,6 +412,7 @@ where
     {
         delete_email(mail_store, account_id, message_id);
     }
+    return;
     mail_store.assert_is_empty();
 }
 
@@ -988,7 +990,7 @@ where
         .get_document_id();
 
     let thread_id = mail_store
-        .get_document_tag_id(
+        .get_document_value(
             account_id,
             Collection::Mail,
             doc_id,

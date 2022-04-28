@@ -9,25 +9,28 @@ use jmap::id::blob::JMAPBlob;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::import::ImportObject;
+use jmap::jmap_store::orm::TinyORM;
 use jmap::jmap_store::set::CreateItemResult;
 use jmap::protocol::json::JSONValue;
 use jmap::request::import::ImportRequest;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
+use mail_parser::{
+    Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader,
+};
 use nlp::Language;
-use store::batch::{Document, MAX_ID_LENGTH};
+use store::batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH};
 use store::blob::BlobId;
 use store::chrono::{LocalResult, SecondsFormat, TimeZone, Utc};
 use store::field::{IndexOptions, Options};
 use store::leb128::Leb128;
 use store::query::DefaultIdMapper;
 use store::serialize::StoreSerialize;
-use store::tracing::debug;
+
 use store::tracing::log::error;
 use store::{
-    batch::WriteBatch, field::Text, roaring::RoaringBitmap, AccountId, Comparator, FieldValue,
-    Filter, JMAPId, JMAPStore, Store, Tag, ThreadId,
+    batch::WriteBatch, roaring::RoaringBitmap, AccountId, Comparator, FieldValue, Filter, JMAPId,
+    JMAPStore, Store, Tag, ThreadId,
 };
 use store::{Collection, DocumentId, Integer, JMAPIdPrefix, LongInteger, StoreError};
 
@@ -36,10 +39,10 @@ use crate::mail::MessageField;
 use super::parse::{
     empty_text_mime_headers, header_to_jmap_address, header_to_jmap_date, header_to_jmap_id,
     header_to_jmap_text, header_to_jmap_url, mime_header_to_jmap, mime_parts_to_jmap,
-    MessageParser,
 };
 use super::{
     MailHeaderForm, MailHeaderProperty, MailProperty, MessageData, MessageOutline, MimePart,
+    MAX_MESSAGE_PARTS,
 };
 
 pub struct ImportMail<'y, T>
@@ -293,24 +296,24 @@ where
         let size = blob.len();
 
         // Parse message
-        let jmap_blob: JMAPBlob = (&blob_id).into();
+        let raw_blob: JMAPBlob = (&blob_id).into();
         let (reference_ids, thread_name) =
             self.mail_parse(&mut document, blob_id, blob, received_at)?;
 
         // Add keyword tags
+        let mut orm = TinyORM::<MessageField>::new();
         for keyword in keywords {
-            document.tag(MessageField::Keyword, keyword, IndexOptions::new());
+            orm.tag(MessageField::Keyword, keyword);
         }
 
         // Add mailbox tags
         for mailbox_id in mailbox_ids {
             batch.log_child_update(Collection::Mailbox, mailbox_id);
-            document.tag(
-                MessageField::Mailbox,
-                Tag::Id(mailbox_id),
-                IndexOptions::new(),
-            );
+            orm.tag(MessageField::Mailbox, Tag::Id(mailbox_id));
         }
+
+        // Serialize ORM
+        orm.insert(&mut document)?;
 
         // Lock account while threads are merged
         let _lock = self.lock_account(batch.account_id, Collection::Mail);
@@ -322,7 +325,7 @@ where
         // Write document to store
         let result = MailImportResult {
             id: JMAPId::from_parts(thread_id, document_id),
-            blob_id: jmap_blob,
+            blob_id: raw_blob,
             thread_id,
             size,
         };
@@ -340,7 +343,7 @@ where
         raw_message: &[u8],
         received_at: Option<i64>,
     ) -> store::Result<(Vec<String>, String)> {
-        let message = Message::parse(&raw_message).ok_or_else(|| {
+        let message = Message::parse(raw_message).ok_or_else(|| {
             StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
         })?;
         let mut total_parts = message.parts.len();
@@ -359,6 +362,12 @@ where
             received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
         };
         let mut has_attachments = false;
+
+        if message.parts.len() > MAX_MESSAGE_PARTS {
+            return Err(StoreError::InvalidArguments(
+                "Message has too many parts.".to_string(),
+            ));
+        }
 
         message_data
             .properties
@@ -528,7 +537,7 @@ where
                             RfcHeader::Subject,
                             subject.to_string(),
                             Language::Unknown,
-                            IndexOptions::new().full_text(0),
+                            IndexOptions::new().full_text(0).build_term_index(),
                         );
 
                         base_subject = Some(if !thread_name.is_empty() {
@@ -573,6 +582,7 @@ where
             }
         }
 
+        // Add main headers as a MimePart
         message_data.mime_parts.push(MimePart::new_part(mime_parts));
         message_outline.headers.push(
             message
@@ -594,9 +604,11 @@ where
                         message_data.text_body.iter().position(|&p| p == part_id)
                     {
                         message_data.text_body[pos] = total_parts;
+                        let blob_id = self.blob_store(text.as_bytes())?;
+                        document.blob(blob_id.clone(), IndexOptions::new());
                         extra_mime_parts.push(MimePart::new_text(
                             empty_text_mime_headers(false, text_len),
-                            self.blob_store(text.as_bytes())?,
+                            blob_id,
                             false,
                         ));
                         total_parts += 1;
@@ -609,15 +621,19 @@ where
                     };
 
                     document.text(
-                        field.clone(),
+                        field,
                         text,
                         Language::Unknown,
-                        IndexOptions::new().full_text(text_part_id as u32),
+                        IndexOptions::new()
+                            .full_text(text_part_id as u32)
+                            .build_term_index(),
                     );
 
+                    let blob_id = self.blob_store(html.body.as_bytes())?;
+                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_html(
                         mime_parts_to_jmap(html.headers_rfc, html_len),
-                        self.blob_store(html.body.as_bytes())?,
+                        blob_id,
                         html.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -635,9 +651,11 @@ where
                         let html = text_to_html(text.body.as_ref());
                         let html_len = html.len();
 
+                        let blob_id = self.blob_store(html.as_bytes())?;
+                        document.blob(blob_id.clone(), IndexOptions::new());
                         extra_mime_parts.push(MimePart::new_html(
                             empty_text_mime_headers(true, html_len),
-                            self.blob_store(html.as_bytes())?,
+                            blob_id,
                             false,
                         ));
                         message_data.html_body[pos] = total_parts;
@@ -650,9 +668,11 @@ where
                         MessageField::Attachment
                     };
 
+                    let blob_id = self.blob_store(text.body.as_bytes())?;
+                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_text(
                         mime_parts_to_jmap(text.headers_rfc, text_len),
-                        self.blob_store(text.body.as_bytes())?,
+                        blob_id,
                         text.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -666,16 +686,20 @@ where
                         field,
                         text.body.into_owned(),
                         Language::Unknown,
-                        IndexOptions::new().full_text(part_id as u32),
+                        IndexOptions::new()
+                            .full_text(part_id as u32)
+                            .build_term_index(),
                     );
                 }
                 MessagePart::Binary(binary) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
+                    let blob_id = self.blob_store(binary.body.as_ref())?;
+                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        self.blob_store(binary.body.as_ref())?,
+                        blob_id,
                         binary.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -687,9 +711,11 @@ where
                     );
                 }
                 MessagePart::InlineBinary(binary) => {
+                    let blob_id = self.blob_store(binary.body.as_ref())?;
+                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        self.blob_store(binary.body.as_ref())?,
+                        blob_id,
                         binary.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -707,7 +733,7 @@ where
 
                     let (blob_id, part_len) = match nested_message.body {
                         MessageAttachment::Parsed(mut message) => {
-                            document.parse_attached_message(&mut message);
+                            document.parse_attached_message(&mut message, part_id as u32);
                             (
                                 self.blob_store(message.raw_message.as_ref())?,
                                 message.raw_message.len(),
@@ -715,13 +741,14 @@ where
                         }
                         MessageAttachment::Raw(raw_message) => {
                             if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                document.parse_attached_message(message);
+                                document.parse_attached_message(message, part_id as u32);
                             }
 
                             (self.blob_store(raw_message.as_ref())?, raw_message.len())
                         }
                     };
 
+                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(nested_message.headers_rfc, part_len),
                         blob_id,
@@ -750,10 +777,12 @@ where
             };
         }
 
+        // Add any HTML/text part conversions
         if !extra_mime_parts.is_empty() {
             message_data.mime_parts.append(&mut extra_mime_parts);
         }
 
+        // Set attachment properties
         message_data
             .properties
             .insert(MailProperty::HasAttachment, has_attachments.into());
@@ -762,20 +791,28 @@ where
             document.tag(MessageField::Attachment, Tag::Default, IndexOptions::new());
         }
 
+        // Serialize message data and outline
         let mut message_data = message_data
             .serialize()
             .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
         let mut message_outline = message_outline.serialize().ok_or_else(|| {
             StoreError::SerializeError("Failed to serialize message outline".into())
         })?;
-        let mut buf = Vec::with_capacity(
+        let mut metadata = Vec::with_capacity(
             message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
         );
-        message_data.len().to_leb128_bytes(&mut buf);
-        buf.append(&mut message_data);
-        buf.append(&mut message_outline);
+        message_data.len().to_leb128_bytes(&mut metadata);
+        metadata.append(&mut message_data);
+        metadata.append(&mut message_outline);
 
-        let blob_id = self.blob_store(&buf)?;
+        // Link blob and set message data tield
+        let metadata_blob_id = self.blob_store(&metadata)?;
+        document.blob(metadata_blob_id.clone(), IndexOptions::new());
+        document.binary(
+            MessageField::Metadata,
+            metadata_blob_id.serialize().unwrap(),
+            IndexOptions::new(),
+        );
 
         // TODO search by "header exists"
         // TODO use content language when available
@@ -830,7 +867,7 @@ where
                     MessageField::ThreadId.into(),
                 )?
                 .into_iter()
-                .filter_map(|id: Option<DocumentId>| Some(id?))
+                .flatten()
                 .collect::<HashSet<ThreadId>>();
 
             match thread_ids.len() {
@@ -1099,5 +1136,262 @@ where
             }
         }*/
         Ok(())
+    }
+}
+
+pub trait MessageParser {
+    fn parse_attached_message(&mut self, message: &mut Message, part_id: u32);
+    fn parse_address(&mut self, header_name: RfcHeader, address: &Addr);
+    fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group);
+    fn parse_text(&mut self, header_name: RfcHeader, text: &str);
+    fn parse_content_type(&mut self, header_name: RfcHeader, content_type: &ContentType);
+    fn add_addr_sort(&mut self, header_name: RfcHeader, header_value: &HeaderValue);
+    fn parse_header(&mut self, header_name: RfcHeader, header_value: &HeaderValue);
+}
+
+impl MessageParser for Document {
+    fn parse_attached_message(&mut self, message: &mut Message, part_id: u32) {
+        if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
+            self.text(
+                MessageField::Attachment,
+                subject.into_owned(),
+                Language::Unknown,
+                IndexOptions::new()
+                    .full_text(part_id << 16)
+                    .build_term_index(),
+            );
+        }
+        for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
+            match sub_part {
+                MessagePart::Text(text) => {
+                    self.text(
+                        MessageField::Attachment,
+                        text.body.into_owned(),
+                        Language::Unknown,
+                        IndexOptions::new()
+                            .full_text(part_id << 16 | sub_part_id as u32)
+                            .build_term_index(),
+                    );
+                }
+                MessagePart::Html(html) => {
+                    self.text(
+                        MessageField::Attachment,
+                        html_to_text(&html.body),
+                        Language::Unknown,
+                        IndexOptions::new()
+                            .full_text(part_id << 16 | sub_part_id as u32)
+                            .build_term_index(),
+                    );
+                }
+                _ => (),
+            }
+        }
+    }
+
+    fn parse_address(&mut self, header_name: RfcHeader, address: &Addr) {
+        if let Some(name) = &address.name {
+            self.parse_text(header_name, name);
+        };
+        if let Some(ref addr) = address.address {
+            if addr.len() <= MAX_TOKEN_LENGTH {
+                self.text(
+                    header_name,
+                    addr.to_lowercase(),
+                    Language::Unknown,
+                    IndexOptions::new().keyword(),
+                );
+            }
+        };
+    }
+
+    fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group) {
+        if let Some(name) = &group.name {
+            self.parse_text(header_name, name);
+        };
+
+        for address in group.addresses.iter() {
+            self.parse_address(header_name, address);
+        }
+    }
+
+    fn parse_text(&mut self, header_name: RfcHeader, text: &str) {
+        match header_name {
+            RfcHeader::Keywords
+            | RfcHeader::ContentLanguage
+            | RfcHeader::MimeVersion
+            | RfcHeader::MessageId
+            | RfcHeader::References
+            | RfcHeader::ContentId
+            | RfcHeader::ResentMessageId => {
+                if text.len() <= MAX_TOKEN_LENGTH {
+                    self.text(
+                        header_name,
+                        text.to_lowercase(),
+                        Language::Unknown,
+                        IndexOptions::new().keyword(),
+                    );
+                }
+            }
+
+            RfcHeader::Subject => (),
+
+            _ => {
+                self.text(
+                    header_name,
+                    text.to_string(),
+                    Language::Unknown,
+                    IndexOptions::new().tokenize(),
+                );
+            }
+        }
+    }
+
+    fn parse_content_type(&mut self, header_name: RfcHeader, content_type: &ContentType) {
+        if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
+            self.text(
+                header_name,
+                content_type.c_type.to_string(),
+                Language::Unknown,
+                IndexOptions::new().keyword(),
+            );
+        }
+        if let Some(subtype) = &content_type.c_subtype {
+            if subtype.len() <= MAX_TOKEN_LENGTH {
+                self.text(
+                    header_name,
+                    subtype.to_string(),
+                    Language::Unknown,
+                    IndexOptions::new().keyword(),
+                );
+            }
+        }
+        if let Some(attributes) = &content_type.attributes {
+            for (key, value) in attributes {
+                if key == "name" || key == "filename" {
+                    self.text(
+                        header_name,
+                        value.to_string(),
+                        Language::Unknown,
+                        IndexOptions::new().tokenize(),
+                    );
+                } else if value.len() <= MAX_TOKEN_LENGTH {
+                    self.text(
+                        header_name,
+                        value.to_lowercase(),
+                        Language::Unknown,
+                        IndexOptions::new().keyword(),
+                    );
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::manual_flatten)]
+    fn add_addr_sort(&mut self, header_name: RfcHeader, header_value: &HeaderValue) {
+        let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
+            col.first().unwrap_or(&HeaderValue::Empty)
+        } else {
+            header_value
+        } {
+            HeaderValue::Address(addr) => [&None, &addr.name, &addr.address],
+            HeaderValue::AddressList(list) => list.first().map_or([&None, &None, &None], |addr| {
+                [&None, &addr.name, &addr.address]
+            }),
+            HeaderValue::Group(group) => group
+                .addresses
+                .first()
+                .map_or([&group.name, &None, &None], |addr| {
+                    [&group.name, &addr.name, &addr.address]
+                }),
+            HeaderValue::GroupList(list) => list.first().map_or([&None, &None, &None], |group| {
+                group
+                    .addresses
+                    .first()
+                    .map_or([&group.name, &None, &None], |addr| {
+                        [&group.name, &addr.name, &addr.address]
+                    })
+            }),
+            _ => [&None, &None, &None],
+        };
+        let text_len = sort_parts
+            .iter()
+            .map(|part| part.as_ref().map_or(0, |s| s.len()))
+            .sum::<usize>();
+        if text_len > 0 {
+            let mut text = String::with_capacity(if text_len > MAX_SORT_FIELD_LENGTH {
+                MAX_SORT_FIELD_LENGTH
+            } else {
+                text_len
+            });
+            'outer: for part in sort_parts {
+                if let Some(s) = part {
+                    if !text.is_empty() {
+                        text.push(' ');
+                    }
+
+                    for ch in s.chars() {
+                        for ch in ch.to_lowercase() {
+                            if text.len() >= MAX_SORT_FIELD_LENGTH {
+                                break 'outer;
+                            }
+                            text.push(ch);
+                        }
+                    }
+                }
+            }
+            self.text(
+                header_name,
+                text,
+                Language::Unknown,
+                IndexOptions::new().tokenize().sort(),
+            );
+        };
+    }
+
+    fn parse_header(&mut self, header_name: RfcHeader, header_value: &HeaderValue) {
+        match header_value {
+            HeaderValue::Address(address) => {
+                self.parse_address(header_name, address);
+            }
+            HeaderValue::AddressList(address_list) => {
+                for item in address_list {
+                    self.parse_address(header_name, item);
+                }
+            }
+            HeaderValue::Group(group) => {
+                self.parse_address_group(header_name, group);
+            }
+            HeaderValue::GroupList(group_list) => {
+                for item in group_list {
+                    self.parse_address_group(header_name, item);
+                }
+            }
+            HeaderValue::Text(text) => {
+                self.parse_text(header_name, text);
+            }
+            HeaderValue::TextList(text_list) => {
+                for item in text_list {
+                    self.parse_text(header_name, item);
+                }
+            }
+            HeaderValue::DateTime(date_time) => {
+                if date_time.is_valid() {
+                    self.number(
+                        header_name,
+                        date_time.to_timestamp() as u64,
+                        IndexOptions::new().sort(),
+                    );
+                }
+            }
+            HeaderValue::ContentType(content_type) => {
+                self.parse_content_type(header_name, content_type);
+            }
+            HeaderValue::Collection(header_value) => {
+                for item in header_value {
+                    self.parse_header(header_name, item);
+                }
+            }
+            HeaderValue::Empty => (),
+        }
     }
 }

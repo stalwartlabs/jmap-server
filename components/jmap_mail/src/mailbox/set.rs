@@ -182,7 +182,7 @@ where
         }
 
         self.validate(helper, None)?;
-        TinyORM::default().merge_validate(document, self.mailbox)?;
+        self.mailbox.insert_validate(document)?;
         Ok(DefaultCreateItem::new(document.document_id as JMAPId))
     }
 
@@ -246,10 +246,10 @@ where
             let message_doc_ids = message_doc_ids.into_iter().collect::<Vec<_>>();
 
             // Obtain thread ids for all messages to be deleted
-            //TODO
+            todo!()
             /*for (thread_id, message_doc_id) in helper
                 .store
-                .get_multi_document_tag_id(
+                .get_multi_document_value(
                     helper.account_id,
                     Collection::Mail,
                     message_doc_ids.iter().copied(),

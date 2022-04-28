@@ -5,7 +5,7 @@ use futures::poll;
 
 use jmap::jmap_store::orm::{JMAPOrm, PropertySchema};
 use jmap_mail::identity::IdentityProperty;
-use jmap_mail::mail::{MessageField, MessageOutline, MESSAGE_DATA, MESSAGE_RAW};
+use jmap_mail::mail::{MessageField, MessageOutline};
 use jmap_mail::mailbox::MailboxProperty;
 
 use store::leb128::Leb128;
@@ -689,7 +689,7 @@ where
         document_id: DocumentId,
         is_insert: bool,
     ) -> store::Result<Option<(Update, usize)>> {
-        let store = self.store.clone();
+        /*let store = self.store.clone();
         self.spawn_worker(move || {
             let mut item_size = std::mem::size_of::<Update>();
 
@@ -776,7 +776,8 @@ where
                 ))
             })
         })
-        .await
+        .await */
+        Ok(None)
     }
 
     async fn fetch_orm<U>(

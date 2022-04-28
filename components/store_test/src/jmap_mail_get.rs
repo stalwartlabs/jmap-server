@@ -409,8 +409,9 @@ where
         assert_eq!(
             &result,
             &serde_json::from_slice::<SortedJSONValue>(&fs::read(&file_name).unwrap()).unwrap(),
-            "{}",
-            serde_json::to_string_pretty(&result).unwrap()
+            "{} ({})",
+            serde_json::to_string_pretty(&result).unwrap(),
+            file_name.to_str().unwrap()
         );
     }
 }

@@ -3,7 +3,7 @@ use jmap::jmap_store::blob::JMAPBlobStore;
 
 use super::server::JMAPServer;
 use jmap::id::JMAPIdSerialize;
-use jmap::{error::problem_details::ProblemDetails, id::blob::BlobId};
+use jmap::{error::problem_details::ProblemDetails, id::blob::JMAPBlob};
 use jmap_mail::mail::parse::get_message_blob;
 use store::{tracing::error, AccountId, JMAPId, Store};
 
@@ -22,33 +22,29 @@ where
 {
     let error = if let (Some(account_id), Some(blob_id)) = (
         JMAPId::from_jmap_string(&path.0),
-        BlobId::from_jmap_string(&path.1),
+        JMAPBlob::from_jmap_string(&path.1),
     ) {
         let account_id = account_id as AccountId;
-        if blob_id.owner_id() == account_id {
-            let store = core.store.clone();
-            match core
-                .spawn_worker(move || store.download_blob(account_id, &blob_id, get_message_blob))
-                .await
-            {
-                Ok(Some(bytes)) => {
-                    return HttpResponse::build(StatusCode::OK)
-                        .insert_header(("Content-Type", params.into_inner().accept))
-                        .insert_header((
-                            "Content-Disposition",
-                            format!("attachment; filename=\"{}\"", path.2), //TODO escape filename
-                        ))
-                        .insert_header(("Cache-Control", "private, immutable, max-age=31536000"))
-                        .body(bytes);
-                }
-                Ok(None) => ProblemDetails::not_found(),
-                Err(err) => {
-                    error!("Blob download failed: {:?}", err);
-                    ProblemDetails::internal_server_error()
-                }
+        let store = core.store.clone();
+        match core
+            .spawn_worker(move || store.download_blob(account_id, &blob_id, get_message_blob))
+            .await
+        {
+            Ok(Some(bytes)) => {
+                return HttpResponse::build(StatusCode::OK)
+                    .insert_header(("Content-Type", params.into_inner().accept))
+                    .insert_header((
+                        "Content-Disposition",
+                        format!("attachment; filename=\"{}\"", path.2), //TODO escape filename
+                    ))
+                    .insert_header(("Cache-Control", "private, immutable, max-age=31536000"))
+                    .body(bytes);
             }
-        } else {
-            ProblemDetails::forbidden()
+            Ok(None) => ProblemDetails::not_found(),
+            Err(err) => {
+                error!("Blob download failed: {:?}", err);
+                ProblemDetails::internal_server_error()
+            }
         }
     } else {
         ProblemDetails::invalid_parameters()

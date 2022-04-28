@@ -1,11 +1,7 @@
-use std::{collections::HashSet, ops::Deref};
-
 use nlp::Language;
 
 use crate::{
-    leb128::Leb128,
-    serialize::{StoreDeserialize, StoreSerialize, TAG_BYTES, TAG_ID, TAG_STATIC, TAG_TEXT},
-    DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
+    serialize::StoreSerialize, DocumentId, FieldId, Float, Integer, LongInteger, Tag, TagId,
 };
 
 #[derive(Debug)]
@@ -83,6 +79,15 @@ impl IndexOptions {
 }
 
 pub trait Options {
+    const F_STORE: u64 = 0x01 << 32;
+    const F_SORT: u64 = 0x02 << 32;
+    const F_CLEAR: u64 = 0x04 << 32;
+    const F_BUILD_TERM_INDEX: u64 = 0x08 << 32;
+    const F_NONE: u64 = 0;
+    const F_KEYWORD: u64 = 1;
+    const F_TOKENIZE: u64 = 2;
+    const F_FULL_TEXT: u64 = 3;
+
     fn store(self) -> Self;
     fn sort(self) -> Self;
     fn clear(self) -> Self;
@@ -98,62 +103,53 @@ pub trait Options {
     fn get_text_options(&self) -> u64;
 }
 
-pub const F_STORE: u64 = 0x01 << 32;
-pub const F_SORT: u64 = 0x02 << 32;
-pub const F_CLEAR: u64 = 0x04 << 32;
-pub const F_BUILD_TERM_INDEX: u64 = 0x08 << 32;
-pub const F_NONE: u64 = 0;
-pub const F_KEYWORD: u64 = 1;
-pub const F_TOKENIZE: u64 = 2;
-pub const F_FULL_TEXT: u64 = 3;
-
 impl Options for u64 {
     fn store(mut self) -> Self {
-        self |= F_STORE;
+        self |= Self::F_STORE;
         self
     }
 
     fn sort(mut self) -> Self {
-        self |= F_SORT;
+        self |= Self::F_SORT;
         self
     }
 
     fn build_term_index(mut self) -> Self {
-        self |= F_BUILD_TERM_INDEX;
+        self |= Self::F_BUILD_TERM_INDEX;
         self
     }
 
     fn keyword(self) -> Self {
-        self | F_KEYWORD
+        self | Self::F_KEYWORD
     }
 
     fn tokenize(self) -> Self {
-        self | F_TOKENIZE
+        self | Self::F_TOKENIZE
     }
 
     fn full_text(self, part_id: u32) -> Self {
-        self | (F_FULL_TEXT + part_id as u64)
+        self | (Self::F_FULL_TEXT + part_id as u64)
     }
 
     fn clear(mut self) -> Self {
-        self |= F_CLEAR;
+        self |= Self::F_CLEAR;
         self
     }
 
     fn is_store(&self) -> bool {
-        self & F_STORE != 0
+        self & Self::F_STORE != 0
     }
 
     fn is_sort(&self) -> bool {
-        self & F_SORT != 0
+        self & Self::F_SORT != 0
     }
 
     fn is_clear(&self) -> bool {
-        self & F_CLEAR != 0
+        self & Self::F_CLEAR != 0
     }
 
     fn is_build_term_index(&self) -> bool {
-        self & F_BUILD_TERM_INDEX != 0
+        self & Self::F_BUILD_TERM_INDEX != 0
     }
 
     fn get_text_options(&self) -> u64 {

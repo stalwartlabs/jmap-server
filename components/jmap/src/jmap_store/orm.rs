@@ -99,6 +99,17 @@ where
         }
     }
 
+    pub fn get_tags(&self, property: &T) -> Option<&HashSet<Tag>> {
+        self.tags.get(property)
+    }
+
+    pub fn has_tags(&self, property: &T) -> bool {
+        self.tags
+            .get(property)
+            .map(|set| !set.is_empty())
+            .unwrap_or(false)
+    }
+
     pub fn get_unsigned_int(&self, property: &T) -> Option<u64> {
         self.properties
             .get(property)
@@ -111,35 +122,73 @@ where
             .and_then(|value| value.to_string())
     }
 
-    pub fn merge_validate(
-        self,
-        document: &mut Document,
-        changes: TinyORM<T>,
-    ) -> crate::error::set::Result<bool> {
+    pub fn insert_validate(self, document: &mut Document) -> crate::error::set::Result<()> {
         for property in T::required() {
-            let is_null = if let Some(value) = changes.properties.get(property) {
-                match value {
-                    JSONValue::Null => true,
-                    JSONValue::String(string) => string.is_empty(),
-                    JSONValue::Array(array) => array.is_empty(),
-                    JSONValue::Object(obj) => obj.is_empty(),
-                    JSONValue::Bool(_) | JSONValue::Number(_) => false,
-                }
-            } else {
-                self.properties.get(property).is_none()
-            };
-            if is_null {
+            if self
+                .properties
+                .get(property)
+                .map(|v| v.is_empty())
+                .unwrap_or(true)
+            {
                 return Err(SetError::invalid_property(
                     property.to_string(),
                     "Property cannot be empty.".to_string(),
                 ));
             }
         }
+        self.insert(document).map_err(|err| err.into())
+    }
 
+    pub fn insert(self, document: &mut Document) -> store::Result<()> {
+        self.insert_orm(document)?;
+        self.update_document(document, false);
+        Ok(())
+    }
+
+    pub fn merge_validate(
+        self,
+        document: &mut Document,
+        changes: TinyORM<T>,
+    ) -> crate::error::set::Result<bool> {
+        for property in T::required() {
+            if changes
+                .properties
+                .get(property)
+                .map(|v| v.is_empty())
+                .unwrap_or_else(|| self.properties.get(property).is_none())
+            {
+                return Err(SetError::invalid_property(
+                    property.to_string(),
+                    "Property cannot be empty.".to_string(),
+                ));
+            }
+        }
         self.merge(document, changes).map_err(|err| err.into())
     }
 
-    pub fn merge(mut self, document: &mut Document, changes: TinyORM<T>) -> store::Result<bool> {
+    pub fn get_tag_diff(&self, changes: &Self, property: &T) -> HashSet<Tag> {
+        match (self.tags.get(property), changes.tags.get(property)) {
+            (Some(this), Some(changes)) if this != changes => {
+                let mut tag_diff = HashSet::new();
+                for tag in this {
+                    if !changes.contains(tag) {
+                        tag_diff.insert(tag.clone());
+                    }
+                }
+                for tag in changes {
+                    if !this.contains(tag) {
+                        tag_diff.insert(tag.clone());
+                    }
+                }
+                tag_diff
+            }
+            (Some(this), None) => this.clone(),
+            (None, Some(changes)) => changes.clone(),
+            _ => HashSet::with_capacity(0),
+        }
+    }
+
+    pub fn merge(mut self, document: &mut Document, changes: Self) -> store::Result<bool> {
         let indexed = T::indexed();
 
         for (property, value) in changes.properties {
@@ -234,13 +283,7 @@ where
         }
 
         if !document.is_empty() {
-            document.binary(
-                Self::FIELD_ID,
-                self.serialize().ok_or_else(|| {
-                    StoreError::SerializeError("Failed to serialize ORM object.".to_string())
-                })?,
-                IndexOptions::new().store(),
-            );
+            self.insert_orm(document)?;
             Ok(true)
         } else {
             Ok(false)
@@ -249,7 +292,10 @@ where
 
     pub fn delete(self, document: &mut Document) {
         TinyORM::<T>::delete_orm(document);
+        self.update_document(document, true);
+    }
 
+    fn update_document(self, document: &mut Document, is_delete: bool) {
         let indexed = T::indexed();
         if indexed.is_empty() && self.tags.is_empty() {
             return;
@@ -258,22 +304,29 @@ where
         for (property, value) in self.properties {
             let (is_indexed, index_options) = indexed
                 .iter()
-                .filter_map(|(p, index_type)| {
+                .filter_map(|(p, index_options)| {
                     if p == &property {
-                        Some((true, index_type))
+                        Some((
+                            true,
+                            if !is_delete {
+                                *index_options
+                            } else {
+                                (*index_options).clear()
+                            },
+                        ))
                     } else {
                         None
                     }
                 })
                 .next()
-                .unwrap_or((false, &0));
+                .unwrap_or((false, 0));
             if is_indexed {
                 match value {
                     JSONValue::String(text) => {
-                        document.text(property, text, Language::Unknown, index_options.clear());
+                        document.text(property, text, Language::Unknown, index_options);
                     }
                     JSONValue::Number(number) => {
-                        document.number(property, &number, index_options.clear());
+                        document.number(property, &number, index_options);
                     }
                     value => {
                         debug_assert!(false, "ORM unsupported type: {:?}", value);
@@ -282,11 +335,27 @@ where
             }
         }
 
+        let index_options = if !is_delete {
+            IndexOptions::new()
+        } else {
+            IndexOptions::new().clear()
+        };
         for (property, tags) in self.tags {
             for tag in tags {
-                document.tag(property, tag, IndexOptions::new().clear());
+                document.tag(property, tag, index_options);
             }
         }
+    }
+
+    pub fn insert_orm(&self, document: &mut Document) -> store::Result<()> {
+        document.binary(
+            Self::FIELD_ID,
+            self.serialize().ok_or_else(|| {
+                StoreError::SerializeError("Failed to serialize ORM object.".to_string())
+            })?,
+            IndexOptions::new().store(),
+        );
+        Ok(())
     }
 
     pub fn delete_orm(document: &mut Document) {

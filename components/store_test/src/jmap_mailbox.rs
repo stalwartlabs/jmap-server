@@ -609,7 +609,8 @@ where
     let message_id = mail_store
         .mail_import(
             account_id,
-            b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
+            0.into(),
+            b"From: test@test.com\nSubject: hey\n\ntest",
             vec![JMAPId::from_jmap_string(&get_mailbox_id(&id_map, "inbox"))
                 .unwrap()
                 .get_document_id()],

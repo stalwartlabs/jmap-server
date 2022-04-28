@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use jmap::{
-    id::{blob::BlobId, JMAPIdSerialize},
+    id::{blob::JMAPBlob, JMAPIdSerialize},
     jmap_store::{blob::JMAPBlobStore, get::JMAPGet, parse::JMAPParse},
     protocol::json::JSONValue,
     request::{get::GetRequest, parse::ParseRequest},
@@ -30,7 +30,7 @@ where
         let mut test_file = test_dir.clone();
         test_file.push(test_name);
 
-        let blob_id = BlobId::from_jmap_string(
+        let blob_id = JMAPBlob::from_jmap_string(
             &JSONValue::from(
                 mail_store
                     .get::<GetMail<T>>(GetRequest {
@@ -39,7 +39,8 @@ where
                             mail_store
                                 .mail_import(
                                     account_id,
-                                    fs::read(&test_file).unwrap(),
+                                    0.into(),
+                                    &fs::read(&test_file).unwrap(),
                                     vec![],
                                     vec![],
                                     None,
@@ -139,7 +140,7 @@ where
                 let inner_blob = mail_store
                     .download_blob(
                         account_id,
-                        &part.eval_unwrap_blob_id("/blobId"),
+                        &part.eval_unwrap_blob("/blobId"),
                         get_message_blob,
                     )
                     .unwrap()

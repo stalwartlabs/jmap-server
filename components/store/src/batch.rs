@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use nlp::{
     lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
@@ -7,13 +7,13 @@ use nlp::{
 
 use crate::{
     blob::BlobId,
-    field::{Field, Number, Options, Text, F_FULL_TEXT, F_KEYWORD, F_NONE, F_TOKENIZE},
+    field::{Field, Number, Options, Text},
     leb128::Leb128,
     AccountId, Collection, DocumentId, FieldId, JMAPId, Tag,
 };
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
-pub const MAX_ID_LENGTH: usize = 80;
+pub const MAX_ID_LENGTH: usize = 100;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
 #[derive(Debug)]
@@ -76,11 +76,11 @@ impl Document {
         self.text_fields.push(Field::new(
             field.into(),
             match options.get_text_options() {
-                F_NONE => Text::None { value },
-                F_KEYWORD => Text::Keyword { value },
-                F_TOKENIZE => Text::Tokenized { value, language },
+                <u64 as Options>::F_NONE => Text::None { value },
+                <u64 as Options>::F_KEYWORD => Text::Keyword { value },
+                <u64 as Options>::F_TOKENIZE => Text::Tokenized { value, language },
                 part_id => Text::Full {
-                    part_id: (part_id - F_FULL_TEXT) as u32,
+                    part_id: (part_id - <u64 as Options>::F_FULL_TEXT) as u32,
                     language: if !matches!(language, Language::Unknown) {
                         language
                     } else {

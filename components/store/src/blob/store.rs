@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::{ops::Range, time::SystemTime};
 
 use tracing::error;
 
@@ -76,6 +76,17 @@ where
         match &self.blob.store {
             BlobStoreType::Local(local_store) => local_store.get(blob_id),
             BlobStoreType::S3(s3_store) => s3_store.get(blob_id),
+        }
+    }
+
+    pub fn blob_get_range(
+        &self,
+        blob_id: &BlobId,
+        range: Range<u32>,
+    ) -> crate::Result<Option<Vec<u8>>> {
+        match &self.blob.store {
+            BlobStoreType::Local(local_store) => local_store.get_range(blob_id, range),
+            BlobStoreType::S3(s3_store) => s3_store.get_range(blob_id, range),
         }
     }
 

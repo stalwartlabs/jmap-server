@@ -169,7 +169,7 @@ where
         let raw_message = mail_store
             .download_blob(
                 account_id,
-                &values.eval_unwrap_blob_id("/blobId"),
+                &values.eval_unwrap_blob("/blobId"),
                 get_message_blob,
             )
             .unwrap()
@@ -419,7 +419,7 @@ fn jmap_mail_update<T>(
                 .unwrap()
         )
         .eval_unwrap_string(&format!("/notUpdated/{}/description", message_id_1)),
-        "Message must belong to at least one mailbox."
+        "Message has to belong to at least one mailbox."
     );
 
     assert_eq!(
@@ -500,7 +500,8 @@ where
     mail_store
         .mail_import(
             account_id,
-            raw_message,
+            mail_store.blob_store(&raw_message).unwrap(),
+            &raw_message,
             mailboxes.into_iter().map(|m| m.get_document_id()).collect(),
             keywords
                 .into_iter()

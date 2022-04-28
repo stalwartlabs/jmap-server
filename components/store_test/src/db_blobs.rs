@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use store::{
     batch::{Document, WriteBatch},
-    blob::{BlobEntries, BlobIndex},
-    field::{IndexOptions, Options},
-    serialize::{StoreDeserialize, BLOB_KEY_PREFIX},
+    serialize::StoreDeserialize,
     Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
 };
 
@@ -12,6 +10,7 @@ trait GetAllBlobs {
     fn get_all_blobs(&self) -> store::Result<Vec<(std::path::PathBuf, i64)>>;
 }
 
+/*
 impl<T> GetAllBlobs for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -48,13 +47,14 @@ where
 
         Ok(result)
     }
-}
+}*/
 
 pub fn blobs<T>(db: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut blobs = Vec::new();
+    //TODO implement
+    /*let mut blobs = Vec::new();
 
     for blob_id in 0..4 {
         let mut parts = Vec::new();
@@ -144,5 +144,5 @@ where
             "Blob file {} should not exist",
             blob_path.display()
         );
-    }
+    }*/
 }

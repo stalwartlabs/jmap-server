@@ -12,29 +12,11 @@ use jmap::{
 };
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
-    parsers::{
-        fields::thread::thread_name,
-        preview::{preview_html, preview_text},
-    },
-    Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader,
-    RfcHeaders,
+    parsers::preview::{preview_html, preview_text},
+    Addr, Group, HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader, RfcHeaders,
 };
-use nlp::{
-    lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
-    Language,
-};
-use store::{
-    batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH},
-    blob::BlobId,
-    field::{IndexOptions, Options, Text},
-    leb128::Leb128,
-    serialize::StoreSerialize,
-    AccountId, Integer, JMAPStore, LongInteger, Store, StoreError, Tag,
-};
-use store::{
-    chrono::{LocalResult, SecondsFormat, TimeZone, Utc},
-    DocumentId,
-};
+
+use store::{AccountId, JMAPStore, Store};
 
 use crate::mail::{
     get::{
@@ -43,7 +25,7 @@ use crate::mail::{
         transform_rfc_header, MailGetArguments,
     },
     HeaderName, JMAPMailMimeHeaders, MailBodyProperty, MailHeaderForm, MailHeaderProperty,
-    MailProperty, MessageData, MessageField, MessageOutline, MimePart, MimePartType,
+    MailProperty, MessageOutline, MimePart, MimePartType,
 };
 
 pub struct ParseMail {
@@ -364,7 +346,7 @@ impl ParseMail {
                             .get_mut(0)
                             .and_then(|l| l.remove(header))
                         {
-                            add_raw_header(&offsets, raw_message, form.clone(), *all)
+                            add_raw_header(&offsets, raw_message, *form, *all)
                         } else {
                             JSONValue::Null
                         }
@@ -428,7 +410,7 @@ impl ParseMail {
                             transform_rfc_header(
                                 *header,
                                 header_value,
-                                form.clone(),
+                                *form,
                                 is_collection,
                                 is_grouped,
                                 *all,
@@ -448,6 +430,7 @@ impl ParseMail {
                                         .and_then(|p| mime_parts.get(p + 1))
                                         .unwrap()
                                         .blob_id
+                                        .as_ref()
                                         .unwrap()
                                         .size as usize],
                                 ),
@@ -463,6 +446,7 @@ impl ParseMail {
                                         .and_then(|p| mime_parts.get(p + 1))
                                         .unwrap()
                                         .blob_id
+                                        .as_ref()
                                         .unwrap()
                                         .size as usize],
                                 ),
@@ -511,7 +495,8 @@ impl ParseMail {
                                         add_body_value(
                                             mime_part,
                                             String::from_utf8_lossy(
-                                                &blobs[mime_part.blob_id.unwrap().size as usize],
+                                                &blobs[mime_part.blob_id.as_ref().unwrap().size
+                                                    as usize],
                                             )
                                             .into_owned(),
                                             &self.arguments,
@@ -529,7 +514,7 @@ impl ParseMail {
                         &self.arguments.body_properties,
                         Some(raw_message),
                         Some(&message_outline),
-                        &blob_id.id,
+                        Some(&blob_id.id),
                     ),
 
                     MailProperty::HtmlBody => add_body_parts(
@@ -538,7 +523,7 @@ impl ParseMail {
                         &self.arguments.body_properties,
                         Some(raw_message),
                         Some(&message_outline),
-                        &blob_id.id,
+                        Some(&blob_id.id),
                     ),
 
                     MailProperty::Attachments => add_body_parts(
@@ -547,7 +532,7 @@ impl ParseMail {
                         &self.arguments.body_properties,
                         Some(raw_message),
                         Some(&message_outline),
-                        &blob_id.id,
+                        Some(&blob_id.id),
                     ),
 
                     MailProperty::BodyStructure => {
@@ -556,7 +541,7 @@ impl ParseMail {
                             &mime_parts,
                             &self.arguments.body_properties,
                             Some(raw_message),
-                            &blob_id.id,
+                            Some(&blob_id.id),
                         ) {
                             body_structure
                         } else {
@@ -627,257 +612,6 @@ pub fn get_message_blob(raw_message: &[u8], blob_index: u32) -> Option<Vec<u8>> 
     }
 
     None
-}
-
-pub trait MessageParser {
-    fn parse_attached_message(&mut self, message: &mut Message);
-    fn parse_address(&mut self, header_name: RfcHeader, address: &Addr);
-    fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group);
-    fn parse_text(&mut self, header_name: RfcHeader, text: &str);
-    fn parse_content_type(&mut self, header_name: RfcHeader, content_type: &ContentType);
-    fn add_addr_sort(&mut self, header_name: RfcHeader, header_value: &HeaderValue);
-    fn parse_header(&mut self, header_name: RfcHeader, header_value: &HeaderValue);
-}
-
-impl MessageParser for Document {
-    fn parse_attached_message(&mut self, message: &mut Message) {
-        if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
-            self.text(
-                MessageField::Attachment,
-                subject.into_owned(),
-                Language::Unknown,
-                IndexOptions::new().full_text(0),
-            );
-        }
-        for part in message.parts.drain(..) {
-            match part {
-                MessagePart::Text(text) => {
-                    self.text(
-                        MessageField::Attachment,
-                        text.body.into_owned(),
-                        Language::Unknown,
-                        IndexOptions::new().full_text(0),
-                    );
-                }
-                MessagePart::Html(html) => {
-                    self.text(
-                        MessageField::Attachment,
-                        html_to_text(&html.body),
-                        Language::Unknown,
-                        IndexOptions::new().full_text(0),
-                    );
-                }
-                _ => (),
-            }
-        }
-    }
-
-    fn parse_address(&mut self, header_name: RfcHeader, address: &Addr) {
-        if let Some(name) = &address.name {
-            self.parse_text(header_name, name);
-        };
-        if let Some(ref addr) = address.address {
-            if addr.len() <= MAX_TOKEN_LENGTH {
-                self.text(
-                    header_name,
-                    addr.to_lowercase(),
-                    Language::Unknown,
-                    IndexOptions::new().keyword(),
-                );
-            }
-        };
-    }
-
-    fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group) {
-        if let Some(name) = &group.name {
-            self.parse_text(header_name, name);
-        };
-
-        for address in group.addresses.iter() {
-            self.parse_address(header_name, address);
-        }
-    }
-
-    fn parse_text(&mut self, header_name: RfcHeader, text: &str) {
-        match header_name {
-            RfcHeader::Keywords
-            | RfcHeader::ContentLanguage
-            | RfcHeader::MimeVersion
-            | RfcHeader::MessageId
-            | RfcHeader::References
-            | RfcHeader::ContentId
-            | RfcHeader::ResentMessageId => {
-                if text.len() <= MAX_TOKEN_LENGTH {
-                    self.text(
-                        header_name,
-                        text.to_lowercase(),
-                        Language::Unknown,
-                        IndexOptions::new().keyword(),
-                    );
-                }
-            }
-
-            RfcHeader::Subject => (),
-
-            _ => {
-                self.text(
-                    header_name,
-                    text.to_string(),
-                    Language::Unknown,
-                    IndexOptions::new().tokenize(),
-                );
-            }
-        }
-    }
-
-    fn parse_content_type(&mut self, header_name: RfcHeader, content_type: &ContentType) {
-        if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
-            self.text(
-                header_name,
-                content_type.c_type.to_string(),
-                Language::Unknown,
-                IndexOptions::new().keyword(),
-            );
-        }
-        if let Some(subtype) = &content_type.c_subtype {
-            if subtype.len() <= MAX_TOKEN_LENGTH {
-                self.text(
-                    header_name,
-                    subtype.to_string(),
-                    Language::Unknown,
-                    IndexOptions::new().keyword(),
-                );
-            }
-        }
-        if let Some(attributes) = &content_type.attributes {
-            for (key, value) in attributes {
-                if key == "name" || key == "filename" {
-                    self.text(
-                        header_name,
-                        value.to_string(),
-                        Language::Unknown,
-                        IndexOptions::new().tokenize(),
-                    );
-                } else if value.len() <= MAX_TOKEN_LENGTH {
-                    self.text(
-                        header_name,
-                        value.to_lowercase(),
-                        Language::Unknown,
-                        IndexOptions::new().keyword(),
-                    );
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::manual_flatten)]
-    fn add_addr_sort(&mut self, header_name: RfcHeader, header_value: &HeaderValue) {
-        let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
-            col.first().unwrap_or(&HeaderValue::Empty)
-        } else {
-            header_value
-        } {
-            HeaderValue::Address(addr) => [&None, &addr.name, &addr.address],
-            HeaderValue::AddressList(list) => list.first().map_or([&None, &None, &None], |addr| {
-                [&None, &addr.name, &addr.address]
-            }),
-            HeaderValue::Group(group) => group
-                .addresses
-                .first()
-                .map_or([&group.name, &None, &None], |addr| {
-                    [&group.name, &addr.name, &addr.address]
-                }),
-            HeaderValue::GroupList(list) => list.first().map_or([&None, &None, &None], |group| {
-                group
-                    .addresses
-                    .first()
-                    .map_or([&group.name, &None, &None], |addr| {
-                        [&group.name, &addr.name, &addr.address]
-                    })
-            }),
-            _ => [&None, &None, &None],
-        };
-        let text_len = sort_parts
-            .iter()
-            .map(|part| part.as_ref().map_or(0, |s| s.len()))
-            .sum::<usize>();
-        if text_len > 0 {
-            let mut text = String::with_capacity(if text_len > MAX_SORT_FIELD_LENGTH {
-                MAX_SORT_FIELD_LENGTH
-            } else {
-                text_len
-            });
-            'outer: for part in sort_parts {
-                if let Some(s) = part {
-                    if !text.is_empty() {
-                        text.push(' ');
-                    }
-
-                    for ch in s.chars() {
-                        for ch in ch.to_lowercase() {
-                            if text.len() >= MAX_SORT_FIELD_LENGTH {
-                                break 'outer;
-                            }
-                            text.push(ch);
-                        }
-                    }
-                }
-            }
-            self.text(
-                header_name,
-                text,
-                Language::Unknown,
-                IndexOptions::new().tokenize().sort(),
-            );
-        };
-    }
-
-    fn parse_header(&mut self, header_name: RfcHeader, header_value: &HeaderValue) {
-        match header_value {
-            HeaderValue::Address(address) => {
-                self.parse_address(header_name, address);
-            }
-            HeaderValue::AddressList(address_list) => {
-                for item in address_list {
-                    self.parse_address(header_name, item);
-                }
-            }
-            HeaderValue::Group(group) => {
-                self.parse_address_group(header_name, group);
-            }
-            HeaderValue::GroupList(group_list) => {
-                for item in group_list {
-                    self.parse_address_group(header_name, item);
-                }
-            }
-            HeaderValue::Text(text) => {
-                self.parse_text(header_name, text);
-            }
-            HeaderValue::TextList(text_list) => {
-                for item in text_list {
-                    self.parse_text(header_name, item);
-                }
-            }
-            HeaderValue::DateTime(date_time) => {
-                if date_time.is_valid() {
-                    self.number(
-                        header_name,
-                        date_time.to_timestamp() as u64,
-                        IndexOptions::new().sort(),
-                    );
-                }
-            }
-            HeaderValue::ContentType(content_type) => {
-                self.parse_content_type(header_name, content_type);
-            }
-            HeaderValue::Collection(header_value) => {
-                for item in header_value {
-                    self.parse_header(header_name, item);
-                }
-            }
-            HeaderValue::Empty => (),
-        }
-    }
 }
 
 pub fn header_to_jmap_date(header: HeaderValue) -> (JSONValue, bool) {

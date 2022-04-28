@@ -11,10 +11,7 @@ use jmap::protocol::json::JSONValue;
 use jmap::request::JSONArgumentParser;
 use jmap::Property;
 
-use store::{
-    field::{IndexOptions, Options},
-    Collection, FieldId,
-};
+use store::{field::Options, Collection, FieldId};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
@@ -80,10 +77,13 @@ impl PropertySchema for MailboxProperty {
 
     fn indexed() -> &'static [(Self, u64)] {
         &[
-            (MailboxProperty::Name, IndexOptions::new().tokenize().sort()),
-            (MailboxProperty::Role, IndexOptions::new().keyword()),
-            (MailboxProperty::ParentId, IndexOptions::new().sort()),
-            (MailboxProperty::SortOrder, IndexOptions::new().sort()),
+            (
+                MailboxProperty::Name,
+                <u64 as Options>::F_TOKENIZE | <u64 as Options>::F_SORT,
+            ),
+            (MailboxProperty::Role, <u64 as Options>::F_KEYWORD),
+            (MailboxProperty::ParentId, <u64 as Options>::F_SORT),
+            (MailboxProperty::SortOrder, <u64 as Options>::F_SORT),
         ]
     }
 }

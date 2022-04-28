@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use crate::identity::IdentityProperty;
 use crate::mail::get::get_rfc_header;
-use crate::mail::{MailHeaderForm, MailProperty, MessageData, MESSAGE_DATA, MESSAGE_RAW};
+use crate::mail::{MailHeaderForm, MailProperty, MessageData, MessageField};
 
 use super::EmailSubmissionProperty;
 use jmap::error::set::{SetError, SetErrorType};
@@ -18,9 +18,10 @@ use jmap::{
 };
 use mail_parser::RfcHeader;
 use store::batch::Document;
-use store::field::{IndexOptions, Options};
+use store::blob::BlobId;
+use store::field::IndexOptions;
 use store::leb128::Leb128;
-use store::serialize::StoreDeserialize;
+use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError};
 
 #[derive(Default)]
@@ -303,27 +304,43 @@ where
                 .into(),
         );
 
+        // Fetch message data
+        let document_id = self.email_id.get_document_id();
+        let message_data_bytes = helper
+            .store
+            .blob_get(
+                &helper
+                    .store
+                    .get_document_value::<BlobId>(
+                        helper.account_id,
+                        Collection::Mail,
+                        document_id,
+                        MessageField::Metadata.into(),
+                    )?
+                    .ok_or_else(|| {
+                        SetError::invalid_property(
+                            EmailSubmissionProperty::EmailId.to_string(),
+                            "Email not found.",
+                        )
+                    })?,
+            )?
+            .ok_or_else(|| {
+                SetError::invalid_property(
+                    EmailSubmissionProperty::EmailId.to_string(),
+                    "Email not found.",
+                )
+            })?;
+
+        let (message_data_len, read_bytes) =
+            usize::from_leb128_bytes(&message_data_bytes[..]).ok_or(StoreError::DataCorruption)?;
+
+        let mut message_data = MessageData::deserialize(
+            &message_data_bytes[read_bytes..read_bytes + message_data_len],
+        )
+        .ok_or(StoreError::DataCorruption)?;
+
         // Obtain recipients from e-mail if missing
         if envelope.rcpt_to.is_empty() {
-            let document_id = self.email_id.get_document_id();
-            let message_data_bytes = helper
-                .store
-                .get_blob(
-                    helper.data.account_id,
-                    Collection::Mail,
-                    document_id,
-                    MESSAGE_DATA,
-                )?
-                .ok_or(StoreError::DataCorruption)?;
-
-            let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
-                .ok_or(StoreError::DataCorruption)?;
-
-            let mut message_data = MessageData::deserialize(
-                &message_data_bytes[read_bytes..read_bytes + message_data_len],
-            )
-            .ok_or(StoreError::DataCorruption)?;
-
             for (property, header) in [
                 (MailProperty::To, RfcHeader::To),
                 (MailProperty::Cc, RfcHeader::Cc),
@@ -356,28 +373,19 @@ where
             }
         }
 
-        // Add blob
-        let blob = helper
-            .store
-            .get_blob(
-                helper.account_id,
-                Collection::Mail,
-                self.email_id.get_document_id(),
-                MESSAGE_RAW,
-            )?
-            .ok_or_else(|| {
-                SetError::invalid_property(
-                    EmailSubmissionProperty::IdentityId.to_string(),
-                    "Identity not found.",
-                )
-            })?;
-        document.binary(0, blob, IndexOptions::new().store_blob(MESSAGE_RAW));
+        // Add and link blob
+        document.binary(
+            EmailSubmissionProperty::EmailId,
+            message_data.raw_message.serialize().unwrap(),
+            IndexOptions::new(),
+        );
+        document.blob(message_data.raw_message, IndexOptions::new());
 
         // Insert envelope
         self.email_submission
             .set(EmailSubmissionProperty::Envelope, envelope.into());
 
-        TinyORM::default().merge_validate(document, self.email_submission)?;
+        self.email_submission.insert_validate(document)?;
 
         if let Some(on_success) = helper.data.on_success.as_mut() {
             let create_id = format!("#{}", create_id);

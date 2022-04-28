@@ -6,19 +6,17 @@ use std::{
 use nlp::{
     stemmer::Stemmer,
     tokenizers::{Token, Tokenizer},
-    Language,
 };
 
 use crate::{
     batch::{Change, WriteAction, WriteBatch, MAX_TOKEN_LENGTH},
-    bitmap::{clear_bit, set_clear_bits},
-    field::{Options, Text, UpdateField},
+    bitmap::set_clear_bits,
+    field::{Options, Text},
     leb128::Leb128,
     log::ChangeId,
-    serialize::{BitmapKey, BlobKey, IndexKey, LogKey, StoreDeserialize, StoreSerialize, ValueKey},
-    term_index::{Term, TermIndex, TermIndexBuilder},
-    AccountId, Collections, ColumnFamily, Direction, DocumentId, FieldId, JMAPStore, Store,
-    StoreError, WriteOperation,
+    serialize::{BitmapKey, BlobKey, IndexKey, LogKey, StoreSerialize, ValueKey},
+    term_index::TermIndexBuilder,
+    AccountId, Collections, ColumnFamily, DocumentId, JMAPStore, Store, StoreError, WriteOperation,
 };
 
 impl<T> JMAPStore<T>

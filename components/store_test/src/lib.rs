@@ -4,27 +4,21 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 use flate2::read::GzDecoder;
 
 use jmap::protocol::json::JSONValue;
-use jmap_mail::mail::{MessageData, MessageOutline, MESSAGE_DATA};
-use store::blob::{BlobEntries, BlobIndex};
-use store::field::Keywords;
+use jmap_mail::mail::{MessageData, MessageOutline};
 use store::leb128::Leb128;
 use store::serialize::{
-    DeserializeBigEndian, IndexKey, LogKey, StoreDeserialize, ValueKey, BLOB_KEY_PREFIX,
-    FOLLOWER_COMMIT_INDEX_KEY, LAST_TERM_ID_KEY, LEADER_COMMIT_INDEX_KEY, TEMP_BLOB_KEY_PREFIX,
+    DeserializeBigEndian, IndexKey, LogKey, StoreDeserialize, ValueKey, FOLLOWER_COMMIT_INDEX_KEY,
+    LEADER_COMMIT_INDEX_KEY,
 };
 use store::term_index::TermIndex;
 use store::{
-    config::EnvSettings,
-    roaring::RoaringBitmap,
-    serialize::{BM_KEYWORD, BM_TAG_ID, BM_TAG_STATIC, BM_TAG_TEXT},
-    AccountId, ColumnFamily, JMAPStore, Store,
+    config::EnvSettings, roaring::RoaringBitmap, AccountId, ColumnFamily, JMAPStore, Store,
 };
 use store::{log, Collection, DocumentId};
 
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
 pub mod db_log;
-pub mod db_term_id;
 pub mod jmap_changes;
 pub mod jmap_mail_get;
 pub mod jmap_mail_merge_threads;
@@ -246,6 +240,7 @@ where
             (ColumnFamily::Values, 0),
             (ColumnFamily::Indexes, 0),
             (ColumnFamily::Logs, 0),
+            (ColumnFamily::Blobs, 0),
         ]);
 
         for cf in [
@@ -253,6 +248,7 @@ where
             ColumnFamily::Values,
             ColumnFamily::Indexes,
             ColumnFamily::Logs,
+            ColumnFamily::Blobs,
         ] {
             for (key, value) in self
                 .db
@@ -261,65 +257,58 @@ where
             {
                 match cf {
                     ColumnFamily::Bitmaps => {
-                        if [BM_KEYWORD, BM_TAG_ID, BM_TAG_TEXT, BM_TAG_STATIC]
-                            .contains(key.last().unwrap())
-                        {
-                            let (account_id, _) = AccountId::from_leb128_bytes(&key).unwrap();
-                            let collection = key[key.len() - 3].into();
-                            if account_id != last_account_id || last_collection != collection {
-                                last_account_id = account_id;
-                                last_collection = collection;
-                                last_ids = self
-                                    .get_document_ids(account_id, collection)
-                                    .unwrap()
-                                    .unwrap_or_default();
-                            }
-                            let mut tagged_docs = RoaringBitmap::deserialize(&value).unwrap();
-                            tagged_docs &= &last_ids;
-                            let mut other_tagged_docs = other
-                                .db
-                                .get::<RoaringBitmap>(cf, &key)
+                        let (account_id, _) = AccountId::from_leb128_bytes(&key).unwrap();
+                        let collection = key[key.len() - 3].into();
+                        if account_id != last_account_id || last_collection != collection {
+                            last_account_id = account_id;
+                            last_collection = collection;
+                            last_ids = self
+                                .get_document_ids(account_id, collection)
                                 .unwrap()
                                 .unwrap_or_default();
-                            other_tagged_docs &= &last_ids;
+                        }
+                        let mut tagged_docs = RoaringBitmap::deserialize(&value).unwrap();
+                        tagged_docs &= &last_ids;
+                        let mut other_tagged_docs = other
+                            .db
+                            .get::<RoaringBitmap>(cf, &key)
+                            .unwrap()
+                            .unwrap_or_default();
+                        other_tagged_docs &= &last_ids;
 
-                            if ASSERT {
-                                assert_eq!(
-                                    tagged_docs,
-                                    other_tagged_docs,
-                                    "{:?}/{}/{:?}/{} -> used ids {:?}",
-                                    cf,
-                                    account_id,
-                                    collection,
-                                    key.last().unwrap(),
-                                    //String::from_utf8_lossy(&key[1..key.len() - 3]),
-                                    self.get_document_ids(account_id, collection)
-                                        .unwrap()
-                                        .unwrap_or_default(),
-                                );
-                            } else if tagged_docs != other_tagged_docs {
-                                println!(
-                                    "{:?} != {:?} for {:?}/{}/{:?}/{} -> active ids {:?}",
-                                    tagged_docs,
-                                    other_tagged_docs,
-                                    cf,
-                                    account_id,
-                                    collection,
-                                    key.last().unwrap(),
-                                    last_ids
-                                );
-                            }
+                        if ASSERT {
+                            assert_eq!(
+                                tagged_docs,
+                                other_tagged_docs,
+                                "{:?}/{}/{:?}/{} -> used ids {:?}",
+                                cf,
+                                account_id,
+                                collection,
+                                key.last().unwrap(),
+                                //String::from_utf8_lossy(&key[1..key.len() - 3]),
+                                self.get_document_ids(account_id, collection)
+                                    .unwrap()
+                                    .unwrap_or_default(),
+                            );
+                        } else if tagged_docs != other_tagged_docs {
+                            println!(
+                                "{:?} != {:?} for {:?}/{}/{:?}/{} -> active ids {:?}",
+                                tagged_docs,
+                                other_tagged_docs,
+                                cf,
+                                account_id,
+                                collection,
+                                key.last().unwrap(),
+                                last_ids
+                            );
+                        }
 
-                            if !tagged_docs.is_empty() {
-                                *total_keys.get_mut(&cf).unwrap() += 1;
-                            }
+                        if !tagged_docs.is_empty() {
+                            *total_keys.get_mut(&cf).unwrap() += 1;
                         }
                     }
                     ColumnFamily::Values => {
                         if (0..=9).contains(&key[0])
-                            && !key.starts_with(BLOB_KEY_PREFIX)
-                            && !key.starts_with(TEMP_BLOB_KEY_PREFIX)
-                            && &key[..] != LAST_TERM_ID_KEY
                             && &key[..] != FOLLOWER_COMMIT_INDEX_KEY
                             && &key[..] != LEADER_COMMIT_INDEX_KEY
                         {
@@ -370,7 +359,7 @@ where
                                                 value, other_value
                                             );
                                             assert_eq!(
-                                                item.blob_id, other_item.blob_id,
+                                                item.part_id, other_item.part_id,
                                                 "{:?} != {:?}",
                                                 value, other_value
                                             );
@@ -380,137 +369,6 @@ where
                                                 value, other_value
                                             );
                                         }
-                                    } else if key.ends_with(&[ValueKey::BLOBS]) {
-                                        let value = BlobEntries::deserialize(&value).unwrap();
-                                        let other_value =
-                                            BlobEntries::deserialize(&other_value).unwrap();
-
-                                        for (blob_index, (entry, other_entry)) in value
-                                            .items
-                                            .into_iter()
-                                            .zip(other_value.items)
-                                            .enumerate()
-                                        {
-                                            if ASSERT {
-                                                assert_eq!(
-                                                    entry.size,
-                                                    other_entry.size,
-                                                    "{:?}/{}/{:?}/{}, blob index {}",
-                                                    cf,
-                                                    account_id,
-                                                    collection,
-                                                    document_id,
-                                                    blob_index
-                                                );
-                                            } else if entry.size != other_entry.size {
-                                                println!(
-                                                    "{} != {}, {:?}/{}/{:?}/{}, blob index {}",
-                                                    entry.size,
-                                                    other_entry.size,
-                                                    cf,
-                                                    account_id,
-                                                    collection,
-                                                    document_id,
-                                                    blob_index
-                                                );
-                                            }
-
-                                            if entry.hash != other_entry.hash {
-                                                let blob = self
-                                                    .get_blob(
-                                                        account_id,
-                                                        Collection::Mail,
-                                                        document_id,
-                                                        blob_index as BlobIndex,
-                                                    )
-                                                    .unwrap()
-                                                    .unwrap();
-                                                let other_blob = other
-                                                    .get_blob(
-                                                        account_id,
-                                                        Collection::Mail,
-                                                        document_id,
-                                                        blob_index as BlobIndex,
-                                                    )
-                                                    .unwrap()
-                                                    .unwrap();
-
-                                                if collection == Collection::Mail
-                                                    && blob_index as BlobIndex == MESSAGE_DATA
-                                                {
-                                                    let mut this_message_data = None;
-                                                    let mut this_message_outline = None;
-
-                                                    for message_data_bytes in vec![blob, other_blob]
-                                                    {
-                                                        let (message_data_len, read_bytes) =
-                                                            usize::from_leb128_bytes(
-                                                                &message_data_bytes[..],
-                                                            )
-                                                            .unwrap();
-
-                                                        let message_data =
-                                                            MessageData::deserialize(
-                                                                &message_data_bytes[read_bytes
-                                                                    ..read_bytes
-                                                                        + message_data_len],
-                                                            )
-                                                            .unwrap();
-
-                                                        let message_outline =
-                                                            MessageOutline::deserialize(
-                                                                &message_data_bytes[read_bytes
-                                                                    + message_data_len..],
-                                                            )
-                                                            .unwrap();
-
-                                                        if let Some(this_message_data) =
-                                                            std::mem::take(&mut this_message_data)
-                                                        {
-                                                            assert_eq!(
-                                                                this_message_data,
-                                                                message_data
-                                                            );
-                                                            let this_message_outline: MessageOutline =
-                                                            std::mem::take(&mut this_message_outline).unwrap();
-
-                                                            assert_eq!(
-                                                                this_message_outline.received_at,
-                                                                message_outline.received_at
-                                                            );
-                                                            assert_eq!(
-                                                                this_message_outline.body_offset,
-                                                                message_outline.body_offset
-                                                            );
-                                                            assert_eq!(
-                                                                this_message_outline.headers,
-                                                                message_outline.headers
-                                                            );
-                                                        } else {
-                                                            this_message_data = Some(message_data);
-                                                            this_message_outline =
-                                                                Some(message_outline);
-                                                        }
-                                                    }
-                                                } else {
-                                                    assert_eq!(
-                                                        blob,
-                                                        other_blob,
-                                                        "{:?}/{}/{:?}/{}, blob index {}",
-                                                        cf,
-                                                        account_id,
-                                                        collection,
-                                                        document_id,
-                                                        blob_index
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    } else if key.ends_with(&[ValueKey::KEYWORDS]) {
-                                        let value = Keywords::deserialize(&value).unwrap();
-                                        let other_value =
-                                            Keywords::deserialize(&other_value).unwrap();
-                                        assert_eq!(value.items, other_value.items);
                                     } else if ASSERT {
                                         panic!(
                                             "{:?}/{}/{:?}/{}, key[{:?}] {:?} != {:?}",
@@ -629,6 +487,26 @@ where
                             println!("Missing log key: [{:?}]", key);
                         };
                     }
+                    ColumnFamily::Blobs => {
+                        *total_keys.get_mut(&cf).unwrap() += 1;
+                        if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap() {
+                            if ASSERT {
+                                assert_eq!(value, other_value.into(), "{:?} {:?}", cf, key);
+                            } else {
+                                let other_value = other_value.into_boxed_slice();
+                                if value != other_value {
+                                    println!(
+                                        "Blob mismatch: {:?} -> {:?} != {:?}",
+                                        key, value, other_value
+                                    );
+                                }
+                            }
+                        } else if ASSERT {
+                            panic!("Missing Blob key: [{:?}]", key);
+                        } else {
+                            println!("Missing Blob key: [{:?}]", key);
+                        };
+                    }
                     _ => (),
                 }
             }
@@ -659,21 +537,13 @@ where
                             key
                         );
                     }
-                    ColumnFamily::Values
-                        if &key[..] != LAST_TERM_ID_KEY && (0..=9).contains(&key[0]) =>
-                    {
-                        if key.starts_with(BLOB_KEY_PREFIX) {
-                            assert_eq!(
-                                i64::deserialize(&value).unwrap(),
-                                0,
-                                "Blob key '{:?}' is not zero.",
-                                key
-                            );
-                        } else if !key.starts_with(TEMP_BLOB_KEY_PREFIX) {
-                            panic!("{:?} {:?}={:?}", cf, key, value);
-                        }
+                    ColumnFamily::Values if (0..=9).contains(&key[0]) => {
+                        panic!("{:?} {:?}={:?}", cf, key, value);
                     }
                     ColumnFamily::Indexes => {
+                        panic!("{:?} {:?}={:?}", cf, key, value);
+                    }
+                    ColumnFamily::Blobs => {
                         panic!("{:?} {:?}={:?}", cf, key, value);
                     }
                     _ => (),

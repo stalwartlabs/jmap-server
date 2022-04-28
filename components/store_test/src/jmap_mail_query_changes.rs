@@ -111,13 +111,13 @@ where
                 let jmap_id = mail_store
                     .mail_import(
                         account_id,
+                        0.into(),
                         format!(
                             "From: test_{}\nSubject: test_{}\n\ntest",
                             if change_num % 2 == 0 { 1 } else { 2 },
                             *id
                         )
-                        .as_bytes()
-                        .to_vec(),
+                        .as_bytes(),
                         vec![if change_num % 2 == 0 { 1 } else { 2 }],
                         vec![Tag::Text(if change_num % 2 == 0 {
                             "1".into()
@@ -144,7 +144,7 @@ where
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
                 let mut batch = WriteBatch::new(account_id, false);
-                batch.delete_document(Collection::Mail, id.get_document_id());
+                batch.delete_document(Document::new(Collection::Mail, id.get_document_id()));
                 batch.log_delete(Collection::Mail, id);
                 mail_store.write(batch).unwrap();
                 removed_ids.insert(id);

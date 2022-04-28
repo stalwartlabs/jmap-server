@@ -869,7 +869,7 @@ where
                 );*/
                 let mut batch = WriteBatch::new(account_id, false);
                 for delete_id in &changes.inserts {
-                    batch.delete_document(collection, delete_id);
+                    //batch.delete_document(collection, delete_id);
                 }
                 let store = self.store.clone();
                 if let Err(err) = self.spawn_worker(move || store.write(batch)).await {

@@ -78,7 +78,8 @@ where
             mail_store
                 .mail_import(
                     base_test_num,
-                    message.as_bytes().to_vec(),
+                    0.into(),
+                    message.as_bytes(),
                     vec![],
                     vec![],
                     None,
@@ -90,7 +91,8 @@ where
             mail_store
                 .mail_import(
                     base_test_num + 1,
-                    message.as_bytes().to_vec(),
+                    0.into(),
+                    message.as_bytes(),
                     vec![],
                     vec![],
                     None,
@@ -103,7 +105,8 @@ where
                 mail_store
                     .mail_import(
                         base_test_num + 2,
-                        message.as_bytes().to_vec(),
+                        0.into(),
+                        message.as_bytes(),
                         vec![],
                         vec![],
                         None,
@@ -114,7 +117,8 @@ where
                 mail_store
                     .mail_import(
                         base_test_num + 3,
-                        message.as_bytes().to_vec(),
+                        0.into(),
+                        message.as_bytes(),
                         vec![],
                         vec![],
                         None,
@@ -128,7 +132,8 @@ where
                 mail_store
                     .mail_import(
                         base_test_num + 4,
-                        message.as_bytes().to_vec(),
+                        0.into(),
+                        message.as_bytes(),
                         vec![],
                         vec![],
                         None,
@@ -139,7 +144,8 @@ where
                 mail_store
                     .mail_import(
                         base_test_num + 5,
-                        message.as_bytes().to_vec(),
+                        0.into(),
+                        message.as_bytes(),
                         vec![],
                         vec![],
                         None,
@@ -173,7 +179,7 @@ where
             for message_doc_id in message_doc_ids {
                 thread_ids.insert(
                     mail_store
-                        .get_document_tag_id(
+                        .get_document_value(
                             base_test_num + test_num,
                             Collection::Mail,
                             message_doc_id.get_document_id(),
@@ -219,6 +225,7 @@ where
             delete_email(mail_store, account_id, message_id);
         }
     }
+    return;
     mail_store.assert_is_empty();
 }
 

@@ -18,7 +18,8 @@ where
         let result = mail_store
             .mail_import(
                 account_id,
-                format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
+                0.into(),
+                format!("Subject: test\nReferences: <1234>\n\n{}", num).as_bytes(),
                 vec![],
                 vec![],
                 Some(10000i64 + num as i64),

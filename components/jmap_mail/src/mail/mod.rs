@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
-    error::method::MethodError, protocol::json::JSONValue, request::JSONArgumentParser, Property,
+    error::method::MethodError, jmap_store::orm::PropertySchema, protocol::json::JSONValue,
+    request::JSONArgumentParser, Property,
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
@@ -22,6 +23,8 @@ use store::{
     serialize::{StoreDeserialize, StoreSerialize},
     Collection, FieldId, StoreError, Tag,
 };
+
+pub const MAX_MESSAGE_PARTS: usize = 1000;
 
 pub type JMAPMailHeaders = HashMap<MailProperty, JSONValue>;
 pub type JMAPMailMimeHeaders = HashMap<MailBodyProperty, JSONValue>;
@@ -164,10 +167,10 @@ impl MimePart {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum MessageField {
-    Internal = 127,
+    Metadata = 127,
     Body = 128,
     Attachment = 129,
     ReceivedAt = 130,
@@ -187,7 +190,33 @@ impl From<MessageField> for FieldId {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+impl Property for MessageField {
+    fn parse(_value: &str) -> Option<Self> {
+        None
+    }
+
+    fn collection() -> Collection {
+        Collection::Mail
+    }
+}
+
+impl PropertySchema for MessageField {
+    fn required() -> &'static [Self] {
+        &[]
+    }
+
+    fn indexed() -> &'static [(Self, u64)] {
+        &[]
+    }
+}
+
+impl Display for MessageField {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Serialize, Deserialize)]
 pub enum MailHeaderForm {
     Raw,
     Text,

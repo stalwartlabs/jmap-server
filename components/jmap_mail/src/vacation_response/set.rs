@@ -132,7 +132,7 @@ where
         _create_id: &str,
         document: &mut Document,
     ) -> jmap::error::set::Result<Self::CreateItemResult> {
-        TinyORM::default().merge_validate(document, self.vacation_response)?;
+        self.vacation_response.insert_validate(document)?;
         Ok(DefaultCreateItem::new(document.document_id as JMAPId))
     }
 

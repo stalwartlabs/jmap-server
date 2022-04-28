@@ -1,9 +1,8 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{HashMap, HashSet},
     convert::TryInto,
 };
 
-use fst::{Map, MapBuilder};
 use nlp::{stemmer::StemmedToken, tokenizers::Token};
 
 use crate::{
@@ -49,7 +48,7 @@ pub struct TermIndexBuilderItem {
 }
 
 pub struct TermIndexBuilder {
-    terms: BTreeMap<String, u32>,
+    terms: HashMap<String, u32>,
     items: Vec<TermIndexBuilderItem>,
 }
 
@@ -63,7 +62,7 @@ pub struct TermIndexItem {
 
 #[derive(Debug)]
 pub struct TermIndex {
-    pub fst_map: Map<Vec<u8>>,
+    pub token_map: HashMap<String, u32>,
     pub items: Vec<TermIndexItem>,
 }
 
@@ -204,7 +203,7 @@ impl TermIndexBuilder {
     pub fn new() -> TermIndexBuilder {
         TermIndexBuilder {
             items: Vec::new(),
-            terms: BTreeMap::new(),
+            terms: HashMap::new(),
         }
     }
 
@@ -260,25 +259,33 @@ impl TermIndexBuilder {
 
 impl StoreSerialize for TermIndexBuilder {
     fn serialize(&self) -> Option<Vec<u8>> {
-        // Build FST
-        let mut fst_map = MapBuilder::memory();
+        // Add tokens
+        if self.terms.is_empty() {
+            return None;
+        }
+        let mut terms = vec![""; self.terms.len()];
+        let mut terms_len = 0;
         for (word, id) in &self.terms {
-            fst_map.insert(word.as_bytes(), *id as u64);
+            terms[*id as usize] = word;
+            terms_len += word.len() + 1;
         }
 
-        let fst_bytes = fst_map.into_inner().ok()?;
-        let mut bytes = Vec::with_capacity(fst_bytes.len() + 1024);
-
-        // Write FST map
-        fst_bytes.len().to_leb128_bytes(&mut bytes);
-        bytes.extend_from_slice(&fst_bytes);
+        // Serialize tokens
+        let mut bytes = Vec::with_capacity(
+            terms_len + ((self.items.len() / self.terms.len()) * std::mem::size_of::<u64>() * 2),
+        );
+        self.terms.len().to_leb128_bytes(&mut bytes);
+        for terms in terms {
+            bytes.extend_from_slice(terms.as_bytes());
+            bytes.push(0);
+        }
 
         // Write terms
         let mut bitpacker = TermIndexPacker::new();
         let mut compressed = vec![0u8; 4 * BitPacker8x::BLOCK_LEN];
 
         for term_index in &self.items {
-            let mut ids = Vec::with_capacity(term_index.terms.len() * 4);
+            let mut ids = Vec::with_capacity(term_index.terms.len() * 2);
             let mut offsets = Vec::with_capacity(term_index.terms.len());
             let mut lengths = Vec::with_capacity(term_index.terms.len());
 
@@ -353,14 +360,21 @@ impl StoreSerialize for TermIndexBuilder {
 
 impl StoreDeserialize for TermIndex {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let (fst_len, bytes_read) = usize::from_leb128_bytes(bytes)?;
+        let (num_terms, mut pos) = u32::from_leb128_bytes(bytes)?;
+        let mut token_map = HashMap::with_capacity(num_terms as usize);
+        for term_id in 0..num_terms {
+            let nil_pos = bytes.get(pos..)?.iter().position(|b| b == &0)?;
+            token_map.insert(
+                String::from_utf8(bytes.get(pos..pos + nil_pos)?.to_vec()).ok()?,
+                term_id,
+            );
+            pos += nil_pos + 1;
+        }
 
         let mut term_index = TermIndex {
             items: Vec::new(),
-            fst_map: Map::new(bytes.get(bytes_read..bytes_read + fst_len)?.to_vec()).ok()?,
+            token_map,
         };
-
-        let mut pos = bytes_read + fst_len;
 
         while pos < bytes.len() {
             let item_len =
@@ -392,13 +406,10 @@ impl StoreDeserialize for TermIndex {
 
 impl TermIndex {
     pub fn get_match_term(&self, word: &str, stemmed_word: Option<&str>) -> MatchTerm {
-        let id = self
-            .fst_map
-            .get(word.as_bytes())
-            .map(|id| id as u32)
-            .unwrap_or(u32::MAX);
+        let id = self.token_map.get(word).copied().unwrap_or(u32::MAX);
         let id_stemmed = stemmed_word
-            .and_then(|word| self.fst_map.get(word.as_bytes()).map(|id| id as u32))
+            .and_then(|word| self.token_map.get(word))
+            .copied()
             .unwrap_or(id);
 
         MatchTerm { id, id_stemmed }
@@ -454,12 +465,16 @@ impl TermIndex {
             if let Some(initial_value) = initial_value {
                 bitpacker.decompress_sorted(
                     initial_value,
-                    &bytes[1..bytes_read],
+                    bytes.get(1..bytes_read).ok_or(Error::DataCorruption)?,
                     &mut decompressed[..],
                     num_bits,
                 );
             } else {
-                bitpacker.decompress(&bytes[1..bytes_read], &mut decompressed[..], num_bits);
+                bitpacker.decompress(
+                    bytes.get(1..bytes_read).ok_or(Error::DataCorruption)?,
+                    &mut decompressed[..],
+                    num_bits,
+                );
             }
 
             Ok((bytes_read, decompressed))
@@ -514,7 +529,7 @@ impl TermIndex {
             'term_loop: while term_pos < item.terms_len {
                 let (bytes_read, chunk) = self.uncompress_chunk(
                     item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
-                    (item.terms_len * 4) - (term_pos * 4),
+                    (item.terms_len * 2) - (term_pos * 2),
                     None,
                 )?;
 
@@ -581,7 +596,7 @@ impl TermIndex {
                     if term_pos < item.terms_len {
                         byte_pos += self.skip_items(
                             item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
-                            (item.terms_len * 4) - (term_pos * 4),
+                            (item.terms_len * 2) - (term_pos * 2),
                         )?;
                     }
 
@@ -652,13 +667,13 @@ impl TermIndex {
             while term_pos < item.terms_len {
                 let (bytes_read, chunk) = self.uncompress_chunk(
                     item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
-                    (item.terms_len * 4) - (term_pos * 4),
+                    (item.terms_len * 2) - (term_pos * 2),
                     None,
                 )?;
 
                 byte_pos += bytes_read;
 
-                for encoded_term in chunk.chunks_exact(8) {
+                for encoded_term in chunk.chunks_exact(2) {
                     let term_id = encoded_term[0];
                     let term_id_stemmed = encoded_term[1];
 
@@ -894,7 +909,7 @@ mod tests {
                     for word in words.iter() {
                         if word == &text_word
                             || !match_phrase
-                                && word == token_stemmed_word.unwrap_or(&&"".to_string())
+                                && word == token_stemmed_word.unwrap_or(&"".to_string())
                         {
                             continue 'outer;
                         }

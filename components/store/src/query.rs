@@ -169,7 +169,7 @@ where
                             }
                             FieldValue::FullText(query) => {
                                 if query.match_phrase {
-                                    let mut words = HashSet::new();
+                                    let mut phrase: Vec<String> = Vec::new();
                                     let field = filter_cond.field;
 
                                     // Retrieve the Term Index for each candidate and match the exact phrase
@@ -182,19 +182,17 @@ where
                                         )
                                         .into_iter()
                                         .filter_map(|token| {
-                                            if !words.contains(token.word.as_ref()) {
-                                                let key = BitmapKey::serialize_term(
-                                                    account_id,
-                                                    collection,
-                                                    field,
-                                                    &token.word,
-                                                    true,
-                                                );
-                                                words.insert(token.word.into_owned());
-                                                key.into()
+                                            let word = token.word.into_owned();
+                                            let r = if !phrase.contains(&word) {
+                                                BitmapKey::serialize_term(
+                                                    account_id, collection, field, &word, true,
+                                                )
+                                                .into()
                                             } else {
                                                 None
-                                            }
+                                            };
+                                            phrase.push(word);
+                                            r
                                         })
                                         .collect(),
                                     )? {
@@ -210,7 +208,7 @@ where
                                             )? {
                                                 if term_index
                                                     .match_terms(
-                                                        &words
+                                                        &phrase
                                                             .iter()
                                                             .map(|w| {
                                                                 term_index.get_match_term(w, None)

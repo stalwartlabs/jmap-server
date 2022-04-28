@@ -144,6 +144,16 @@ impl JSONValue {
         matches!(self, JSONValue::Null)
     }
 
+    pub fn is_empty(&self) -> bool {
+        match self {
+            JSONValue::Null => true,
+            JSONValue::String(string) => string.is_empty(),
+            JSONValue::Array(array) => array.is_empty(),
+            JSONValue::Object(obj) => obj.is_empty(),
+            JSONValue::Bool(_) | JSONValue::Number(_) => false,
+        }
+    }
+
     pub fn to_array(&self) -> Option<&Vec<JSONValue>> {
         match self {
             JSONValue::Array(array) => Some(array),
