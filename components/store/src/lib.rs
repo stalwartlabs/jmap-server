@@ -111,16 +111,15 @@ impl JMAPIdPrefix for JMAPId {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum Collection {
-    Blob = 0,
-    Account = 1,
-    PushSubscription = 2,
-    Mail = 3,
-    Mailbox = 4,
-    Thread = 5,
-    Identity = 6,
-    EmailSubmission = 7,
-    VacationResponse = 8,
-    None = 9,
+    Account = 0,
+    PushSubscription = 1,
+    Mail = 2,
+    Mailbox = 3,
+    Thread = 4,
+    Identity = 5,
+    EmailSubmission = 6,
+    VacationResponse = 7,
+    None = 8,
 }
 
 impl From<u8> for Collection {

@@ -82,7 +82,6 @@ pub trait Options {
     const F_STORE: u64 = 0x01 << 32;
     const F_SORT: u64 = 0x02 << 32;
     const F_CLEAR: u64 = 0x04 << 32;
-    const F_BUILD_TERM_INDEX: u64 = 0x08 << 32;
     const F_NONE: u64 = 0;
     const F_KEYWORD: u64 = 1;
     const F_TOKENIZE: u64 = 2;
@@ -91,7 +90,6 @@ pub trait Options {
     fn store(self) -> Self;
     fn sort(self) -> Self;
     fn clear(self) -> Self;
-    fn build_term_index(self) -> Self;
     fn keyword(self) -> Self;
     fn tokenize(self) -> Self;
     fn full_text(self, part_id: u32) -> Self;
@@ -99,7 +97,6 @@ pub trait Options {
     fn is_store(&self) -> bool;
     fn is_sort(&self) -> bool;
     fn is_clear(&self) -> bool;
-    fn is_build_term_index(&self) -> bool;
     fn get_text_options(&self) -> u64;
 }
 
@@ -111,11 +108,6 @@ impl Options for u64 {
 
     fn sort(mut self) -> Self {
         self |= Self::F_SORT;
-        self
-    }
-
-    fn build_term_index(mut self) -> Self {
-        self |= Self::F_BUILD_TERM_INDEX;
         self
     }
 
@@ -146,10 +138,6 @@ impl Options for u64 {
 
     fn is_clear(&self) -> bool {
         self & Self::F_CLEAR != 0
-    }
-
-    fn is_build_term_index(&self) -> bool {
-        self & Self::F_BUILD_TERM_INDEX != 0
     }
 
     fn get_text_options(&self) -> u64 {
@@ -189,11 +177,6 @@ impl<T> Field<T> {
     #[inline(always)]
     pub fn is_clear(&self) -> bool {
         self.options.is_clear()
-    }
-
-    #[inline(always)]
-    pub fn is_build_term_index(&self) -> bool {
-        self.options.is_build_term_index()
     }
 
     pub fn size_of(&self) -> usize {

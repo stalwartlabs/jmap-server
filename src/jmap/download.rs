@@ -4,7 +4,7 @@ use jmap::jmap_store::blob::JMAPBlobStore;
 use super::server::JMAPServer;
 use jmap::id::JMAPIdSerialize;
 use jmap::{error::problem_details::ProblemDetails, id::blob::JMAPBlob};
-use jmap_mail::mail::parse::get_message_blob;
+use jmap_mail::mail::parse::get_message_part;
 use store::{tracing::error, AccountId, JMAPId, Store};
 
 #[derive(serde::Deserialize)]
@@ -27,7 +27,7 @@ where
         let account_id = account_id as AccountId;
         let store = core.store.clone();
         match core
-            .spawn_worker(move || store.download_blob(account_id, &blob_id, get_message_blob))
+            .spawn_worker(move || store.download_blob(account_id, &blob_id, get_message_part))
             .await
         {
             Ok(Some(bytes)) => {

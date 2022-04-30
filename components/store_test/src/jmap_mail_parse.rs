@@ -9,7 +9,7 @@ use jmap::{
 use jmap_mail::mail::{
     get::GetMail,
     import::JMAPMailImport,
-    parse::{get_message_blob, ParseMail},
+    parse::{get_message_part, ParseMail},
     HeaderName, MailBodyProperty, MailHeaderForm, MailHeaderProperty, MailProperty,
 };
 use mail_parser::RfcHeader;
@@ -30,6 +30,9 @@ where
         let mut test_file = test_dir.clone();
         test_file.push(test_name);
 
+        let raw_blob = fs::read(&test_file).unwrap();
+        let raw_blob_id = mail_store.blob_store(&raw_blob).unwrap();
+
         let blob_id = JMAPBlob::from_jmap_string(
             &JSONValue::from(
                 mail_store
@@ -39,8 +42,8 @@ where
                             mail_store
                                 .mail_import(
                                     account_id,
-                                    0.into(),
-                                    &fs::read(&test_file).unwrap(),
+                                    raw_blob_id,
+                                    &raw_blob,
                                     vec![],
                                     vec![],
                                     None,
@@ -141,17 +144,22 @@ where
                     .download_blob(
                         account_id,
                         &part.eval_unwrap_blob("/blobId"),
-                        get_message_blob,
+                        get_message_part,
                     )
                     .unwrap()
                     .unwrap();
 
-                test_file
-                    .set_extension(format!("part{}", part.eval_unwrap_unsigned_int("/partId")));
+                test_file.set_extension(format!("part{}", part.eval_unwrap_string("/partId")));
 
                 //fs::write(&test_file, inner_blob).unwrap();
+                let expected_inner_blob = fs::read(&test_file).unwrap();
 
-                assert_eq!(inner_blob, fs::read(&test_file).unwrap());
+                assert_eq!(
+                    inner_blob,
+                    expected_inner_blob,
+                    "file: {}",
+                    test_file.display()
+                );
             }
         }
 
@@ -167,7 +175,7 @@ where
             SortedJSONValue::from(
                 result
                     .eval(&format!("/parsed/{}", blob_id.to_jmap_string()))
-                    .unwrap()
+                    .unwrap(),
             ),
             serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
         );

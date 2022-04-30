@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     iter::FromIterator,
     vec,
@@ -77,7 +78,7 @@ where
     }
 
     fn inner_blob_fnc() -> InnerBlobFnc {
-        get_message_blob
+        get_message_part
     }
 }
 
@@ -97,7 +98,6 @@ impl ParseMail {
             body_offset: message.offset_body,
             body_structure: message.structure,
             headers: Vec::with_capacity(total_parts + 1),
-            received_at: 0,
         };
         let mut has_attachments = false;
 
@@ -556,73 +556,64 @@ impl ParseMail {
     }
 }
 
-pub fn get_message_blob(raw_message: &[u8], blob_index: u32) -> Option<Vec<u8>> {
-    let message = Message::parse(raw_message)?;
-    let mut blob_pos = 0;
+pub fn get_message_part(raw_message: &[u8], part_id: u32) -> Option<Cow<[u8]>> {
+    let mut message = Message::parse(raw_message)?;
+    let part_id = part_id as usize;
+    let total_parts = message.parts.len();
 
-    for (part_id, part) in message.parts.into_iter().enumerate() {
-        match part {
-            MessagePart::Html(html) => {
-                if message.text_body.contains(&part_id) {
-                    if blob_index == blob_pos {
-                        return Some(html_to_text(html.body.as_ref()).into_bytes());
-                    } else {
-                        blob_pos += 1;
+    if part_id < total_parts {
+        match message.parts.swap_remove(part_id) {
+            MessagePart::Text(part) | MessagePart::Html(part) => match part.body {
+                Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
+                Cow::Owned(text) => Cow::Owned(text.into_bytes()),
+            }
+            .into(),
+            MessagePart::Binary(binary) | MessagePart::InlineBinary(binary) => binary.body.into(),
+            MessagePart::Message(nested_message) => match nested_message.body {
+                MessageAttachment::Parsed(message) => message.raw_message,
+                MessageAttachment::Raw(raw_message) => raw_message,
+            }
+            .into(),
+            MessagePart::Multipart(_) => None,
+        }
+    } else {
+        let mut num_conversions = 0;
+        for (part_pos, part) in message.parts.into_iter().enumerate() {
+            match part {
+                MessagePart::Html(html) => {
+                    if message.text_body.contains(&part_pos) {
+                        if total_parts + num_conversions == part_id {
+                            return Cow::from(html_to_text(html.body.as_ref()).into_bytes()).into();
+                        } else {
+                            num_conversions += 1;
+                        }
                     }
                 }
-                if blob_index == blob_pos {
-                    return Some(html.body.into_owned().into_bytes());
-                } else {
-                    blob_pos += 1;
-                }
-            }
-            MessagePart::Text(text) => {
-                if message.html_body.contains(&part_id) {
-                    if blob_index == blob_pos {
-                        return Some(text_to_html(text.body.as_ref()).into_bytes());
-                    } else {
-                        blob_pos += 1;
+                MessagePart::Text(text) => {
+                    if message.html_body.contains(&part_pos) {
+                        if total_parts + num_conversions == part_id {
+                            return Cow::from(text_to_html(text.body.as_ref()).into_bytes()).into();
+                        } else {
+                            num_conversions += 1;
+                        }
                     }
                 }
-                if blob_index == blob_pos {
-                    return Some(text.body.into_owned().into_bytes());
-                } else {
-                    blob_pos += 1;
-                }
+                _ => (),
             }
-            MessagePart::Binary(binary) | MessagePart::InlineBinary(binary) => {
-                if blob_index == blob_pos {
-                    return Some(binary.body.into_owned());
-                } else {
-                    blob_pos += 1;
-                }
-            }
-            MessagePart::Message(nested_message) => {
-                if blob_index == blob_pos {
-                    return Some(match nested_message.body {
-                        MessageAttachment::Parsed(message) => message.raw_message.into_owned(),
-                        MessageAttachment::Raw(raw_message) => raw_message.into_owned(),
-                    });
-                } else {
-                    blob_pos += 1;
-                }
-            }
-            MessagePart::Multipart(_) => (),
-        };
+        }
+        None
     }
-
-    None
 }
 
 pub fn header_to_jmap_date(header: HeaderValue) -> (JSONValue, bool) {
     match header {
-        HeaderValue::DateTime(datetime) => (JSONValue::String(datetime.to_iso8601()), false),
+        HeaderValue::DateTime(datetime) => (datetime.to_timestamp().into(), false),
         HeaderValue::Collection(list) => (
             JSONValue::Array(
                 list.into_iter()
                     .filter_map(|datetime| {
                         if let HeaderValue::DateTime(datetime) = datetime {
-                            Some(JSONValue::String(datetime.to_iso8601()))
+                            Some(datetime.to_timestamp().into())
                         } else {
                             None
                         }

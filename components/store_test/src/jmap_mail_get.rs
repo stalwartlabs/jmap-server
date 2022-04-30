@@ -115,7 +115,7 @@ where
             blob,
             vec![],
             vec!["tag"],
-            Some((blob_len * 1000000) as i64),
+            Some((blob_len * 1000000) as u64),
         );
 
         let result = if file_name.file_name().unwrap() != "headers.eml" {
@@ -403,8 +403,8 @@ where
 
         file_name.set_extension("json");
 
-        //fs::write(file_name, &serde_json::to_string_pretty(&SortedJSONValue::from(result)).unwrap()).unwrap();
         let result = SortedJSONValue::from(result);
+        //fs::write(&file_name, &serde_json::to_string_pretty(&result).unwrap()).unwrap();
 
         assert_eq!(
             &result,

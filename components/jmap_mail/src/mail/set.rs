@@ -1,3 +1,8 @@
+use crate::mail::import::JMAPMailImport;
+use crate::mail::parse::get_message_part;
+use crate::mail::{
+    HeaderName, Keyword, MailHeaderForm, MailHeaderProperty, MailProperty, MessageField,
+};
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::blob::JMAPBlob;
 use jmap::id::JMAPIdSerialize;
@@ -16,25 +21,30 @@ use mail_builder::headers::text::Text;
 use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
+use mail_parser::parsers::fields::thread::thread_name;
+use mail_parser::RfcHeader;
+use nlp::Language;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::batch::Document;
+use store::blob::BlobId;
 use store::chrono::DateTime;
+use store::field::{IndexOptions, Options};
+use store::leb128::Leb128;
 use store::roaring::RoaringBitmap;
-use store::{Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError, Tag};
-
-use crate::mail::import::JMAPMailImport;
-use crate::mail::parse::get_message_blob;
-use crate::mail::{
-    HeaderName, Keyword, MailHeaderForm, MailHeaderProperty, MailProperty, MessageField,
+use store::serialize::StoreDeserialize;
+use store::{
+    AccountId, Collection, DocumentId, Integer, JMAPId, JMAPIdPrefix, JMAPStore, LongInteger,
+    Store, StoreError, Tag,
 };
 
 use super::import::MailImportResult;
+use super::{MessageData, MessageOutline};
 
 #[allow(clippy::large_enum_variant)]
 pub enum SetMail {
     Create {
         fields: TinyORM<MessageField>,
-        received_at: Option<i64>,
+        received_at: Option<u64>,
         builder: MessageBuilder,
         body_values: Option<HashMap<String, JSONValue>>,
     },
@@ -210,7 +220,7 @@ where
                 builder.header("Subject", Text::new(value.parse_json_string()?));
             }
             (MailProperty::SentAt, SetMail::Create { builder, .. }) => {
-                builder.header("Date", Date::new(value.parse_json_date()?))
+                builder.header("Date", Date::new(value.parse_json_date()? as i64))
             }
             (
                 field @ MailProperty::TextBody,
@@ -494,6 +504,189 @@ where
     }
 }
 
+pub trait JMAPMailDelete {
+    fn mail_delete(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> jmap::Result<Option<Document>>;
+}
+
+impl<T> JMAPMailDelete for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn mail_delete(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> jmap::Result<Option<Document>> {
+        let mut document = Document::new(Collection::Mail, document_id);
+        let metadata_blob_id = if let Some(metadata_blob_id) = self.get_document_value::<BlobId>(
+            account_id,
+            Collection::Mail,
+            document_id,
+            MessageField::Metadata.into(),
+        )? {
+            metadata_blob_id
+        } else {
+            return Ok(None);
+        };
+
+        let message_data = MessageData::from_metadata(
+            &self
+                .blob_get(&metadata_blob_id)?
+                .ok_or(StoreError::DataCorruption)?,
+        )
+        .ok_or(StoreError::DataCorruption)?;
+
+        // Remove fields
+        for (property, value) in message_data.properties {
+            match property {
+                MailProperty::Size => {
+                    document.number(
+                        MessageField::Size,
+                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)? as Integer,
+                        IndexOptions::new().sort().clear(),
+                    );
+                }
+                MailProperty::ReceivedAt => {
+                    document.number(
+                        MessageField::ReceivedAt,
+                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)?,
+                        IndexOptions::new().sort().clear(),
+                    );
+                }
+                MailProperty::HasAttachment => {
+                    if value.unwrap_bool().ok_or(StoreError::DataCorruption)? {
+                        document.tag(
+                            MessageField::Attachment,
+                            Tag::Default,
+                            IndexOptions::new().clear(),
+                        );
+                    }
+                }
+                MailProperty::Header(MailHeaderProperty {
+                    header: HeaderName::Rfc(rfc_header),
+                    ..
+                }) => {
+                    document.tag(
+                        MessageField::HasHeader,
+                        Tag::Static(rfc_header.into()),
+                        IndexOptions::new().clear(),
+                    );
+
+                    match rfc_header {
+                        RfcHeader::Subject => {
+                            let subject =
+                                value.unwrap_string().ok_or(StoreError::DataCorruption)?;
+                            let thread_name = thread_name(&subject);
+
+                            document.text(
+                                MessageField::ThreadName,
+                                if !thread_name.is_empty() {
+                                    thread_name.to_string()
+                                } else {
+                                    "!".to_string()
+                                },
+                                Language::Unknown,
+                                IndexOptions::new().keyword().sort().clear(),
+                            );
+                        }
+                        RfcHeader::From => todo!(),
+                        RfcHeader::To => todo!(),
+                        RfcHeader::Cc => todo!(),
+                        RfcHeader::Date => {
+                            document.number(
+                                rfc_header,
+                                value
+                                    .unwrap_unsigned_int()
+                                    .ok_or(StoreError::DataCorruption)?,
+                                IndexOptions::new().sort().clear(),
+                            );
+                        }
+                        RfcHeader::Keywords
+                        | RfcHeader::MessageId
+                        | RfcHeader::InReplyTo
+                        | RfcHeader::References
+                        | RfcHeader::ResentMessageId => {}
+                        RfcHeader::Bcc => todo!(),
+                        RfcHeader::ReplyTo => todo!(),
+                        RfcHeader::Sender => todo!(),
+                        RfcHeader::Comments => todo!(),
+                        RfcHeader::Received => todo!(),
+                        RfcHeader::ReturnPath => todo!(),
+                        RfcHeader::MimeVersion => todo!(),
+                        RfcHeader::ResentTo => todo!(),
+                        RfcHeader::ResentFrom => todo!(),
+                        RfcHeader::ResentBcc => todo!(),
+                        RfcHeader::ResentCc => todo!(),
+                        RfcHeader::ResentSender => todo!(),
+                        RfcHeader::ResentDate => todo!(),
+                        RfcHeader::ListArchive => todo!(),
+                        RfcHeader::ListHelp => todo!(),
+                        RfcHeader::ListId => todo!(),
+                        RfcHeader::ListOwner => todo!(),
+                        RfcHeader::ListPost => todo!(),
+                        RfcHeader::ListSubscribe => todo!(),
+                        RfcHeader::ListUnsubscribe => todo!(),
+                        RfcHeader::ContentDescription => todo!(),
+                        RfcHeader::ContentId => todo!(),
+                        RfcHeader::ContentLanguage => todo!(),
+                        RfcHeader::ContentLocation => todo!(),
+                        RfcHeader::ContentTransferEncoding => todo!(),
+                        RfcHeader::ContentType => todo!(),
+                        RfcHeader::ContentDisposition => todo!(),
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        // Remove thread
+        let thread_id = self
+            .get_document_value::<DocumentId>(
+                account_id,
+                Collection::Mail,
+                document_id,
+                MessageField::ThreadId.into(),
+            )?
+            .ok_or(StoreError::DataCorruption)?;
+        document.tag(
+            MessageField::ThreadId,
+            Tag::Id(thread_id),
+            IndexOptions::new().clear(),
+        );
+        document.number(
+            MessageField::ThreadId,
+            thread_id,
+            IndexOptions::new().store().clear(),
+        );
+
+        // Unlink all blobs
+        document.blob(message_data.raw_message, IndexOptions::new().clear());
+        document.blob(metadata_blob_id, IndexOptions::new().clear());
+        for mime_part in message_data.mime_parts {
+            if let Some(blob_id) = mime_part.blob_id {
+                document.blob(blob_id, IndexOptions::new().clear());
+            }
+        }
+        document.binary(
+            MessageField::Metadata,
+            Vec::with_capacity(0),
+            IndexOptions::new().clear(),
+        );
+
+        // Delete ORM
+        let fields = self
+            .get_orm::<MessageField>(account_id, document_id)?
+            .ok_or(StoreError::DataCorruption)?;
+        fields.delete(&mut document);
+
+        Ok(document.into())
+    }
+}
+
 pub trait JSONMailValue {
     fn parse_header(
         self,
@@ -527,7 +720,7 @@ pub trait JSONMailValue {
     where
         T: for<'x> Store<'x> + 'static;
     fn parse_json_string(self) -> jmap::error::set::Result<String>;
-    fn parse_json_date(self) -> jmap::error::set::Result<i64>;
+    fn parse_json_date(self) -> jmap::error::set::Result<u64>;
     fn parse_json_string_list(self) -> jmap::error::set::Result<Vec<String>>;
     fn parse_json_addresses(self) -> jmap::error::set::Result<Vec<Address>>;
     fn parse_json_grouped_addresses(self) -> jmap::error::set::Result<Vec<Address>>;
@@ -559,7 +752,7 @@ impl JSONMailValue for JSONValue {
                 MessageId::from(self.parse_json_string_list()?),
             ),
             MailHeaderForm::Date => {
-                builder.header(header.unwrap(), Date::new(self.parse_json_date()?))
+                builder.header(header.unwrap(), Date::new(self.parse_json_date()? as i64))
             }
             MailHeaderForm::URLs => {
                 builder.header(header.unwrap(), URL::from(self.parse_json_string_list()?))
@@ -689,7 +882,7 @@ impl JSONMailValue for JSONValue {
                             &JMAPBlob::from_jmap_string(&blob_id).ok_or_else(|| {
                                 SetError::new(SetErrorType::BlobNotFound, "Failed to parse blobId")
                             })?,
-                            get_message_blob,
+                            get_message_part,
                         )
                         .map_err(|_| {
                             SetError::new(SetErrorType::BlobNotFound, "Failed to fetch blob.")
@@ -887,7 +1080,7 @@ impl JSONMailValue for JSONValue {
         })
     }
 
-    fn parse_json_date(self) -> jmap::error::set::Result<i64> {
+    fn parse_json_date(self) -> jmap::error::set::Result<u64> {
         Ok(
             DateTime::parse_from_rfc3339(self.to_string().ok_or_else(|| {
                 SetError::new(
@@ -901,7 +1094,7 @@ impl JSONMailValue for JSONValue {
                     "Expected a valid UTCDate property.".to_string(),
                 )
             })?
-            .timestamp(),
+            .timestamp() as u64,
         )
     }
 

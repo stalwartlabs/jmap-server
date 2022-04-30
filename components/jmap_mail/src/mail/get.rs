@@ -258,9 +258,14 @@ where
                                 .collect::<HashMap<String, JSONValue>>()
                         })
                         .into(),
-                    MailProperty::Size | MailProperty::ReceivedAt | MailProperty::HasAttachment => {
+                    MailProperty::Size | MailProperty::HasAttachment => {
                         message_data.properties.remove(property).unwrap_or_default()
                     }
+                    MailProperty::ReceivedAt => message_data
+                        .properties
+                        .remove(property)
+                        .map(|date| date.into_utc_date())
+                        .unwrap_or_default(),
                     MailProperty::TextBody => add_body_parts(
                         &message_data.text_body,
                         &message_data.mime_parts,
@@ -698,7 +703,7 @@ fn add_body_part(
             }
             MailBodyProperty::PartId => {
                 if let Some(part_id) = part_id {
-                    body_part.insert("partId".into(), part_id.into());
+                    body_part.insert("partId".into(), part_id.to_string().into());
                 }
             }
             _ => (),
@@ -782,11 +787,13 @@ pub fn transform_rfc_header(
     as_collection: bool,
 ) -> jmap::Result<JSONValue> {
     Ok(match (header, form) {
-        (RfcHeader::Date | RfcHeader::ResentDate, MailHeaderForm::Date)
-        | (
+        (
             RfcHeader::Subject | RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId,
             MailHeaderForm::Text,
         ) => transform_json_string(value, as_collection),
+        (RfcHeader::Date | RfcHeader::ResentDate, MailHeaderForm::Date) => {
+            transform_json_date(value, as_collection)
+        }
         (
             RfcHeader::MessageId
             | RfcHeader::References
@@ -913,17 +920,17 @@ pub fn transform_json_emailaddress(
         if ((as_grouped && is_grouped) || (!as_grouped && !is_grouped))
             && ((is_collection && as_collection) || (!is_collection && !as_collection))
         {
-            JSONValue::Array(list)
+            list.into()
         } else if (as_grouped && is_grouped) || (!as_grouped && !is_grouped) {
             if as_collection && !is_collection {
-                JSONValue::Array(vec![JSONValue::Array(list)])
+                vec![list.into()].into()
             } else {
                 // !as_collection && is_collection
                 list.pop().unwrap_or_default()
             }
         } else {
             let mut list = if as_collection && !is_collection {
-                vec![JSONValue::Array(list)]
+                vec![list.into()]
             } else if !as_collection && is_collection {
                 if let JSONValue::Array(list) = list.pop().unwrap_or_default() {
                     list
@@ -938,7 +945,7 @@ pub fn transform_json_emailaddress(
                 let list_to_group = |list: Vec<JSONValue>| -> JSONValue {
                     let mut group = HashMap::new();
                     group.insert("name".to_string(), JSONValue::Null);
-                    group.insert("addresses".to_string(), JSONValue::Array(list));
+                    group.insert("addresses".to_string(), list.into());
                     JSONValue::Object(group)
                 };
                 JSONValue::Array(if !as_collection {
@@ -994,14 +1001,14 @@ pub fn transform_json_stringlist(
     if let JSONValue::Array(mut list) = value {
         if !as_collection {
             if !is_collection {
-                JSONValue::Array(list)
+                list.into()
             } else {
                 list.pop().unwrap_or_default()
             }
         } else if is_collection {
-            JSONValue::Array(list)
+            list.into()
         } else {
-            JSONValue::Array(vec![JSONValue::Array(list)])
+            vec![list.into()].into()
         }
     } else {
         JSONValue::Null
@@ -1014,14 +1021,39 @@ pub fn transform_json_string(value: JSONValue, as_collection: bool) -> JSONValue
             if !as_collection {
                 list.pop().unwrap_or_default()
             } else {
-                JSONValue::Array(list)
+                list.into()
             }
         }
         value @ JSONValue::String(_) => {
             if !as_collection {
                 value
             } else {
-                JSONValue::Array(vec![value])
+                vec![value].into()
+            }
+        }
+        _ => JSONValue::Null,
+    }
+}
+
+pub fn transform_json_date(value: JSONValue, as_collection: bool) -> JSONValue {
+    match value {
+        JSONValue::Array(mut list) => {
+            if !as_collection {
+                list.pop()
+                    .map(|value| value.into_utc_date())
+                    .unwrap_or_default()
+            } else {
+                list.into_iter()
+                    .map(|value| value.into_utc_date())
+                    .collect::<Vec<_>>()
+                    .into()
+            }
+        }
+        value @ JSONValue::Number(_) => {
+            if !as_collection {
+                value.into_utc_date()
+            } else {
+                vec![value.into_utc_date()].into()
             }
         }
         _ => JSONValue::Null,

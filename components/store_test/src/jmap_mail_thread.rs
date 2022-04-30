@@ -22,7 +22,7 @@ where
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).as_bytes(),
                 vec![],
                 vec![],
-                Some(10000i64 + num as i64),
+                Some(10000u64 + num as u64),
             )
             .unwrap();
         thread_id = result.thread_id;

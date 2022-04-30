@@ -124,7 +124,7 @@ where
                         } else {
                             "2".into()
                         })],
-                        Some(*id as i64),
+                        Some(*id),
                     )
                     .unwrap()
                     .id;

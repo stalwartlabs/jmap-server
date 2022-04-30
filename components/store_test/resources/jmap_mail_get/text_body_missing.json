@@ -19,7 +19,7 @@
           }
         ],
         "name": "redball.png",
-        "partId": 0,
+        "partId": "0",
         "size": 1453,
         "type": "image/png"
       }
@@ -87,7 +87,7 @@
         }
       ],
       "name": "redball.png",
-      "partId": 0,
+      "partId": "0",
       "size": 1453,
       "type": "image/png"
     },

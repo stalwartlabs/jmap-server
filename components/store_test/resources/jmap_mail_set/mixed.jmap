@@ -18,7 +18,7 @@
             "value": "image/png"
           }
         ],
-        "partId": 3,
+        "partId": "3",
         "size": 37,
         "type": "image/png"
       },
@@ -40,7 +40,7 @@
           }
         ],
         "name": "Book about ☕ tables.pdf",
-        "partId": 4,
+        "partId": "4",
         "size": 127,
         "type": "x-document/pdf"
       }
@@ -101,7 +101,7 @@
               "language": [
                 "en"
               ],
-              "partId": 1,
+              "partId": "1",
               "size": 129,
               "type": "text/plain"
             },
@@ -124,7 +124,7 @@
               "language": [
                 "en_US"
               ],
-              "partId": 2,
+              "partId": "2",
               "size": 175,
               "type": "text/html"
             }
@@ -148,7 +148,7 @@
               "value": "image/png"
             }
           ],
-          "partId": 3,
+          "partId": "3",
           "size": 37,
           "type": "image/png"
         },
@@ -170,7 +170,7 @@
             }
           ],
           "name": "Book about ☕ tables.pdf",
-          "partId": 4,
+          "partId": "4",
           "size": 127,
           "type": "x-document/pdf"
         }
@@ -216,7 +216,7 @@
         "language": [
           "en_US"
         ],
-        "partId": 2,
+        "partId": "2",
         "size": 175,
         "type": "text/html"
       },
@@ -237,7 +237,7 @@
             "value": "image/png"
           }
         ],
-        "partId": 3,
+        "partId": "3",
         "size": 37,
         "type": "image/png"
       }
@@ -278,7 +278,7 @@
         "language": [
           "en"
         ],
-        "partId": 1,
+        "partId": "1",
         "size": 129,
         "type": "text/plain"
       },
@@ -299,7 +299,7 @@
             "value": "image/png"
           }
         ],
-        "partId": 3,
+        "partId": "3",
         "size": 37,
         "type": "image/png"
       }

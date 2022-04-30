@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     thread,
@@ -9,7 +10,7 @@ use store::{blob::BlobId, AccountId, JMAPStore, Store};
 
 use crate::id::blob::JMAPBlob;
 
-pub type InnerBlobFnc = fn(&[u8], u32) -> Option<Vec<u8>>;
+pub type InnerBlobFnc = fn(&[u8], u32) -> Option<Cow<[u8]>>;
 
 pub trait JMAPBlobStore {
     fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<JMAPBlob>;
@@ -43,7 +44,7 @@ where
         let bytes = self.blob_get(&blob.id)?;
         Ok(
             if let (Some(bytes), Some(inner_id)) = (&bytes, blob.inner_id) {
-                blob_fnc(bytes, inner_id)
+                blob_fnc(bytes, inner_id).map(|bytes| bytes.into_owned())
             } else {
                 bytes
             },

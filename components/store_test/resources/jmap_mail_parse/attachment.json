@@ -18,7 +18,7 @@
         }
       ],
       "name": "map_of_Argentina.gif",
-      "partId": 1,
+      "partId": "1",
       "size": 288,
       "type": "image/gif"
     }
@@ -82,7 +82,7 @@
             "value": "text/plain; charset=us-ascii"
           }
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 355,
         "type": "text/plain"
       },
@@ -104,7 +104,7 @@
           }
         ],
         "name": "map_of_Argentina.gif",
-        "partId": 1,
+        "partId": "1",
         "size": 288,
         "type": "image/gif"
       }
@@ -134,7 +134,7 @@
   "htmlBody": [
     {
       "blobId": "ignored_value",
-      "partId": 2,
+      "partId": "2",
       "size": 429,
       "type": "text/html"
     },
@@ -156,7 +156,7 @@
         }
       ],
       "name": "map_of_Argentina.gif",
-      "partId": 1,
+      "partId": "1",
       "size": 288,
       "type": "image/gif"
     }
@@ -190,7 +190,7 @@
           "value": "text/plain; charset=us-ascii"
         }
       ],
-      "partId": 0,
+      "partId": "0",
       "size": 355,
       "type": "text/plain"
     },
@@ -212,7 +212,7 @@
         }
       ],
       "name": "map_of_Argentina.gif",
-      "partId": 1,
+      "partId": "1",
       "size": 288,
       "type": "image/gif"
     }

@@ -306,36 +306,26 @@ where
 
         // Fetch message data
         let document_id = self.email_id.get_document_id();
-        let message_data_bytes = helper
-            .store
-            .blob_get(
-                &helper
-                    .store
-                    .get_document_value::<BlobId>(
-                        helper.account_id,
-                        Collection::Mail,
-                        document_id,
-                        MessageField::Metadata.into(),
-                    )?
-                    .ok_or_else(|| {
-                        SetError::invalid_property(
-                            EmailSubmissionProperty::EmailId.to_string(),
-                            "Email not found.",
-                        )
-                    })?,
-            )?
-            .ok_or_else(|| {
-                SetError::invalid_property(
-                    EmailSubmissionProperty::EmailId.to_string(),
-                    "Email not found.",
-                )
-            })?;
-
-        let (message_data_len, read_bytes) =
-            usize::from_leb128_bytes(&message_data_bytes[..]).ok_or(StoreError::DataCorruption)?;
-
-        let mut message_data = MessageData::deserialize(
-            &message_data_bytes[read_bytes..read_bytes + message_data_len],
+        let mut message_data = MessageData::from_metadata(
+            &helper
+                .store
+                .blob_get(
+                    &helper
+                        .store
+                        .get_document_value::<BlobId>(
+                            helper.account_id,
+                            Collection::Mail,
+                            document_id,
+                            MessageField::Metadata.into(),
+                        )?
+                        .ok_or_else(|| {
+                            SetError::invalid_property(
+                                EmailSubmissionProperty::EmailId.to_string(),
+                                "Email not found.",
+                            )
+                        })?,
+                )?
+                .ok_or(StoreError::DataCorruption)?,
         )
         .ok_or(StoreError::DataCorruption)?;
 

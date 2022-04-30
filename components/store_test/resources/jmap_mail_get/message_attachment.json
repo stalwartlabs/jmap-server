@@ -18,7 +18,7 @@
             "value": "message/rfc822"
           }
         ],
-        "partId": 1,
+        "partId": "1",
         "size": 1980,
         "type": "message/rfc822"
       }
@@ -57,7 +57,7 @@
               "value": "text/plain; charset=us-ascii"
             }
           ],
-          "partId": 0,
+          "partId": "0",
           "size": 61,
           "type": "text/plain"
         },
@@ -78,7 +78,7 @@
               "value": "message/rfc822"
             }
           ],
-          "partId": 1,
+          "partId": "1",
           "size": 1980,
           "type": "message/rfc822"
         }
@@ -107,7 +107,7 @@
     "htmlBody": [
       {
         "blobId": "ignored_value",
-        "partId": 2,
+        "partId": "2",
         "size": 107,
         "type": "text/html"
       }
@@ -134,7 +134,7 @@
             "value": "text/plain; charset=us-ascii"
           }
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 61,
         "type": "text/plain"
       }

@@ -54,7 +54,7 @@
             "value": "text/plain; charset=utf-8; format=flowed"
           }
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 30,
         "type": "text/plain"
       },
@@ -71,7 +71,7 @@
             "value": "text/html; charset=utf-8"
           }
         ],
-        "partId": 1,
+        "partId": "1",
         "size": 173,
         "type": "text/html"
       }
@@ -112,7 +112,7 @@
           "value": "text/html; charset=utf-8"
         }
       ],
-      "partId": 1,
+      "partId": "1",
       "size": 173,
       "type": "text/html"
     }
@@ -146,7 +146,7 @@
           "value": "text/plain; charset=utf-8; format=flowed"
         }
       ],
-      "partId": 0,
+      "partId": "0",
       "size": 30,
       "type": "text/plain"
     }

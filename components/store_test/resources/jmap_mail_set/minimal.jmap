@@ -23,7 +23,7 @@
           "value": "<my-message-id>"
         }
       ],
-      "partId": 0,
+      "partId": "0",
       "size": 2,
       "type": "text/plain"
     },
@@ -43,7 +43,7 @@
     "htmlBody": [
       {
         "blobId": "ignored_value",
-        "partId": 1,
+        "partId": "1",
         "size": 31,
         "type": "text/html"
       }
@@ -72,7 +72,7 @@
             "value": "text/plain; charset=\"utf-8\""
           }
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 2,
         "type": "text/plain"
       }

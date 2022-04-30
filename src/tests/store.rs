@@ -37,9 +37,7 @@ where
 #[test]
 fn insert_filter_sort() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_filter_test", true);
-
-    store_test::db_insert_filter_sort::insert_filter_sort(db, false);
-
+    store_test::db_insert_filter_sort::insert_filter_sort(db, true);
     destroy_temp_dir(temp_dir);
 }
 

@@ -76,7 +76,6 @@ where
                 let is_stored = field.is_stored();
                 let is_clear = field.is_clear();
                 let is_sorted = field.is_sorted();
-                let build_term_index = field.is_build_term_index();
 
                 let text = match field.value {
                     Text::None { value } => value,
@@ -92,19 +91,9 @@ where
                             document.document_id,
                             !is_clear,
                         );
-                        if build_term_index {
-                            let term = term_index.add_token(Token {
-                                word: value.clone().into(),
-                                offset: 0,
-                                len: value.len() as u8,
-                            });
-                            term_index.add_terms(field.field, 0, vec![term]);
-                        }
                         value
                     }
                     Text::Tokenized { value, language } => {
-                        let mut terms = Vec::new();
-
                         for token in Tokenizer::new(&value, language, MAX_TOKEN_LENGTH) {
                             merge_bitmap_clear(
                                 bitmap_list.entry(BitmapKey::serialize_term(
@@ -117,15 +106,7 @@ where
                                 document.document_id,
                                 !is_clear,
                             );
-                            if build_term_index {
-                                terms.push(term_index.add_token(token));
-                            }
                         }
-
-                        if !terms.is_empty() {
-                            term_index.add_terms(field.field, 0, terms);
-                        }
-
                         value
                     }
                     Text::Full {
@@ -162,9 +143,7 @@ where
                                 );
                             }
 
-                            if build_term_index {
-                                terms.push(term_index.add_stemmed_token(token));
-                            }
+                            terms.push(term_index.add_stemmed_token(token));
                         }
 
                         if !terms.is_empty() {

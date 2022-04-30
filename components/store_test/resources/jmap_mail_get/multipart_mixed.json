@@ -13,7 +13,7 @@
             "value": "audio/basic"
           }
         ],
-        "partId": 3,
+        "partId": "3",
         "size": 85,
         "type": "audio/basic"
       },
@@ -29,7 +29,7 @@
             "value": "image/jpeg"
           }
         ],
-        "partId": 4,
+        "partId": "4",
         "size": 44,
         "type": "image/jpeg"
       },
@@ -41,7 +41,7 @@
             "value": "text/enriched"
           }
         ],
-        "partId": 5,
+        "partId": "5",
         "size": 140,
         "type": "text/enriched"
       },
@@ -53,7 +53,7 @@
             "value": "message/rfc822"
           }
         ],
-        "partId": 6,
+        "partId": "6",
         "size": 243,
         "type": "message/rfc822"
       }
@@ -89,7 +89,7 @@
       "subParts": [
         {
           "blobId": "ignored_value",
-          "partId": 0,
+          "partId": "0",
           "size": 262,
           "type": "text/plain"
         },
@@ -102,7 +102,7 @@
               "value": "text/plain; charset=US-ASCII"
             }
           ],
-          "partId": 1,
+          "partId": "1",
           "size": 111,
           "type": "text/plain"
         },
@@ -126,7 +126,7 @@
                   "value": "audio/basic"
                 }
               ],
-              "partId": 3,
+              "partId": "3",
               "size": 85,
               "type": "audio/basic"
             },
@@ -142,7 +142,7 @@
                   "value": "image/jpeg"
                 }
               ],
-              "partId": 4,
+              "partId": "4",
               "size": 44,
               "type": "image/jpeg"
             }
@@ -157,7 +157,7 @@
               "value": "text/enriched"
             }
           ],
-          "partId": 5,
+          "partId": "5",
           "size": 140,
           "type": "text/enriched"
         },
@@ -169,7 +169,7 @@
               "value": "message/rfc822"
             }
           ],
-          "partId": 6,
+          "partId": "6",
           "size": 243,
           "type": "message/rfc822"
         }
@@ -208,13 +208,13 @@
     "htmlBody": [
       {
         "blobId": "ignored_value",
-        "partId": 7,
+        "partId": "7",
         "size": 316,
         "type": "text/html"
       },
       {
         "blobId": "ignored_value",
-        "partId": 8,
+        "partId": "8",
         "size": 149,
         "type": "text/html"
       }
@@ -231,7 +231,7 @@
     "textBody": [
       {
         "blobId": "ignored_value",
-        "partId": 0,
+        "partId": "0",
         "size": 262,
         "type": "text/plain"
       },
@@ -244,7 +244,7 @@
             "value": "text/plain; charset=US-ASCII"
           }
         ],
-        "partId": 1,
+        "partId": "1",
         "size": 111,
         "type": "text/plain"
       }

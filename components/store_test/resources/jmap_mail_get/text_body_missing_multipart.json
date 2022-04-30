@@ -19,7 +19,7 @@
           }
         ],
         "name": "blueball.png",
-        "partId": 0,
+        "partId": "0",
         "size": 1325,
         "type": "image/png"
       },
@@ -41,7 +41,7 @@
           }
         ],
         "name": "redball.png",
-        "partId": 1,
+        "partId": "1",
         "size": 1453,
         "type": "image/png"
       }
@@ -117,7 +117,7 @@
             }
           ],
           "name": "blueball.png",
-          "partId": 0,
+          "partId": "0",
           "size": 1325,
           "type": "image/png"
         },
@@ -139,7 +139,7 @@
             }
           ],
           "name": "redball.png",
-          "partId": 1,
+          "partId": "1",
           "size": 1453,
           "type": "image/png"
         }

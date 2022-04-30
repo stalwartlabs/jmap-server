@@ -24,7 +24,7 @@
           }
         ],
         "name": "2aa3ed95.png",
-        "partId": 4,
+        "partId": "4",
         "size": 1325,
         "type": "image/png"
       },
@@ -51,7 +51,7 @@
           }
         ],
         "name": "2aa3edd1.png",
-        "partId": 5,
+        "partId": "5",
         "size": 1453,
         "type": "image/png"
       },
@@ -73,7 +73,7 @@
           }
         ],
         "name": "blueball.png",
-        "partId": 6,
+        "partId": "6",
         "size": 1325,
         "type": "image/png"
       },
@@ -95,7 +95,7 @@
           }
         ],
         "name": "greenball.png",
-        "partId": 7,
+        "partId": "7",
         "size": 1298,
         "type": "image/png"
       }
@@ -174,7 +174,7 @@
                       "value": "text/plain; charset=\"iso-8859-1\""
                     }
                   ],
-                  "partId": 2,
+                  "partId": "2",
                   "size": 779,
                   "type": "text/plain"
                 },
@@ -191,7 +191,7 @@
                       "value": "text/html; charset=\"iso-8859-1\""
                     }
                   ],
-                  "partId": 3,
+                  "partId": "3",
                   "size": 1154,
                   "type": "text/html"
                 }
@@ -221,7 +221,7 @@
                 }
               ],
               "name": "2aa3ed95.png",
-              "partId": 4,
+              "partId": "4",
               "size": 1325,
               "type": "image/png"
             },
@@ -248,7 +248,7 @@
                 }
               ],
               "name": "2aa3edd1.png",
-              "partId": 5,
+              "partId": "5",
               "size": 1453,
               "type": "image/png"
             }
@@ -273,7 +273,7 @@
             }
           ],
           "name": "blueball.png",
-          "partId": 6,
+          "partId": "6",
           "size": 1325,
           "type": "image/png"
         },
@@ -295,7 +295,7 @@
             }
           ],
           "name": "greenball.png",
-          "partId": 7,
+          "partId": "7",
           "size": 1298,
           "type": "image/png"
         }
@@ -335,7 +335,7 @@
             "value": "text/html; charset=\"iso-8859-1\""
           }
         ],
-        "partId": 3,
+        "partId": "3",
         "size": 1154,
         "type": "text/html"
       }
@@ -366,7 +366,7 @@
             "value": "text/plain; charset=\"iso-8859-1\""
           }
         ],
-        "partId": 2,
+        "partId": "2",
         "size": 779,
         "type": "text/plain"
       }

@@ -4,7 +4,6 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 use flate2::read::GzDecoder;
 
 use jmap::protocol::json::JSONValue;
-use jmap_mail::mail::{MessageData, MessageOutline};
 use store::leb128::Leb128;
 use store::serialize::{
     DeserializeBigEndian, IndexKey, LogKey, StoreDeserialize, ValueKey, FOLLOWER_COMMIT_INDEX_KEY,

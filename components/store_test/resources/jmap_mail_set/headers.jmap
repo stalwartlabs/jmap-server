@@ -136,7 +136,7 @@
           "language": [
             "en"
           ],
-          "partId": 0,
+          "partId": "0",
           "size": 81,
           "type": "text/plain"
         },
@@ -159,7 +159,7 @@
           ],
           "location": "https://example.com/html-body.html",
           "name": "html-body.html",
-          "partId": 1,
+          "partId": "1",
           "size": 218,
           "type": "text/html"
         }
@@ -211,7 +211,7 @@
         ],
         "location": "https://example.com/html-body.html",
         "name": "html-body.html",
-        "partId": 1,
+        "partId": "1",
         "size": 218,
         "type": "text/html"
       }
@@ -284,7 +284,7 @@
         "language": [
           "en"
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 81,
         "type": "text/plain"
       }

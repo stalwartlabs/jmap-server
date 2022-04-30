@@ -56,7 +56,6 @@ pub struct MessageOutline {
     pub body_offset: usize,
     pub body_structure: MessageStructure,
     pub headers: Vec<HashMap<HeaderName, Vec<HeaderOffset>>>,
-    pub received_at: i64,
 }
 
 impl StoreSerialize for MessageOutline {
@@ -629,5 +628,17 @@ impl JSONArgumentParser for Keyword {
         Ok(Keyword {
             tag: Keyword::from_jmap(argument.parse_string()?),
         })
+    }
+}
+
+impl MessageData {
+    pub fn from_metadata(bytes: &[u8]) -> Option<Self> {
+        use store::leb128::Leb128;
+
+        let (message_data_len, read_bytes) = usize::from_leb128_bytes(bytes)?;
+
+        <MessageData as StoreDeserialize>::deserialize(
+            bytes.get(read_bytes..read_bytes + message_data_len)?,
+        )
     }
 }

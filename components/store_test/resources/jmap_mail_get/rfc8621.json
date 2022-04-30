@@ -14,7 +14,7 @@
             "value": "image/jpeg"
           }
         ],
-        "partId": 5,
+        "partId": "5",
         "size": 1,
         "type": "image/jpeg"
       },
@@ -26,7 +26,7 @@
             "value": "image/jpeg"
           }
         ],
-        "partId": 9,
+        "partId": "9",
         "size": 1,
         "type": "image/jpeg"
       },
@@ -43,7 +43,7 @@
             "value": "image/jpeg"
           }
         ],
-        "partId": 10,
+        "partId": "10",
         "size": 1,
         "type": "image/jpeg"
       },
@@ -55,7 +55,7 @@
             "value": "application/x-excel"
           }
         ],
-        "partId": 11,
+        "partId": "11",
         "size": 1,
         "type": "application/x-excel"
       },
@@ -67,7 +67,7 @@
             "value": "message/rfc822"
           }
         ],
-        "partId": 12,
+        "partId": "12",
         "size": 17,
         "type": "message/rfc822"
       }
@@ -98,7 +98,7 @@
               "value": "text/plain"
             }
           ],
-          "partId": 0,
+          "partId": "0",
           "size": 1,
           "type": "text/plain"
         },
@@ -139,7 +139,7 @@
                           "value": "text/plain"
                         }
                       ],
-                      "partId": 4,
+                      "partId": "4",
                       "size": 1,
                       "type": "text/plain"
                     },
@@ -156,7 +156,7 @@
                           "value": "image/jpeg"
                         }
                       ],
-                      "partId": 5,
+                      "partId": "5",
                       "size": 1,
                       "type": "image/jpeg"
                     },
@@ -173,7 +173,7 @@
                           "value": "text/plain"
                         }
                       ],
-                      "partId": 6,
+                      "partId": "6",
                       "size": 1,
                       "type": "text/plain"
                     }
@@ -196,7 +196,7 @@
                           "value": "text/html"
                         }
                       ],
-                      "partId": 8,
+                      "partId": "8",
                       "size": 14,
                       "type": "text/html"
                     },
@@ -208,7 +208,7 @@
                           "value": "image/jpeg"
                         }
                       ],
-                      "partId": 9,
+                      "partId": "9",
                       "size": 1,
                       "type": "image/jpeg"
                     }
@@ -231,7 +231,7 @@
                   "value": "image/jpeg"
                 }
               ],
-              "partId": 10,
+              "partId": "10",
               "size": 1,
               "type": "image/jpeg"
             },
@@ -243,7 +243,7 @@
                   "value": "application/x-excel"
                 }
               ],
-              "partId": 11,
+              "partId": "11",
               "size": 1,
               "type": "application/x-excel"
             },
@@ -255,7 +255,7 @@
                   "value": "message/rfc822"
                 }
               ],
-              "partId": 12,
+              "partId": "12",
               "size": 17,
               "type": "message/rfc822"
             }
@@ -275,7 +275,7 @@
               "value": "text/plain"
             }
           ],
-          "partId": 13,
+          "partId": "13",
           "size": 1,
           "type": "text/plain"
         }
@@ -323,7 +323,7 @@
     "htmlBody": [
       {
         "blobId": "ignored_value",
-        "partId": 14,
+        "partId": "14",
         "size": 27,
         "type": "text/html"
       },
@@ -335,13 +335,13 @@
             "value": "text/html"
           }
         ],
-        "partId": 8,
+        "partId": "8",
         "size": 14,
         "type": "text/html"
       },
       {
         "blobId": "ignored_value",
-        "partId": 15,
+        "partId": "15",
         "size": 27,
         "type": "text/html"
       }
@@ -368,7 +368,7 @@
             "value": "text/plain"
           }
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 1,
         "type": "text/plain"
       },
@@ -385,7 +385,7 @@
             "value": "text/plain"
           }
         ],
-        "partId": 4,
+        "partId": "4",
         "size": 1,
         "type": "text/plain"
       },
@@ -402,7 +402,7 @@
             "value": "image/jpeg"
           }
         ],
-        "partId": 5,
+        "partId": "5",
         "size": 1,
         "type": "image/jpeg"
       },
@@ -419,7 +419,7 @@
             "value": "text/plain"
           }
         ],
-        "partId": 6,
+        "partId": "6",
         "size": 1,
         "type": "text/plain"
       },
@@ -436,7 +436,7 @@
             "value": "text/plain"
           }
         ],
-        "partId": 13,
+        "partId": "13",
         "size": 1,
         "type": "text/plain"
       }

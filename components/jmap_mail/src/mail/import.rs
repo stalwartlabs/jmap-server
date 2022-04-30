@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::time::SystemTime;
 
-use crate::mail::parse::get_message_blob;
+use crate::mail::parse::get_message_part;
 use crate::mail::Keyword;
 
 use jmap::error::method::MethodError;
@@ -16,7 +17,8 @@ use jmap::request::import::ImportRequest;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{
-    Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader,
+    Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, MimeHeaders,
+    RfcHeader,
 };
 use nlp::Language;
 use store::batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH};
@@ -57,7 +59,7 @@ pub struct ImportItem {
     pub blob_id: JMAPBlob,
     pub mailbox_ids: Vec<DocumentId>,
     pub keywords: Vec<Keyword>,
-    pub received_at: Option<i64>,
+    pub received_at: Option<u64>,
 }
 
 impl<'y, T> ImportObject<'y, T> for ImportMail<'y, T>
@@ -168,7 +170,7 @@ where
 
         if let Some(blob) =
             self.store
-                .download_blob(self.account_id, &item.blob_id, get_message_blob)?
+                .download_blob(self.account_id, &item.blob_id, get_message_part)?
         {
             Ok(self
                 .store
@@ -208,7 +210,7 @@ pub trait JMAPMailImport {
         blob: &[u8],
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
-        received_at: Option<i64>,
+        received_at: Option<u64>,
     ) -> jmap::Result<MailImportResult>;
 
     fn mail_parse(
@@ -216,7 +218,7 @@ pub trait JMAPMailImport {
         document: &mut Document,
         blob_id: BlobId,
         raw_message: &[u8],
-        received_at: Option<i64>,
+        received_at: Option<u64>,
     ) -> store::Result<(Vec<String>, String)>;
 
     fn mail_set_thread(
@@ -288,7 +290,7 @@ where
         blob: &[u8],
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
-        received_at: Option<i64>,
+        received_at: Option<u64>,
     ) -> jmap::Result<MailImportResult> {
         let document_id = self.assign_document_id(account_id, Collection::Mail)?;
         let mut batch = WriteBatch::new(account_id, self.config.is_in_cluster);
@@ -341,7 +343,7 @@ where
         document: &mut Document,
         blob_id: BlobId,
         raw_message: &[u8],
-        received_at: Option<i64>,
+        received_at: Option<u64>,
     ) -> store::Result<(Vec<String>, String)> {
         let message = Message::parse(raw_message).ok_or_else(|| {
             StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
@@ -359,7 +361,6 @@ where
             body_offset: message.offset_body,
             body_structure: message.structure,
             headers: Vec::with_capacity(total_parts + 1),
-            received_at: received_at.unwrap_or_else(|| Utc::now().timestamp()),
         };
         let mut has_attachments = false;
 
@@ -379,20 +380,19 @@ where
             IndexOptions::new().sort(),
         );
 
-        message_data.properties.insert(
-            MailProperty::ReceivedAt,
-            if let LocalResult::Single(received_at) =
-                Utc.timestamp_opt(message_outline.received_at, 0)
-            {
-                JSONValue::String(received_at.to_rfc3339_opts(SecondsFormat::Secs, true))
-            } else {
-                JSONValue::Null
-            },
-        );
-
+        // Add received at
+        let received_at = received_at.unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        });
+        message_data
+            .properties
+            .insert(MailProperty::ReceivedAt, received_at.into());
         document.number(
             MessageField::ReceivedAt,
-            message_outline.received_at as LongInteger,
+            received_at,
             IndexOptions::new().sort(),
         );
 
@@ -401,9 +401,6 @@ where
         let mut base_subject = None;
 
         for (header_name, header_value) in message.headers_rfc {
-            // Add headers to document
-            document.parse_header(header_name, &header_value);
-
             // Tag header
             document.tag(
                 MessageField::HasHeader,
@@ -418,40 +415,20 @@ where
                 | RfcHeader::References
                 | RfcHeader::ResentMessageId => {
                     // Build a list containing all IDs that appear in the header
-                    match &header_value {
-                        HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                            reference_ids.push(text.to_string())
-                        }
-                        HeaderValue::TextList(list) => {
-                            reference_ids.extend(list.iter().filter_map(|text| {
-                                if text.len() <= MAX_ID_LENGTH {
-                                    Some(text.to_string())
-                                } else {
-                                    None
-                                }
-                            }));
-                        }
-                        HeaderValue::Collection(col) => {
-                            for item in col {
-                                match item {
-                                    HeaderValue::Text(text) if text.len() <= MAX_ID_LENGTH => {
-                                        reference_ids.push(text.to_string())
-                                    }
-                                    HeaderValue::TextList(list) => {
-                                        reference_ids.extend(list.iter().filter_map(|text| {
-                                            if text.len() <= MAX_ID_LENGTH {
-                                                Some(text.to_string())
-                                            } else {
-                                                None
-                                            }
-                                        }))
-                                    }
-                                    _ => (),
-                                }
+                    get_text_values(&header_value, |value| {
+                        if value.len() <= MAX_ID_LENGTH {
+                            if header_name == RfcHeader::MessageId {
+                                document.text(
+                                    header_name,
+                                    value.to_string(),
+                                    Language::Unknown,
+                                    IndexOptions::new().keyword(),
+                                );
                             }
+                            reference_ids.push(value.to_string());
                         }
-                        _ => (),
-                    }
+                    });
+
                     let (value, is_collection) = header_to_jmap_id(header_value);
                     message_data.properties.insert(
                         MailProperty::Header(MailHeaderProperty::new_rfc(
@@ -462,31 +439,70 @@ where
                         value,
                     );
                 }
-                RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
-                    // Build sort index
-                    document.add_addr_sort(header_name, &header_value);
-                    let (value, is_grouped, is_collection) =
-                        header_to_jmap_address(header_value, false);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            if is_grouped {
-                                MailHeaderForm::GroupedAddresses
-                            } else {
-                                MailHeaderForm::Addresses
-                            },
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::ReplyTo
+                RfcHeader::From
+                | RfcHeader::To
+                | RfcHeader::Cc
+                | RfcHeader::Bcc
+                | RfcHeader::ReplyTo
                 | RfcHeader::Sender
                 | RfcHeader::ResentTo
                 | RfcHeader::ResentFrom
                 | RfcHeader::ResentBcc
                 | RfcHeader::ResentCc
                 | RfcHeader::ResentSender => {
+                    if let RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc =
+                        header_name
+                    {
+                        // Build sort index
+                        let mut sort_text = String::with_capacity(MAX_SORT_FIELD_LENGTH);
+                        let mut found_addr = false;
+                        get_addr_values(&header_value, |value, is_addr| {
+                            if is_addr {
+                                if value.len() <= MAX_ID_LENGTH {
+                                    document.text(
+                                        header_name,
+                                        value.to_lowercase(),
+                                        Language::Unknown,
+                                        IndexOptions::new().keyword(),
+                                    );
+                                }
+                            } else {
+                                document.text(
+                                    header_name,
+                                    value.to_string(),
+                                    Language::Unknown,
+                                    IndexOptions::new().tokenize(),
+                                );
+                            }
+
+                            if !found_addr {
+                                if !sort_text.is_empty() {
+                                    sort_text.push(' ');
+                                }
+                                found_addr = is_addr;
+                                'outer: for ch in value.chars() {
+                                    for ch in ch.to_lowercase() {
+                                        if sort_text.len() < MAX_SORT_FIELD_LENGTH {
+                                            sort_text.push(ch);
+                                        } else {
+                                            found_addr = true;
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+
+                        if !sort_text.is_empty() {
+                            document.text(
+                                header_name,
+                                sort_text,
+                                Language::Unknown,
+                                IndexOptions::new().sort(),
+                            );
+                        }
+                    }
+
                     let (value, is_grouped, is_collection) =
                         header_to_jmap_address(header_value, false);
                     message_data.properties.insert(
@@ -503,6 +519,12 @@ where
                     );
                 }
                 RfcHeader::Date | RfcHeader::ResentDate => {
+                    if let (RfcHeader::Date, Some(timestamp)) =
+                        (header_name, get_first_date_time(&header_value))
+                    {
+                        document.number(header_name, timestamp as u64, IndexOptions::new().sort());
+                    }
+
                     let (value, is_collection) = header_to_jmap_date(header_value);
                     message_data.properties.insert(
                         MailProperty::Header(MailHeaderProperty::new_rfc(
@@ -529,15 +551,20 @@ where
                         value,
                     );
                 }
-                RfcHeader::Subject => {
-                    if let HeaderValue::Text(subject) = &header_value {
+                RfcHeader::Subject
+                | RfcHeader::Comments
+                | RfcHeader::Keywords
+                | RfcHeader::ListId => {
+                    if let (RfcHeader::Subject, Some(subject)) =
+                        (header_name, get_first_text(&header_value))
+                    {
                         let thread_name = thread_name(subject);
 
                         document.text(
                             RfcHeader::Subject,
                             subject.to_string(),
                             Language::Unknown,
-                            IndexOptions::new().full_text(0).build_term_index(),
+                            IndexOptions::new().full_text(0),
                         );
 
                         base_subject = Some(if !thread_name.is_empty() {
@@ -545,18 +572,28 @@ where
                         } else {
                             "!".to_string()
                         });
+                    } else if let RfcHeader::Keywords = header_name {
+                        get_text_values(&header_value, |value| {
+                            if value.len() <= MAX_ID_LENGTH {
+                                document.text(
+                                    header_name,
+                                    value.to_string(),
+                                    Language::Unknown,
+                                    IndexOptions::new().keyword(),
+                                );
+                            }
+                        });
+                    } else if let RfcHeader::Comments = header_name {
+                        get_text_values(&header_value, |value| {
+                            document.text(
+                                header_name,
+                                value.to_string(),
+                                Language::Unknown,
+                                IndexOptions::new().tokenize(),
+                            );
+                        });
                     }
-                    let (value, is_collection) = header_to_jmap_text(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::Text,
-                            is_collection,
-                        )),
-                        value,
-                    );
-                }
-                RfcHeader::Comments | RfcHeader::Keywords | RfcHeader::ListId => {
+
                     let (value, is_collection) = header_to_jmap_text(header_value);
                     message_data.properties.insert(
                         MailProperty::Header(MailHeaderProperty::new_rfc(
@@ -624,9 +661,7 @@ where
                         field,
                         text,
                         Language::Unknown,
-                        IndexOptions::new()
-                            .full_text(text_part_id as u32)
-                            .build_term_index(),
+                        IndexOptions::new().full_text(text_part_id as u32),
                     );
 
                     let blob_id = self.blob_store(html.body.as_bytes())?;
@@ -686,9 +721,7 @@ where
                         field,
                         text.body.into_owned(),
                         Language::Unknown,
-                        IndexOptions::new()
-                            .full_text(part_id as u32)
-                            .build_term_index(),
+                        IndexOptions::new().full_text(part_id as u32),
                     );
                 }
                 MessagePart::Binary(binary) => {
@@ -733,7 +766,7 @@ where
 
                     let (blob_id, part_len) = match nested_message.body {
                         MessageAttachment::Parsed(mut message) => {
-                            document.parse_attached_message(&mut message, part_id as u32);
+                            add_attached_message(document, &mut message, part_id as u32);
                             (
                                 self.blob_store(message.raw_message.as_ref())?,
                                 message.raw_message.len(),
@@ -741,7 +774,7 @@ where
                         }
                         MessageAttachment::Raw(raw_message) => {
                             if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                document.parse_attached_message(message, part_id as u32);
+                                add_attached_message(document, message, part_id as u32);
                             }
 
                             (self.blob_store(raw_message.as_ref())?, raw_message.len())
@@ -1139,259 +1172,152 @@ where
     }
 }
 
-pub trait MessageParser {
-    fn parse_attached_message(&mut self, message: &mut Message, part_id: u32);
-    fn parse_address(&mut self, header_name: RfcHeader, address: &Addr);
-    fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group);
-    fn parse_text(&mut self, header_name: RfcHeader, text: &str);
-    fn parse_content_type(&mut self, header_name: RfcHeader, content_type: &ContentType);
-    fn add_addr_sort(&mut self, header_name: RfcHeader, header_value: &HeaderValue);
-    fn parse_header(&mut self, header_name: RfcHeader, header_value: &HeaderValue);
+fn add_attached_message(document: &mut Document, message: &mut Message, part_id: u32) {
+    if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
+        document.text(
+            MessageField::Attachment,
+            subject.into_owned(),
+            Language::Unknown,
+            IndexOptions::new().full_text(part_id << 16),
+        );
+    }
+    for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
+        match sub_part {
+            MessagePart::Text(text) => {
+                document.text(
+                    MessageField::Attachment,
+                    text.body.into_owned(),
+                    Language::Unknown,
+                    IndexOptions::new().full_text(part_id << 16 | sub_part_id as u32),
+                );
+            }
+            MessagePart::Html(html) => {
+                document.text(
+                    MessageField::Attachment,
+                    html_to_text(&html.body),
+                    Language::Unknown,
+                    IndexOptions::new().full_text(part_id << 16 | sub_part_id as u32),
+                );
+            }
+            _ => (),
+        }
+    }
 }
 
-impl MessageParser for Document {
-    fn parse_attached_message(&mut self, message: &mut Message, part_id: u32) {
-        if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
-            self.text(
-                MessageField::Attachment,
-                subject.into_owned(),
-                Language::Unknown,
-                IndexOptions::new()
-                    .full_text(part_id << 16)
-                    .build_term_index(),
-            );
+fn get_addr_values(header_value: &HeaderValue, mut callback: impl FnMut(&str, bool)) {
+    match header_value {
+        HeaderValue::Address(addr) => {
+            if let Some(name) = &addr.name {
+                callback(name, false);
+            }
+            if let Some(addr) = &addr.address {
+                callback(addr, true);
+            }
         }
-        for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
-            match sub_part {
-                MessagePart::Text(text) => {
-                    self.text(
-                        MessageField::Attachment,
-                        text.body.into_owned(),
-                        Language::Unknown,
-                        IndexOptions::new()
-                            .full_text(part_id << 16 | sub_part_id as u32)
-                            .build_term_index(),
-                    );
+        HeaderValue::AddressList(list) => {
+            for addr in list {
+                if let Some(name) = &addr.name {
+                    callback(name, false);
                 }
-                MessagePart::Html(html) => {
-                    self.text(
-                        MessageField::Attachment,
-                        html_to_text(&html.body),
-                        Language::Unknown,
-                        IndexOptions::new()
-                            .full_text(part_id << 16 | sub_part_id as u32)
-                            .build_term_index(),
-                    );
-                }
-                _ => (),
-            }
-        }
-    }
-
-    fn parse_address(&mut self, header_name: RfcHeader, address: &Addr) {
-        if let Some(name) = &address.name {
-            self.parse_text(header_name, name);
-        };
-        if let Some(ref addr) = address.address {
-            if addr.len() <= MAX_TOKEN_LENGTH {
-                self.text(
-                    header_name,
-                    addr.to_lowercase(),
-                    Language::Unknown,
-                    IndexOptions::new().keyword(),
-                );
-            }
-        };
-    }
-
-    fn parse_address_group(&mut self, header_name: RfcHeader, group: &Group) {
-        if let Some(name) = &group.name {
-            self.parse_text(header_name, name);
-        };
-
-        for address in group.addresses.iter() {
-            self.parse_address(header_name, address);
-        }
-    }
-
-    fn parse_text(&mut self, header_name: RfcHeader, text: &str) {
-        match header_name {
-            RfcHeader::Keywords
-            | RfcHeader::ContentLanguage
-            | RfcHeader::MimeVersion
-            | RfcHeader::MessageId
-            | RfcHeader::References
-            | RfcHeader::ContentId
-            | RfcHeader::ResentMessageId => {
-                if text.len() <= MAX_TOKEN_LENGTH {
-                    self.text(
-                        header_name,
-                        text.to_lowercase(),
-                        Language::Unknown,
-                        IndexOptions::new().keyword(),
-                    );
-                }
-            }
-
-            RfcHeader::Subject => (),
-
-            _ => {
-                self.text(
-                    header_name,
-                    text.to_string(),
-                    Language::Unknown,
-                    IndexOptions::new().tokenize(),
-                );
-            }
-        }
-    }
-
-    fn parse_content_type(&mut self, header_name: RfcHeader, content_type: &ContentType) {
-        if content_type.c_type.len() <= MAX_TOKEN_LENGTH {
-            self.text(
-                header_name,
-                content_type.c_type.to_string(),
-                Language::Unknown,
-                IndexOptions::new().keyword(),
-            );
-        }
-        if let Some(subtype) = &content_type.c_subtype {
-            if subtype.len() <= MAX_TOKEN_LENGTH {
-                self.text(
-                    header_name,
-                    subtype.to_string(),
-                    Language::Unknown,
-                    IndexOptions::new().keyword(),
-                );
-            }
-        }
-        if let Some(attributes) = &content_type.attributes {
-            for (key, value) in attributes {
-                if key == "name" || key == "filename" {
-                    self.text(
-                        header_name,
-                        value.to_string(),
-                        Language::Unknown,
-                        IndexOptions::new().tokenize(),
-                    );
-                } else if value.len() <= MAX_TOKEN_LENGTH {
-                    self.text(
-                        header_name,
-                        value.to_lowercase(),
-                        Language::Unknown,
-                        IndexOptions::new().keyword(),
-                    );
+                if let Some(addr) = &addr.address {
+                    callback(addr, true);
                 }
             }
         }
-    }
-
-    #[allow(clippy::manual_flatten)]
-    fn add_addr_sort(&mut self, header_name: RfcHeader, header_value: &HeaderValue) {
-        let sort_parts = match if let HeaderValue::Collection(ref col) = header_value {
-            col.first().unwrap_or(&HeaderValue::Empty)
-        } else {
-            header_value
-        } {
-            HeaderValue::Address(addr) => [&None, &addr.name, &addr.address],
-            HeaderValue::AddressList(list) => list.first().map_or([&None, &None, &None], |addr| {
-                [&None, &addr.name, &addr.address]
-            }),
-            HeaderValue::Group(group) => group
-                .addresses
-                .first()
-                .map_or([&group.name, &None, &None], |addr| {
-                    [&group.name, &addr.name, &addr.address]
-                }),
-            HeaderValue::GroupList(list) => list.first().map_or([&None, &None, &None], |group| {
-                group
-                    .addresses
-                    .first()
-                    .map_or([&group.name, &None, &None], |addr| {
-                        [&group.name, &addr.name, &addr.address]
-                    })
-            }),
-            _ => [&None, &None, &None],
-        };
-        let text_len = sort_parts
-            .iter()
-            .map(|part| part.as_ref().map_or(0, |s| s.len()))
-            .sum::<usize>();
-        if text_len > 0 {
-            let mut text = String::with_capacity(if text_len > MAX_SORT_FIELD_LENGTH {
-                MAX_SORT_FIELD_LENGTH
-            } else {
-                text_len
-            });
-            'outer: for part in sort_parts {
-                if let Some(s) = part {
-                    if !text.is_empty() {
-                        text.push(' ');
+        HeaderValue::Group(group) => {
+            if let Some(name) = &group.name {
+                callback(name, false);
+            }
+            for addr in &group.addresses {
+                if let Some(name) = &addr.name {
+                    callback(name, false);
+                }
+                if let Some(addr) = &addr.address {
+                    callback(addr, true);
+                }
+            }
+        }
+        HeaderValue::GroupList(list) => {
+            for group in list {
+                if let Some(name) = &group.name {
+                    callback(name, false);
+                }
+                for addr in &group.addresses {
+                    if let Some(name) = &addr.name {
+                        callback(name, false);
                     }
+                    if let Some(addr) = &addr.address {
+                        callback(addr, true);
+                    }
+                }
+            }
+        }
+        _ => (),
+    }
+}
 
-                    for ch in s.chars() {
-                        for ch in ch.to_lowercase() {
-                            if text.len() >= MAX_SORT_FIELD_LENGTH {
-                                break 'outer;
-                            }
-                            text.push(ch);
+fn get_text_values(header_value: &HeaderValue, mut callback: impl FnMut(&str)) {
+    match &header_value {
+        HeaderValue::Text(text) => {
+            callback(text.as_ref());
+        }
+        HeaderValue::TextList(list) => {
+            for text in list {
+                callback(text.as_ref());
+            }
+        }
+        HeaderValue::Collection(col) => {
+            for item in col {
+                match item {
+                    HeaderValue::Text(text) => {
+                        callback(text.as_ref());
+                    }
+                    HeaderValue::TextList(list) => {
+                        for text in list {
+                            callback(text.as_ref());
                         }
                     }
+                    _ => (),
                 }
             }
-            self.text(
-                header_name,
-                text,
-                Language::Unknown,
-                IndexOptions::new().tokenize().sort(),
-            );
-        };
-    }
-
-    fn parse_header(&mut self, header_name: RfcHeader, header_value: &HeaderValue) {
-        match header_value {
-            HeaderValue::Address(address) => {
-                self.parse_address(header_name, address);
-            }
-            HeaderValue::AddressList(address_list) => {
-                for item in address_list {
-                    self.parse_address(header_name, item);
-                }
-            }
-            HeaderValue::Group(group) => {
-                self.parse_address_group(header_name, group);
-            }
-            HeaderValue::GroupList(group_list) => {
-                for item in group_list {
-                    self.parse_address_group(header_name, item);
-                }
-            }
-            HeaderValue::Text(text) => {
-                self.parse_text(header_name, text);
-            }
-            HeaderValue::TextList(text_list) => {
-                for item in text_list {
-                    self.parse_text(header_name, item);
-                }
-            }
-            HeaderValue::DateTime(date_time) => {
-                if date_time.is_valid() {
-                    self.number(
-                        header_name,
-                        date_time.to_timestamp() as u64,
-                        IndexOptions::new().sort(),
-                    );
-                }
-            }
-            HeaderValue::ContentType(content_type) => {
-                self.parse_content_type(header_name, content_type);
-            }
-            HeaderValue::Collection(header_value) => {
-                for item in header_value {
-                    self.parse_header(header_name, item);
-                }
-            }
-            HeaderValue::Empty => (),
         }
+        _ => (),
+    }
+}
+
+fn get_first_text<'x>(header_value: &'x HeaderValue) -> Option<&'x str> {
+    match &header_value {
+        HeaderValue::Text(text) => text.as_ref().into(),
+        HeaderValue::TextList(list) => list.first().map(|text| text.as_ref()),
+        HeaderValue::Collection(col) => col.first().and_then(|item| match item {
+            HeaderValue::Text(text) => text.as_ref().into(),
+            HeaderValue::TextList(list) => list.first().map(|text| text.as_ref()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn get_first_date_time(header_value: &HeaderValue) -> Option<i64> {
+    match &header_value {
+        HeaderValue::DateTime(date_time) => {
+            if date_time.is_valid() {
+                Some(date_time.to_timestamp())
+            } else {
+                None
+            }
+        }
+        HeaderValue::Collection(col) => col.first().and_then(|item| {
+            if let HeaderValue::DateTime(date_time) = item {
+                if date_time.is_valid() {
+                    Some(date_time.to_timestamp())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }),
+        _ => None,
     }
 }

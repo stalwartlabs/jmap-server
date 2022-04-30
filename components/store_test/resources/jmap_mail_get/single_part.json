@@ -59,7 +59,7 @@
           "value": "3 (Normal)"
         }
       ],
-      "partId": 0,
+      "partId": "0",
       "size": 754,
       "type": "text/plain"
     },
@@ -85,7 +85,7 @@
     "htmlBody": [
       {
         "blobId": "ignored_value",
-        "partId": 1,
+        "partId": "1",
         "size": 808,
         "type": "text/html"
       }
@@ -116,7 +116,7 @@
             "value": "text/plain;\n\tcharset=\"iso-8859-1\""
           }
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 754,
         "type": "text/plain"
       }

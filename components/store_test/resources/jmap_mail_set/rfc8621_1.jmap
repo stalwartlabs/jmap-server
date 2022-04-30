@@ -38,7 +38,7 @@
       "language": [
         "en"
       ],
-      "partId": 0,
+      "partId": "0",
       "size": 81,
       "type": "text/plain"
     },
@@ -64,7 +64,7 @@
     "htmlBody": [
       {
         "blobId": "ignored_value",
-        "partId": 1,
+        "partId": "1",
         "size": 107,
         "type": "text/html"
       }
@@ -105,7 +105,7 @@
         "language": [
           "en"
         ],
-        "partId": 0,
+        "partId": "0",
         "size": 81,
         "type": "text/plain"
       }

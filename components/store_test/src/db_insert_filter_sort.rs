@@ -114,10 +114,7 @@ where
                                             pos as u8,
                                             field.to_lowercase(),
                                             Language::English,
-                                            IndexOptions::new()
-                                                .sort()
-                                                .full_text(0)
-                                                .build_term_index(),
+                                            IndexOptions::new().sort().full_text(0),
                                         );
                                     }
                                 }

@@ -345,7 +345,7 @@ where
                         &values_str["accession_number"][values_str["accession_number"].len() - 1..]
                     )),
                 ],
-                Some(values_int["year"] as i64),
+                Some(values_int["year"] as u64),
             )
             .unwrap();
 

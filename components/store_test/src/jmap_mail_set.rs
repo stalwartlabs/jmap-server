@@ -7,7 +7,7 @@ use jmap::{
     request::{get::GetRequest, set::SetRequest},
 };
 use jmap_mail::mail::{
-    get::GetMail, import::JMAPMailImport, parse::get_message_blob, set::SetMail, MailBodyProperty,
+    get::GetMail, import::JMAPMailImport, parse::get_message_part, set::SetMail, MailBodyProperty,
     MailProperty,
 };
 use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
@@ -170,7 +170,7 @@ where
             .download_blob(
                 account_id,
                 &values.eval_unwrap_blob("/blobId"),
-                get_message_blob,
+                get_message_part,
             )
             .unwrap()
             .unwrap();
@@ -492,7 +492,7 @@ pub fn insert_email<T>(
     raw_message: Vec<u8>,
     mailboxes: Vec<JMAPId>,
     keywords: Vec<&str>,
-    received_at: Option<i64>,
+    received_at: Option<u64>,
 ) -> JMAPId
 where
     T: for<'x> Store<'x> + 'static,

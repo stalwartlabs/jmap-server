@@ -138,7 +138,7 @@ impl JSONValue {
             .ok_or_else(|| MethodError::InvalidArguments("Expected boolean.".to_string()))
     }
 
-    pub fn parse_utc_date(self, optional: bool) -> crate::Result<Option<i64>> {
+    pub fn parse_utc_date(self, optional: bool) -> crate::Result<Option<u64>> {
         match self {
             JSONValue::String(date_time) => {
                 Ok(Some(parse_utc_date(&date_time).ok_or_else(|| {
@@ -210,11 +210,8 @@ impl JSONValue {
     }
 }
 
-pub fn parse_utc_date(date_time: &str) -> Option<i64> {
-    DateTime::parse_from_rfc3339(date_time)
-        .ok()?
-        .timestamp()
-        .into()
+pub fn parse_utc_date(date_time: &str) -> Option<u64> {
+    (DateTime::parse_from_rfc3339(date_time).ok()?.timestamp() as u64).into()
 }
 
 #[cfg(test)]
