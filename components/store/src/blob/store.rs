@@ -54,6 +54,11 @@ where
         Ok(blob_id)
     }
 
+    pub fn blob_exists(&self, blob_id: &BlobId) -> crate::Result<bool> {
+        self.db
+            .exists(ColumnFamily::Blobs, &BlobKey::serialize(blob_id))
+    }
+
     pub fn blob_link_ephimeral(
         &self,
         blob_id: &BlobId,

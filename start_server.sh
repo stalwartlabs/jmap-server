@@ -8,3 +8,4 @@ else
 fi
 
 #RUST_BACKTRACE=1 RUST_LOG="actix_web=debug,jmap_server=debug" cargo run
+RUST_LOG="actix_web=debug,jmap_server=debug" cargo test test_cluster -- --nocapture

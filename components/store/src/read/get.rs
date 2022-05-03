@@ -121,4 +121,16 @@ where
             Ok(None)
         }
     }
+
+    pub fn get_term_index_id(
+        &self,
+        account_id: AccountId,
+        collection: Collection,
+        document_id: DocumentId,
+    ) -> crate::Result<Option<BlobId>> {
+        self.db.get::<BlobId>(
+            ColumnFamily::Values,
+            &ValueKey::serialize_term_index(account_id, collection, document_id),
+        )
+    }
 }

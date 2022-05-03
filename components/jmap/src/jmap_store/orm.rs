@@ -26,7 +26,7 @@ pub trait PropertySchema:
     fn indexed() -> &'static [(Self, u64)];
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
 pub struct TinyORM<T>
 where
     T: PropertySchema,

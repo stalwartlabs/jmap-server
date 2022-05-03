@@ -1005,7 +1005,7 @@ pub fn insert_mailbox<T>(
     mail_store: &JMAPStore<T>,
     account_id: AccountId,
     name: &str,
-    role: &str,
+    role: Option<&str>,
 ) -> JMAPId
 where
     T: for<'x> Store<'x> + 'static,
@@ -1016,10 +1016,14 @@ where
             if_in_state: None,
             create: Vec::from_iter([(
                 "my_id".to_string(),
-                HashMap::from_iter([
-                    ("name".to_string(), name.to_string().into()),
-                    ("role".to_string(), role.to_string().into()),
-                ])
+                if let Some(role) = role {
+                    HashMap::from_iter([
+                        ("name".to_string(), name.to_string().into()),
+                        ("role".to_string(), role.to_string().into()),
+                    ])
+                } else {
+                    HashMap::from_iter([("name".to_string(), name.to_string().into())])
+                }
                 .into(),
             )]),
             update: HashMap::new(),
@@ -1056,7 +1060,6 @@ pub fn update_mailbox<T>(
                             "name".to_string(),
                             format!("Mailbox {}_{}", ref_id, seq_id).into()
                         ),
-                        ("role".to_string(), format!("{}_{}", ref_id, seq_id).into()),
                         ("sortOrder".to_string(), ((ref_id * 100) + seq_id).into())
                     ])
                     .into(),

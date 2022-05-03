@@ -239,7 +239,7 @@ where
                                         &store,
                                         account_id,
                                         &format!("Mailbox {}", id_seq),
-                                        &format!("role_{}", id_seq),
+                                        None,
                                     ),
                                 );
                             (id_seq, JMAPId::from_parts(id_seq as u32, local_id as u32))
@@ -314,7 +314,7 @@ where
                                     &store,
                                     account_id,
                                     &format!("Mailbox {}", local_id),
-                                    &format!("role_{}", local_id),
+                                    None,
                                 ),
                             );
                     }

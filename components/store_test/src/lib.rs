@@ -3,7 +3,10 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::read::GzDecoder;
 
+use jmap::jmap_store::orm::TinyORM;
 use jmap::protocol::json::JSONValue;
+use jmap_mail::mail::MessageField;
+use jmap_mail::mailbox::MailboxProperty;
 use store::blob::BLOB_HASH_LEN;
 use store::config::env_settings::EnvSettings;
 use store::core::collection::Collection;
@@ -182,6 +185,10 @@ pub fn init_settings(
                             temp_dir.to_str().unwrap().to_string(),
                         ),
                         ("cluster".to_string(), "secret_key".to_string()),
+                        (
+                            "jmap-url".to_string(),
+                            format!("http://127.0.0.1:{}/.well-known/jmap", 8000 + peer_num),
+                        ),
                         ("http-port".to_string(), (8000 + peer_num).to_string()),
                         ("rpc-port".to_string(), (9000 + peer_num).to_string()),
                         (
@@ -329,45 +336,48 @@ where
                             if last_ids.contains(document_id) {
                                 *total_keys.get_mut(&cf).unwrap() += 1;
 
-                                let other_value =
-                                    other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into();
+                                let other_value = if let Some(other_value) =
+                                    other.db.get::<Vec<u8>>(cf, &key).unwrap()
+                                {
+                                    other_value.into()
+                                } else if ASSERT {
+                                    panic!("Missing value key: {:?}", key);
+                                } else {
+                                    println!("Missing value key: {:?}", key);
+                                    continue;
+                                };
+
                                 if value != other_value {
                                     if key
-                                        == ValueKey::serialize_term_index(
+                                        == ValueKey::serialize_value(
                                             account_id,
                                             collection,
                                             document_id,
+                                            255,
                                         )
                                         .into_boxed_slice()
                                     {
-                                        let value = TermIndex::deserialize(&value).unwrap();
-                                        let other_value =
-                                            TermIndex::deserialize(&other_value).unwrap();
-                                        assert_eq!(
-                                            value.items.len(),
-                                            other_value.items.len(),
-                                            "{:?} != {:?}",
-                                            value,
-                                            other_value
-                                        );
-                                        for (item, other_item) in
-                                            value.items.iter().zip(other_value.items.iter())
-                                        {
-                                            assert_eq!(
-                                                item.field_id, other_item.field_id,
-                                                "{:?} != {:?}",
-                                                value, other_value
-                                            );
-                                            assert_eq!(
-                                                item.part_id, other_item.part_id,
-                                                "{:?} != {:?}",
-                                                value, other_value
-                                            );
-                                            assert_eq!(
-                                                item.terms_len, other_item.terms_len,
-                                                "{:?} != {:?}",
-                                                value, other_value
-                                            );
+                                        match collection {
+                                            Collection::Account => todo!(),
+                                            Collection::PushSubscription => todo!(),
+                                            Collection::Mail => assert_eq!(
+                                                TinyORM::<MessageField>::deserialize(&value)
+                                                    .unwrap(),
+                                                TinyORM::<MessageField>::deserialize(&other_value)
+                                                    .unwrap()
+                                            ),
+                                            Collection::Mailbox => assert_eq!(
+                                                TinyORM::<MailboxProperty>::deserialize(&value)
+                                                    .unwrap(),
+                                                TinyORM::<MailboxProperty>::deserialize(
+                                                    &other_value
+                                                )
+                                                .unwrap()
+                                            ),
+                                            Collection::Identity => todo!(),
+                                            Collection::EmailSubmission => todo!(),
+                                            Collection::VacationResponse => todo!(),
+                                            Collection::Thread | Collection::None => unreachable!(),
                                         }
                                     } else if ASSERT {
                                         panic!(
@@ -413,13 +423,21 @@ where
                         if last_ids.contains(document_id) {
                             *total_keys.get_mut(&cf).unwrap() += 1;
 
+                            let other_value = if let Some(other_value) =
+                                other.db.get::<Vec<u8>>(cf, &key).unwrap()
+                            {
+                                other_value.into()
+                            } else if ASSERT {
+                                panic!("Missing index key: {:?}", key);
+                            } else {
+                                println!("Missing index key: {:?}", key);
+                                continue;
+                            };
+
                             assert_eq!(
-                                value,
-                                other.db.get::<Vec<u8>>(cf, &key).unwrap().unwrap().into(),
+                                value, other_value,
                                 "{:?}/{}/{:?}",
-                                cf,
-                                account_id,
-                                collection
+                                cf, account_id, collection
                             );
                         }
                     }
@@ -489,24 +507,29 @@ where
                         };
                     }
                     ColumnFamily::Blobs => {
-                        *total_keys.get_mut(&cf).unwrap() += 1;
-                        if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap() {
-                            if ASSERT {
-                                assert_eq!(value, other_value.into(), "{:?} {:?}", cf, key);
-                            } else {
-                                let other_value = other_value.into_boxed_slice();
-                                if value != other_value {
-                                    println!(
-                                        "Blob mismatch: {:?} -> {:?} != {:?}",
-                                        key, value, other_value
-                                    );
+                        if key.len()
+                            > BLOB_HASH_LEN
+                                + u32::from_leb128_bytes(&key[BLOB_HASH_LEN..]).unwrap().1
+                        {
+                            *total_keys.get_mut(&cf).unwrap() += 1;
+                            if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap() {
+                                if ASSERT {
+                                    assert_eq!(value, other_value.into(), "{:?} {:?}", cf, key);
+                                } else {
+                                    let other_value = other_value.into_boxed_slice();
+                                    if value != other_value {
+                                        println!(
+                                            "Blob mismatch: {:?} -> {:?} != {:?}",
+                                            key, value, other_value
+                                        );
+                                    }
                                 }
+                            } else if ASSERT {
+                                panic!("Missing Blob key: [{:?}]", key);
+                            } else {
+                                println!("Missing Blob key: [{:?}]", key);
                             }
-                        } else if ASSERT {
-                            panic!("Missing Blob key: [{:?}]", key);
-                        } else {
-                            println!("Missing Blob key: [{:?}]", key);
-                        };
+                        }
                     }
                 }
             }

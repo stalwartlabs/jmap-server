@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use super::changes::JMAPChanges;
 use crate::error::set::SetError;
 use crate::id::state::JMAPState;
 use crate::id::JMAPIdSerialize;
@@ -10,7 +11,6 @@ use crate::{
     protocol::{json::JSONValue, json_pointer::JSONPointer},
     request::set::SetRequest,
 };
-
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::JMAPIdPrefix;
@@ -18,8 +18,6 @@ use store::parking_lot::MutexGuard;
 use store::write::batch::WriteBatch;
 use store::AccountId;
 use store::{roaring::RoaringBitmap, JMAPId, JMAPStore, Store};
-
-use super::changes::JMAPChanges;
 
 pub struct SetObjectHelper<'y, T, U>
 where

@@ -698,14 +698,14 @@ where
         metadata.append(&mut message_data_bytes);
         metadata.append(&mut message_outline_bytes);
 
-        // Link blob and set message data tield
+        // Link blob and set message data field
         let metadata_blob_id = self.blob_store(&metadata)?;
-        document.blob(metadata_blob_id.clone(), IndexOptions::new());
         document.binary(
             MessageField::Metadata,
             metadata_blob_id.serialize().unwrap(),
             IndexOptions::new(),
         );
+        document.blob(metadata_blob_id, IndexOptions::new());
 
         // TODO search by "header exists"
         // TODO use content language when available

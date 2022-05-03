@@ -144,7 +144,7 @@ fn jmap_mailbox() {
 fn insert_test_data() {
     let (db, _temp_dir) = init_db::<RocksDB>("strdb_jmap_test", true);
 
-    let _inbox_id = insert_mailbox(&db, 1, "Inbox", "INBOX");
+    let _inbox_id = insert_mailbox(&db, 1, "Inbox", "INBOX".into());
     let mut _test_dir = PathBuf::from(
         "/home/vagrant/code/jmap-server/components/store_test/resources/jmap_mail_get/",
     ); //env!("CARGO_MANIFEST_DIR"));

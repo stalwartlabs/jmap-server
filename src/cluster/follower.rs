@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use jmap::jmap_store::raft::RaftUpdate;
+use store::blob::BlobId;
 use store::core::collection::{Collection, Collections};
+use store::core::error::StoreError;
 use store::log::raft::{LogIndex, RaftId, TermId};
 use store::roaring::RoaringBitmap;
 use store::serialize::key::LogKey;
@@ -29,6 +32,11 @@ enum State {
         changed_accounts: HashMap<AccountId, Collections>,
     },
     AppendChanges {
+        changed_accounts: Vec<(AccountId, Collections)>,
+    },
+    AppendBlobs {
+        pending_blobs: HashSet<BlobId>,
+        pending_updates: Vec<Update>,
         changed_accounts: Vec<(AccountId, Collections)>,
     },
     Rollback {
@@ -220,7 +228,47 @@ where
                         indexes.leader_commit_index = commit_index;
 
                         if let Some((next_state, response)) = core
-                            .handle_pending_updates(&mut indexes, changed_accounts, updates)
+                            .check_pending_updates(&mut indexes, changed_accounts, updates)
+                            .await
+                        {
+                            state = next_state;
+                            response
+                        } else {
+                            break;
+                        }
+                    }
+
+                    (
+                        AppendEntriesRequest::Update {
+                            commit_index,
+                            updates,
+                        },
+                        State::AppendBlobs {
+                            pending_blobs,
+                            pending_updates,
+                            changed_accounts,
+                        },
+                    ) => {
+                        debug!(
+                            concat!(
+                                "[{}] Received {} blobs with commit index {}: ",
+                                "{} pending accounts."
+                            ),
+                            local_name,
+                            updates.len(),
+                            commit_index,
+                            changed_accounts.len()
+                        );
+                        indexes.leader_commit_index = commit_index;
+
+                        if let Some((next_state, response)) = core
+                            .handle_missing_blobs(
+                                &mut indexes,
+                                changed_accounts,
+                                pending_blobs,
+                                pending_updates,
+                                updates,
+                            )
                             .await
                         {
                             state = next_state;
@@ -683,6 +731,136 @@ where
         }
     }
 
+    async fn check_pending_updates(
+        &self,
+        indexes: &mut RaftIndexes,
+        changed_accounts: Vec<(AccountId, Collections)>,
+        updates: Vec<Update>,
+    ) -> Option<(State, Response)> {
+        // Request any missing blobs
+        let store = self.store.clone();
+        match self
+            .spawn_worker(move || {
+                let mut missing_blob_ids = Vec::new();
+
+                for update in &updates {
+                    match update {
+                        Update::Document {
+                            update:
+                                RaftUpdate::Insert {
+                                    blobs, term_index, ..
+                                },
+                        } if !blobs.is_empty() || term_index.is_some() => {
+                            for blob in blobs {
+                                if !store.blob_exists(blob)? {
+                                    missing_blob_ids.push(blob.clone());
+                                }
+                            }
+                            if let Some(term_index) = term_index {
+                                if !store.blob_exists(term_index)? {
+                                    missing_blob_ids.push(term_index.clone());
+                                }
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+
+                Ok((updates, missing_blob_ids))
+            })
+            .await
+        {
+            Ok((updates, missing_blob_ids)) => {
+                if !missing_blob_ids.is_empty() {
+                    Some((
+                        State::AppendBlobs {
+                            pending_blobs: missing_blob_ids.iter().cloned().collect(),
+                            pending_updates: updates,
+                            changed_accounts,
+                        },
+                        Response::AppendEntries(AppendEntriesResponse::FetchBlobs {
+                            blob_ids: missing_blob_ids,
+                        }),
+                    ))
+                } else {
+                    self.handle_pending_updates(indexes, changed_accounts, updates)
+                        .await
+                }
+            }
+            Err(err) => {
+                error!("Failed to verify blobs: {:?}", err);
+                None
+            }
+        }
+    }
+
+    async fn handle_missing_blobs(
+        &self,
+        indexes: &mut RaftIndexes,
+        changed_accounts: Vec<(AccountId, Collections)>,
+        mut pending_blobs: HashSet<BlobId>,
+        pending_updates: Vec<Update>,
+        updates: Vec<Update>,
+    ) -> Option<(State, Response)> {
+        let store = self.store.clone();
+        match self
+            .spawn_worker(move || {
+                for update in updates {
+                    match update {
+                        Update::Blob { blob_id, blob } => {
+                            if pending_blobs.remove(&blob_id) {
+                                let saved_blob_id = store.blob_store(
+                                    &store::lz4_flex::decompress_size_prepended(&blob).map_err(
+                                        |_| {
+                                            StoreError::InternalError(format!(
+                                                "Failed to decompress blobId {}.",
+                                                blob_id
+                                            ))
+                                        },
+                                    )?,
+                                )?;
+                                if blob_id != saved_blob_id {
+                                    return Err(StoreError::InternalError(format!(
+                                        "BlobId {} was saved with Id {}.",
+                                        blob_id, saved_blob_id
+                                    )));
+                                }
+                            } else {
+                                debug!("Received unexpected blobId: {}", blob_id);
+                            }
+                        }
+                        _ => {
+                            debug_assert!(false, "Invalid update: {:?}", update);
+                        }
+                    }
+                }
+                Ok(pending_blobs)
+            })
+            .await
+        {
+            Ok(pending_blobs) => {
+                if pending_blobs.is_empty() {
+                    self.handle_pending_updates(indexes, changed_accounts, pending_updates)
+                        .await
+                } else {
+                    (
+                        State::AppendBlobs {
+                            pending_blobs,
+                            pending_updates,
+                            changed_accounts,
+                        },
+                        Response::AppendEntries(AppendEntriesResponse::Continue),
+                    )
+                        .into()
+                }
+            }
+            Err(err) => {
+                error!("Failed to write blobs: {:?}", err);
+                None
+            }
+        }
+    }
+
     async fn handle_pending_updates(
         &self,
         indexes: &mut RaftIndexes,
@@ -888,7 +1066,7 @@ where
                     .spawn_worker(move || {
                         let mut batch = WriteBatch::new(account_id, false);
                         for delete_id in inserts {
-                            store.delete_document(collection, delete_id, &mut batch)?;
+                            store.delete_document(&mut batch, collection, delete_id)?;
                         }
 
                         store.write(batch)

@@ -33,7 +33,7 @@ where
 
     // Create the Inbox
     let leader = assert_leader_elected(&peers).await;
-    let inbox_id = insert_mailbox(&leader.store, 1, "Inbox", "INBOX");
+    let inbox_id = insert_mailbox(&leader.store, 1, "Inbox", "INBOX".into());
     leader.update_uncommitted_index().await;
     assert_cluster_updated(&peers).await;
 

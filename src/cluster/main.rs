@@ -58,7 +58,6 @@ pub async fn start_cluster<T>(
         let mut is_offline = false;
 
         loop {
-            let went_to_bed = Instant::now();
             match time::timeout(wait_timeout, main_rx.recv()).await {
                 Ok(Some(message)) => {
                     #[cfg(test)]
@@ -97,17 +96,6 @@ pub async fn start_cluster<T>(
                         continue;
                     }
 
-                    if went_to_bed.elapsed().as_millis() as u64 > PING_INTERVAL + 50 {
-                        println!(
-                            "[{}] Took too long ({}ms) to wake up!",
-                            cluster.addr,
-                            went_to_bed.elapsed().as_millis()
-                        );
-                    }
-
-                    let time = Instant::now();
-                    let exec = format!("{:?}", message);
-
                     match cluster.handle_message(message).await {
                         Ok(true) => (),
                         Ok(false) => {
@@ -121,15 +109,6 @@ pub async fn start_cluster<T>(
                             shutdown_tx.send(false).ok();
                             break;
                         }
-                    }
-
-                    if time.elapsed().as_millis() > 50 {
-                        println!(
-                            "{}ms [{}] Executing {}",
-                            time.elapsed().as_millis(),
-                            cluster.addr,
-                            exec,
-                        );
                     }
                 }
                 Ok(None) => {
@@ -156,9 +135,6 @@ pub async fn start_cluster<T>(
                         );
                     }
 
-                    if cluster.is_leading() {
-                        print!("{}ms ", time_since_last_ping)
-                    }
                     if let Err(err) = cluster.ping_peers().await {
                         debug!("Failed to ping peers: {:?}", err);
                         break;
@@ -329,7 +305,7 @@ where
             }
         }
 
-        if self.is_leading() {
+        /*if self.is_leading() {
             print!(
                 "Leader [{} = {}/{}]",
                 self.addr, self.last_log.index, self.last_log.term
@@ -341,7 +317,7 @@ where
                 );
             }
             println!();
-        }
+        }*/
 
         // Start a new election
         if leader_is_offline {

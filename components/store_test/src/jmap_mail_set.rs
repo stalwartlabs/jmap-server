@@ -110,8 +110,8 @@ pub fn jmap_mail_set<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let _mailbox_id_1 = insert_mailbox(mail_store, account_id, "Inbox", "INBOX");
-    let _mailbox_id_2 = insert_mailbox(mail_store, account_id, "Sent", "SENT");
+    let _mailbox_id_1 = insert_mailbox(mail_store, account_id, "Inbox", "INBOX".into());
+    let _mailbox_id_2 = insert_mailbox(mail_store, account_id, "Sent", "SENT".into());
 
     jmap_mail_update(
         mail_store,

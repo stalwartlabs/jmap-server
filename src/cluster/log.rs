@@ -1,8 +1,9 @@
-use jmap::jmap_store::raft::{RaftObject, RaftUpdate};
+use jmap::jmap_store::raft::{JMAPRaftStore, RaftUpdate};
 use jmap::jmap_store::set::SetObject;
 use jmap_mail::mail::set::SetMail;
 use jmap_mail::mailbox::set::SetMailbox;
 use store::bincode;
+use store::blob::BlobId;
 use store::core::collection::{Collection, Collections};
 use store::core::document::Document;
 use store::core::error::StoreError;
@@ -36,6 +37,10 @@ pub enum Update {
     },
     Change {
         change: Vec<u8>,
+    },
+    Blob {
+        blob_id: BlobId,
+        blob: Vec<u8>,
     },
     Log {
         raft_id: RaftId,
@@ -76,6 +81,9 @@ pub enum AppendEntriesResponse {
         account_id: AccountId,
         collection: Collection,
         changes: Vec<u8>,
+    },
+    FetchBlobs {
+        blob_ids: Vec<BlobId>,
     },
     Continue,
     Done {
@@ -347,17 +355,16 @@ pub trait RaftStore {
 
     fn apply_update(
         &self,
-        account_id: AccountId,
+        write_batch: &mut WriteBatch,
         collection: Collection,
         update: RaftUpdate,
-        write_batch: &mut WriteBatch,
     ) -> store::Result<()>;
 
     fn delete_document(
         &self,
+        write_batch: &mut WriteBatch,
         collection: Collection,
         document_id: DocumentId,
-        write_batch: &mut WriteBatch,
     ) -> store::Result<()>;
 }
 
@@ -812,16 +819,13 @@ where
 
     fn apply_update(
         &self,
-        account_id: AccountId,
+        write_batch: &mut WriteBatch,
         collection: Collection,
         update: RaftUpdate,
-        write_batch: &mut WriteBatch,
     ) -> store::Result<()> {
         match collection {
-            Collection::Mail => SetMail::raft_apply_update(self, write_batch, account_id, update),
-            Collection::Mailbox => {
-                SetMailbox::raft_apply_update(self, write_batch, account_id, update)
-            }
+            Collection::Mail => self.raft_apply_update::<SetMail>(write_batch, update),
+            Collection::Mailbox => self.raft_apply_update::<SetMailbox>(write_batch, update),
             Collection::Account => todo!(),
             Collection::PushSubscription => todo!(),
             Collection::Thread => todo!(),
@@ -834,9 +838,9 @@ where
 
     fn delete_document(
         &self,
+        write_batch: &mut WriteBatch,
         collection: Collection,
         document_id: DocumentId,
-        write_batch: &mut WriteBatch,
     ) -> store::Result<()> {
         let mut document = Document::new(collection, document_id);
         match collection {
@@ -943,23 +947,14 @@ where
                         false,
                     );
 
-                    let mut bytes_it = value.iter();
-                    for _ in
-                        0..usize::from_leb128_it(&mut bytes_it).ok_or(StoreError::DataCorruption)?
-                    {
-                        let collection: Collection =
-                            (*bytes_it.next().ok_or(StoreError::DataCorruption)?).into();
-                        for _ in 0..usize::from_leb128_it(&mut bytes_it)
-                            .ok_or(StoreError::DataCorruption)?
-                        {
-                            let document_id = DocumentId::from_leb128_it(&mut bytes_it)
-                                .ok_or(StoreError::DataCorruption)?;
-                            println!(
-                                "Committing delete document {} from account {}, {:?}",
-                                document_id, write_batch.account_id, collection
-                            );
-                            store.delete_document(collection, document_id, &mut write_batch)?;
-                        }
+                    for document in bincode::deserialize::<Vec<Document>>(&value).map_err(|_| {
+                        StoreError::SerializeError("Failed to deserialize tombstones".to_string())
+                    })? {
+                        println!(
+                            "Committing delete document {} from account {}, {:?}",
+                            document.document_id, write_batch.account_id, document.collection
+                        );
+                        write_batch.delete_document(document);
                     }
 
                     if !write_batch.is_empty() {
@@ -1077,12 +1072,7 @@ where
                                         write_batch.account_id = account_id;
                                     }
                                 }
-                                store.apply_update(
-                                    account_id,
-                                    collection,
-                                    update,
-                                    &mut write_batch,
-                                )?;
+                                store.apply_update(&mut write_batch, collection, update)?;
                             }
                             PendingUpdate::Delete { document_ids } => {
                                 debug_assert!(
@@ -1100,9 +1090,9 @@ where
 
                                 for document_id in document_ids {
                                     store.delete_document(
+                                        &mut write_batch,
                                         collection,
                                         document_id,
-                                        &mut write_batch,
                                     )?;
                                 }
                             }
@@ -1262,7 +1252,7 @@ where
                             }
                         }
 
-                        store.apply_update(account_id, collection, update, &mut write_batch)?;
+                        store.apply_update(&mut write_batch, collection, update)?;
                     }
                     Update::Eof => {
                         is_done = true;

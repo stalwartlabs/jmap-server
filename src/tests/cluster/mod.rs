@@ -216,12 +216,7 @@ impl Ac {
             Ac::InsertMailbox(local_id) => {
                 mailbox_map.lock().insert(
                     *local_id,
-                    insert_mailbox(
-                        store,
-                        2,
-                        &format!("Mailbox {}", local_id),
-                        &format!("role_{}", local_id),
-                    ),
+                    insert_mailbox(store, 2, &format!("Mailbox {}", local_id), None),
                 );
             }
             Ac::UpdateMailbox(local_id) => {
@@ -419,7 +414,17 @@ where
                             }
                         }
                         assert!(follower.is_up_to_date());
+                        println!(
+                            "Comparing leader {} with follower {}.",
+                            leader_pos + 1,
+                            follower_pos + 1
+                        );
                         let keys_leader = leader.store.compare_with(&follower.store);
+                        println!(
+                            "Comparing follower {} with leader {}.",
+                            leader_pos + 1,
+                            follower_pos + 1
+                        );
                         let keys_follower = follower.store.compare_with(&leader.store);
                         assert!(
                             keys_leader.iter().map(|(_, v)| *v).sum::<usize>() > 0,
@@ -463,7 +468,7 @@ where
 }
 
 #[test]
-#[ignore]
+//#[ignore]
 fn postmortem() {
     let dbs = (1..=6)
         .map(|n| super::store::init_db_params::<RocksDB>("st_cluster", n, 5, false).0)
@@ -480,13 +485,13 @@ fn postmortem() {
 }
 
 #[tokio::test]
-#[cfg_attr(not(feature = "test_cluster"), ignore)]
+//#[cfg_attr(not(feature = "test_cluster"), ignore)]
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
-    raft_election::<RocksDB>().await;
-    merge_mail_threads::<RocksDB>().await;
+    //raft_election::<RocksDB>().await;
+    //merge_mail_threads::<RocksDB>().await;
     crud_ops::<RocksDB>().await;
-    resolve_log_conflict::<RocksDB>().await;
+    //resolve_log_conflict::<RocksDB>().await;
 }
 
 #[tokio::test]

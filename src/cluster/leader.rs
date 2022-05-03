@@ -1,8 +1,9 @@
 use futures::poll;
-use jmap::jmap_store::raft::RaftObject;
+use jmap::jmap_store::raft::JMAPRaftStore;
 use jmap_mail::mail::set::SetMail;
 use jmap_mail::mailbox::set::SetMailbox;
 use std::task::Poll;
+use store::blob::BlobId;
 use store::core::collection::{Collection, Collections};
 use store::core::error::StoreError;
 use store::log::raft::{LogIndex, RaftId};
@@ -37,6 +38,9 @@ enum State {
         account_id: AccountId,
         collection: Collection,
         changes: MergedChanges,
+    },
+    AppendBlobs {
+        pending_blob_ids: Vec<BlobId>,
     },
     Wait,
 }
@@ -241,6 +245,32 @@ where
                             }
                             Err(err) => {
                                 error!("Failed to prepare changes: {:?}", err);
+                                break;
+                            }
+                        }
+                    }
+                    State::AppendBlobs { pending_blob_ids } => {
+                        if pending_blob_ids.is_empty() {
+                            debug!(
+                                "[{}] Peer {} requested blobs but there is nothing else left to send. Aborting.",
+                                local_name, peer_name
+                            );
+                            break;
+                        }
+
+                        match core.prepare_blobs(pending_blob_ids).await {
+                            Ok((updates, pending_blob_ids)) => {
+                                state = State::AppendBlobs { pending_blob_ids };
+                                Request::AppendEntries {
+                                    term,
+                                    request: AppendEntriesRequest::Update {
+                                        commit_index: last_log.index,
+                                        updates,
+                                    },
+                                }
+                            }
+                            Err(err) => {
+                                error!("Failed to prepare blobs: {:?}", err);
                                 break;
                             }
                         }
@@ -564,6 +594,11 @@ where
                             changes,
                         };
                     }
+                    AppendEntriesResponse::FetchBlobs { blob_ids } => {
+                        state = State::AppendBlobs {
+                            pending_blob_ids: blob_ids,
+                        };
+                    }
                 }
             }
         });
@@ -644,10 +679,10 @@ where
             let item = self
                 .spawn_worker(move || match collection {
                     Collection::Mail => {
-                        SetMail::raft_prepare_update(&store, document_id, is_insert)
+                        store.raft_prepare_update::<SetMail>(account_id, document_id, is_insert)
                     }
                     Collection::Mailbox => {
-                        SetMailbox::raft_prepare_update(&store, document_id, is_insert)
+                        store.raft_prepare_update::<SetMailbox>(account_id, document_id, is_insert)
                     }
                     _ => Err(StoreError::InternalError(
                         "Unsupported collection for changes".into(),
@@ -681,6 +716,41 @@ where
         }
 
         Ok(updates)
+    }
+
+    async fn prepare_blobs(
+        &self,
+        pending_blob_ids: Vec<BlobId>,
+    ) -> store::Result<(Vec<Update>, Vec<BlobId>)> {
+        let store = self.store.clone();
+        self.spawn_worker(move || {
+            let mut remaining_blobs = Vec::new();
+            let mut updates = Vec::new();
+            let mut bytes_sent = 0;
+
+            for pending_blob_id in pending_blob_ids {
+                if bytes_sent < BATCH_MAX_SIZE {
+                    let blob = store::lz4_flex::compress_prepend_size(
+                        &store.blob_get(&pending_blob_id)?.ok_or_else(|| {
+                            StoreError::InternalError(format!(
+                                "Blob {} not found.",
+                                pending_blob_id
+                            ))
+                        })?,
+                    );
+                    bytes_sent += blob.len();
+                    updates.push(Update::Blob {
+                        blob_id: pending_blob_id,
+                        blob,
+                    });
+                } else {
+                    remaining_blobs.push(pending_blob_id);
+                }
+            }
+
+            Ok((updates, remaining_blobs))
+        })
+        .await
     }
 }
 
