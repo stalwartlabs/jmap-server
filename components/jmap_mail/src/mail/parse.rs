@@ -29,6 +29,8 @@ use crate::mail::{
     MailProperty, MessageOutline, MimePart, MimePartType,
 };
 
+use super::get::transform_json_date;
+
 pub struct ParseMail {
     pub account_id: AccountId,
     pub properties: Vec<MailProperty>,
@@ -326,7 +328,7 @@ impl ParseMail {
                     MailProperty::SentAt => {
                         if let Some(date) = message.headers_rfc.remove(&RfcHeader::Date) {
                             let (value, _) = header_to_jmap_date(date);
-                            transform_json_string(value, false)
+                            transform_json_date(value, false)
                         } else {
                             JSONValue::Null
                         }

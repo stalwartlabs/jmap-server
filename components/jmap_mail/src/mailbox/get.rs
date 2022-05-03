@@ -6,9 +6,13 @@ use jmap::jmap_store::get::GetObject;
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::protocol::json::JSONValue;
 use jmap::request::get::GetRequest;
+use store::core::collection::Collection;
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::core::JMAPIdPrefix;
 use store::roaring::RoaringBitmap;
 
-use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, StoreError, Tag};
+use store::{AccountId, JMAPId, JMAPStore};
 use store::{DocumentId, Store};
 
 use crate::mail::{Keyword, MessageField};

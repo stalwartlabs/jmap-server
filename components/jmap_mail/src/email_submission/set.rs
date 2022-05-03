@@ -17,12 +17,15 @@ use jmap::{
     request::set::SetRequest,
 };
 use mail_parser::RfcHeader;
-use store::batch::Document;
+
 use store::blob::BlobId;
-use store::field::IndexOptions;
-use store::leb128::Leb128;
-use store::serialize::{StoreDeserialize, StoreSerialize};
-use store::{AccountId, Collection, JMAPId, JMAPIdPrefix, JMAPStore, Store, StoreError};
+use store::core::collection::Collection;
+use store::core::document::Document;
+use store::core::error::StoreError;
+use store::core::JMAPIdPrefix;
+use store::serialize::StoreSerialize;
+use store::write::options::IndexOptions;
+use store::{AccountId, JMAPId, JMAPStore, Store};
 
 #[derive(Default)]
 pub struct SetEmailSubmission {
@@ -411,14 +414,22 @@ where
         }
     }
 
-    fn delete(
+    fn validate_delete(
         _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _document: &mut Document,
+        _jmap_id: JMAPId,
     ) -> jmap::error::set::Result<()> {
         Err(SetError::forbidden(concat!(
             "Deleting Email Submissions is not allowed, ",
             "update its status to 'canceled' insted."
         )))
+    }
+
+    fn delete(
+        _store: &JMAPStore<T>,
+        _account_id: AccountId,
+        _document: &mut Document,
+    ) -> store::Result<()> {
+        Ok(())
     }
 }
 

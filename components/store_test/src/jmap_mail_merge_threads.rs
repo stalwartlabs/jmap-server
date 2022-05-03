@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use jmap_mail::mail::{import::JMAPMailImport, MessageField};
 use store::{
-    query::DefaultIdMapper, Collection, Comparator, Filter, JMAPIdPrefix, JMAPStore, Store, Tag,
-    ThreadId,
+    core::{collection::Collection, tag::Tag, JMAPIdPrefix},
+    read::{comparator::Comparator, filter::Filter, DefaultIdMapper},
+    JMAPStore, Store, ThreadId,
 };
 
 use crate::{jmap_mail_set::delete_email, StoreCompareWith};
@@ -225,7 +226,7 @@ where
             delete_email(mail_store, account_id, message_id);
         }
     }
-    return;
+
     mail_store.assert_is_empty();
 }
 

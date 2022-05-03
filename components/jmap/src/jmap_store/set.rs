@@ -10,10 +10,14 @@ use crate::{
     protocol::{json::JSONValue, json_pointer::JSONPointer},
     request::set::SetRequest,
 };
-use store::batch::Document;
+
+use store::core::collection::Collection;
+use store::core::document::Document;
+use store::core::JMAPIdPrefix;
 use store::parking_lot::MutexGuard;
-use store::{batch::WriteBatch, roaring::RoaringBitmap, JMAPId, JMAPStore, Store};
-use store::{AccountId, Collection, JMAPIdPrefix};
+use store::write::batch::WriteBatch;
+use store::AccountId;
+use store::{roaring::RoaringBitmap, JMAPId, JMAPStore, Store};
 
 use super::changes::JMAPChanges;
 
@@ -110,10 +114,15 @@ where
         helper: &mut SetObjectHelper<T, Self::Helper>,
         document: &mut Document,
     ) -> crate::error::set::Result<Option<Self::UpdateItemResult>>;
-    fn delete(
+    fn validate_delete(
         helper: &mut SetObjectHelper<T, Self::Helper>,
-        document: &mut Document,
+        jmap_id: JMAPId,
     ) -> crate::error::set::Result<()>;
+    fn delete(
+        store: &JMAPStore<T>,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()>;
 }
 
 pub trait JMAPSet<T>
@@ -351,13 +360,14 @@ where
 
         for jmap_id in std::mem::take(&mut helper.will_destroy) {
             let document_id = jmap_id.get_document_id();
-            let mut document = Document::new(collection, document_id);
             if helper.document_ids.contains(document_id) {
-                if let Err(err) = V::delete(&mut helper, &mut document) {
+                if let Err(err) = V::validate_delete(&mut helper, jmap_id) {
                     helper
                         .not_destroyed
                         .insert(jmap_id.to_jmap_string(), err.into());
                 } else {
+                    let mut document = Document::new(collection, document_id);
+                    V::delete(self, helper.account_id, &mut document)?;
                     helper.changes.delete_document(document);
                     helper.changes.log_delete(collection, jmap_id);
                     helper.destroyed.push(jmap_id.to_jmap_string().into());

@@ -29,9 +29,13 @@ use mail_parser::{
     },
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{blob::BlobId, leb128::Leb128, AccountId, Collection, JMAPId, JMAPStore};
-use store::{serialize::StoreDeserialize, JMAPIdPrefix};
-use store::{DocumentId, Store, StoreError};
+use store::serialize::leb128::Leb128;
+use store::{blob::BlobId, core::JMAPIdPrefix, AccountId, JMAPId, JMAPStore};
+use store::{
+    core::{collection::Collection, error::StoreError},
+    serialize::StoreDeserialize,
+};
+use store::{DocumentId, Store};
 
 pub struct GetMail<'y, T>
 where
@@ -880,10 +884,7 @@ pub fn add_raw_header(
         header_values.pop().unwrap_or_default()
     };
     match form {
-        MailHeaderForm::Raw | MailHeaderForm::Text => {
-            let (value, _) = header_to_jmap_text(header_values);
-            value
-        }
+        MailHeaderForm::Raw | MailHeaderForm::Text => header_to_jmap_text(header_values).0,
         MailHeaderForm::Addresses | MailHeaderForm::GroupedAddresses => {
             let (value, is_grouped, is_collection) = header_to_jmap_address(header_values, false);
             transform_json_emailaddress(
@@ -894,18 +895,9 @@ pub fn add_raw_header(
                 all,
             )
         }
-        MailHeaderForm::MessageIds => {
-            let (value, _) = header_to_jmap_id(header_values);
-            value
-        }
-        MailHeaderForm::Date => {
-            let (value, _) = header_to_jmap_date(header_values);
-            value
-        }
-        MailHeaderForm::URLs => {
-            let (value, _) = header_to_jmap_url(header_values);
-            value
-        }
+        MailHeaderForm::MessageIds => header_to_jmap_id(header_values).0,
+        MailHeaderForm::Date => header_to_jmap_date(header_values).0.into_utc_date(),
+        MailHeaderForm::URLs => header_to_jmap_url(header_values).0,
     }
 }
 

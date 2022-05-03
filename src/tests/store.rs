@@ -1,10 +1,8 @@
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
-use store::{JMAPConfig, JMAPStore, Store};
+use store::{config::jmap::JMAPConfig, JMAPStore, Store};
 use store_rocksdb::RocksDB;
-use store_test::{
-    destroy_temp_dir, init_settings, jmap_mail_set::insert_email, jmap_mailbox::insert_mailbox,
-};
+use store_test::{destroy_temp_dir, init_settings, jmap_mailbox::insert_mailbox};
 
 pub fn init_db<T>(name: &str, delete_if_exists: bool) -> (JMAPStore<T>, PathBuf)
 where

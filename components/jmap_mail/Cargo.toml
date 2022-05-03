@@ -5,7 +5,6 @@ edition = "2018"
 publish = false
 
 [dependencies]
-nlp = { path = "../nlp" }
 jmap = { path = "../jmap" }
 store = { path = "../store" }
 mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }

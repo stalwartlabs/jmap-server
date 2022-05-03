@@ -2,10 +2,11 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use rand::Rng;
-use store::log::{LogIndex, RaftId, TermId};
+use store::core::collection::Collection;
+use store::log::raft::{LogIndex, RaftId, TermId};
 use store::roaring::RoaringTreemap;
 use store::tracing::{debug, error, info};
-use store::{AccountId, Collection, Store};
+use store::{AccountId, Store};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cluster::leader;

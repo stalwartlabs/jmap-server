@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::protocol::json::JSONValue;
+use store::core::error::StoreError;
 use store::tracing::error;
-use store::StoreError;
 
 #[derive(Debug)]
 pub enum MethodError {

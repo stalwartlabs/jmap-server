@@ -10,7 +10,10 @@ use jmap_mail::mail::{
     get::GetMail, import::JMAPMailImport, parse::get_message_part, set::SetMail, MailBodyProperty,
     MailProperty,
 };
-use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store, Tag};
+use store::{
+    core::{tag::Tag, JMAPIdPrefix},
+    AccountId, JMAPId, JMAPStore, Store,
+};
 
 use crate::{
     jmap_mail_get::{build_mail_get_arguments, SortedJSONValue},
@@ -46,7 +49,7 @@ where
                 if k == "blobId" {
                     if let JSONValue::String(value) = v {
                         *value = mail_store
-                            .upload_blob(account_id, value.as_bytes())
+                            .blob_store_ephimeral(account_id, value.as_bytes())
                             .unwrap()
                             .to_jmap_string();
                     } else {
@@ -167,7 +170,7 @@ where
         let values = result.eval("/created/m1").unwrap();
 
         let raw_message = mail_store
-            .download_blob(
+            .blob_jmap_get(
                 account_id,
                 &values.eval_unwrap_blob("/blobId"),
                 get_message_part,

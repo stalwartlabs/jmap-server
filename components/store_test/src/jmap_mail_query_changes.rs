@@ -13,11 +13,10 @@ use jmap_mail::mail::{
     changes::ChangesMail, import::JMAPMailImport, query::QueryMail, MessageField,
 };
 use store::{
-    batch::{Document, WriteBatch},
-    field::IndexOptions,
-    AccountId, JMAPId, JMAPStore, Store, Tag,
+    core::{collection::Collection, document::Document, tag::Tag, JMAPIdPrefix},
+    write::{batch::WriteBatch, options::IndexOptions},
+    AccountId, JMAPId, JMAPStore, Store,
 };
-use store::{Collection, JMAPIdPrefix};
 
 use crate::{
     jmap_changes::LogAction,

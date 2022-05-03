@@ -3,14 +3,13 @@ use std::{
     convert::TryInto,
 };
 
-use nlp::{stemmer::StemmedToken, tokenizers::Token};
+use crate::nlp::{stemmer::StemmedToken, tokenizers::Token};
 
+use crate::serialize::leb128::Leb128;
 use crate::{
-    leb128::Leb128,
     serialize::{StoreDeserialize, StoreSerialize},
     FieldId,
 };
-
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
 #[derive(Debug)]
@@ -41,12 +40,14 @@ pub struct TermGroup {
     pub terms: Vec<Term>,
 }
 
+#[derive(Debug)]
 pub struct TermIndexBuilderItem {
     field: FieldId,
     part_id: u32,
     terms: Vec<Term>,
 }
 
+#[derive(Debug)]
 pub struct TermIndexBuilder {
     terms: HashMap<String, u32>,
     items: Vec<TermIndexBuilderItem>,
@@ -60,7 +61,7 @@ pub struct TermIndexItem {
     pub terms: Vec<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TermIndex {
     pub token_map: HashMap<String, u32>,
     pub items: Vec<TermIndexItem>,
@@ -360,9 +361,9 @@ impl StoreSerialize for TermIndexBuilder {
 
 impl StoreDeserialize for TermIndex {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let (num_terms, mut pos) = u32::from_leb128_bytes(bytes)?;
-        let mut token_map = HashMap::with_capacity(num_terms as usize);
-        for term_id in 0..num_terms {
+        let (num_tokens, mut pos) = u32::from_leb128_bytes(bytes)?;
+        let mut token_map = HashMap::with_capacity(num_tokens as usize);
+        for term_id in 0..num_tokens {
             let nil_pos = bytes.get(pos..)?.iter().position(|b| b == &0)?;
             token_map.insert(
                 String::from_utf8(bytes.get(pos..pos + nil_pos)?.to_vec()).ok()?,
@@ -444,7 +445,6 @@ impl TermIndex {
     }
 
     fn uncompress_chunk(
-        &self,
         bytes: &[u8],
         remaining_items: usize,
         initial_value: Option<u32>,
@@ -527,7 +527,7 @@ impl TermIndex {
             let mut byte_pos = 0;
 
             'term_loop: while term_pos < item.terms_len {
-                let (bytes_read, chunk) = self.uncompress_chunk(
+                let (bytes_read, chunk) = TermIndex::uncompress_chunk(
                     item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
                     (item.terms_len * 2) - (term_pos * 2),
                     None,
@@ -596,7 +596,7 @@ impl TermIndex {
                     if term_pos < item.terms_len {
                         byte_pos += self.skip_items(
                             item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
-                            (item.terms_len * 2) - (term_pos * 2),
+                            (item.terms_len - term_pos) * 2,
                         )?;
                     }
 
@@ -607,7 +607,7 @@ impl TermIndex {
                     term_pos = 0;
 
                     'outer: while term_pos < item.terms_len {
-                        let (bytes_read, chunk) = self.uncompress_chunk(
+                        let (bytes_read, chunk) = TermIndex::uncompress_chunk(
                             item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
                             item.terms_len - term_pos,
                             Some(initial_value),
@@ -652,24 +652,59 @@ impl TermIndex {
             None
         })
     }
+}
 
-    pub fn uncompress_all_terms(&self) -> Result<Vec<UncompressedTerms>> {
-        let mut result = Vec::with_capacity(self.items.len());
-        for item in &self.items {
-            let mut term_pos = 0;
-            let mut byte_pos = 0;
-            let mut terms = UncompressedTerms {
-                field_id: item.field_id,
+#[derive(Default)]
+pub struct Terms {
+    pub field_id: FieldId,
+    pub exact_terms: HashSet<TermId>,
+    pub stemmed_terms: HashSet<TermId>,
+}
+
+pub struct TokenIndex {
+    pub tokens: Vec<String>,
+    pub terms: Vec<Terms>,
+}
+
+impl StoreDeserialize for TokenIndex {
+    fn deserialize(bytes: &[u8]) -> Option<Self> {
+        let (num_tokens, mut pos) = u32::from_leb128_bytes(bytes)?;
+        let mut tokens = Vec::with_capacity(num_tokens as usize);
+        for _ in 0..num_tokens {
+            let nil_pos = bytes.get(pos..)?.iter().position(|b| b == &0)?;
+            tokens.push(String::from_utf8(bytes.get(pos..pos + nil_pos)?.to_vec()).ok()?);
+            pos += nil_pos + 1;
+        }
+
+        let mut terms = Vec::new();
+        while pos < bytes.len() {
+            let item_len =
+                u32::from_le_bytes(bytes.get(pos..pos + LENGTH_SIZE)?.try_into().ok()?) as usize;
+            pos += LENGTH_SIZE;
+
+            let mut field_terms = Terms {
+                field_id: *bytes.get(pos)?,
                 exact_terms: HashSet::new(),
                 stemmed_terms: HashSet::new(),
             };
+            pos += 1;
 
-            while term_pos < item.terms_len {
-                let (bytes_read, chunk) = self.uncompress_chunk(
-                    item.terms.get(byte_pos..).ok_or(Error::DataCorruption)?,
-                    (item.terms_len * 2) - (term_pos * 2),
+            let (_, bytes_read) = u32::from_leb128_bytes(bytes.get(pos..)?)?;
+            pos += bytes_read;
+
+            let (terms_len, bytes_read) = usize::from_leb128_bytes(bytes.get(pos..)?)?;
+            pos += bytes_read;
+
+            let mut term_pos = 0;
+            let mut byte_pos = pos;
+
+            while term_pos < terms_len {
+                let (bytes_read, chunk) = TermIndex::uncompress_chunk(
+                    bytes.get(byte_pos..)?,
+                    (terms_len - term_pos) * 2,
                     None,
-                )?;
+                )
+                .ok()?;
 
                 byte_pos += bytes_read;
 
@@ -677,37 +712,34 @@ impl TermIndex {
                     let term_id = encoded_term[0];
                     let term_id_stemmed = encoded_term[1];
 
-                    terms.exact_terms.insert(term_id);
+                    field_terms.exact_terms.insert(term_id);
                     if term_id != term_id_stemmed {
-                        terms.stemmed_terms.insert(term_id_stemmed);
+                        field_terms.stemmed_terms.insert(term_id_stemmed);
                     }
                     term_pos += 1;
                 }
             }
-            result.push(terms);
-        }
-        Ok(result)
-    }
-}
 
-#[derive(Default)]
-pub struct UncompressedTerms {
-    pub field_id: FieldId,
-    pub exact_terms: HashSet<TermId>,
-    pub stemmed_terms: HashSet<TermId>,
+            terms.push(field_terms);
+            pos += item_len;
+        }
+
+        Some(TokenIndex { tokens, terms })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use nlp::{stemmer::Stemmer, Language};
+    use crate::nlp::{
+        stemmer::Stemmer,
+        term_index::{TermIndexBuilder, TokenIndex},
+        Language,
+    };
 
     use super::TermIndex;
-    use crate::{
-        serialize::{StoreDeserialize, StoreSerialize},
-        term_index::TermIndexBuilder,
-    };
+    use crate::serialize::{StoreDeserialize, StoreSerialize};
 
     #[test]
     #[allow(clippy::bind_instead_of_map)]
@@ -833,7 +865,13 @@ mod tests {
         let compressed_term_index = builder.serialize().unwrap();
         let term_index = TermIndex::deserialize(&compressed_term_index[..]).unwrap();
 
-        assert_eq!(15, term_index.uncompress_all_terms().unwrap().len());
+        assert_eq!(
+            15,
+            TokenIndex::deserialize(&compressed_term_index[..])
+                .unwrap()
+                .terms
+                .len()
+        );
 
         let tests = [
             (vec!["thomas", "clinton"], None, true, 4),

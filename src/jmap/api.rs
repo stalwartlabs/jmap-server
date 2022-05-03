@@ -30,7 +30,7 @@ use jmap_mail::mailbox::query::QueryMailbox;
 use jmap_mail::mailbox::set::SetMailbox;
 use jmap_mail::thread::changes::ChangesThread;
 use jmap_mail::thread::get::GetThread;
-use store::log::ChangeId;
+use store::log::changes::ChangeId;
 use store::tracing::debug;
 use store::Store;
 

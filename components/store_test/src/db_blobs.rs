@@ -1,10 +1,4 @@
-use std::sync::Arc;
-
-use store::{
-    batch::{Document, WriteBatch},
-    serialize::StoreDeserialize,
-    Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
-};
+use store::{JMAPStore, Store};
 
 trait GetAllBlobs {
     fn get_all_blobs(&self) -> store::Result<Vec<(std::path::PathBuf, i64)>>;
@@ -49,7 +43,7 @@ where
     }
 }*/
 
-pub fn blobs<T>(db: JMAPStore<T>)
+pub fn blobs<T>(_db: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {

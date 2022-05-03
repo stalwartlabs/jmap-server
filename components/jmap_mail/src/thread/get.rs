@@ -5,8 +5,13 @@ use jmap::{
     request::get::GetRequest,
 };
 use store::{
-    query::DefaultIdMapper, AccountId, Collection, Comparator, FieldComparator, Filter, JMAPId,
-    JMAPIdPrefix, JMAPStore, Store, Tag,
+    core::{collection::Collection, tag::Tag, JMAPIdPrefix},
+    read::{
+        comparator::{Comparator, FieldComparator},
+        filter::Filter,
+        DefaultIdMapper,
+    },
+    AccountId, JMAPId, JMAPStore, Store,
 };
 
 use crate::mail::MessageField;

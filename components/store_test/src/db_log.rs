@@ -8,10 +8,14 @@ use jmap::{
 };
 use jmap_mail::mail::changes::ChangesMail;
 use store::{
-    batch::WriteBatch,
-    log::{Entry, LogIndex, RaftId, TermId},
-    serialize::{LogKey, StoreDeserialize},
-    AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError,
+    core::{collection::Collection, error::StoreError},
+    log::{
+        entry::Entry,
+        raft::{LogIndex, RaftId, TermId},
+    },
+    serialize::{key::LogKey, StoreDeserialize},
+    write::batch::WriteBatch,
+    AccountId, ColumnFamily, Direction, JMAPStore, Store,
 };
 
 pub fn compact_log<T>(mail_store: JMAPStore<T>)

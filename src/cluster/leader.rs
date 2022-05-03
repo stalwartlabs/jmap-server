@@ -1,26 +1,20 @@
-use std::collections::HashSet;
-use std::task::Poll;
-
 use futures::poll;
-
-use jmap::jmap_store::orm::{JMAPOrm, PropertySchema};
-use jmap_mail::identity::IdentityProperty;
-use jmap_mail::mail::{MessageField, MessageOutline};
-use jmap_mail::mailbox::MailboxProperty;
-
-use store::leb128::Leb128;
-use store::log::{LogIndex, RaftId};
+use jmap::jmap_store::raft::RaftObject;
+use jmap_mail::mail::set::SetMail;
+use jmap_mail::mailbox::set::SetMailbox;
+use std::task::Poll;
+use store::core::collection::{Collection, Collections};
+use store::core::error::StoreError;
+use store::log::raft::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
-use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::tracing::{debug, error};
-use store::Collections;
-use store::{lz4_flex, AccountId, Collection, DocumentId, Store, StoreError};
+use store::{AccountId, Store};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse, RaftStore};
 use crate::JMAPServer;
 
-use super::log::{DocumentUpdate, MergedChanges, Update};
+use super::log::{MergedChanges, Update};
 use super::Peer;
 use super::{
     rpc::{self, Request, Response, RpcEvent},
@@ -646,24 +640,30 @@ where
                 break;
             };
 
-            if let Some((item, item_size)) = match collection {
-                Collection::Mail => self.fetch_email(account_id, document_id, is_insert).await?,
-                Collection::Mailbox => {
-                    self.fetch_orm::<MailboxProperty>(account_id, document_id)
-                        .await?
-                }
-                Collection::Identity => {
-                    self.fetch_orm::<IdentityProperty>(account_id, document_id)
-                        .await?
-                }
-                _ => {
-                    return Err(StoreError::InternalError(
+            let store = self.store.clone();
+            let item = self
+                .spawn_worker(move || match collection {
+                    Collection::Mail => {
+                        SetMail::raft_prepare_update(&store, document_id, is_insert)
+                    }
+                    Collection::Mailbox => {
+                        SetMailbox::raft_prepare_update(&store, document_id, is_insert)
+                    }
+                    _ => Err(StoreError::InternalError(
                         "Unsupported collection for changes".into(),
-                    ))
+                    )),
+                })
+                .await?;
+
+            if let Some(item) = item {
+                if updates.is_empty() {
+                    updates.push(Update::Begin {
+                        account_id,
+                        collection,
+                    });
                 }
-            } {
-                updates.push(item);
-                batch_size += item_size;
+                batch_size += item.size();
+                updates.push(Update::Document { update: item });
             } else {
                 debug!(
                     "Warning: Failed to fetch item in collection {:?}",
@@ -676,144 +676,11 @@ where
             }
         }
 
-        if changes.is_empty() {
+        if !updates.is_empty() {
             updates.push(Update::Eof);
         }
 
         Ok(updates)
-    }
-
-    async fn fetch_email(
-        &self,
-        account_id: AccountId,
-        document_id: DocumentId,
-        is_insert: bool,
-    ) -> store::Result<Option<(Update, usize)>> {
-        /*let store = self.store.clone();
-        self.spawn_worker(move || {
-            let mut item_size = std::mem::size_of::<Update>();
-
-            let mailboxes = if let Some(mailboxes) = store.get_document_tags(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::Mailbox.into(),
-            )? {
-                item_size += mailboxes.items.len() * std::mem::size_of::<DocumentId>();
-                mailboxes.items
-            } else {
-                return Ok(None);
-            };
-            let keywords = if let Some(keywords) = store.get_document_tags(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::Keyword.into(),
-            )? {
-                item_size += keywords.items.iter().map(|tag| tag.len()).sum::<usize>();
-                keywords.items
-            } else {
-                HashSet::new()
-            };
-
-            let thread_id = if let Some(thread_id) = store.get_document_tag_id(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::ThreadId.into(),
-            )? {
-                thread_id
-            } else {
-                return Ok(None);
-            };
-
-            Ok(if is_insert {
-                if let (Some(body), Some(message_data_bytes)) = (
-                    store.get_blob(account_id, Collection::Mail, document_id, MESSAGE_RAW)?,
-                    store.get_blob(account_id, Collection::Mail, document_id, MESSAGE_DATA)?,
-                ) {
-                    // Deserialize the message data
-                    let (message_data_len, read_bytes) =
-                        usize::from_leb128_bytes(&message_data_bytes[..])
-                            .ok_or(StoreError::DataCorruption)?;
-                    let message_outline = MessageOutline::deserialize(
-                        &message_data_bytes[read_bytes + message_data_len..],
-                    )
-                    .ok_or(StoreError::DataCorruption)?;
-
-                    // Compress body
-                    let body = lz4_flex::compress_prepend_size(&body);
-                    item_size += body.len();
-                    Some((
-                        Update::Document {
-                            account_id,
-                            document_id,
-                            update: DocumentUpdate::InsertMail {
-                                thread_id,
-                                keywords,
-                                mailboxes,
-                                body,
-                                received_at: message_outline.received_at,
-                            },
-                        },
-                        item_size,
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                Some((
-                    Update::Document {
-                        account_id,
-                        document_id,
-                        update: DocumentUpdate::UpdateMail {
-                            thread_id,
-                            keywords,
-                            mailboxes,
-                        },
-                    },
-                    item_size,
-                ))
-            })
-        })
-        .await */
-        Ok(None)
-    }
-
-    async fn fetch_orm<U>(
-        &self,
-        account_id: AccountId,
-        document_id: DocumentId,
-    ) -> store::Result<Option<(Update, usize)>>
-    where
-        U: PropertySchema + 'static,
-    {
-        let store = self.store.clone();
-        self.spawn_worker(move || {
-            Ok(
-                if let Some(orm) = store.get_orm::<U>(account_id, document_id)? {
-                    let data = orm.serialize().ok_or_else(|| {
-                        StoreError::SerializeError("Failed to serialize ORM.".to_string())
-                    })?;
-                    let data_len = data.len();
-                    (
-                        Update::Document {
-                            account_id,
-                            document_id,
-                            update: DocumentUpdate::ORM {
-                                collection: U::collection(),
-                                data,
-                            },
-                        },
-                        data_len,
-                    )
-                        .into()
-                } else {
-                    None
-                },
-            )
-        })
-        .await
     }
 }
 

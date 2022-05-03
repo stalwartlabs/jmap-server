@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use store::{AccountId, JMAPConfig};
+use store::{config::jmap::JMAPConfig, AccountId};
 
 use crate::{
     error::method::MethodError,

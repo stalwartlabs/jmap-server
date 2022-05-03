@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::mail::set::SetMail;
 use crate::mail::MessageField;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
@@ -9,13 +10,17 @@ use jmap::jmap_store::set::{
 use jmap::protocol::invocation::Invocation;
 use jmap::protocol::json::{JSONNumber, JSONValue};
 use jmap::request::set::SetRequest;
-use store::batch::Document;
-use store::query::DefaultIdMapper;
-use store::Store;
-use store::{
-    Collection, Comparator, ComparisonOperator, DocumentId, FieldValue, Filter, JMAPId,
-    JMAPIdPrefix, JMAPStore, LongInteger, StoreError, Tag,
-};
+
+use store::core::collection::Collection;
+use store::core::document::Document;
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::core::JMAPIdPrefix;
+use store::read::comparator::Comparator;
+use store::read::filter::{ComparisonOperator, FieldValue, Filter};
+use store::read::DefaultIdMapper;
+use store::{AccountId, Store};
+use store::{DocumentId, JMAPId, JMAPStore, LongInteger};
 
 use super::MailboxProperty;
 //TODO mailbox id 0 is inbox and cannot be deleted
@@ -204,9 +209,23 @@ where
     }
 
     fn delete(
-        helper: &mut SetObjectHelper<T, SetMailboxHelper>,
+        store: &JMAPStore<T>,
+        account_id: AccountId,
         document: &mut Document,
+    ) -> store::Result<()> {
+        // Delete index
+        if let Some(orm) = store.get_orm::<MailboxProperty>(account_id, document.document_id)? {
+            orm.delete(document);
+        }
+        Ok(())
+    }
+
+    fn validate_delete(
+        helper: &mut SetObjectHelper<T, Self::Helper>,
+        jmap_id: JMAPId,
     ) -> jmap::error::set::Result<()> {
+        let document_id = jmap_id.get_document_id();
+
         // Verify that this mailbox does not have sub-mailboxes
         if !helper
             .store
@@ -216,7 +235,7 @@ where
                 Filter::new_condition(
                     MailboxProperty::ParentId.into(),
                     ComparisonOperator::Equal,
-                    FieldValue::LongInteger((document.document_id + 1) as LongInteger),
+                    FieldValue::LongInteger((document_id + 1) as LongInteger),
                 ),
                 Comparator::None,
             )?
@@ -233,7 +252,7 @@ where
             helper.account_id,
             Collection::Mail,
             MessageField::Mailbox.into(),
-            Tag::Id(document.document_id),
+            Tag::Id(document_id),
         )? {
             if !helper.data.on_destroy_remove_emails {
                 return Err(SetError::new(
@@ -246,8 +265,7 @@ where
             let message_doc_ids = message_doc_ids.into_iter().collect::<Vec<_>>();
 
             // Obtain thread ids for all messages to be deleted
-            todo!()
-            /*for (thread_id, message_doc_id) in helper
+            for (thread_id, message_doc_id) in helper
                 .store
                 .get_multi_document_value(
                     helper.account_id,
@@ -259,23 +277,16 @@ where
                 .zip(message_doc_ids)
             {
                 if let Some(thread_id) = thread_id {
-                    helper
-                        .changes
-                        .delete_document(Collection::Mail, message_doc_id);
+                    let mut document = Document::new(Collection::Mail, message_doc_id);
+                    SetMail::delete(helper.store, helper.account_id, &mut document)?;
+
+                    helper.changes.delete_document(document);
                     helper.changes.log_delete(
                         Collection::Mail,
-                        JMAPId::from_parts(*thread_id, message_doc_id),
+                        JMAPId::from_parts(thread_id, message_doc_id),
                     );
                 }
-            }*/
-        }
-
-        // Delete index
-        if let Some(orm) = helper
-            .store
-            .get_orm::<MailboxProperty>(helper.account_id, document.document_id)?
-        {
-            orm.delete(document);
+            }
         }
         Ok(())
     }

@@ -1,15 +1,15 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use rand::Rng;
-use store::{parking_lot::Mutex, AccountId, Collection, JMAPId, JMAPIdPrefix, Store};
+use store::{core::collection::Collection, parking_lot::Mutex, AccountId, JMAPId, Store};
 
+use crate::tests::cluster::{assert_mirrored_stores, num_online_peers, Ac};
+use store::core::JMAPIdPrefix;
 use store_test::{
     jmap_mail_set::{delete_email, insert_email, update_email},
     jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
 };
 use tokio::time::sleep;
-
-use crate::tests::cluster::{assert_mirrored_stores, num_online_peers, Ac};
 
 use super::{
     activate_all_peers, assert_cluster_updated, assert_leader_elected, shutdown_all, Cluster, Cmd,

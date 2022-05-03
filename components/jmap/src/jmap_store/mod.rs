@@ -6,4 +6,5 @@ pub mod orm;
 pub mod parse;
 pub mod query;
 pub mod query_changes;
+pub mod raft;
 pub mod set;

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use store::{AccountId, Collection, JMAPId, JMAPStore, Store};
+use store::{core::collection::Collection, AccountId, JMAPId, JMAPStore, Store};
 
 use crate::{
     error::method::MethodError,

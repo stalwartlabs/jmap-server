@@ -16,12 +16,6 @@ impl<'x> IndoEuropeanTokenizer<'x> {
             iterator: text.char_indices(),
         }
     }
-    pub fn new_boxed(
-        text: &'x str,
-        max_token_length: usize,
-    ) -> Box<dyn Iterator<Item = Token<'x>> + 'x> {
-        Box::new(Self::new(text, max_token_length))
-    }
 }
 
 /// Parses indo-european text into lowercase tokens.

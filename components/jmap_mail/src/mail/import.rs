@@ -16,25 +16,25 @@ use jmap::protocol::json::JSONValue;
 use jmap::request::import::ImportRequest;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::{
-    Addr, ContentType, Group, HeaderValue, Message, MessageAttachment, MessagePart, MimeHeaders,
-    RfcHeader,
-};
-use nlp::Language;
-use store::batch::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH, MAX_TOKEN_LENGTH};
+use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
 use store::blob::BlobId;
-use store::chrono::{LocalResult, SecondsFormat, TimeZone, Utc};
-use store::field::{IndexOptions, Options};
-use store::leb128::Leb128;
-use store::query::DefaultIdMapper;
+use store::core::collection::Collection;
+use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::core::JMAPIdPrefix;
+use store::nlp::Language;
+use store::read::comparator::Comparator;
+use store::read::filter::{FieldValue, Filter};
+use store::read::DefaultIdMapper;
+use store::serialize::leb128::Leb128;
 use store::serialize::StoreSerialize;
 
 use store::tracing::log::error;
-use store::{
-    batch::WriteBatch, roaring::RoaringBitmap, AccountId, Comparator, FieldValue, Filter, JMAPId,
-    JMAPStore, Store, Tag, ThreadId,
-};
-use store::{Collection, DocumentId, Integer, JMAPIdPrefix, LongInteger, StoreError};
+use store::write::batch::WriteBatch;
+use store::write::options::{IndexOptions, Options};
+use store::{roaring::RoaringBitmap, AccountId, JMAPId, JMAPStore, Store, ThreadId};
+use store::{DocumentId, Integer};
 
 use crate::mail::MessageField;
 
@@ -43,8 +43,8 @@ use super::parse::{
     header_to_jmap_text, header_to_jmap_url, mime_header_to_jmap, mime_parts_to_jmap,
 };
 use super::{
-    MailHeaderForm, MailHeaderProperty, MailProperty, MessageData, MessageOutline, MimePart,
-    MAX_MESSAGE_PARTS,
+    HeaderName, MailHeaderForm, MailHeaderProperty, MailProperty, MessageData, MessageOutline,
+    MimePart, MAX_MESSAGE_PARTS,
 };
 
 pub struct ImportMail<'y, T>
@@ -170,7 +170,7 @@ where
 
         if let Some(blob) =
             self.store
-                .download_blob(self.account_id, &item.blob_id, get_message_part)?
+                .blob_jmap_get(self.account_id, &item.blob_id, get_message_part)?
         {
             Ok(self
                 .store
@@ -219,14 +219,12 @@ pub trait JMAPMailImport {
         blob_id: BlobId,
         raw_message: &[u8],
         received_at: Option<u64>,
-    ) -> store::Result<(Vec<String>, String)>;
+    ) -> store::Result<()>;
 
     fn mail_set_thread(
         &self,
         batch: &mut WriteBatch,
         document: &mut Document,
-        reference_ids: Vec<String>,
-        thread_name: String,
     ) -> store::Result<DocumentId>;
 
     fn mail_merge_threads(
@@ -234,18 +232,6 @@ pub trait JMAPMailImport {
         documents: &mut WriteBatch,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
-
-    #[allow(clippy::too_many_arguments)]
-    fn raft_update_mail(
-        &self,
-        batch: &mut WriteBatch,
-        account_id: AccountId,
-        document_id: DocumentId,
-        thread_id: DocumentId,
-        mailbox_ids: HashSet<Tag>,
-        keywords: HashSet<Tag>,
-        insert: Option<(Vec<u8>, i64)>,
-    ) -> store::Result<()>;
 }
 
 pub struct MailImportResult {
@@ -299,8 +285,7 @@ where
 
         // Parse message
         let raw_blob: JMAPBlob = (&blob_id).into();
-        let (reference_ids, thread_name) =
-            self.mail_parse(&mut document, blob_id, blob, received_at)?;
+        self.mail_parse(&mut document, blob_id, blob, received_at)?;
 
         // Add keyword tags
         let mut orm = TinyORM::<MessageField>::new();
@@ -321,8 +306,7 @@ where
         let _lock = self.lock_account(batch.account_id, Collection::Mail);
 
         // Obtain thread Id
-        let thread_id =
-            self.mail_set_thread(&mut batch, &mut document, reference_ids, thread_name)?;
+        let thread_id = self.mail_set_thread(&mut batch, &mut document)?;
 
         // Write document to store
         let result = MailImportResult {
@@ -344,7 +328,7 @@ where
         blob_id: BlobId,
         raw_message: &[u8],
         received_at: Option<u64>,
-    ) -> store::Result<(Vec<String>, String)> {
+    ) -> store::Result<()> {
         let message = Message::parse(raw_message).ok_or_else(|| {
             StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
         })?;
@@ -370,65 +354,33 @@ where
             ));
         }
 
+        // Add size
         message_data
             .properties
             .insert(MailProperty::Size, message.raw_message.len().into());
 
-        document.number(
-            MessageField::Size,
-            message.raw_message.len() as Integer,
-            IndexOptions::new().sort(),
-        );
-
         // Add received at
-        let received_at = received_at.unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-        });
-        message_data
-            .properties
-            .insert(MailProperty::ReceivedAt, received_at.into());
-        document.number(
-            MessageField::ReceivedAt,
-            received_at,
-            IndexOptions::new().sort(),
+        message_data.properties.insert(
+            MailProperty::ReceivedAt,
+            received_at
+                .unwrap_or_else(|| {
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0)
+                })
+                .into(),
         );
 
-        let mut reference_ids = Vec::new();
         let mut mime_parts = HashMap::with_capacity(5);
-        let mut base_subject = None;
 
+        // Build JMAP headers
         for (header_name, header_value) in message.headers_rfc {
-            // Tag header
-            document.tag(
-                MessageField::HasHeader,
-                Tag::Static(header_name.into()),
-                IndexOptions::new(),
-            );
-
-            // Build JMAP headers
             match header_name {
                 RfcHeader::MessageId
                 | RfcHeader::InReplyTo
                 | RfcHeader::References
                 | RfcHeader::ResentMessageId => {
-                    // Build a list containing all IDs that appear in the header
-                    get_text_values(&header_value, |value| {
-                        if value.len() <= MAX_ID_LENGTH {
-                            if header_name == RfcHeader::MessageId {
-                                document.text(
-                                    header_name,
-                                    value.to_string(),
-                                    Language::Unknown,
-                                    IndexOptions::new().keyword(),
-                                );
-                            }
-                            reference_ids.push(value.to_string());
-                        }
-                    });
-
                     let (value, is_collection) = header_to_jmap_id(header_value);
                     message_data.properties.insert(
                         MailProperty::Header(MailHeaderProperty::new_rfc(
@@ -450,59 +402,6 @@ where
                 | RfcHeader::ResentBcc
                 | RfcHeader::ResentCc
                 | RfcHeader::ResentSender => {
-                    if let RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc =
-                        header_name
-                    {
-                        // Build sort index
-                        let mut sort_text = String::with_capacity(MAX_SORT_FIELD_LENGTH);
-                        let mut found_addr = false;
-                        get_addr_values(&header_value, |value, is_addr| {
-                            if is_addr {
-                                if value.len() <= MAX_ID_LENGTH {
-                                    document.text(
-                                        header_name,
-                                        value.to_lowercase(),
-                                        Language::Unknown,
-                                        IndexOptions::new().keyword(),
-                                    );
-                                }
-                            } else {
-                                document.text(
-                                    header_name,
-                                    value.to_string(),
-                                    Language::Unknown,
-                                    IndexOptions::new().tokenize(),
-                                );
-                            }
-
-                            if !found_addr {
-                                if !sort_text.is_empty() {
-                                    sort_text.push(' ');
-                                }
-                                found_addr = is_addr;
-                                'outer: for ch in value.chars() {
-                                    for ch in ch.to_lowercase() {
-                                        if sort_text.len() < MAX_SORT_FIELD_LENGTH {
-                                            sort_text.push(ch);
-                                        } else {
-                                            found_addr = true;
-                                            break 'outer;
-                                        }
-                                    }
-                                }
-                            }
-                        });
-
-                        if !sort_text.is_empty() {
-                            document.text(
-                                header_name,
-                                sort_text,
-                                Language::Unknown,
-                                IndexOptions::new().sort(),
-                            );
-                        }
-                    }
-
                     let (value, is_grouped, is_collection) =
                         header_to_jmap_address(header_value, false);
                     message_data.properties.insert(
@@ -519,12 +418,6 @@ where
                     );
                 }
                 RfcHeader::Date | RfcHeader::ResentDate => {
-                    if let (RfcHeader::Date, Some(timestamp)) =
-                        (header_name, get_first_date_time(&header_value))
-                    {
-                        document.number(header_name, timestamp as u64, IndexOptions::new().sort());
-                    }
-
                     let (value, is_collection) = header_to_jmap_date(header_value);
                     message_data.properties.insert(
                         MailProperty::Header(MailHeaderProperty::new_rfc(
@@ -555,43 +448,27 @@ where
                 | RfcHeader::Comments
                 | RfcHeader::Keywords
                 | RfcHeader::ListId => {
-                    if let (RfcHeader::Subject, Some(subject)) =
-                        (header_name, get_first_text(&header_value))
-                    {
-                        let thread_name = thread_name(subject);
-
-                        document.text(
-                            RfcHeader::Subject,
-                            subject.to_string(),
-                            Language::Unknown,
-                            IndexOptions::new().full_text(0),
-                        );
-
-                        base_subject = Some(if !thread_name.is_empty() {
-                            thread_name.to_string()
-                        } else {
-                            "!".to_string()
-                        });
-                    } else if let RfcHeader::Keywords = header_name {
-                        get_text_values(&header_value, |value| {
-                            if value.len() <= MAX_ID_LENGTH {
+                    // Add Subject to index
+                    if header_name == RfcHeader::Subject {
+                        match &header_value {
+                            HeaderValue::Text(text) => {
                                 document.text(
-                                    header_name,
-                                    value.to_string(),
+                                    RfcHeader::Subject,
+                                    text.to_string(),
                                     Language::Unknown,
-                                    IndexOptions::new().keyword(),
+                                    IndexOptions::new().full_text(0),
                                 );
                             }
-                        });
-                    } else if let RfcHeader::Comments = header_name {
-                        get_text_values(&header_value, |value| {
-                            document.text(
-                                header_name,
-                                value.to_string(),
-                                Language::Unknown,
-                                IndexOptions::new().tokenize(),
-                            );
-                        });
+                            HeaderValue::TextList(list) if !list.is_empty() => {
+                                document.text(
+                                    RfcHeader::Subject,
+                                    list.first().unwrap().to_string(),
+                                    Language::Unknown,
+                                    IndexOptions::new().full_text(0),
+                                );
+                            }
+                            _ => (),
+                        }
                     }
 
                     let (value, is_collection) = header_to_jmap_text(header_value);
@@ -641,11 +518,9 @@ where
                         message_data.text_body.iter().position(|&p| p == part_id)
                     {
                         message_data.text_body[pos] = total_parts;
-                        let blob_id = self.blob_store(text.as_bytes())?;
-                        document.blob(blob_id.clone(), IndexOptions::new());
                         extra_mime_parts.push(MimePart::new_text(
                             empty_text_mime_headers(false, text_len),
-                            blob_id,
+                            self.blob_store(text.as_bytes())?,
                             false,
                         ));
                         total_parts += 1;
@@ -664,11 +539,9 @@ where
                         IndexOptions::new().full_text(text_part_id as u32),
                     );
 
-                    let blob_id = self.blob_store(html.body.as_bytes())?;
-                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_html(
                         mime_parts_to_jmap(html.headers_rfc, html_len),
-                        blob_id,
+                        self.blob_store(html.body.as_bytes())?,
                         html.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -686,11 +559,9 @@ where
                         let html = text_to_html(text.body.as_ref());
                         let html_len = html.len();
 
-                        let blob_id = self.blob_store(html.as_bytes())?;
-                        document.blob(blob_id.clone(), IndexOptions::new());
                         extra_mime_parts.push(MimePart::new_html(
                             empty_text_mime_headers(true, html_len),
-                            blob_id,
+                            self.blob_store(html.as_bytes())?,
                             false,
                         ));
                         message_data.html_body[pos] = total_parts;
@@ -703,11 +574,9 @@ where
                         MessageField::Attachment
                     };
 
-                    let blob_id = self.blob_store(text.body.as_bytes())?;
-                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_text(
                         mime_parts_to_jmap(text.headers_rfc, text_len),
-                        blob_id,
+                        self.blob_store(text.body.as_bytes())?,
                         text.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -728,11 +597,9 @@ where
                     if !has_attachments {
                         has_attachments = true;
                     }
-                    let blob_id = self.blob_store(binary.body.as_ref())?;
-                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        blob_id,
+                        self.blob_store(binary.body.as_ref())?,
                         binary.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -744,11 +611,9 @@ where
                     );
                 }
                 MessagePart::InlineBinary(binary) => {
-                    let blob_id = self.blob_store(binary.body.as_ref())?;
-                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
-                        blob_id,
+                        self.blob_store(binary.body.as_ref())?,
                         binary.is_encoding_problem,
                     ));
                     message_outline.headers.push(
@@ -781,7 +646,6 @@ where
                         }
                     };
 
-                    document.blob(blob_id.clone(), IndexOptions::new());
                     message_data.mime_parts.push(MimePart::new_binary(
                         mime_parts_to_jmap(nested_message.headers_rfc, part_len),
                         blob_id,
@@ -820,23 +684,19 @@ where
             .properties
             .insert(MailProperty::HasAttachment, has_attachments.into());
 
-        if has_attachments {
-            document.tag(MessageField::Attachment, Tag::Default, IndexOptions::new());
-        }
-
         // Serialize message data and outline
-        let mut message_data = message_data
+        let mut message_data_bytes = message_data
             .serialize()
             .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
-        let mut message_outline = message_outline.serialize().ok_or_else(|| {
+        let mut message_outline_bytes = message_outline.serialize().ok_or_else(|| {
             StoreError::SerializeError("Failed to serialize message outline".into())
         })?;
         let mut metadata = Vec::with_capacity(
-            message_data.len() + message_outline.len() + std::mem::size_of::<usize>(),
+            message_data_bytes.len() + message_outline_bytes.len() + std::mem::size_of::<usize>(),
         );
-        message_data.len().to_leb128_bytes(&mut metadata);
-        metadata.append(&mut message_data);
-        metadata.append(&mut message_outline);
+        message_data_bytes.len().to_leb128_bytes(&mut metadata);
+        metadata.append(&mut message_data_bytes);
+        metadata.append(&mut message_outline_bytes);
 
         // Link blob and set message data tield
         let metadata_blob_id = self.blob_store(&metadata)?;
@@ -851,19 +711,26 @@ where
         // TODO use content language when available
         // TODO index PDF, Doc, Excel, etc.
 
-        Ok((
-            reference_ids,
-            base_subject.unwrap_or_else(|| "!".to_string()),
-        ))
+        // Build index
+        message_data.build_index(document, true)
     }
 
     fn mail_set_thread(
         &self,
         batch: &mut WriteBatch,
         document: &mut Document,
-        reference_ids: Vec<String>,
-        thread_name: String,
     ) -> store::Result<DocumentId> {
+        // Obtain thread name and reference ids
+        let mut reference_ids = Vec::new();
+        let mut thread_name = None;
+        for field in &document.text_fields {
+            if field.field == MessageField::ThreadName as u8 {
+                thread_name = field.value.text.as_str().into();
+            } else if field.field == MessageField::MessageIdRef as u8 {
+                reference_ids.push(field.value.text.as_str());
+            }
+        }
+
         // Obtain thread id
         let thread_id = if !reference_ids.is_empty() {
             // Obtain thread ids for all matching document ids
@@ -877,7 +744,7 @@ where
                         Filter::and(vec![
                             Filter::eq(
                                 MessageField::ThreadName.into(),
-                                FieldValue::Keyword(thread_name.to_string()),
+                                FieldValue::Keyword(thread_name.unwrap_or("!").to_string()),
                             ),
                             Filter::or(
                                 reference_ids
@@ -927,15 +794,6 @@ where
             thread_id
         };
 
-        for reference_id in reference_ids {
-            document.text(
-                MessageField::MessageIdRef,
-                reference_id,
-                Language::Unknown,
-                IndexOptions::new().keyword(),
-            );
-        }
-
         document.tag(
             MessageField::ThreadId,
             Tag::Id(thread_id),
@@ -946,13 +804,6 @@ where
             MessageField::ThreadId,
             thread_id,
             IndexOptions::new().store(),
-        );
-
-        document.text(
-            MessageField::ThreadName,
-            thread_name,
-            Language::Unknown,
-            IndexOptions::new().keyword().sort(),
         );
 
         Ok(thread_id)
@@ -1026,150 +877,6 @@ where
 
         Ok(thread_id)
     }
-
-    fn raft_update_mail(
-        &self,
-        batch: &mut WriteBatch,
-        account_id: AccountId,
-        document_id: DocumentId,
-        thread_id: DocumentId,
-        mailboxes: HashSet<Tag>,
-        keywords: HashSet<Tag>,
-        insert: Option<(Vec<u8>, i64)>,
-    ) -> store::Result<()> {
-        /*if let Some((raw_message, received_at)) = insert {
-            let mut document = Document::new(Collection::Mail, document_id);
-
-            // Parse and build message document
-            let (reference_ids, thread_name) =
-                document.parse_message(raw_message, vec![], vec![], received_at.into())?;
-
-            for mailbox in mailboxes {
-                document.tag(MessageField::Mailbox, mailbox, IndexOptions::new());
-            }
-
-            for keyword in keywords {
-                document.tag(MessageField::Keyword, keyword, IndexOptions::new());
-            }
-
-            for reference_id in reference_ids {
-                document.text(
-                    MessageField::MessageIdRef,
-                    Text::keyword(reference_id),
-                    IndexOptions::new(),
-                );
-            }
-
-            // Add thread id and name
-            document.tag(
-                MessageField::ThreadId,
-                Tag::Id(thread_id),
-                IndexOptions::new(),
-            );
-            document.text(
-                MessageField::ThreadName,
-                Text::keyword(thread_name),
-                IndexOptions::new().sort(),
-            );
-
-            batch.insert_document(document);
-        } else {
-            let mut document = Document::new(Collection::Mail, document_id);
-
-            // Process mailbox changes
-            if let Some(current_mailboxes) = self.get_document_tags(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::Mailbox.into(),
-            )? {
-                if current_mailboxes.items != mailboxes {
-                    for current_mailbox in &current_mailboxes.items {
-                        if !mailboxes.contains(current_mailbox) {
-                            document.tag(
-                                MessageField::Mailbox,
-                                current_mailbox.clone(),
-                                IndexOptions::new().clear(),
-                            );
-                        }
-                    }
-
-                    for mailbox in mailboxes {
-                        if !current_mailboxes.contains(&mailbox) {
-                            document.tag(MessageField::Mailbox, mailbox, IndexOptions::new());
-                        }
-                    }
-                }
-            } else {
-                debug!(
-                    "Raft update failed: No mailbox tags found for message {}.",
-                    document_id
-                );
-                return Ok(());
-            };
-
-            // Process keyword changes
-            let current_keywords = if let Some(current_keywords) = self.get_document_tags(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::Keyword.into(),
-            )? {
-                current_keywords.items
-            } else {
-                HashSet::new()
-            };
-            if current_keywords != keywords {
-                for current_keyword in &current_keywords {
-                    if !keywords.contains(current_keyword) {
-                        document.tag(
-                            MessageField::Keyword,
-                            current_keyword.clone(),
-                            IndexOptions::new().clear(),
-                        );
-                    }
-                }
-
-                for keyword in keywords {
-                    if !current_keywords.contains(&keyword) {
-                        document.tag(MessageField::Keyword, keyword, IndexOptions::new());
-                    }
-                }
-            }
-
-            // Handle thread id changes
-            if let Some(current_thread_id) = self.get_document_tag_id(
-                account_id,
-                Collection::Mail,
-                document_id,
-                MessageField::ThreadId.into(),
-            )? {
-                if thread_id != current_thread_id {
-                    document.tag(
-                        MessageField::ThreadId,
-                        Tag::Id(thread_id),
-                        IndexOptions::new(),
-                    );
-                    document.tag(
-                        MessageField::ThreadId,
-                        Tag::Id(current_thread_id),
-                        IndexOptions::new().clear(),
-                    );
-                }
-            } else {
-                debug!(
-                    "Raft update failed: No thread id found for message {}.",
-                    document_id
-                );
-                return Ok(());
-            };
-
-            if !document.is_empty() {
-                batch.update_document(document);
-            }
-        }*/
-        Ok(())
-    }
 }
 
 fn add_attached_message(document: &mut Document, message: &mut Message, part_id: u32) {
@@ -1188,7 +895,7 @@ fn add_attached_message(document: &mut Document, message: &mut Message, part_id:
                     MessageField::Attachment,
                     text.body.into_owned(),
                     Language::Unknown,
-                    IndexOptions::new().full_text(part_id << 16 | sub_part_id as u32),
+                    IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
                 );
             }
             MessagePart::Html(html) => {
@@ -1196,7 +903,7 @@ fn add_attached_message(document: &mut Document, message: &mut Message, part_id:
                     MessageField::Attachment,
                     html_to_text(&html.body),
                     Language::Unknown,
-                    IndexOptions::new().full_text(part_id << 16 | sub_part_id as u32),
+                    IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
                 );
             }
             _ => (),
@@ -1204,120 +911,219 @@ fn add_attached_message(document: &mut Document, message: &mut Message, part_id:
     }
 }
 
-fn get_addr_values(header_value: &HeaderValue, mut callback: impl FnMut(&str, bool)) {
-    match header_value {
-        HeaderValue::Address(addr) => {
-            if let Some(name) = &addr.name {
-                callback(name, false);
-            }
-            if let Some(addr) = &addr.address {
-                callback(addr, true);
-            }
-        }
-        HeaderValue::AddressList(list) => {
-            for addr in list {
-                if let Some(name) = &addr.name {
-                    callback(name, false);
-                }
-                if let Some(addr) = &addr.address {
-                    callback(addr, true);
-                }
-            }
-        }
-        HeaderValue::Group(group) => {
-            if let Some(name) = &group.name {
-                callback(name, false);
-            }
-            for addr in &group.addresses {
-                if let Some(name) = &addr.name {
-                    callback(name, false);
-                }
-                if let Some(addr) = &addr.address {
-                    callback(addr, true);
-                }
-            }
-        }
-        HeaderValue::GroupList(list) => {
-            for group in list {
-                if let Some(name) = &group.name {
-                    callback(name, false);
-                }
-                for addr in &group.addresses {
-                    if let Some(name) = &addr.name {
-                        callback(name, false);
-                    }
-                    if let Some(addr) = &addr.address {
-                        callback(addr, true);
-                    }
-                }
-            }
-        }
-        _ => (),
-    }
-}
+impl MessageData {
+    pub fn build_index(self, document: &mut Document, is_insert: bool) -> store::Result<()> {
+        let options = if is_insert {
+            IndexOptions::new()
+        } else {
+            IndexOptions::new().clear()
+        };
 
-fn get_text_values(header_value: &HeaderValue, mut callback: impl FnMut(&str)) {
-    match &header_value {
-        HeaderValue::Text(text) => {
-            callback(text.as_ref());
-        }
-        HeaderValue::TextList(list) => {
-            for text in list {
-                callback(text.as_ref());
-            }
-        }
-        HeaderValue::Collection(col) => {
-            for item in col {
-                match item {
-                    HeaderValue::Text(text) => {
-                        callback(text.as_ref());
+        for (property, value) in self.properties {
+            match property {
+                MailProperty::Size => {
+                    document.number(
+                        MessageField::Size,
+                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)? as Integer,
+                        IndexOptions::new().sort() | options,
+                    );
+                }
+                MailProperty::ReceivedAt => {
+                    document.number(
+                        MessageField::ReceivedAt,
+                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)?,
+                        IndexOptions::new().sort() | options,
+                    );
+                }
+                MailProperty::HasAttachment => {
+                    if value.unwrap_bool().ok_or(StoreError::DataCorruption)? {
+                        document.tag(
+                            MessageField::Attachment,
+                            Tag::Default,
+                            IndexOptions::new() | options,
+                        );
                     }
-                    HeaderValue::TextList(list) => {
-                        for text in list {
-                            callback(text.as_ref());
+                }
+                MailProperty::Header(MailHeaderProperty {
+                    header: HeaderName::Rfc(header_name),
+                    ..
+                }) => {
+                    document.tag(
+                        MessageField::HasHeader,
+                        Tag::Static(header_name.into()),
+                        IndexOptions::new() | options,
+                    );
+
+                    match header_name {
+                        RfcHeader::MessageId
+                        | RfcHeader::InReplyTo
+                        | RfcHeader::References
+                        | RfcHeader::ResentMessageId => value.unwrap_values(|value| {
+                            match value {
+                                JSONValue::String(id) if id.len() <= MAX_ID_LENGTH => {
+                                    if header_name == RfcHeader::MessageId {
+                                        document.text(
+                                            header_name,
+                                            id.to_string(),
+                                            Language::Unknown,
+                                            IndexOptions::new().keyword() | options,
+                                        );
+                                    }
+                                    document.text(
+                                        MessageField::MessageIdRef,
+                                        id,
+                                        Language::Unknown,
+                                        IndexOptions::new().keyword() | options,
+                                    );
+                                }
+                                _ => (),
+                            }
+                            true
+                        }),
+
+                        RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
+                            let mut sort_text = String::with_capacity(MAX_SORT_FIELD_LENGTH);
+                            let mut found_addr = false;
+                            let mut last_is_space = true;
+
+                            value.unwrap_object_properties(
+                                &["name", "email"],
+                                |property_idx, value| {
+                                    if let Some(value) = value.unwrap_string() {
+                                        let is_addr = property_idx == 1;
+
+                                        if !found_addr {
+                                            if !sort_text.is_empty() {
+                                                sort_text.push(' ');
+                                                last_is_space = true;
+                                            }
+                                            found_addr = is_addr;
+                                            'outer: for ch in value.chars() {
+                                                for ch in ch.to_lowercase() {
+                                                    if sort_text.len() < MAX_SORT_FIELD_LENGTH {
+                                                        let is_space = ch.is_whitespace();
+                                                        if !is_space || !last_is_space {
+                                                            sort_text.push(ch);
+                                                            last_is_space = is_space;
+                                                        }
+                                                    } else {
+                                                        found_addr = true;
+                                                        break 'outer;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if is_addr {
+                                            if value.len() <= MAX_ID_LENGTH {
+                                                document.text(
+                                                    header_name,
+                                                    value.to_lowercase(),
+                                                    Language::Unknown,
+                                                    IndexOptions::new().keyword() | options,
+                                                );
+                                            }
+                                        } else {
+                                            document.text(
+                                                header_name,
+                                                value,
+                                                Language::Unknown,
+                                                IndexOptions::new().tokenize() | options,
+                                            );
+                                        }
+                                    }
+
+                                    true
+                                },
+                            );
+
+                            document.text(
+                                header_name,
+                                if !sort_text.is_empty() {
+                                    sort_text
+                                } else {
+                                    "!".to_string()
+                                },
+                                Language::Unknown,
+                                IndexOptions::new().sort() | options,
+                            );
                         }
+                        RfcHeader::Date => value.unwrap_values(|value| {
+                            if let Some(timestamp) = value.to_unsigned_int() {
+                                document.number(
+                                    header_name,
+                                    timestamp,
+                                    IndexOptions::new().sort() | options,
+                                );
+                            }
+                            false
+                        }),
+                        RfcHeader::Subject => {
+                            value.unwrap_values(|value| {
+                                if let Some(subject) = value.unwrap_string() {
+                                    // Obtain thread name
+                                    let thread_name = thread_name(&subject);
+                                    document.text(
+                                        MessageField::ThreadName,
+                                        if !thread_name.is_empty() {
+                                            thread_name.to_string()
+                                        } else {
+                                            "!".to_string()
+                                        },
+                                        Language::Unknown,
+                                        IndexOptions::new().keyword().sort() | options,
+                                    );
+                                }
+
+                                false
+                            });
+                        }
+                        RfcHeader::Keywords => {
+                            value.unwrap_values(|value| {
+                                match value {
+                                    JSONValue::String(keyword)
+                                        if keyword.len() <= MAX_ID_LENGTH =>
+                                    {
+                                        document.text(
+                                            MessageField::MessageIdRef,
+                                            keyword,
+                                            Language::Unknown,
+                                            IndexOptions::new().keyword() | options,
+                                        );
+                                    }
+                                    _ => (),
+                                }
+                                true
+                            });
+                        }
+                        RfcHeader::Comments => {
+                            value.unwrap_values(|value| {
+                                if let Some(value) = value.unwrap_string() {
+                                    document.text(
+                                        header_name,
+                                        value,
+                                        Language::Unknown,
+                                        IndexOptions::new().tokenize() | options,
+                                    );
+                                }
+                                true
+                            });
+                        }
+                        _ => (),
                     }
-                    _ => (),
                 }
+                _ => (),
             }
         }
-        _ => (),
-    }
-}
 
-fn get_first_text<'x>(header_value: &'x HeaderValue) -> Option<&'x str> {
-    match &header_value {
-        HeaderValue::Text(text) => text.as_ref().into(),
-        HeaderValue::TextList(list) => list.first().map(|text| text.as_ref()),
-        HeaderValue::Collection(col) => col.first().and_then(|item| match item {
-            HeaderValue::Text(text) => text.as_ref().into(),
-            HeaderValue::TextList(list) => list.first().map(|text| text.as_ref()),
-            _ => None,
-        }),
-        _ => None,
-    }
-}
-
-fn get_first_date_time(header_value: &HeaderValue) -> Option<i64> {
-    match &header_value {
-        HeaderValue::DateTime(date_time) => {
-            if date_time.is_valid() {
-                Some(date_time.to_timestamp())
-            } else {
-                None
+        // Link/unlink blobs
+        document.blob(self.raw_message, IndexOptions::new() | options);
+        for mime_part in self.mime_parts {
+            if let Some(blob_id) = mime_part.blob_id {
+                document.blob(blob_id, IndexOptions::new() | options);
             }
         }
-        HeaderValue::Collection(col) => col.first().and_then(|item| {
-            if let HeaderValue::DateTime(date_time) = item {
-                if date_time.is_valid() {
-                    Some(date_time.to_timestamp())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }),
-        _ => None,
+
+        Ok(())
     }
 }

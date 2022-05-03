@@ -4,7 +4,7 @@ pub mod jmap;
 pub mod tests;
 
 use crate::jmap::server::{init_jmap_server, start_jmap_server, JMAPServer, DEFAULT_HTTP_PORT};
-use store::{config::EnvSettings, tracing::info};
+use store::{config::env_settings::EnvSettings, tracing::info};
 use store_rocksdb::RocksDB;
 
 use crate::cluster::main::start_cluster;

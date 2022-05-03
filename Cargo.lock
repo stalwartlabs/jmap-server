@@ -997,7 +997,6 @@ dependencies = [
 name = "jmap"
 version = "0.1.0"
 dependencies = [
- "nlp",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -1013,7 +1012,6 @@ dependencies = [
  "gethostname",
  "jmap",
  "jmap_mail",
- "nlp",
  "num_cpus",
  "openssl",
  "rand",
@@ -1035,7 +1033,6 @@ dependencies = [
  "jmap",
  "mail-builder",
  "mail-parser",
- "nlp",
  "rmp-serde",
  "serde",
  "store",
@@ -1320,16 +1317,6 @@ name = "naive-cityhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fce7b49e1e6d8aa67232ef1c4c936c0af58756eb2db6f65c40bacb39035e7f42"
-
-[[package]]
-name = "nlp"
-version = "0.1.0"
-dependencies = [
- "jieba-rs",
- "rust-stemmers",
- "tinysegmenter",
- "whatlang",
-]
 
 [[package]]
 name = "nom"
@@ -1978,15 +1965,18 @@ dependencies = [
  "bincode",
  "bitpacking",
  "chrono",
+ "jieba-rs",
  "lz4_flex",
  "moka",
  "naive-cityhash",
- "nlp",
  "parking_lot 0.12.0",
  "roaring",
+ "rust-stemmers",
  "serde",
  "sha2",
+ "tinysegmenter",
  "tracing",
+ "whatlang",
  "xxhash-rust",
 ]
 
@@ -2007,7 +1997,6 @@ dependencies = [
  "jmap",
  "jmap_mail",
  "mail-parser",
- "nlp",
  "rayon",
  "serde",
  "serde_json",

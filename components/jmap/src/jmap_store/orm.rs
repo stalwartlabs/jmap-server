@@ -1,8 +1,10 @@
-use nlp::Language;
-use store::batch::Document;
-use store::field::{IndexOptions, Options, Text};
+use store::core::document::Document;
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::nlp::Language;
 use store::serialize::{StoreDeserialize, StoreSerialize};
-use store::{AccountId, DocumentId, JMAPStore, Store, StoreError, Tag};
+use store::write::options::{IndexOptions, Options};
+use store::{AccountId, DocumentId, JMAPStore, Store};
 
 use crate::error::set::SetError;
 use crate::{protocol::json::JSONValue, Property};
@@ -166,7 +168,7 @@ where
         self.merge(document, changes).map_err(|err| err.into())
     }
 
-    pub fn get_tag_diff(&self, changes: &Self, property: &T) -> HashSet<Tag> {
+    pub fn get_changed_tags(&self, changes: &Self, property: &T) -> HashSet<Tag> {
         match (self.tags.get(property), changes.tags.get(property)) {
             (Some(this), Some(changes)) if this != changes => {
                 let mut tag_diff = HashSet::new();

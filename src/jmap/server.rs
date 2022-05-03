@@ -4,13 +4,15 @@ use std::sync::Arc;
 
 use actix_web::{middleware, web, App, HttpServer};
 
-use store::config::EnvSettings;
+use store::config::env_settings::EnvSettings;
+use store::config::jmap::JMAPConfig;
+use store::core::error::StoreError;
 use store::tracing::{error, info};
 use store::{
     serialize::{StoreDeserialize, StoreSerialize},
-    Store, StoreError,
+    Store,
 };
-use store::{ColumnFamily, JMAPConfig, JMAPStore};
+use store::{ColumnFamily, JMAPStore};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::cluster::{self, Event, IPC_CHANNEL_BUFFER};

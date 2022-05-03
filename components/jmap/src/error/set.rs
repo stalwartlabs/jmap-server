@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::protocol::json::JSONValue;
+use store::core::error::StoreError;
 use store::tracing::error;
-use store::StoreError;
 
 pub struct SetError {
     pub error_type: SetErrorType,

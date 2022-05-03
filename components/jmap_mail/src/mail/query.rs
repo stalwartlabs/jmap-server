@@ -1,20 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::mail::{Keyword, MessageField};
 use jmap::error::method::MethodError;
 use jmap::jmap_store::query::{JMAPQuery, QueryObject, QueryResult};
 use jmap::protocol::json::JSONValue;
 use jmap::request::query::QueryRequest;
 use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
 use mail_parser::RfcHeader;
-use nlp::Language;
-use store::query::QueryFilterMap;
-use store::{
-    roaring::RoaringBitmap, AccountId, Comparator, DocumentSetComparator, FieldComparator,
-    FieldValue, Filter, JMAPId, JMAPStore, Store, StoreError, Tag, TextQuery,
-};
-use store::{Collection, DocumentId, JMAPIdPrefix};
-
-use crate::mail::{Keyword, MessageField};
+use store::core::collection::Collection;
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::core::JMAPIdPrefix;
+use store::nlp::Language;
+use store::read::comparator::{Comparator, DocumentSetComparator, FieldComparator};
+use store::read::filter::{FieldValue, Filter, TextQuery};
+use store::read::QueryFilterMap;
+use store::DocumentId;
+use store::{roaring::RoaringBitmap, AccountId, JMAPId, JMAPStore, Store};
 
 pub struct QueryMail<'y, T>
 where

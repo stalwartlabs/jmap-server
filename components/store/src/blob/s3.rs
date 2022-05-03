@@ -1,9 +1,11 @@
+use crate::config::env_settings::EnvSettings;
+
 use super::BlobStore;
 
 pub struct S3BlobStore {}
 
 impl BlobStore for S3BlobStore {
-    fn new(_settings: &crate::config::EnvSettings) -> crate::Result<Self> {
+    fn new(_settings: &EnvSettings) -> crate::Result<Self> {
         todo!()
     }
 

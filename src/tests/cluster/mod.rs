@@ -4,7 +4,8 @@ use actix_web::web;
 use futures::future::join_all;
 
 use store::{
-    config::EnvSettings, log::RaftId, parking_lot::Mutex, AccountId, JMAPId, JMAPStore, Store,
+    config::env_settings::EnvSettings, log::raft::RaftId, parking_lot::Mutex, AccountId, JMAPId,
+    JMAPStore, Store,
 };
 
 use store_rocksdb::RocksDB;

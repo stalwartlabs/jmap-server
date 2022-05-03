@@ -11,12 +11,12 @@ use actix_web::web;
 use serde::{Deserialize, Serialize};
 use store::{
     bincode,
-    log::{LogIndex, RaftId, TermId},
     serialize::{StoreDeserialize, StoreSerialize},
     Store,
 };
 use store::{
-    config::EnvSettings,
+    config::env_settings::EnvSettings,
+    log::raft::{LogIndex, RaftId, TermId},
     tracing::{error, info},
 };
 use tokio::sync::{mpsc, oneshot, watch};

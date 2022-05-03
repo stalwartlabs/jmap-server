@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use rust_stemmers::Algorithm;
 
-use crate::{tokenizers::Tokenizer, Language};
+use crate::nlp::{tokenizers::Tokenizer, Language};
 
 #[derive(Debug, PartialEq)]
 pub struct StemmedToken<'x> {

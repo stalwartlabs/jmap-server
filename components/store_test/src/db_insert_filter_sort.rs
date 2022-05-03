@@ -4,14 +4,19 @@ use std::{
     time::Instant,
 };
 
-use nlp::Language;
 use store::{
-    batch::{Document, WriteBatch},
-    field::{IndexOptions, Options, Text},
-    query::DefaultIdMapper,
-    Collection, Comparator, ComparisonOperator, FieldValue, Filter, JMAPIdPrefix, JMAPStore, Store,
-    TextQuery,
+    core::{collection::Collection, document::Document, JMAPIdPrefix},
+    nlp::Language,
+    read::{
+        comparator::Comparator,
+        filter::{ComparisonOperator, FieldValue, Filter, TextQuery},
+    },
+    write::{
+        batch::WriteBatch,
+        options::{IndexOptions, Options},
+    },
 };
+use store::{read::DefaultIdMapper, JMAPStore, Store};
 
 use crate::deflate_artwork_data;
 

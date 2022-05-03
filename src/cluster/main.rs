@@ -6,7 +6,7 @@ use std::{
 use actix_web::web;
 use store::Store;
 use store::{
-    config::EnvSettings,
+    config::env_settings::EnvSettings,
     tracing::{debug, error, info},
 };
 use tokio::{

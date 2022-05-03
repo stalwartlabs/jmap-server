@@ -11,8 +11,8 @@ use jmap::{
     protocol::json::JSONValue,
     request::set::SetRequest,
 };
-use store::batch::Document;
-use store::{JMAPId, JMAPStore, Store};
+use store::core::document::Document;
+use store::{AccountId, JMAPId, JMAPStore, Store};
 
 #[derive(Default)]
 pub struct SetVacationResponse {
@@ -152,10 +152,18 @@ where
         }
     }
 
-    fn delete(
+    fn validate_delete(
         _helper: &mut SetObjectHelper<T, Self::Helper>,
-        document: &mut Document,
+        _jmap_id: JMAPId,
     ) -> jmap::error::set::Result<()> {
+        Ok(())
+    }
+
+    fn delete(
+        _store: &JMAPStore<T>,
+        _account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()> {
         TinyORM::<Self::Property>::delete_orm(document);
         Ok(())
     }

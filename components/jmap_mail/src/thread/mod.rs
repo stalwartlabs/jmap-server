@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use jmap::{request::JSONArgumentParser, Property};
-use store::Collection;
+use store::core::collection::Collection;
 
 pub mod changes;
 pub mod get;
@@ -13,7 +13,7 @@ impl Property for ThreadProperty {
         None
     }
 
-    fn collection() -> store::Collection {
+    fn collection() -> store::core::collection::Collection {
         Collection::Thread
     }
 }

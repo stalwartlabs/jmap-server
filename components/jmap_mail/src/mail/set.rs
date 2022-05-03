@@ -21,24 +21,22 @@ use mail_builder::headers::text::Text;
 use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
-use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::RfcHeader;
-use nlp::Language;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use store::batch::Document;
+use store::core::collection::Collection;
+use store::core::document::Document;
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::core::JMAPIdPrefix;
+use store::write::options::{IndexOptions, Options};
+
 use store::blob::BlobId;
 use store::chrono::DateTime;
-use store::field::{IndexOptions, Options};
-use store::leb128::Leb128;
+
 use store::roaring::RoaringBitmap;
-use store::serialize::StoreDeserialize;
-use store::{
-    AccountId, Collection, DocumentId, Integer, JMAPId, JMAPIdPrefix, JMAPStore, LongInteger,
-    Store, StoreError, Tag,
-};
+use store::{AccountId, DocumentId, JMAPId, JMAPStore, Store};
 
 use super::import::MailImportResult;
-use super::{MessageData, MessageOutline};
+use super::MessageData;
 
 #[allow(clippy::large_enum_variant)]
 pub enum SetMail {
@@ -411,22 +409,18 @@ where
             // Parse message
             // TODO: write parsed message directly to store, avoid parsing it again.
             let size = blob.len();
-            let (reference_ids, thread_name) =
-                helper
-                    .store
-                    .mail_parse(document, blob_id, &blob, received_at)?;
+            helper
+                .store
+                .mail_parse(document, blob_id, &blob, received_at)?;
             fields.insert(document)?;
 
             // Lock collection
             helper.lock(Collection::Mail);
 
             // Obtain thread Id
-            let thread_id = helper.store.mail_set_thread(
-                &mut helper.changes,
-                document,
-                reference_ids,
-                thread_name,
-            )?;
+            let thread_id = helper
+                .store
+                .mail_set_thread(&mut helper.changes, document)?;
 
             Ok(MailImportResult {
                 id: JMAPId::from_parts(thread_id, document.document_id),
@@ -459,7 +453,7 @@ where
             // Set all current mailboxes as changed if the Seen tag changed
             let mut changed_mailboxes = HashSet::new();
             if current_fields
-                .get_tag_diff(&fields, &MessageField::Keyword)
+                .get_changed_tags(&fields, &MessageField::Keyword)
                 .iter()
                 .any(|keyword| matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN))
             {
@@ -469,7 +463,8 @@ where
             }
 
             // Add all new or removed mailboxes
-            for changed_mailbox_tag in current_fields.get_tag_diff(&fields, &MessageField::Mailbox)
+            for changed_mailbox_tag in
+                current_fields.get_changed_tags(&fields, &MessageField::Mailbox)
             {
                 changed_mailboxes.insert(changed_mailbox_tag.as_id());
             }
@@ -496,33 +491,20 @@ where
         }
     }
 
-    fn delete(
-        _helper: &mut SetObjectHelper<T, SetMailHelper>,
-        _document: &mut Document,
+    fn validate_delete(
+        _helper: &mut SetObjectHelper<T, Self::Helper>,
+        _jmap_id: JMAPId,
     ) -> jmap::error::set::Result<()> {
         Ok(())
     }
-}
 
-pub trait JMAPMailDelete {
-    fn mail_delete(
-        &self,
+    fn delete(
+        store: &JMAPStore<T>,
         account_id: AccountId,
-        document_id: DocumentId,
-    ) -> jmap::Result<Option<Document>>;
-}
-
-impl<T> JMAPMailDelete for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn mail_delete(
-        &self,
-        account_id: AccountId,
-        document_id: DocumentId,
-    ) -> jmap::Result<Option<Document>> {
-        let mut document = Document::new(Collection::Mail, document_id);
-        let metadata_blob_id = if let Some(metadata_blob_id) = self.get_document_value::<BlobId>(
+        document: &mut Document,
+    ) -> store::Result<()> {
+        let document_id = document.document_id;
+        let metadata_blob_id = if let Some(metadata_blob_id) = store.get_document_value::<BlobId>(
             account_id,
             Collection::Mail,
             document_id,
@@ -530,121 +512,20 @@ where
         )? {
             metadata_blob_id
         } else {
-            return Ok(None);
+            return Ok(());
         };
 
-        let message_data = MessageData::from_metadata(
-            &self
+        // Remove index entries
+        MessageData::from_metadata(
+            &store
                 .blob_get(&metadata_blob_id)?
                 .ok_or(StoreError::DataCorruption)?,
         )
-        .ok_or(StoreError::DataCorruption)?;
+        .ok_or(StoreError::DataCorruption)?
+        .build_index(document, false)?;
 
-        // Remove fields
-        for (property, value) in message_data.properties {
-            match property {
-                MailProperty::Size => {
-                    document.number(
-                        MessageField::Size,
-                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)? as Integer,
-                        IndexOptions::new().sort().clear(),
-                    );
-                }
-                MailProperty::ReceivedAt => {
-                    document.number(
-                        MessageField::ReceivedAt,
-                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)?,
-                        IndexOptions::new().sort().clear(),
-                    );
-                }
-                MailProperty::HasAttachment => {
-                    if value.unwrap_bool().ok_or(StoreError::DataCorruption)? {
-                        document.tag(
-                            MessageField::Attachment,
-                            Tag::Default,
-                            IndexOptions::new().clear(),
-                        );
-                    }
-                }
-                MailProperty::Header(MailHeaderProperty {
-                    header: HeaderName::Rfc(rfc_header),
-                    ..
-                }) => {
-                    document.tag(
-                        MessageField::HasHeader,
-                        Tag::Static(rfc_header.into()),
-                        IndexOptions::new().clear(),
-                    );
-
-                    match rfc_header {
-                        RfcHeader::Subject => {
-                            let subject =
-                                value.unwrap_string().ok_or(StoreError::DataCorruption)?;
-                            let thread_name = thread_name(&subject);
-
-                            document.text(
-                                MessageField::ThreadName,
-                                if !thread_name.is_empty() {
-                                    thread_name.to_string()
-                                } else {
-                                    "!".to_string()
-                                },
-                                Language::Unknown,
-                                IndexOptions::new().keyword().sort().clear(),
-                            );
-                        }
-                        RfcHeader::From => todo!(),
-                        RfcHeader::To => todo!(),
-                        RfcHeader::Cc => todo!(),
-                        RfcHeader::Date => {
-                            document.number(
-                                rfc_header,
-                                value
-                                    .unwrap_unsigned_int()
-                                    .ok_or(StoreError::DataCorruption)?,
-                                IndexOptions::new().sort().clear(),
-                            );
-                        }
-                        RfcHeader::Keywords
-                        | RfcHeader::MessageId
-                        | RfcHeader::InReplyTo
-                        | RfcHeader::References
-                        | RfcHeader::ResentMessageId => {}
-                        RfcHeader::Bcc => todo!(),
-                        RfcHeader::ReplyTo => todo!(),
-                        RfcHeader::Sender => todo!(),
-                        RfcHeader::Comments => todo!(),
-                        RfcHeader::Received => todo!(),
-                        RfcHeader::ReturnPath => todo!(),
-                        RfcHeader::MimeVersion => todo!(),
-                        RfcHeader::ResentTo => todo!(),
-                        RfcHeader::ResentFrom => todo!(),
-                        RfcHeader::ResentBcc => todo!(),
-                        RfcHeader::ResentCc => todo!(),
-                        RfcHeader::ResentSender => todo!(),
-                        RfcHeader::ResentDate => todo!(),
-                        RfcHeader::ListArchive => todo!(),
-                        RfcHeader::ListHelp => todo!(),
-                        RfcHeader::ListId => todo!(),
-                        RfcHeader::ListOwner => todo!(),
-                        RfcHeader::ListPost => todo!(),
-                        RfcHeader::ListSubscribe => todo!(),
-                        RfcHeader::ListUnsubscribe => todo!(),
-                        RfcHeader::ContentDescription => todo!(),
-                        RfcHeader::ContentId => todo!(),
-                        RfcHeader::ContentLanguage => todo!(),
-                        RfcHeader::ContentLocation => todo!(),
-                        RfcHeader::ContentTransferEncoding => todo!(),
-                        RfcHeader::ContentType => todo!(),
-                        RfcHeader::ContentDisposition => todo!(),
-                    }
-                }
-                _ => (),
-            }
-        }
-
-        // Remove thread
-        let thread_id = self
+        // Remove thread related data
+        let thread_id = store
             .get_document_value::<DocumentId>(
                 account_id,
                 Collection::Mail,
@@ -663,14 +544,8 @@ where
             IndexOptions::new().store().clear(),
         );
 
-        // Unlink all blobs
-        document.blob(message_data.raw_message, IndexOptions::new().clear());
+        // Unlink metadata
         document.blob(metadata_blob_id, IndexOptions::new().clear());
-        for mime_part in message_data.mime_parts {
-            if let Some(blob_id) = mime_part.blob_id {
-                document.blob(blob_id, IndexOptions::new().clear());
-            }
-        }
         document.binary(
             MessageField::Metadata,
             Vec::with_capacity(0),
@@ -678,12 +553,12 @@ where
         );
 
         // Delete ORM
-        let fields = self
+        let fields = store
             .get_orm::<MessageField>(account_id, document_id)?
             .ok_or(StoreError::DataCorruption)?;
-        fields.delete(&mut document);
+        fields.delete(document);
 
-        Ok(document.into())
+        Ok(())
     }
 }
 
@@ -877,7 +752,7 @@ impl JSONMailValue for JSONValue {
                 BodyPart::Binary(
                     helper
                         .store
-                        .download_blob(
+                        .blob_jmap_get(
                             helper.account_id,
                             &JMAPBlob::from_jmap_string(&blob_id).ok_or_else(|| {
                                 SetError::new(SetErrorType::BlobNotFound, "Failed to parse blobId")

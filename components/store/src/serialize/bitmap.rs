@@ -1,12 +1,14 @@
+use crate::read::filter::{ComparisonOperator, LogicalOperator};
+use crate::serialize::leb128::Leb128;
 use crate::{
-    leb128::Leb128,
-    serialize::{DeserializeBigEndian, StoreDeserialize, FIELD_PREFIX_LEN},
-    ColumnFamily, ComparisonOperator, Direction, JMAPStore, Store,
+    serialize::{DeserializeBigEndian, StoreDeserialize},
+    ColumnFamily, Direction, JMAPStore, Store,
 };
+use crate::{DocumentId, StoreError};
 use roaring::RoaringBitmap;
 use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
 
-use crate::{DocumentId, LogicalOperator, StoreError};
+use super::key::FIELD_PREFIX_LEN;
 
 pub const BIT_SET: u8 = 0x80;
 pub const BIT_CLEAR: u8 = 0;

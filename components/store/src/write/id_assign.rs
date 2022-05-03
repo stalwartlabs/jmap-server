@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 
 use crate::{
-    serialize::BitmapKey, AccountId, Collection, DocumentId, JMAPStore, Store, StoreError,
+    serialize::key::BitmapKey, AccountId, Collection, DocumentId, JMAPStore, Store, StoreError,
 };
 
 #[derive(Clone, Hash, PartialEq, Eq)]

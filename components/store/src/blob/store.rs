@@ -3,7 +3,7 @@ use std::{ops::Range, time::SystemTime};
 use tracing::error;
 
 use crate::{
-    serialize::{BlobKey, StoreSerialize},
+    serialize::{key::BlobKey, StoreSerialize},
     AccountId, ColumnFamily, Direction, JMAPStore, Store,
 };
 
@@ -39,7 +39,7 @@ where
         // Store blobId including a timestamp
         if let Err(err) = self
             .db
-            .set(ColumnFamily::Values, &key, &timestamp.serialize().unwrap())
+            .set(ColumnFamily::Blobs, &key, &timestamp.serialize().unwrap())
         {
             // There was a problem writing to the store, delete blob.
             if let Err(err) = match &self.blob.store {

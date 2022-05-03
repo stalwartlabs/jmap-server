@@ -10,7 +10,10 @@ use actix_web::{
 };
 use jmap::URI;
 use jmap::{id::JMAPIdSerialize, protocol::response::serialize_hex};
-use store::{config::EnvSettings, JMAPConfig, Store};
+use store::{
+    config::{env_settings::EnvSettings, jmap::JMAPConfig},
+    Store,
+};
 
 use super::server::JMAPServer;
 

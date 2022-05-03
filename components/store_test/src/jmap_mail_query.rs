@@ -13,12 +13,15 @@ use std::{
     iter::FromIterator,
     time::Instant,
 };
-use store::JMAPIdPrefix;
 use store::{
     chrono::{SecondsFormat, TimeZone, Utc},
-    query::DefaultIdMapper,
-    AccountId, Collection, Comparator, DocumentId, FieldValue, Filter, Integer, JMAPId, JMAPStore,
-    Store, Tag,
+    core::{collection::Collection, tag::Tag, JMAPIdPrefix},
+    read::{
+        comparator::Comparator,
+        filter::{FieldValue, Filter},
+        DefaultIdMapper,
+    },
+    AccountId, DocumentId, Integer, JMAPId, JMAPStore, Store,
 };
 
 use crate::{
@@ -317,7 +320,7 @@ where
                 0.into(),
                 format!(
                     concat!(
-                        "From: {}\nCc: {}\nMessage-ID: <{}>\n",
+                        "From: \"{}\" <artist@domain.com>\nCc: \"{}\" <cc@domain.com>\nMessage-ID: <{}>\n",
                         "References: <{}>\nComments: {}\nSubject: [{}]",
                         " Year {}\n\n{}\n{}\n"
                     ),
@@ -412,7 +415,7 @@ where
     {
         delete_email(mail_store, account_id, message_id);
     }
-    return;
+
     mail_store.assert_is_empty();
 }
 

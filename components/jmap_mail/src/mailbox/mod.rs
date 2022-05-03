@@ -1,6 +1,7 @@
 pub mod changes;
 pub mod get;
 pub mod query;
+pub mod raft;
 pub mod set;
 
 use std::fmt::Display;
@@ -11,7 +12,9 @@ use jmap::protocol::json::JSONValue;
 use jmap::request::JSONArgumentParser;
 use jmap::Property;
 
-use store::{field::Options, Collection, FieldId};
+use store::core::collection::Collection;
+use store::write::options::Options;
+use store::FieldId;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]

@@ -5,7 +5,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{config::EnvSettings, StoreError};
+use crate::{config::env_settings::EnvSettings, StoreError};
 
 use super::{BlobId, BlobStore};
 

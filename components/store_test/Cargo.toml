@@ -9,7 +9,6 @@ store = { path = "../store" }
 mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
 jmap = { path = "../jmap" }
 jmap_mail = { path = "../jmap_mail" }
-nlp = { path = "../nlp" }
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}

@@ -1,9 +1,7 @@
-use store::log::ChangeId;
-
 use crate::{error::method::MethodError, protocol::json::JSONValue};
 
 use super::{hex_reader, HexWriter, JMAPIdSerialize};
-use store::leb128::Leb128;
+use store::{log::changes::ChangeId, serialize::leb128::Leb128};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
@@ -140,7 +138,7 @@ impl JSONValue {
 #[cfg(test)]
 mod tests {
 
-    use store::log::ChangeId;
+    use store::log::changes::ChangeId;
 
     use crate::id::JMAPIdSerialize;
 

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-nlp = { path = "components/nlp" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 store = { path = "components/store" }
@@ -28,7 +27,6 @@ store_test = { path = "components/store_test" }
 [workspace]
 resolver = "2"
 members = [
-    "components/nlp",
     "components/store",
     "components/store_rocksdb",
     "components/store_test",

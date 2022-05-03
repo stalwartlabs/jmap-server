@@ -1,11 +1,12 @@
 use std::fmt::Display;
 
 use jmap::{jmap_store::orm::PropertySchema, Property};
-use store::{field::Options, Collection};
+use store::{core::collection::Collection, write::options::Options};
 
 pub mod changes;
 pub mod get;
 pub mod query;
+pub mod raft;
 pub mod set;
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, serde::Serialize, serde::Deserialize)]
@@ -40,7 +41,7 @@ impl Property for EmailSubmissionProperty {
         }
     }
 
-    fn collection() -> store::Collection {
+    fn collection() -> Collection {
         Collection::EmailSubmission
     }
 }

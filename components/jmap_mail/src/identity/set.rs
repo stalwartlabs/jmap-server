@@ -10,8 +10,9 @@ use jmap::{
     protocol::json::JSONValue,
     request::set::SetRequest,
 };
-use store::batch::Document;
-use store::{JMAPId, JMAPIdPrefix, JMAPStore, Store};
+use store::core::document::Document;
+use store::core::JMAPIdPrefix;
+use store::{AccountId, JMAPId, JMAPStore, Store};
 
 #[derive(Default)]
 pub struct SetIdentity {
@@ -148,14 +149,19 @@ where
         }
     }
 
-    fn delete(
-        helper: &mut SetObjectHelper<T, Self::Helper>,
-        document: &mut Document,
+    fn validate_delete(
+        _helper: &mut SetObjectHelper<T, Self::Helper>,
+        _jmap_id: JMAPId,
     ) -> jmap::error::set::Result<()> {
-        if let Some(orm) = helper
-            .store
-            .get_orm::<IdentityProperty>(helper.account_id, document.document_id)?
-        {
+        Ok(())
+    }
+
+    fn delete(
+        store: &JMAPStore<T>,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()> {
+        if let Some(orm) = store.get_orm::<IdentityProperty>(account_id, document.document_id)? {
             orm.delete(document);
         }
         Ok(())

@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
 use store::{
-    query::QueryFilterMap, AccountId, Collection, Comparator, Filter, FilterOperator, JMAPId,
-    JMAPStore, LogicalOperator, Store,
+    core::collection::Collection,
+    read::{
+        comparator::Comparator,
+        filter::{Filter, FilterOperator, LogicalOperator},
+        QueryFilterMap,
+    },
+    AccountId, JMAPId, JMAPStore, Store,
 };
 
 use crate::{
@@ -115,7 +120,8 @@ where
         };
 
         let sort = if let Some(sort) = request.sort {
-            let mut terms: Vec<store::Comparator> = Vec::with_capacity(sort.len());
+            let mut terms: Vec<store::read::comparator::Comparator> =
+                Vec::with_capacity(sort.len());
             for comp in sort {
                 terms.push(object.parse_comparator(
                     comp.property,
@@ -124,9 +130,9 @@ where
                     comp.arguments,
                 )?);
             }
-            store::Comparator::List(terms)
+            store::read::comparator::Comparator::List(terms)
         } else {
-            store::Comparator::None
+            store::read::comparator::Comparator::None
         };
 
         let results_it = self.query_store::<V>(request.account_id, collection, filter, sort)?;

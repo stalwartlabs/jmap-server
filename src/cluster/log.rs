@@ -1,26 +1,24 @@
-use std::collections::HashSet;
-
-use jmap::jmap_store::orm::{JMAPOrm, PropertySchema, TinyORM};
-use jmap_mail::identity::IdentityProperty;
-use jmap_mail::mail::import::JMAPMailImport;
-use jmap_mail::mailbox::MailboxProperty;
-use store::batch::{Document, WriteBatch};
-use store::leb128::Leb128;
-use store::serialize::{
-    DeserializeBigEndian, StoreDeserialize, StoreSerialize, FOLLOWER_COMMIT_INDEX_KEY,
-};
+use jmap::jmap_store::raft::{RaftObject, RaftUpdate};
+use jmap::jmap_store::set::SetObject;
+use jmap_mail::mail::set::SetMail;
+use jmap_mail::mailbox::set::SetMailbox;
+use store::bincode;
+use store::core::collection::{Collection, Collections};
+use store::core::document::Document;
+use store::core::error::StoreError;
+use store::core::JMAPIdPrefix;
+use store::log::changes::ChangeId;
+use store::log::entry::Entry;
+use store::log::raft::{LogIndex, RaftId, TermId};
+use store::roaring::{RoaringBitmap, RoaringTreemap};
+use store::serialize::key::{LogKey, FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY};
+use store::serialize::leb128::{skip_leb128_it, Leb128};
+use store::serialize::{DeserializeBigEndian, StoreDeserialize, StoreSerialize};
+use store::write::batch::{self, WriteBatch};
+use store::write::operation::WriteOperation;
 use store::{
-    batch,
-    leb128::skip_leb128_it,
-    log::ChangeId,
-    log::{Entry, LogIndex, RaftId, TermId},
-    roaring::{RoaringBitmap, RoaringTreemap},
-    serialize::{LogKey, LEADER_COMMIT_INDEX_KEY},
-    tracing::debug,
-    AccountId, Collection, Collections, ColumnFamily, Direction, DocumentId, JMAPId, JMAPIdPrefix,
-    JMAPStore, Store, StoreError, Tag,
+    tracing::debug, AccountId, ColumnFamily, Direction, DocumentId, JMAPId, JMAPStore, Store,
 };
-use store::{bincode, lz4_flex, WriteOperation};
 use tokio::sync::oneshot;
 
 use crate::JMAPServer;
@@ -29,14 +27,14 @@ use super::rpc;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum Update {
-    Document {
-        account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-    },
-    Change {
+    Begin {
         account_id: AccountId,
         collection: Collection,
+    },
+    Document {
+        update: RaftUpdate,
+    },
+    Change {
         change: Vec<u8>,
     },
     Log {
@@ -44,26 +42,6 @@ pub enum Update {
         log: Vec<u8>,
     },
     Eof,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub enum DocumentUpdate {
-    InsertMail {
-        thread_id: DocumentId,
-        keywords: HashSet<Tag>,
-        mailboxes: HashSet<Tag>,
-        received_at: i64,
-        body: Vec<u8>,
-    },
-    UpdateMail {
-        thread_id: DocumentId,
-        keywords: HashSet<Tag>,
-        mailboxes: HashSet<Tag>,
-    },
-    ORM {
-        collection: Collection,
-        data: Vec<u8>,
-    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -287,14 +265,14 @@ impl MergedChanges {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum PendingUpdate {
-    UpdateDocument {
-        account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-    },
-    DeleteDocuments {
+    Begin {
         account_id: AccountId,
         collection: Collection,
+    },
+    Update {
+        update: RaftUpdate,
+    },
+    Delete {
         document_ids: Vec<DocumentId>,
     },
 }
@@ -367,23 +345,20 @@ pub trait RaftStore {
 
     fn has_pending_rollback(&self) -> store::Result<bool>;
 
-    fn apply_document_update(
+    fn apply_update(
         &self,
         account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-        document_batch: &mut WriteBatch,
+        collection: Collection,
+        update: RaftUpdate,
+        write_batch: &mut WriteBatch,
     ) -> store::Result<()>;
 
-    fn raft_update_orm<U>(
+    fn delete_document(
         &self,
-        document_batch: &mut WriteBatch,
-        account_id: AccountId,
+        collection: Collection,
         document_id: DocumentId,
-        data: Vec<u8>,
-    ) -> store::Result<()>
-    where
-        U: PropertySchema + 'static;
+        write_batch: &mut WriteBatch,
+    ) -> store::Result<()>;
 }
 
 impl<T> RaftStore for JMAPStore<T>
@@ -791,11 +766,11 @@ where
                     ))
                 })?;
             entries_size += change.len() + std::mem::size_of::<AccountId>() + 1;
-            entries.push(Update::Change {
+            entries.push(Update::Begin {
                 account_id,
                 collection: changed_collection,
-                change,
             });
+            entries.push(Update::Change { change });
         }
         Ok(entries_size)
     }
@@ -835,98 +810,47 @@ where
         Ok(false)
     }
 
-    fn apply_document_update(
+    fn apply_update(
         &self,
         account_id: AccountId,
-        document_id: DocumentId,
-        update: DocumentUpdate,
-        document_batch: &mut WriteBatch,
+        collection: Collection,
+        update: RaftUpdate,
+        write_batch: &mut WriteBatch,
     ) -> store::Result<()> {
-        match update {
-            DocumentUpdate::InsertMail {
-                thread_id,
-                keywords,
-                mailboxes,
-                received_at,
-                body,
-            } => {
-                self.raft_update_mail(
-                    document_batch,
-                    account_id,
-                    document_id,
-                    thread_id,
-                    mailboxes,
-                    keywords,
-                    Some((
-                        lz4_flex::decompress_size_prepended(&body).map_err(|err| {
-                            StoreError::InternalError(format!(
-                                "Failed to decompress raft update: {}",
-                                err
-                            ))
-                        })?,
-                        received_at,
-                    )),
-                )?;
+        match collection {
+            Collection::Mail => SetMail::raft_apply_update(self, write_batch, account_id, update),
+            Collection::Mailbox => {
+                SetMailbox::raft_apply_update(self, write_batch, account_id, update)
             }
-            DocumentUpdate::UpdateMail {
-                thread_id,
-                keywords,
-                mailboxes,
-            } => {
-                self.raft_update_mail(
-                    document_batch,
-                    account_id,
-                    document_id,
-                    thread_id,
-                    mailboxes,
-                    keywords,
-                    None,
-                )?;
-            }
-            DocumentUpdate::ORM { collection, data } => match collection {
-                Collection::Mailbox => self.raft_update_orm::<MailboxProperty>(
-                    document_batch,
-                    account_id,
-                    document_id,
-                    data,
-                )?,
-                Collection::Identity => self.raft_update_orm::<IdentityProperty>(
-                    document_batch,
-                    account_id,
-                    document_id,
-                    data,
-                )?,
-                _ => (),
-            },
+            Collection::Account => todo!(),
+            Collection::PushSubscription => todo!(),
+            Collection::Thread => todo!(),
+            Collection::Identity => todo!(),
+            Collection::EmailSubmission => todo!(),
+            Collection::VacationResponse => todo!(),
+            Collection::None => todo!(),
         }
-        Ok(())
     }
 
-    fn raft_update_orm<U>(
+    fn delete_document(
         &self,
-        document_batch: &mut WriteBatch,
-        account_id: AccountId,
+        collection: Collection,
         document_id: DocumentId,
-        data: Vec<u8>,
-    ) -> store::Result<()>
-    where
-        U: PropertySchema + 'static,
-    {
-        let changes: TinyORM<U> = TinyORM::deserialize(&data).ok_or_else(|| {
-            StoreError::DeserializeError("Failed to deserialize ORM.".to_string())
-        })?;
-        let mut document = Document::new(U::collection(), document_id);
-        if let Some(current) = self.get_orm::<U>(account_id, document_id)? {
-            if current.merge(&mut document, changes)? {
-                document_batch.update_document(document);
-            }
-        } else if TinyORM::<U>::default().merge(&mut document, changes)? {
-            document_batch.insert_document(document);
-        } else {
-            return Err(StoreError::InternalError(
-                "Failed to merge ORM changes.".to_string(),
-            ));
+        write_batch: &mut WriteBatch,
+    ) -> store::Result<()> {
+        let mut document = Document::new(collection, document_id);
+        match collection {
+            Collection::Mail => SetMail::delete(self, write_batch.account_id, &mut document)?,
+            Collection::Mailbox => SetMailbox::delete(self, write_batch.account_id, &mut document)?,
+            Collection::Account => todo!(),
+            Collection::PushSubscription => todo!(),
+            Collection::Thread => todo!(),
+            Collection::Identity => todo!(),
+            Collection::EmailSubmission => todo!(),
+            Collection::VacationResponse => todo!(),
+            Collection::None => todo!(),
         }
+        write_batch.delete_document(document);
         Ok(())
     }
 }
@@ -1007,7 +931,7 @@ where
                     })?;
 
                 if apply_up_to != LogIndex::MAX && index <= apply_up_to {
-                    let mut document_batch = WriteBatch::new(
+                    let mut write_batch = WriteBatch::new(
                         (&key[..])
                             .deserialize_be_u32(LogKey::TOMBSTONE_ACCOUNT_POS)
                             .ok_or_else(|| {
@@ -1028,19 +952,18 @@ where
                         for _ in 0..usize::from_leb128_it(&mut bytes_it)
                             .ok_or(StoreError::DataCorruption)?
                         {
-                            let doc_id = DocumentId::from_leb128_it(&mut bytes_it)
+                            let document_id = DocumentId::from_leb128_it(&mut bytes_it)
                                 .ok_or(StoreError::DataCorruption)?;
                             println!(
                                 "Committing delete document {} from account {}, {:?}",
-                                doc_id, document_batch.account_id, collection
+                                document_id, write_batch.account_id, collection
                             );
-                            //TODO
-                            //document_batch.delete_document(collection, doc_id);
+                            store.delete_document(collection, document_id, &mut write_batch)?;
                         }
                     }
 
-                    if !document_batch.is_empty() {
-                        store.write(document_batch)?;
+                    if !write_batch.is_empty() {
+                        store.write(write_batch)?;
                     }
 
                     log_batch.push(WriteOperation::Delete {
@@ -1120,7 +1043,9 @@ where
                 })?;
 
                 if apply_up_to != LogIndex::MAX && index <= apply_up_to {
-                    let mut document_batch = WriteBatch::new(AccountId::MAX, false);
+                    let mut write_batch = WriteBatch::new(AccountId::MAX, false);
+                    let mut account_id = AccountId::MAX;
+                    let mut collection = Collection::None;
 
                     for update in PendingUpdates::deserialize(&value)
                         .ok_or_else(|| {
@@ -1132,50 +1057,60 @@ where
                         .updates
                     {
                         match update {
-                            PendingUpdate::UpdateDocument {
-                                account_id,
-                                document_id,
-                                update,
+                            PendingUpdate::Begin {
+                                account_id: update_account_id,
+                                collection: update_collection,
                             } => {
-                                if account_id != document_batch.account_id {
-                                    if !document_batch.is_empty() {
-                                        store.write(document_batch)?;
-                                        document_batch = WriteBatch::new(account_id, false);
+                                account_id = update_account_id;
+                                collection = update_collection;
+                            }
+                            PendingUpdate::Update { update } => {
+                                debug_assert!(
+                                    account_id != AccountId::MAX && collection != Collection::None
+                                );
+
+                                if account_id != write_batch.account_id {
+                                    if !write_batch.is_empty() {
+                                        store.write(write_batch)?;
+                                        write_batch = WriteBatch::new(account_id, false);
                                     } else {
-                                        document_batch.account_id = account_id;
+                                        write_batch.account_id = account_id;
                                     }
                                 }
-                                store.apply_document_update(
+                                store.apply_update(
                                     account_id,
-                                    document_id,
+                                    collection,
                                     update,
-                                    &mut document_batch,
+                                    &mut write_batch,
                                 )?;
                             }
-                            PendingUpdate::DeleteDocuments {
-                                account_id,
-                                collection,
-                                document_ids,
-                            } => {
-                                if account_id != document_batch.account_id {
-                                    if !document_batch.is_empty() {
-                                        store.write(document_batch)?;
-                                        document_batch = WriteBatch::new(account_id, false);
+                            PendingUpdate::Delete { document_ids } => {
+                                debug_assert!(
+                                    account_id != AccountId::MAX && collection != Collection::None
+                                );
+
+                                if account_id != write_batch.account_id {
+                                    if !write_batch.is_empty() {
+                                        store.write(write_batch)?;
+                                        write_batch = WriteBatch::new(account_id, false);
                                     } else {
-                                        document_batch.account_id = account_id;
+                                        write_batch.account_id = account_id;
                                     }
                                 }
 
                                 for document_id in document_ids {
-                                    //TODO
-                                    //document_batch.delete_document(collection, document_id);
+                                    store.delete_document(
+                                        collection,
+                                        document_id,
+                                        &mut write_batch,
+                                    )?;
                                 }
                             }
                         }
                     }
 
-                    if !document_batch.is_empty() {
-                        store.write(document_batch)?;
+                    if !write_batch.is_empty() {
+                        store.write(write_batch)?;
                     }
 
                     store.db.delete(ColumnFamily::Logs, &key)?;
@@ -1297,33 +1232,37 @@ where
     pub async fn apply_rollback_updates(&self, updates: Vec<Update>) -> store::Result<bool> {
         let store = self.store.clone();
         self.spawn_worker(move || {
-            let mut document_batch = WriteBatch::new(AccountId::MAX, false);
+            let mut write_batch = WriteBatch::new(AccountId::MAX, false);
 
             debug!("Inserting {} rollback changes...", updates.len(),);
             let mut is_done = false;
+            let mut account_id = AccountId::MAX;
+            let mut collection = Collection::None;
 
             for update in updates {
                 match update {
-                    Update::Document {
-                        account_id,
-                        document_id,
-                        update,
+                    Update::Begin {
+                        account_id: update_account_id,
+                        collection: update_collection,
                     } => {
-                        if account_id != document_batch.account_id {
-                            if !document_batch.is_empty() {
-                                store.write(document_batch)?;
-                                document_batch = WriteBatch::new(account_id, false);
+                        account_id = update_account_id;
+                        collection = update_collection;
+                    }
+                    Update::Document { update } => {
+                        debug_assert!(
+                            account_id != AccountId::MAX && collection != Collection::None
+                        );
+
+                        if account_id != write_batch.account_id {
+                            if !write_batch.is_empty() {
+                                store.write(write_batch)?;
+                                write_batch = WriteBatch::new(account_id, false);
                             } else {
-                                document_batch.account_id = account_id;
+                                write_batch.account_id = account_id;
                             }
                         }
 
-                        store.apply_document_update(
-                            account_id,
-                            document_id,
-                            update,
-                            &mut document_batch,
-                        )?;
+                        store.apply_update(account_id, collection, update, &mut write_batch)?;
                     }
                     Update::Eof => {
                         is_done = true;
@@ -1331,8 +1270,8 @@ where
                     _ => debug_assert!(false, "Invalid update type: {:?}", update),
                 }
             }
-            if !document_batch.is_empty() {
-                store.write(document_batch)?;
+            if !write_batch.is_empty() {
+                store.write(write_batch)?;
             }
 
             Ok(is_done)

@@ -5,11 +5,15 @@ use rocksdb::{
     MergeOperands, MultiThreaded, Options,
 };
 use store::{
-    bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITLIST, IS_BITMAP},
-    config::EnvSettings,
+    config::env_settings::EnvSettings,
+    core::error::StoreError,
     roaring::RoaringBitmap,
-    serialize::StoreDeserialize,
-    Result, Store, StoreError,
+    serialize::{
+        bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITLIST, IS_BITMAP},
+        StoreDeserialize,
+    },
+    write::operation::WriteOperation,
+    Result, Store,
 };
 
 pub struct RocksDB {
@@ -59,7 +63,7 @@ impl<'x> Store<'x> for RocksDB {
     }
 
     #[inline(always)]
-    fn write(&self, batch: Vec<store::WriteOperation>) -> Result<()> {
+    fn write(&self, batch: Vec<WriteOperation>) -> Result<()> {
         let mut rocks_batch = rocksdb::WriteBatch::default();
         let cf_bitmaps = self.cf_handle(store::ColumnFamily::Bitmaps)?;
         let cf_values = self.cf_handle(store::ColumnFamily::Values)?;
@@ -69,7 +73,7 @@ impl<'x> Store<'x> for RocksDB {
 
         for op in batch {
             match op {
-                store::WriteOperation::Set { cf, key, value } => {
+                WriteOperation::Set { cf, key, value } => {
                     rocks_batch.put_cf(
                         match cf {
                             store::ColumnFamily::Bitmaps => &cf_bitmaps,
@@ -82,7 +86,7 @@ impl<'x> Store<'x> for RocksDB {
                         value,
                     );
                 }
-                store::WriteOperation::Delete { cf, key } => {
+                WriteOperation::Delete { cf, key } => {
                     rocks_batch.delete_cf(
                         match cf {
                             store::ColumnFamily::Bitmaps => &cf_bitmaps,
@@ -94,7 +98,7 @@ impl<'x> Store<'x> for RocksDB {
                         key,
                     );
                 }
-                store::WriteOperation::Merge { cf, key, value } => {
+                WriteOperation::Merge { cf, key, value } => {
                     rocks_batch.merge_cf(
                         match cf {
                             store::ColumnFamily::Bitmaps => &cf_bitmaps,

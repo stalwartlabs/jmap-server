@@ -2,7 +2,7 @@ use jmap::{
     jmap_store::changes::{ChangesObject, ChangesResult, JMAPChanges},
     request::changes::ChangesRequest,
 };
-use store::{Collection, JMAPStore, Store};
+use store::{core::collection::Collection, JMAPStore, Store};
 
 pub struct ChangesThread {}
 

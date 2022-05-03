@@ -57,7 +57,7 @@ where
         for blob_id in request.blob_ids {
             let blob_id_str = blob_id.to_jmap_string();
             if let Some(blob) =
-                self.download_blob(request.account_id, &blob_id, U::inner_blob_fnc())?
+                self.blob_jmap_get(request.account_id, &blob_id, U::inner_blob_fnc())?
             {
                 if let Some(result) = object.parse_blob(blob_id, blob)? {
                     parsed.insert(blob_id_str, result);

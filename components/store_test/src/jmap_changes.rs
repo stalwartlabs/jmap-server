@@ -5,7 +5,9 @@ use jmap::{
     request::changes::ChangesRequest,
 };
 use jmap_mail::mail::changes::ChangesMail;
-use store::{batch::WriteBatch, AccountId, Collection, JMAPId, JMAPStore, Store};
+use store::{
+    core::collection::Collection, write::batch::WriteBatch, AccountId, JMAPId, JMAPStore, Store,
+};
 
 use crate::db_log::assert_compaction;
 

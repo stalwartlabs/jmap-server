@@ -6,9 +6,12 @@ use jmap::jmap_store::query::QueryObject;
 use jmap::protocol::json::JSONValue;
 use jmap::request::query::QueryRequest;
 
-use store::query::QueryFilterMap;
-use store::{Collection, Comparator, FieldComparator, FieldValue, Filter, JMAPId, JMAPStore};
+use store::core::collection::Collection;
+use store::read::comparator::{Comparator, FieldComparator};
+use store::read::filter::{FieldValue, Filter};
+use store::read::QueryFilterMap;
 use store::{DocumentId, Store};
+use store::{JMAPId, JMAPStore};
 
 use super::EmailSubmissionProperty;
 

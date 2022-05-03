@@ -1,4 +1,4 @@
-use crate::term_index::Term;
+use super::term_index::Term;
 
 fn escape_char(c: char, string: &mut String) {
     match c {
@@ -74,12 +74,10 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
 
-    use nlp::{tokenizers::Tokenizer, Language};
+    use crate::nlp::term_index::{TermIndex, TermIndexBuilder};
+    use crate::nlp::{tokenizers::Tokenizer, Language};
 
-    use crate::{
-        serialize::{StoreDeserialize, StoreSerialize},
-        term_index::{TermIndex, TermIndexBuilder},
-    };
+    use crate::serialize::{StoreDeserialize, StoreSerialize};
 
     use super::*;
 

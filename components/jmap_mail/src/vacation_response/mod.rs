@@ -4,7 +4,7 @@ pub mod set;
 use std::fmt::Display;
 
 use jmap::{jmap_store::orm::PropertySchema, Property};
-use store::Collection;
+use store::core::collection::Collection;
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
@@ -32,7 +32,7 @@ impl Property for VacationResponseProperty {
         }
     }
 
-    fn collection() -> store::Collection {
+    fn collection() -> store::core::collection::Collection {
         Collection::VacationResponse
     }
 }

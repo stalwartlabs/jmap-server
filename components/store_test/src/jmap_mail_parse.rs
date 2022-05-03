@@ -141,7 +141,7 @@ where
                 part_name
             )) {
                 let inner_blob = mail_store
-                    .download_blob(
+                    .blob_jmap_get(
                         account_id,
                         &part.eval_unwrap_blob("/blobId"),
                         get_message_part,
@@ -177,7 +177,15 @@ where
                     .eval(&format!("/parsed/{}", blob_id.to_jmap_string()))
                     .unwrap(),
             ),
-            serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
+            serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap(),
+            "({}) {}",
+            test_file.display(),
+            serde_json::to_string_pretty(&SortedJSONValue::from(
+                result
+                    .eval(&format!("/parsed/{}", blob_id.to_jmap_string()))
+                    .unwrap()
+            ))
+            .unwrap()
         );
     }
 
@@ -185,7 +193,7 @@ where
     let mut test_file = test_dir;
     test_file.push("headers.eml");
     let blob_id = mail_store
-        .upload_blob(account_id, &fs::read(&test_file).unwrap())
+        .blob_store_ephimeral(account_id, &fs::read(&test_file).unwrap())
         .unwrap();
 
     let mut properties = vec![
@@ -423,6 +431,6 @@ where
 
     assert_eq!(
         SortedJSONValue::from(JSONValue::Object(result)),
-        serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap()
+        serde_json::from_slice::<SortedJSONValue>(&fs::read(&test_file).unwrap()).unwrap(),
     );
 }

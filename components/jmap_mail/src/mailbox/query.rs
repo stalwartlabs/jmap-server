@@ -6,11 +6,14 @@ use jmap::jmap_store::query::QueryObject;
 use jmap::protocol::json::JSONValue;
 use jmap::request::query::QueryRequest;
 
-use store::query::QueryFilterMap;
+use store::core::collection::Collection;
+use store::core::error::StoreError;
+use store::core::tag::Tag;
+use store::read::comparator::{Comparator, FieldComparator};
+use store::read::filter::{FieldValue, Filter};
+use store::read::QueryFilterMap;
 use store::{AccountId, DocumentId, Store};
-use store::{
-    Collection, Comparator, FieldComparator, FieldValue, Filter, JMAPId, JMAPStore, StoreError, Tag,
-};
+use store::{JMAPId, JMAPStore};
 
 use super::MailboxProperty;
 

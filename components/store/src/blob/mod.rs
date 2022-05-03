@@ -3,10 +3,9 @@ use std::{convert::TryInto, fmt::Display, ops::Range};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    config::EnvSettings,
-    leb128::Leb128,
-    mutex_map::MutexMap,
-    serialize::{StoreDeserialize, StoreSerialize},
+    config::env_settings::EnvSettings,
+    serialize::{leb128::Leb128, StoreDeserialize, StoreSerialize},
+    write::mutex_map::MutexMap,
 };
 
 use self::{local::LocalBlobStore, s3::S3BlobStore};

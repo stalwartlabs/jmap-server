@@ -14,7 +14,7 @@ use jmap_mail::{
     },
 };
 
-use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, Store};
+use store::{core::JMAPIdPrefix, AccountId, JMAPId, JMAPStore, Store};
 
 use crate::{jmap_mail_get::build_mail_get_arguments, JMAPComparator, JMAPFilter};
 

@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, vec::IntoIter};
 
 use serde::{Deserialize, Serialize};
 use store::{
     chrono::{LocalResult, SecondsFormat, TimeZone, Utc},
-    field::Number,
+    core::number::Number,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -218,12 +218,31 @@ impl JSONValue {
     }
 
     pub fn into_utc_date(self) -> JSONValue {
-        if let Some(timestamp) = self.unwrap_unsigned_int() {
-            if let LocalResult::Single(timestamp) = Utc.timestamp_opt(timestamp as i64, 0) {
-                return timestamp.to_rfc3339_opts(SecondsFormat::Secs, true).into();
+        match self {
+            JSONValue::Number(timestamp) => {
+                if let LocalResult::Single(timestamp) =
+                    Utc.timestamp_opt(timestamp.to_unsigned_int() as i64, 0)
+                {
+                    timestamp.to_rfc3339_opts(SecondsFormat::Secs, true).into()
+                } else {
+                    JSONValue::Null
+                }
             }
+            JSONValue::Array(items) => items
+                .into_iter()
+                .filter_map(|item| {
+                    if let LocalResult::Single(timestamp) =
+                        Utc.timestamp_opt(item.unwrap_unsigned_int()? as i64, 0)
+                    {
+                        Some(timestamp.to_rfc3339_opts(SecondsFormat::Secs, true).into())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into(),
+            _ => JSONValue::Null,
         }
-        JSONValue::Null
     }
 
     pub fn unwrap_array(self) -> Option<Vec<JSONValue>> {
@@ -255,6 +274,102 @@ impl JSONValue {
         match self {
             JSONValue::Bool(bool) => Some(bool),
             _ => None,
+        }
+    }
+
+    pub fn unwrap_values(self, mut visitor: impl FnMut(JSONValue) -> bool) {
+        let mut it: Option<IntoIter<JSONValue>> = None;
+        let mut it_stack: Vec<IntoIter<JSONValue>> = Vec::new();
+        let mut item = self;
+
+        loop {
+            if let Some(cur_it) = it.as_mut() {
+                if let Some(next) = cur_it.next() {
+                    item = next;
+                } else if let Some(prev_it) = it_stack.pop() {
+                    it = Some(prev_it);
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            match item {
+                JSONValue::Array(array) => {
+                    if let Some(it) = it {
+                        it_stack.push(it);
+                    }
+                    it = Some(array.into_iter());
+                }
+                JSONValue::String(_) | JSONValue::Number(_) => {
+                    if !visitor(item) {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+
+            if it.is_none() {
+                break;
+            } else {
+                item = JSONValue::Null;
+            }
+        }
+    }
+
+    pub fn unwrap_object_properties(
+        self,
+        properties: &[&str],
+        mut visitor: impl FnMut(usize, JSONValue) -> bool,
+    ) {
+        let mut it: Option<IntoIter<JSONValue>> = None;
+        let mut it_stack: Vec<IntoIter<JSONValue>> = Vec::new();
+        let mut item = self;
+
+        loop {
+            if let Some(cur_it) = it.as_mut() {
+                if let Some(next) = cur_it.next() {
+                    item = next;
+                } else if let Some(prev_it) = it_stack.pop() {
+                    it = Some(prev_it);
+                    continue;
+                } else {
+                    break;
+                }
+            }
+
+            match item {
+                JSONValue::Array(array) => {
+                    if let Some(it) = it {
+                        it_stack.push(it);
+                    }
+                    it = Some(array.into_iter());
+                }
+                JSONValue::Object(mut obj) => {
+                    for (property_idx, property) in properties.iter().enumerate() {
+                        if let Some(value) = obj.remove(*property) {
+                            if !visitor(property_idx, value) {
+                                return;
+                            }
+                        }
+                    }
+                    for (_, value) in obj {
+                        if let JSONValue::Array(array) = value {
+                            if let Some(it) = it {
+                                it_stack.push(it);
+                            }
+                            it = Some(array.into_iter());
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            if it.is_none() {
+                break;
+            } else {
+                item = JSONValue::Null;
+            }
         }
     }
 }

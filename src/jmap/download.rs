@@ -27,7 +27,7 @@ where
         let account_id = account_id as AccountId;
         let store = core.store.clone();
         match core
-            .spawn_worker(move || store.download_blob(account_id, &blob_id, get_message_part))
+            .spawn_worker(move || store.blob_jmap_get(account_id, &blob_id, get_message_part))
             .await
         {
             Ok(Some(bytes)) => {

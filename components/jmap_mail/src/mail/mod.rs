@@ -3,6 +3,7 @@ pub mod get;
 pub mod import;
 pub mod parse;
 pub mod query;
+pub mod raft;
 pub mod set;
 
 use serde::{Deserialize, Serialize};
@@ -20,8 +21,9 @@ use mail_parser::{
 use store::{
     bincode,
     blob::BlobId,
+    core::{collection::Collection, error::StoreError, tag::Tag},
     serialize::{StoreDeserialize, StoreSerialize},
-    Collection, FieldId, StoreError, Tag,
+    FieldId,
 };
 
 pub const MAX_MESSAGE_PARTS: usize = 1000;
@@ -633,7 +635,7 @@ impl JSONArgumentParser for Keyword {
 
 impl MessageData {
     pub fn from_metadata(bytes: &[u8]) -> Option<Self> {
-        use store::leb128::Leb128;
+        use store::serialize::leb128::Leb128;
 
         let (message_data_len, read_bytes) = usize::from_leb128_bytes(bytes)?;
 

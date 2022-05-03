@@ -218,7 +218,7 @@ pub fn parse_utc_date(date_time: &str) -> Option<u64> {
 mod tests {
     use std::collections::HashMap;
 
-    use store::{config::EnvSettings, JMAPConfig};
+    use store::config::{env_settings::EnvSettings, jmap::JMAPConfig};
 
     use crate::{
         protocol::{

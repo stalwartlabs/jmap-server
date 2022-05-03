@@ -1,20 +1,14 @@
-use std::{
-    borrow::Cow,
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    thread,
-    time::SystemTime,
-};
+use std::borrow::Cow;
 
-use store::{blob::BlobId, AccountId, JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
 use crate::id::blob::JMAPBlob;
 
 pub type InnerBlobFnc = fn(&[u8], u32) -> Option<Cow<[u8]>>;
 
 pub trait JMAPBlobStore {
-    fn upload_blob(&self, account: AccountId, bytes: &[u8]) -> store::Result<JMAPBlob>;
-    fn download_blob(
+    fn blob_store_ephimeral(&self, account: AccountId, bytes: &[u8]) -> store::Result<JMAPBlob>;
+    fn blob_jmap_get(
         &self,
         account: AccountId,
         blob: &JMAPBlob,
@@ -26,13 +20,13 @@ impl<T> JMAPBlobStore for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn upload_blob(&self, account_id: AccountId, bytes: &[u8]) -> store::Result<JMAPBlob> {
+    fn blob_store_ephimeral(&self, account_id: AccountId, bytes: &[u8]) -> store::Result<JMAPBlob> {
         let blob_id = self.blob_store(bytes)?;
         self.blob_link_ephimeral(&blob_id, account_id)?;
         Ok(JMAPBlob::new(blob_id))
     }
 
-    fn download_blob(
+    fn blob_jmap_get(
         &self,
         account_id: AccountId,
         blob: &JMAPBlob,        //TODO check ACL

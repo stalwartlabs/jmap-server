@@ -5,11 +5,10 @@ use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use store::{bincode, leb128::Leb128, log::RaftId};
-use store::{
-    log::TermId,
-    tracing::{debug, error},
-};
+use store::bincode;
+use store::log::raft::{RaftId, TermId};
+use store::serialize::leb128::Leb128;
+use store::tracing::{debug, error};
 use tokio::sync::watch;
 use tokio::{
     net::{TcpListener, TcpStream},

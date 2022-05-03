@@ -12,7 +12,10 @@ use std::{
 };
 use store::{AccountId, JMAPStore, Store};
 
-use crate::jmap_mail_set::insert_email;
+use crate::{
+    jmap_mail_set::{delete_email, insert_email},
+    StoreCompareWith,
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 #[serde(untagged)]
@@ -413,5 +416,9 @@ where
             serde_json::to_string_pretty(&result).unwrap(),
             file_name.to_str().unwrap()
         );
+
+        delete_email(mail_store, account_id, jmap_id);
     }
+
+    mail_store.assert_is_empty();
 }

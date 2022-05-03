@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use store::{
-    roaring::RoaringBitmap, AccountId, DocumentId, JMAPId, JMAPIdPrefix, JMAPStore, Store,
+    core::JMAPIdPrefix, roaring::RoaringBitmap, AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };
 
 use crate::{

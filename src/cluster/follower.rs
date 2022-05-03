@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
-use store::batch::WriteBatch;
-use store::log::{LogIndex, RaftId, TermId};
+use store::core::collection::{Collection, Collections};
+use store::log::raft::{LogIndex, RaftId, TermId};
 use store::roaring::RoaringBitmap;
-use store::serialize::{LogKey, StoreSerialize};
+use store::serialize::key::LogKey;
+use store::serialize::StoreSerialize;
 use store::tracing::{debug, error};
-use store::{AccountId, Collection, ColumnFamily, Store};
-use store::{Collections, WriteOperation};
+use store::write::batch::WriteBatch;
+use store::write::operation::WriteOperation;
+use store::{AccountId, ColumnFamily, Store};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::cluster::log::{AppendEntriesResponse, PendingUpdate, PendingUpdates};
@@ -394,14 +396,19 @@ where
             .spawn_worker(move || {
                 let mut log_batch = Vec::with_capacity(updates.len());
                 let mut is_done = updates.is_empty();
+                let mut account_id = AccountId::MAX;
+                let mut collection = Collection::None;
 
                 for update in updates {
                     match update {
-                        Update::Change {
-                            account_id,
-                            collection,
-                            change,
+                        Update::Begin {
+                            account_id: update_account_id,
+                            collection: update_collection,
                         } => {
+                            account_id = update_account_id;
+                            collection = update_collection;
+                        }
+                        Update::Change { change } => {
                             #[cfg(test)]
                             {
                                 assert!(last_index != LogIndex::MAX);
@@ -421,6 +428,9 @@ where
                                     existing_change
                                 );
                             }
+                            debug_assert!(
+                                account_id != AccountId::MAX && collection != Collection::None
+                            );
 
                             log_batch.push(WriteOperation::set(
                                 ColumnFamily::Logs,
@@ -441,7 +451,7 @@ where
                                 use store::serialize::StoreDeserialize;
                                 let existing_log = store
                                     .db
-                                    .get::<log::Entry>(
+                                    .get::<log::entry::Entry>(
                                         ColumnFamily::Logs,
                                         &LogKey::serialize_raft(&raft_id),
                                     )
@@ -451,7 +461,7 @@ where
                                     "{} -> existing: {:?} new: {:?}",
                                     raft_id.index,
                                     existing_log.unwrap(),
-                                    log::Entry::deserialize(&log).unwrap()
+                                    log::entry::Entry::deserialize(&log).unwrap()
                                 );
                             }
 
@@ -608,20 +618,23 @@ where
                             indexes.uncommitted_index,
                             indexes.sequence_id,
                         );
-                        let pending_updates =
-                            match PendingUpdates::new(vec![PendingUpdate::DeleteDocuments {
+                        let pending_updates = match PendingUpdates::new(vec![
+                            PendingUpdate::Begin {
                                 account_id,
                                 collection,
+                            },
+                            PendingUpdate::Delete {
                                 document_ids: changes.deletes.into_iter().collect(),
-                            }])
-                            .serialize()
-                            {
-                                Some(pending_updates) => pending_updates,
-                                None => {
-                                    error!("Failed to serialize pending updates.");
-                                    return None;
-                                }
-                            };
+                            },
+                        ])
+                        .serialize()
+                        {
+                            Some(pending_updates) => pending_updates,
+                            None => {
+                                error!("Failed to serialize pending updates.");
+                                return None;
+                            }
+                        };
 
                         let store = self.store.clone();
                         if let Err(err) = self
@@ -682,16 +695,17 @@ where
 
         for update in updates {
             match update {
-                Update::Document {
+                Update::Begin {
                     account_id,
-                    document_id,
-                    update,
+                    collection,
                 } => {
-                    pending_updates.push(PendingUpdate::UpdateDocument {
+                    pending_updates.push(PendingUpdate::Begin {
                         account_id,
-                        document_id,
-                        update,
+                        collection,
                     });
+                }
+                Update::Document { update } => {
+                    pending_updates.push(PendingUpdate::Update { update });
                 }
                 Update::Eof => {
                     is_done = true;
@@ -867,16 +881,23 @@ where
                     "Deleting from collection {:?} items {:?}",
                     collection, changes.inserts
                 );*/
-                let mut batch = WriteBatch::new(account_id, false);
-                for delete_id in &changes.inserts {
-                    //batch.delete_document(collection, delete_id);
-                }
+
+                let inserts = std::mem::take(&mut changes.inserts);
                 let store = self.store.clone();
-                if let Err(err) = self.spawn_worker(move || store.write(batch)).await {
+                if let Err(err) = self
+                    .spawn_worker(move || {
+                        let mut batch = WriteBatch::new(account_id, false);
+                        for delete_id in inserts {
+                            store.delete_document(collection, delete_id, &mut batch)?;
+                        }
+
+                        store.write(batch)
+                    })
+                    .await
+                {
                     error!("Failed to delete documents: {:?}", err);
                     return None;
                 }
-                changes.inserts.clear();
             }
 
             if !updates.is_empty() {

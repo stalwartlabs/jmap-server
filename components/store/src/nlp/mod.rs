@@ -1,8 +1,10 @@
 pub mod lang;
+pub mod search_snippet;
 pub mod stemmer;
+pub mod term_index;
 pub mod tokenizers;
 
-#[derive(Debug, PartialEq, Clone, Copy, Hash, Eq)]
+#[derive(Debug, PartialEq, Clone, Copy, Hash, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Language {
     Esperanto = 0,
     English = 1,

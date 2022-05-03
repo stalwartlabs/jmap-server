@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use store::{
-    log::{Change, Query},
-    AccountId, Collection, JMAPId, JMAPStore, Store, StoreError,
+    core::{collection::Collection, error::StoreError},
+    log::changes::{Change, Query},
+    AccountId, JMAPId, JMAPStore, Store,
 };
 
 use crate::{

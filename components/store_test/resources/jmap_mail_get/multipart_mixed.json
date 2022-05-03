@@ -225,7 +225,7 @@
     },
     "preview": "... Some text appears here ...\n\n[Note that the blank between the boundary and the start\nof the text in this part means no header fields were\ngiven and this is text in the US-ASCII character set.\nIt could have been done with explicit typing as in the\nnex...",
     "receivedAt": "2028-09-19T18:13:20Z",
-    "sentAt": "1994-10-07T16:15:05-07:00",
+    "sentAt": "1994-10-07T23:15:05Z",
     "size": 1853,
     "subject": "A multipart example",
     "textBody": [

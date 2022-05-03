@@ -38,9 +38,8 @@ where
     let error = if let Some(account_id) = JMAPId::from_jmap_string(&path.0) {
         let store = core.store.clone();
         let size = bytes.len();
-        println!("received {} bytes", size);
         match core
-            .spawn_worker(move || store.upload_blob(account_id as AccountId, &bytes))
+            .spawn_worker(move || store.blob_store_ephimeral(account_id as AccountId, &bytes))
             .await
         {
             Ok(blob_id) => {

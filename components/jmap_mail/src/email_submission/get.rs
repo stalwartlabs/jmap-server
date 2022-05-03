@@ -7,7 +7,9 @@ use jmap::jmap_store::orm::JMAPOrm;
 use jmap::protocol::json::JSONValue;
 use jmap::request::get::GetRequest;
 
-use store::{AccountId, JMAPId, JMAPIdPrefix, JMAPStore, StoreError};
+use store::core::error::StoreError;
+use store::core::JMAPIdPrefix;
+use store::{AccountId, JMAPId, JMAPStore};
 use store::{DocumentId, Store};
 
 use super::EmailSubmissionProperty;

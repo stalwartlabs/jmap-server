@@ -1,14 +1,14 @@
 use std::io::Write;
 
+use crate::{error::method::MethodError, protocol::json::JSONValue};
+use store::serialize::leb128::Leb128;
 use store::{
     blob::{BlobId, BLOB_HASH_LEN},
-    AccountId, Collection, DocumentId,
+    core::collection::Collection,
+    AccountId, DocumentId,
 };
 
-use crate::{error::method::MethodError, protocol::json::JSONValue};
-
 use super::{hex_reader, HexWriter, JMAPIdSerialize};
-use store::leb128::Leb128;
 
 #[derive(Clone, Debug)]
 pub struct OwnedBlob {

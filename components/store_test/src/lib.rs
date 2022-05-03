@@ -4,16 +4,17 @@ use std::{collections::HashMap, io::Read, iter::FromIterator, path::PathBuf};
 use flate2::read::GzDecoder;
 
 use jmap::protocol::json::JSONValue;
-use store::leb128::Leb128;
-use store::serialize::{
-    DeserializeBigEndian, IndexKey, LogKey, StoreDeserialize, ValueKey, FOLLOWER_COMMIT_INDEX_KEY,
-    LEADER_COMMIT_INDEX_KEY,
+use store::blob::BLOB_HASH_LEN;
+use store::config::env_settings::EnvSettings;
+use store::core::collection::Collection;
+use store::nlp::term_index::TermIndex;
+use store::serialize::key::{
+    IndexKey, LogKey, ValueKey, FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY,
 };
-use store::term_index::TermIndex;
-use store::{
-    config::EnvSettings, roaring::RoaringBitmap, AccountId, ColumnFamily, JMAPStore, Store,
-};
-use store::{log, Collection, DocumentId};
+use store::serialize::leb128::Leb128;
+use store::serialize::{DeserializeBigEndian, StoreDeserialize};
+use store::{log, DocumentId};
+use store::{roaring::RoaringBitmap, AccountId, ColumnFamily, JMAPStore, Store};
 
 pub mod db_blobs;
 pub mod db_insert_filter_sort;
@@ -426,13 +427,14 @@ where
                         *total_keys.get_mut(&cf).unwrap() += 1;
                         if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap() {
                             if key.starts_with(&[LogKey::RAFT_KEY_PREFIX]) {
-                                let entry = log::Entry::deserialize(&value).unwrap();
-                                let other_entry = log::Entry::deserialize(&other_value).unwrap();
+                                let entry = log::entry::Entry::deserialize(&value).unwrap();
+                                let other_entry =
+                                    log::entry::Entry::deserialize(&other_value).unwrap();
                                 let mut do_panic = false;
                                 match (&entry, &other_entry) {
                                     (
-                                        log::Entry::Snapshot { changed_accounts },
-                                        log::Entry::Snapshot {
+                                        log::entry::Entry::Snapshot { changed_accounts },
+                                        log::entry::Entry::Snapshot {
                                             changed_accounts: other_changed_accounts,
                                         },
                                     ) => {
@@ -506,7 +508,6 @@ where
                             println!("Missing Blob key: [{:?}]", key);
                         };
                     }
-                    _ => (),
                 }
             }
         }
@@ -543,7 +544,12 @@ where
                         panic!("{:?} {:?}={:?}", cf, key, value);
                     }
                     ColumnFamily::Blobs => {
-                        panic!("{:?} {:?}={:?}", cf, key, value);
+                        if key.len()
+                            > BLOB_HASH_LEN
+                                + u32::from_leb128_bytes(&key[BLOB_HASH_LEN..]).unwrap().1
+                        {
+                            panic!("{:?} {:?}={:?}", cf, key, value);
+                        }
                     }
                     _ => (),
                 }
