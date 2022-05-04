@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use actix_web::{middleware, web, App, HttpServer};
@@ -13,9 +12,9 @@ use store::{
     Store,
 };
 use store::{ColumnFamily, JMAPStore};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
-use crate::cluster::{self, Event, IPC_CHANNEL_BUFFER};
+use crate::cluster::{ClusterIpc, Event};
 use crate::jmap::api::handle_jmap_request;
 use crate::jmap::download::handle_jmap_download;
 use crate::jmap::event_source::handle_jmap_event_source;
@@ -29,14 +28,12 @@ pub const DEFAULT_RPC_PORT: u16 = 7911;
 
 pub struct JMAPServer<T> {
     pub store: Arc<JMAPStore<T>>,
-    pub cluster_tx: mpsc::Sender<cluster::Event>,
     pub worker_pool: rayon::ThreadPool,
-    pub is_leader: AtomicBool,
-    pub is_up_to_date: AtomicBool,
     pub base_session: Session,
+    pub cluster: Option<ClusterIpc>,
 
     #[cfg(test)]
-    pub is_offline: AtomicBool,
+    pub is_offline: std::sync::atomic::AtomicBool,
 }
 
 impl<T> JMAPServer<T>
@@ -121,8 +118,10 @@ where
     }
 
     pub async fn shutdown(&self) {
-        if self.store.config.is_in_cluster && self.cluster_tx.send(Event::Shutdown).await.is_err() {
-            error!("Failed to send shutdown event to cluster.");
+        if let Some(cluster) = &self.cluster {
+            if cluster.tx.send(Event::Shutdown).await.is_err() {
+                error!("Failed to send shutdown event to cluster.");
+            }
         }
     }
 
@@ -132,7 +131,10 @@ where
             .store(is_offline, std::sync::atomic::Ordering::Relaxed);
         self.set_follower();
         if self
-            .cluster_tx
+            .cluster
+            .as_ref()
+            .unwrap()
+            .tx
             .send(Event::SetOffline {
                 is_offline,
                 notify_peers,
@@ -153,21 +155,17 @@ where
 #[allow(clippy::type_complexity)]
 pub fn init_jmap_server<T>(
     settings: &EnvSettings,
-) -> (
-    web::Data<JMAPServer<T>>,
-    Option<(mpsc::Sender<cluster::Event>, mpsc::Receiver<cluster::Event>)>,
-)
+    cluster: Option<ClusterIpc>,
+) -> web::Data<JMAPServer<T>>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let is_cluster = settings.get("cluster").is_some();
-
     // Build the JMAP server.
-    let (cluster_tx, cluster_rx) = mpsc::channel::<cluster::Event>(IPC_CHANNEL_BUFFER);
     let config = JMAPConfig::from(settings);
     let base_session = Session::new(settings, &config);
     let store = JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
-    let jmap_server = web::Data::new(JMAPServer {
+
+    web::Data::new(JMAPServer {
         base_session,
         store,
         worker_pool: rayon::ThreadPoolBuilder::new()
@@ -179,21 +177,10 @@ where
             )
             .build()
             .unwrap(),
-        cluster_tx: cluster_tx.clone(),
-        is_leader: (!is_cluster).into(),
-        is_up_to_date: (!is_cluster).into(),
+        cluster,
         #[cfg(test)]
         is_offline: false.into(),
-    });
-
-    (
-        jmap_server,
-        if is_cluster {
-            Some((cluster_tx, cluster_rx))
-        } else {
-            None
-        },
-    )
+    })
 }
 
 pub async fn start_jmap_server<T>(

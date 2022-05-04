@@ -301,6 +301,7 @@ where
                                 .unwrap()
                                 .remove(&local_id)
                                 .unwrap(),
+                            true,
                         );
                     }
                     Ac::InsertMailbox(local_id) => {
@@ -353,6 +354,7 @@ where
                                 .unwrap()
                                 .remove(&local_id)
                                 .unwrap(),
+                            true,
                         );
                     }
                 })
@@ -361,7 +363,7 @@ where
 
                 success = true;
 
-                leader.update_uncommitted_index().await;
+                leader.commit_last_index().await;
                 assert_cluster_updated(&peers).await;
                 assert_mirrored_stores(peers.clone(), true).await;
             }

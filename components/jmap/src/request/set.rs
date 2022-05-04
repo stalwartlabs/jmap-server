@@ -13,6 +13,7 @@ pub struct SetRequest {
     pub update: HashMap<String, JSONValue>,
     pub destroy: Vec<JSONValue>,
     pub arguments: HashMap<String, JSONValue>,
+    pub tombstone_deletions: bool,
 }
 
 impl SetRequest {
@@ -24,6 +25,7 @@ impl SetRequest {
             update: HashMap::with_capacity(0),
             destroy: Vec::with_capacity(0),
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         };
 
         invocation.parse_arguments(response, |name, value| {

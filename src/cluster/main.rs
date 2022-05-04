@@ -1,38 +1,80 @@
 use std::{
     net::SocketAddr,
+    sync::atomic::AtomicU8,
     time::{Duration, Instant},
 };
 
 use actix_web::web;
-use store::Store;
 use store::{
     config::env_settings::EnvSettings,
     tracing::{debug, error, info},
 };
+use store::{log::raft::LogIndex, Store};
 use tokio::{
     sync::{mpsc, watch},
     time,
 };
 
-use crate::{cluster::IPC_CHANNEL_BUFFER, jmap::server::DEFAULT_RPC_PORT, JMAPServer};
+use crate::{
+    cluster::{IPC_CHANNEL_BUFFER, RAFT_LOG_BEHIND},
+    jmap::server::DEFAULT_RPC_PORT,
+    JMAPServer,
+};
 
 use super::{
     gossip::{self, spawn_quidnunc, PING_INTERVAL},
     rpc::{self, spawn_rpc},
-    Cluster, Event,
+    Cluster, ClusterIpc, Event,
 };
 
+pub struct ClusterInit {
+    main_rx: mpsc::Receiver<Event>,
+    main_tx: mpsc::Sender<Event>,
+    commit_index_tx: watch::Sender<LogIndex>,
+}
+
+pub fn init_cluster(settings: &EnvSettings) -> Option<(ClusterIpc, ClusterInit)> {
+    if settings.get("cluster").is_some() {
+        let (main_tx, main_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
+        let (commit_index_tx, commit_index_rx) = watch::channel(LogIndex::MAX);
+        (
+            ClusterIpc {
+                tx: main_tx.clone(),
+                state: RAFT_LOG_BEHIND.into(),
+                commit_index_rx,
+            },
+            ClusterInit {
+                main_rx,
+                main_tx,
+                commit_index_tx,
+            },
+        )
+            .into()
+    } else {
+        None
+    }
+}
+
 pub async fn start_cluster<T>(
+    init: ClusterInit,
     core: web::Data<JMAPServer<T>>,
     settings: &EnvSettings,
-    mut main_rx: mpsc::Receiver<Event>,
-    main_tx: mpsc::Sender<Event>,
 ) where
     T: for<'x> Store<'x> + 'static,
 {
     let (gossip_tx, gossip_rx) = mpsc::channel::<(SocketAddr, gossip::Request)>(IPC_CHANNEL_BUFFER);
+    let main_tx = init.main_tx;
+    let mut main_rx = init.main_rx;
+    let commit_index_tx = init.commit_index_tx;
 
-    let mut cluster = Cluster::init(settings, core.clone(), main_tx.clone(), gossip_tx).await;
+    let mut cluster = Cluster::init(
+        settings,
+        core.clone(),
+        main_tx.clone(),
+        gossip_tx,
+        commit_index_tx,
+    )
+    .await;
 
     let bind_addr = SocketAddr::from((
         settings.parse_ipaddr("bind-addr", "127.0.0.1"),
@@ -263,8 +305,12 @@ where
                     "[{}] Sending appendEntries request for id {}, term {}.",
                     self.addr, uncommitted_index, self.term
                 );
-                self.uncommitted_index = uncommitted_index;
-                self.send_append_entries();
+                if uncommitted_index > self.uncommitted_index
+                    || self.uncommitted_index == LogIndex::MAX
+                {
+                    self.uncommitted_index = uncommitted_index;
+                    self.send_append_entries();
+                }
             }
             Event::AdvanceCommitIndex {
                 peer_id,

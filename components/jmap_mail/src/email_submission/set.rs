@@ -93,6 +93,7 @@ where
                         update: HashMap::with_capacity(update_email.len()),
                         destroy: Vec::with_capacity(destroy_email.len()),
                         arguments: HashMap::with_capacity(0),
+                        tombstone_deletions: false,
                     },
                     update_email,
                     destroy_email,

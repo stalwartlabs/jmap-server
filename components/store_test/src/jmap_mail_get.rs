@@ -417,7 +417,7 @@ where
             file_name.to_str().unwrap()
         );
 
-        delete_email(mail_store, account_id, jmap_id);
+        delete_email(mail_store, account_id, jmap_id, false);
     }
 
     mail_store.assert_is_empty();

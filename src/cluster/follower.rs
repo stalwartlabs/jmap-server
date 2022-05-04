@@ -741,7 +741,7 @@ where
         let store = self.store.clone();
         match self
             .spawn_worker(move || {
-                let mut missing_blob_ids = Vec::new();
+                let mut missing_blob_ids = HashSet::new();
 
                 for update in &updates {
                     match update {
@@ -753,12 +753,12 @@ where
                         } if !blobs.is_empty() || term_index.is_some() => {
                             for blob in blobs {
                                 if !store.blob_exists(blob)? {
-                                    missing_blob_ids.push(blob.clone());
+                                    missing_blob_ids.insert(blob.clone());
                                 }
                             }
                             if let Some(term_index) = term_index {
                                 if !store.blob_exists(term_index)? {
-                                    missing_blob_ids.push(term_index.clone());
+                                    missing_blob_ids.insert(term_index.clone());
                                 }
                             }
                         }
@@ -766,7 +766,7 @@ where
                     }
                 }
 
-                Ok((updates, missing_blob_ids))
+                Ok((updates, missing_blob_ids.into_iter().collect::<Vec<_>>()))
             })
             .await
         {
@@ -826,7 +826,12 @@ where
                                     )));
                                 }
                             } else {
-                                debug!("Received unexpected blobId: {}", blob_id);
+                                debug_assert!(
+                                    false,
+                                    "Received unexpected blobId: {}, pending {}.",
+                                    blob_id,
+                                    pending_blobs.len()
+                                );
                             }
                         }
                         _ => {
@@ -1064,7 +1069,7 @@ where
                 let store = self.store.clone();
                 if let Err(err) = self
                     .spawn_worker(move || {
-                        let mut batch = WriteBatch::new(account_id, false);
+                        let mut batch = WriteBatch::new(account_id);
                         for delete_id in inserts {
                             store.delete_document(&mut batch, collection, delete_id)?;
                         }

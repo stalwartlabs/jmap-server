@@ -944,7 +944,6 @@ where
                                     key
                                 ))
                             })?,
-                        false,
                     );
 
                     for document in bincode::deserialize::<Vec<Document>>(&value).map_err(|_| {
@@ -1038,7 +1037,7 @@ where
                 })?;
 
                 if apply_up_to != LogIndex::MAX && index <= apply_up_to {
-                    let mut write_batch = WriteBatch::new(AccountId::MAX, false);
+                    let mut write_batch = WriteBatch::new(AccountId::MAX);
                     let mut account_id = AccountId::MAX;
                     let mut collection = Collection::None;
 
@@ -1067,7 +1066,7 @@ where
                                 if account_id != write_batch.account_id {
                                     if !write_batch.is_empty() {
                                         store.write(write_batch)?;
-                                        write_batch = WriteBatch::new(account_id, false);
+                                        write_batch = WriteBatch::new(account_id);
                                     } else {
                                         write_batch.account_id = account_id;
                                     }
@@ -1082,7 +1081,7 @@ where
                                 if account_id != write_batch.account_id {
                                     if !write_batch.is_empty() {
                                         store.write(write_batch)?;
-                                        write_batch = WriteBatch::new(account_id, false);
+                                        write_batch = WriteBatch::new(account_id);
                                     } else {
                                         write_batch.account_id = account_id;
                                     }
@@ -1222,7 +1221,7 @@ where
     pub async fn apply_rollback_updates(&self, updates: Vec<Update>) -> store::Result<bool> {
         let store = self.store.clone();
         self.spawn_worker(move || {
-            let mut write_batch = WriteBatch::new(AccountId::MAX, false);
+            let mut write_batch = WriteBatch::new(AccountId::MAX);
 
             debug!("Inserting {} rollback changes...", updates.len(),);
             let mut is_done = false;
@@ -1246,7 +1245,7 @@ where
                         if account_id != write_batch.account_id {
                             if !write_batch.is_empty() {
                                 store.write(write_batch)?;
-                                write_batch = WriteBatch::new(account_id, false);
+                                write_batch = WriteBatch::new(account_id);
                             } else {
                                 write_batch.account_id = account_id;
                             }

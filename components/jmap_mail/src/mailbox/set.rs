@@ -33,6 +33,7 @@ pub struct SetMailbox {
 
 pub struct SetMailboxHelper {
     on_destroy_remove_emails: bool,
+    tombstone_deletions: bool,
 }
 
 impl<T> SetObjectData<T> for SetMailboxHelper
@@ -46,6 +47,7 @@ where
                 .get("onDestroyRemoveEmails")
                 .and_then(|v| v.to_bool())
                 .unwrap_or(false),
+            tombstone_deletions: request.tombstone_deletions,
         })
     }
 
@@ -280,7 +282,11 @@ where
                     let mut document = Document::new(Collection::Mail, message_doc_id);
                     SetMail::delete(helper.store, helper.account_id, &mut document)?;
 
-                    helper.changes.delete_document(document);
+                    if !helper.data.tombstone_deletions {
+                        helper.changes.delete_document(document);
+                    } else {
+                        helper.changes.tombstone_document(document);
+                    }
                     helper.changes.log_delete(
                         Collection::Mail,
                         JMAPId::from_parts(thread_id, message_doc_id),

@@ -46,7 +46,7 @@ where
         .unwrap();
 
         // Notify peers of changes
-        leader.update_uncommitted_index().await;
+        leader.commit_last_index().await;
         assert_cluster_updated(&peers).await;
 
         // Bring back previous offline leader

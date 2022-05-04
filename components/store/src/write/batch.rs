@@ -8,13 +8,13 @@ pub enum WriteAction {
     Insert(Document),
     Update(Document),
     Delete(Document),
+    Tombstone(Document),
 }
 
 pub struct WriteBatch {
     pub account_id: AccountId,
     pub changes: HashMap<Collection, Change>,
     pub documents: Vec<WriteAction>,
-    pub set_tombstones: bool,
 }
 
 #[derive(Default)]
@@ -26,12 +26,11 @@ pub struct Change {
 }
 
 impl WriteBatch {
-    pub fn new(account_id: AccountId, set_tombstones: bool) -> Self {
+    pub fn new(account_id: AccountId) -> Self {
         WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: Vec::new(),
-            set_tombstones,
         }
     }
 
@@ -40,7 +39,6 @@ impl WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: vec![WriteAction::Insert(document)],
-            set_tombstones: false,
         }
     }
 
@@ -54,7 +52,6 @@ impl WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: vec![WriteAction::Delete(Document::new(collection, document_id))],
-            set_tombstones,
         }
     }
 
@@ -72,6 +69,10 @@ impl WriteBatch {
 
     pub fn delete_document(&mut self, document: Document) {
         self.documents.push(WriteAction::Delete(document));
+    }
+
+    pub fn tombstone_document(&mut self, document: Document) {
+        self.documents.push(WriteAction::Tombstone(document));
     }
 
     pub fn log_insert(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {

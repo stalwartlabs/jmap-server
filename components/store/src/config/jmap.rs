@@ -3,8 +3,6 @@ use crate::nlp::Language;
 use super::env_settings::EnvSettings;
 
 pub struct JMAPConfig {
-    pub is_in_cluster: bool,
-
     pub blob_temp_ttl: u64,
     pub default_language: Language,
 
@@ -27,7 +25,7 @@ pub struct JMAPConfig {
 }
 
 impl From<&EnvSettings> for JMAPConfig {
-    fn from(settings: &EnvSettings) -> Self {
+    fn from(_settings: &EnvSettings) -> Self {
         JMAPConfig {
             max_size_upload: 50000000,
             max_concurrent_upload: 8,
@@ -46,7 +44,6 @@ impl From<&EnvSettings> for JMAPConfig {
             mail_import_max_items: 2,
             mail_parse_max_items: 5,
             default_language: Language::English,
-            is_in_cluster: settings.get("cluster").is_some(),
         }
     }
 }

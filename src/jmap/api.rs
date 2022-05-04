@@ -32,7 +32,7 @@ use jmap_mail::thread::changes::ChangesThread;
 use jmap_mail::thread::get::GetThread;
 use store::log::changes::ChangeId;
 use store::tracing::debug;
-use store::Store;
+use store::{AccountId, Store};
 
 use super::server::JMAPServer;
 
@@ -100,13 +100,22 @@ where
     let total_method_calls = request.method_calls.len();
     for (call_num, (name, arguments, call_id)) in request.method_calls.into_iter().enumerate() {
         match Invocation::parse(&name, arguments, &response, &core.store.config) {
-            Ok(invocation) => {
-                let is_set = invocation.is_set();
+            Ok(mut invocation) => {
+                let is_set = invocation.update_set_flags(core.is_in_cluster());
 
                 match handle_method_call(invocation, &core).await {
                     Ok(result) => {
                         // Add result
-                        let mut change_id = result.change_id;
+                        let mut changes = Vec::with_capacity(2);
+                        if let Some(change) = result.change {
+                            // Commit change
+                            if core.is_in_cluster() && !core.commit_index(change.id).await {
+                                response.push_error(call_id, MethodError::ServerPartialFail);
+                                continue;
+                            }
+
+                            changes.push(change);
+                        }
                         response.push_response(
                             name,
                             call_id.clone(),
@@ -119,8 +128,19 @@ where
                             let name = next_invocation.to_string();
                             match handle_method_call(next_invocation, &core).await {
                                 Ok(result) => {
-                                    if result.change_id.is_some() {
-                                        change_id = result.change_id;
+                                    if let Some(change) = result.change {
+                                        // Commit change
+                                        if core.is_in_cluster()
+                                            && !core.commit_index(change.id).await
+                                        {
+                                            response.push_error(
+                                                call_id,
+                                                MethodError::ServerPartialFail,
+                                            );
+                                            continue;
+                                        }
+
+                                        changes.push(change);
                                     }
                                     response.push_response(name, call_id, result.result, false);
                                 }
@@ -130,11 +150,10 @@ where
                             }
                         }
 
-                        // Wait for cluster
-                        if core.store.config.is_in_cluster && core.is_leader() {
-                            if let Some(_change_id) = change_id {
-                                //Todo wait for changes to propagate
-                            }
+                        // TODO set tombstones flag
+                        // Notify clients
+                        if !changes.is_empty() {
+                            //TODO
                         }
                     }
                     Err(err) => {
@@ -156,7 +175,13 @@ where
 pub struct InvocationResult {
     result: JSONValue,
     next_invocation: Option<Invocation>,
-    change_id: Option<ChangeId>,
+    change: Option<ObjectChange>,
+}
+
+pub struct ObjectChange {
+    pub object: Object,
+    pub account_id: AccountId,
+    pub id: ChangeId,
 }
 
 pub async fn handle_method_call<T>(
@@ -170,7 +195,9 @@ where
     core.spawn_jmap_request(move || {
         Ok(match (invocation.obj, invocation.call) {
             (Object::Email, Method::Get(request)) => store.get::<GetMail<T>>(request)?.into(),
-            (Object::Email, Method::Set(request)) => store.set::<SetMail>(request)?.into(),
+            (Object::Email, Method::Set(request)) => {
+                (Object::Email, store.set::<SetMail>(request)?).into()
+            }
             (Object::Email, Method::Query(request)) => store.query::<QueryMail<T>>(request)?.into(),
             (Object::Email, Method::QueryChanges(request)) => store
                 .query_changes::<ChangesMail, QueryMail<T>>(request)?
@@ -179,7 +206,7 @@ where
                 store.changes::<ChangesMail>(request)?.into()
             }
             (Object::Email, Method::Import(request)) => {
-                store.import::<ImportMail<T>>(request)?.into()
+                (Object::Email, store.import::<ImportMail<T>>(request)?).into()
             }
             (Object::Email, Method::Parse(request)) => store.parse::<ParseMail>(request)?.into(),
             (Object::Thread, Method::Get(request)) => store.get::<GetThread<T>>(request)?.into(),
@@ -187,7 +214,9 @@ where
                 store.changes::<ChangesThread>(request)?.into()
             }
             (Object::Mailbox, Method::Get(request)) => store.get::<GetMailbox<T>>(request)?.into(),
-            (Object::Mailbox, Method::Set(request)) => store.set::<SetMailbox>(request)?.into(),
+            (Object::Mailbox, Method::Set(request)) => {
+                (Object::Mailbox, store.set::<SetMailbox>(request)?).into()
+            }
             (Object::Mailbox, Method::Query(request)) => {
                 store.query::<QueryMailbox<T>>(request)?.into()
             }
@@ -200,7 +229,9 @@ where
             (Object::Identity, Method::Get(request)) => {
                 store.get::<GetIdentity<T>>(request)?.into()
             }
-            (Object::Identity, Method::Set(request)) => store.set::<SetIdentity>(request)?.into(),
+            (Object::Identity, Method::Set(request)) => {
+                (Object::Identity, store.set::<SetIdentity>(request)?).into()
+            }
             (Object::Identity, Method::Changes(request)) => {
                 store.changes::<ChangesIdentity>(request)?.into()
             }
@@ -218,21 +249,26 @@ impl InvocationResult {
         Self {
             result,
             next_invocation: None,
-            change_id: None,
+            change: None,
         }
     }
 }
 
-impl From<SetResult> for InvocationResult {
-    fn from(mut result: SetResult) -> Self {
+impl From<(Object, SetResult)> for InvocationResult {
+    fn from(mut result: (Object, SetResult)) -> Self {
         InvocationResult {
-            next_invocation: Option::take(&mut result.next_invocation),
-            change_id: if result.new_state != result.old_state {
-                result.new_state.get_change_id()
+            next_invocation: Option::take(&mut result.1.next_invocation),
+            change: if result.1.new_state != result.1.old_state {
+                ObjectChange {
+                    object: result.0,
+                    account_id: result.1.account_id,
+                    id: result.1.new_state.get_change_id(),
+                }
+                .into()
             } else {
                 None
             },
-            result: result.into(),
+            result: result.1.into(),
         }
     }
 }
@@ -261,16 +297,21 @@ impl From<QueryChangesResult> for InvocationResult {
     }
 }
 
-impl From<ImportResult> for InvocationResult {
-    fn from(result: ImportResult) -> Self {
+impl From<(Object, ImportResult)> for InvocationResult {
+    fn from(mut result: (Object, ImportResult)) -> Self {
         InvocationResult {
-            change_id: if result.new_state != result.old_state {
-                result.new_state.get_change_id()
+            next_invocation: None,
+            change: if result.1.new_state != result.1.old_state {
+                ObjectChange {
+                    object: result.0,
+                    account_id: result.1.account_id,
+                    id: result.1.new_state.get_change_id(),
+                }
+                .into()
             } else {
                 None
             },
-            result: result.into(),
-            next_invocation: None,
+            result: result.1.into(),
         }
     }
 }

@@ -51,36 +51,35 @@ where
                 }
                 WriteAction::Update(document) => document,
                 WriteAction::Delete(mut document) => {
-                    if !batch.set_tombstones {
-                        // Remove document id from collection
-                        bitmap_list
-                            .entry(BitmapKey::serialize_document_ids(
-                                batch.account_id,
-                                document.collection,
-                            ))
-                            .or_insert_with(HashMap::new)
-                            .insert(document.document_id, false);
-
-                        // Delete term index
-                        let term_index_key = ValueKey::serialize_term_index(
+                    // Remove document id from collection
+                    bitmap_list
+                        .entry(BitmapKey::serialize_document_ids(
                             batch.account_id,
                             document.collection,
-                            document.document_id,
-                        );
-                        if let Some(blob_id) = self
-                            .db
-                            .get::<BlobId>(ColumnFamily::Values, &term_index_key)?
-                        {
-                            document.term_index = Some((blob_id, IndexOptions::new().clear()));
-                        }
+                        ))
+                        .or_insert_with(HashMap::new)
+                        .insert(document.document_id, false);
 
-                        document
-                    } else {
-                        debug_assert!(!batch.changes.is_empty());
-                        // Add to tombstones
-                        tombstones.push(document);
-                        continue;
+                    // Delete term index
+                    let term_index_key = ValueKey::serialize_term_index(
+                        batch.account_id,
+                        document.collection,
+                        document.document_id,
+                    );
+                    if let Some(blob_id) = self
+                        .db
+                        .get::<BlobId>(ColumnFamily::Values, &term_index_key)?
+                    {
+                        document.term_index = Some((blob_id, IndexOptions::new().clear()));
                     }
+
+                    document
+                }
+                WriteAction::Tombstone(document) => {
+                    debug_assert!(!batch.changes.is_empty());
+                    // Add to tombstones
+                    tombstones.push(document);
+                    continue;
                 }
             };
 

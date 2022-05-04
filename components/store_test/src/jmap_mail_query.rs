@@ -413,7 +413,7 @@ where
         )
         .unwrap()
     {
-        delete_email(mail_store, account_id, message_id);
+        delete_email(mail_store, account_id, message_id, false);
     }
 
     mail_store.assert_is_empty();

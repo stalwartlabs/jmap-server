@@ -12,7 +12,7 @@ use store::config::env_settings::EnvSettings;
 use store::core::collection::Collection;
 use store::nlp::term_index::TermIndex;
 use store::serialize::key::{
-    IndexKey, LogKey, ValueKey, FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY,
+    IndexKey, LogKey, ValueKey, BM_DOCUMENT_IDS, FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY,
 };
 use store::serialize::leb128::Leb128;
 use store::serialize::{DeserializeBigEndian, StoreDeserialize};
@@ -264,8 +264,11 @@ where
             {
                 match cf {
                     ColumnFamily::Bitmaps => {
-                        let (account_id, _) = AccountId::from_leb128_bytes(&key).unwrap();
-                        let collection = key[key.len() - 3].into();
+                        let (account_id, collection) = if key.last().unwrap() == &BM_DOCUMENT_IDS {
+                            (key[0] as AccountId, key[1].into())
+                        } else {
+                            (key[key.len() - 3] as AccountId, key[key.len() - 3].into())
+                        };
                         if account_id != last_account_id || last_collection != collection {
                             last_account_id = account_id;
                             last_collection = collection;

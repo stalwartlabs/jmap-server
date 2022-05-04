@@ -18,7 +18,10 @@ use store_test::{
 use tokio::{sync::mpsc, time::sleep};
 
 use crate::{
-    cluster::{self, main::start_cluster},
+    cluster::{
+        self,
+        main::{init_cluster, start_cluster, ClusterInit},
+    },
     JMAPServer,
 };
 use crate::{jmap::server::init_jmap_server, tests::cluster::fuzz::cluster_fuzz};
@@ -35,8 +38,7 @@ pub mod log_conflict;
 pub mod mail_thread_merge;
 
 struct Peer<T> {
-    tx: mpsc::Sender<cluster::Event>,
-    rx: mpsc::Receiver<cluster::Event>,
+    init: ClusterInit,
     temp_dir: PathBuf,
     jmap_server: web::Data<JMAPServer<T>>,
     settings: EnvSettings,
@@ -93,12 +95,11 @@ where
         let (settings, temp_dir) =
             init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
 
-        let (jmap_server, cluster) = init_jmap_server(&settings);
-        let (tx, rx) = cluster.unwrap();
+        let (ipc, init) = init_cluster(&settings).unwrap();
+        let jmap_server = init_jmap_server(&settings, ipc.into());
 
         Peer {
-            tx,
-            rx,
+            init,
             settings,
             temp_dir,
             jmap_server,
@@ -106,7 +107,7 @@ where
     }
 
     pub async fn start_cluster(self) -> (web::Data<JMAPServer<T>>, PathBuf) {
-        start_cluster(self.jmap_server.clone(), &self.settings, self.rx, self.tx).await;
+        start_cluster(self.init, self.jmap_server.clone(), &self.settings).await;
         (self.jmap_server, self.temp_dir)
     }
 }
@@ -211,7 +212,7 @@ impl Ac {
                 );
             }
             Ac::DeleteEmail(local_id) => {
-                delete_email(store, 2, email_map.lock().remove(local_id).unwrap());
+                delete_email(store, 2, email_map.lock().remove(local_id).unwrap(), true);
             }
             Ac::InsertMailbox(local_id) => {
                 mailbox_map.lock().insert(
@@ -229,7 +230,7 @@ impl Ac {
                 );
             }
             Ac::DeleteMailbox(local_id) => {
-                delete_mailbox(store, 2, mailbox_map.lock().remove(local_id).unwrap());
+                delete_mailbox(store, 2, mailbox_map.lock().remove(local_id).unwrap(), true);
             }
         }
     }
@@ -489,14 +490,15 @@ fn postmortem() {
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
     //raft_election::<RocksDB>().await;
-    //merge_mail_threads::<RocksDB>().await;
-    crud_ops::<RocksDB>().await;
+    merge_mail_threads::<RocksDB>().await;
+    //crud_ops::<RocksDB>().await;
     //resolve_log_conflict::<RocksDB>().await;
 }
 
 #[tokio::test]
-#[cfg_attr(not(feature = "fuzz_cluster"), ignore)]
+//#[cfg_attr(not(feature = "fuzz_cluster"), ignore)]
 async fn fuzz_cluster() {
     tracing_subscriber::fmt::init();
     cluster_fuzz::<RocksDB>(vec![]).await;
+    //cluster_fuzz::<RocksDB>(serde_json::from_slice(br#""#).unwrap()).await;
 }

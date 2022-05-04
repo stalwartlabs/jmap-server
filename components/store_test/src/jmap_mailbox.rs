@@ -474,6 +474,7 @@ where
             )]),
             destroy: vec![],
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         })
         .unwrap()
         .not_updated
@@ -491,6 +492,7 @@ where
             )]),
             destroy: vec![],
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         })
         .unwrap()
         .not_updated
@@ -512,6 +514,7 @@ where
             )]),
             destroy: vec![],
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         })
         .unwrap()
         .not_updated
@@ -529,6 +532,7 @@ where
             )]),
             destroy: vec![],
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         })
         .unwrap()
         .not_updated
@@ -547,6 +551,7 @@ where
             )]),
             destroy: vec![],
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         })
         .unwrap()
         .not_updated
@@ -580,6 +585,7 @@ where
                 )]),
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -665,6 +671,7 @@ where
                 )]),
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -714,6 +721,7 @@ where
                 update: HashMap::new(),
                 destroy: vec![get_mailbox_id(&id_map, "1").into()],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .destroyed,
@@ -730,6 +738,7 @@ where
                 update: HashMap::new(),
                 destroy: vec![get_mailbox_id(&id_map, "trash").into()],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .destroyed,
@@ -750,6 +759,7 @@ where
                         "onDestroyRemoveEmails".to_string(),
                         true.into(),
                     )]),
+                    tombstone_deletions: false,
                 })
                 .unwrap()
         )
@@ -804,6 +814,7 @@ where
                 )]),
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -979,6 +990,7 @@ fn create_nested_mailboxes<T>(
                 update: HashMap::new(),
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .into();
@@ -1029,6 +1041,7 @@ where
             update: HashMap::new(),
             destroy: vec![],
             arguments: HashMap::new(),
+            tombstone_deletions: false,
         })
         .unwrap()
         .into();
@@ -1066,6 +1079,7 @@ pub fn update_mailbox<T>(
                 )]),
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -1073,8 +1087,12 @@ pub fn update_mailbox<T>(
     );
 }
 
-pub fn delete_mailbox<T>(mail_store: &JMAPStore<T>, account_id: AccountId, jmap_id: JMAPId)
-where
+pub fn delete_mailbox<T>(
+    mail_store: &JMAPStore<T>,
+    account_id: AccountId,
+    jmap_id: JMAPId,
+    tombstone_deletions: bool,
+) where
     T: for<'x> Store<'x> + 'static,
 {
     assert_eq!(
@@ -1088,6 +1106,7 @@ where
                 arguments: HashMap::from_iter([
                     ("onDestroyRemoveEmails".to_string(), true.into(),)
                 ]),
+                tombstone_deletions,
             })
             .unwrap()
             .not_destroyed,

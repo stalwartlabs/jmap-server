@@ -48,12 +48,6 @@ pub struct LogKey {}
 pub struct BlobKey {}
 
 impl ValueKey {
-    pub fn serialize_account(account: AccountId) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
-        account.to_leb128_bytes(&mut bytes);
-        bytes
-    }
-
     pub fn serialize_collection(account: AccountId, collection: Collection) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(
             std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>(),
@@ -130,12 +124,6 @@ impl BlobKey {
 }
 
 impl BitmapKey {
-    pub fn serialize_account(account: AccountId) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
-        account.to_leb128_bytes(&mut bytes);
-        bytes
-    }
-
     pub fn serialize_term(
         account: AccountId,
         collection: Collection,
@@ -236,12 +224,6 @@ impl IndexKey {
         bytes.extend_from_slice(&field.to_be_bytes());
         bytes.extend_from_slice(key);
         bytes.extend_from_slice(&document.to_be_bytes());
-        bytes
-    }
-
-    pub fn serialize_account(account: AccountId) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>());
-        bytes.extend_from_slice(&account.to_be_bytes());
         bytes
     }
 

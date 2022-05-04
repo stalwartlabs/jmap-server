@@ -4,6 +4,7 @@ pub mod jmap;
 pub mod tests;
 
 use crate::jmap::server::{init_jmap_server, start_jmap_server, JMAPServer, DEFAULT_HTTP_PORT};
+use cluster::main::init_cluster;
 use store::{config::env_settings::EnvSettings, tracing::info};
 use store_rocksdb::RocksDB;
 
@@ -28,13 +29,16 @@ async fn main() -> std::io::Result<()> {
         settings.set_value("jmap-url".to_string(), default_url);
     }
 
-    let (jmap_server, cluster) = init_jmap_server::<RocksDB>(&settings);
-
-    // Start cluster
-    if let Some((cluster_tx, cluster_rx)) = cluster {
-        start_cluster(jmap_server.clone(), &settings, cluster_rx, cluster_tx).await;
-    }
-
     // Start JMAP server
-    start_jmap_server(jmap_server, settings).await
+    start_jmap_server(
+        if let Some((cluster_ipc, cluster_init)) = init_cluster(&settings) {
+            let server = init_jmap_server::<RocksDB>(&settings, cluster_ipc.into());
+            start_cluster(cluster_init, server.clone(), &settings).await;
+            server
+        } else {
+            init_jmap_server::<RocksDB>(&settings, None)
+        },
+        settings,
+    )
+    .await
 }

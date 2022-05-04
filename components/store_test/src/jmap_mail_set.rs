@@ -161,6 +161,7 @@ where
                 update: HashMap::new(),
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .into();
@@ -358,6 +359,7 @@ fn jmap_mail_update<T>(
                 create: vec![],
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -389,6 +391,7 @@ fn jmap_mail_update<T>(
                 create: vec![],
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -418,6 +421,7 @@ fn jmap_mail_update<T>(
                     create: vec![],
                     destroy: vec![],
                     arguments: HashMap::new(),
+                    tombstone_deletions: false,
                 })
                 .unwrap()
         )
@@ -440,6 +444,7 @@ fn jmap_mail_update<T>(
                     create: vec![],
                     destroy: vec![message_id_1.clone().into()],
                     arguments: HashMap::new(),
+                    tombstone_deletions: false,
                 })
                 .unwrap()
         )
@@ -456,6 +461,7 @@ fn jmap_mail_update<T>(
                 create: vec![],
                 destroy: vec![message_id_2.clone().into(), message_id_3.clone().into()],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_destroyed,
@@ -553,6 +559,7 @@ pub fn update_email<T>(
                 create: vec![],
                 destroy: vec![],
                 arguments: HashMap::new(),
+                tombstone_deletions: false,
             })
             .unwrap()
             .not_updated,
@@ -560,8 +567,12 @@ pub fn update_email<T>(
     );
 }
 
-pub fn delete_email<T>(mail_store: &JMAPStore<T>, account_id: AccountId, jmap_id: JMAPId)
-where
+pub fn delete_email<T>(
+    mail_store: &JMAPStore<T>,
+    account_id: AccountId,
+    jmap_id: JMAPId,
+    tombstone_deletions: bool,
+) where
     T: for<'x> Store<'x> + 'static,
 {
     assert_eq!(
@@ -573,6 +584,7 @@ where
                 create: vec![],
                 destroy: vec![jmap_id.to_jmap_string().into()],
                 arguments: HashMap::new(),
+                tombstone_deletions,
             })
             .unwrap()
             .not_destroyed,

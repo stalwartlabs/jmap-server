@@ -3,6 +3,7 @@ use std::{
     fmt::Display,
     hash::{Hash, Hasher},
     net::{SocketAddr, ToSocketAddrs},
+    sync::atomic::AtomicU8,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -42,6 +43,10 @@ pub const IPC_CHANNEL_BUFFER: usize = 1024;
 const HEARTBEAT_WINDOW: usize = 1 << 10;
 const HEARTBEAT_WINDOW_MASK: usize = HEARTBEAT_WINDOW - 1;
 
+pub const RAFT_LOG_BEHIND: u8 = 0;
+pub const RAFT_LOG_UPDATED: u8 = 1;
+pub const RAFT_LOG_LEADER: u8 = 2;
+
 pub struct Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -69,6 +74,7 @@ where
     pub core: web::Data<JMAPServer<T>>,
     pub tx: mpsc::Sender<Event>,
     pub gossip_tx: mpsc::Sender<(SocketAddr, gossip::Request)>,
+    pub commit_index_tx: watch::Sender<LogIndex>,
 
     // Raft status
     pub term: TermId,
@@ -151,6 +157,12 @@ impl Display for Peer {
     }
 }
 
+pub struct ClusterIpc {
+    pub tx: mpsc::Sender<Event>,
+    pub state: AtomicU8,
+    pub commit_index_rx: watch::Receiver<LogIndex>,
+}
+
 impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -196,6 +208,7 @@ where
         core: web::Data<JMAPServer<T>>,
         tx: mpsc::Sender<Event>,
         gossip_tx: mpsc::Sender<(SocketAddr, gossip::Request)>,
+        commit_index_tx: watch::Sender<LogIndex>,
     ) -> Self {
         let key = settings.get("cluster").unwrap();
 
@@ -275,6 +288,7 @@ where
             last_peer_pinged: u32::MAX as usize,
             tx,
             gossip_tx,
+            commit_index_tx,
         };
 
         // Add previously discovered peers

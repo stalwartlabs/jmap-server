@@ -279,7 +279,7 @@ where
         received_at: Option<u64>,
     ) -> jmap::Result<MailImportResult> {
         let document_id = self.assign_document_id(account_id, Collection::Mail)?;
-        let mut batch = WriteBatch::new(account_id, self.config.is_in_cluster);
+        let mut batch = WriteBatch::new(account_id);
         let mut document = Document::new(Collection::Mail, document_id);
         let size = blob.len();
 

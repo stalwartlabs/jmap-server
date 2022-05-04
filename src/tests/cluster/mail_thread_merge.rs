@@ -34,7 +34,7 @@ where
     // Create the Inbox
     let leader = assert_leader_elected(&peers).await;
     let inbox_id = insert_mailbox(&leader.store, 1, "Inbox", "INBOX".into());
-    leader.update_uncommitted_index().await;
+    leader.commit_last_index().await;
     assert_cluster_updated(&peers).await;
 
     // Keep one peer down to test full sync at the end
@@ -64,7 +64,7 @@ where
         .unwrap();
 
         // Notify peers of changes
-        leader.update_uncommitted_index().await;
+        leader.commit_last_index().await;
         assert_cluster_updated(&peers).await;
 
         // Bring back previous offline leader

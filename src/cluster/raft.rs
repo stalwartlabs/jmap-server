@@ -8,12 +8,13 @@ use store::roaring::RoaringTreemap;
 use store::tracing::{debug, error, info};
 use store::{AccountId, Store};
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio::time;
 
 use crate::cluster::leader;
 use crate::JMAPServer;
 
 use super::log::{MergedChanges, RaftStore};
-use super::{log, rpc};
+use super::{log, rpc, RAFT_LOG_BEHIND, RAFT_LOG_LEADER, RAFT_LOG_UPDATED};
 use super::{
     rpc::{Request, Response},
     Cluster, Peer, PeerId,
@@ -22,6 +23,7 @@ use super::{
 pub const ELECTION_TIMEOUT: u64 = 1000;
 pub const ELECTION_TIMEOUT_RAND_FROM: u64 = 50;
 pub const ELECTION_TIMEOUT_RAND_TO: u64 = 300;
+pub const COMMIT_TIMEOUT_MS: u64 = 1000;
 
 #[derive(Debug)]
 pub enum State {
@@ -376,12 +378,22 @@ where
 
             let last_log_index = self.last_log.index;
             let core = self.core.clone();
+
+            // Commit pending updates
             tokio::spawn(async move {
                 if let Err(err) = core.commit_leader(last_log_index, false).await {
                     error!("Failed to commit leader: {:?}", err);
                 }
             });
+
+            // Notify peers
             self.send_append_entries();
+
+            // Notify clients
+            if let Err(err) = self.commit_index_tx.send(last_log_index) {
+                error!("Failed to send commit index: {:?}", err);
+            }
+
             debug!(
                 "Advancing commit index to {} [cluster: {:?}].",
                 self.last_log.index, indexes
@@ -464,28 +476,53 @@ impl<T> JMAPServer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
+    pub fn is_in_cluster(&self) -> bool {
+        self.cluster.is_some()
+    }
+
     pub fn set_leader(&self, term: TermId) {
-        self.is_leader.store(true, Ordering::Relaxed);
-        self.is_up_to_date.store(true, Ordering::Relaxed);
+        self.cluster
+            .as_ref()
+            .unwrap()
+            .state
+            .store(RAFT_LOG_LEADER, Ordering::Relaxed);
         self.store.raft_term.store(term, Ordering::Relaxed);
         self.store.doc_id_cache.invalidate_all();
     }
 
     pub fn set_follower(&self) {
-        self.is_leader.store(false, Ordering::Relaxed);
-        self.is_up_to_date.store(false, Ordering::Relaxed);
+        self.cluster
+            .as_ref()
+            .unwrap()
+            .state
+            .store(RAFT_LOG_BEHIND, Ordering::Relaxed);
     }
 
     pub fn is_leader(&self) -> bool {
-        self.is_leader.load(Ordering::Relaxed)
+        self.cluster
+            .as_ref()
+            .map(|cluster| cluster.state.load(Ordering::Relaxed) == RAFT_LOG_LEADER)
+            .unwrap_or(true)
     }
 
     pub fn is_up_to_date(&self) -> bool {
-        self.is_up_to_date.load(Ordering::Relaxed)
+        self.cluster
+            .as_ref()
+            .map(|cluster| {
+                [RAFT_LOG_LEADER, RAFT_LOG_UPDATED].contains(&cluster.state.load(Ordering::Relaxed))
+            })
+            .unwrap_or(true)
     }
 
-    pub fn set_up_to_date(&self, val: bool) {
-        self.is_up_to_date.store(val, Ordering::Relaxed);
+    pub fn set_up_to_date(&self, is_up_to_date: bool) {
+        self.cluster.as_ref().unwrap().state.store(
+            if is_up_to_date {
+                RAFT_LOG_UPDATED
+            } else {
+                RAFT_LOG_BEHIND
+            },
+            Ordering::Relaxed,
+        );
     }
 
     pub fn update_raft_index(&self, index: LogIndex) {
@@ -558,36 +595,90 @@ where
     }
 
     pub async fn update_last_log(&self, last_log: RaftId) {
-        if self.store.config.is_in_cluster
-            && self
-                .cluster_tx
+        if let Some(cluster) = &self.cluster {
+            if cluster
+                .tx
                 .send(super::Event::UpdateLastLog { last_log })
                 .await
                 .is_err()
-        {
-            error!("Failed to send store changed event.");
+            {
+                error!("Failed to send store changed event.");
+            }
         }
     }
 
-    pub async fn advance_uncommitted_index(&self, uncommitted_index: LogIndex) {
-        if self.store.config.is_in_cluster
-            && self
-                .cluster_tx
-                .send(super::Event::AdvanceUncommittedIndex { uncommitted_index })
-                .await
-                .is_err()
-        {
-            error!("Failed to send store changed event.");
+    pub async fn commit_index(&self, index: LogIndex) -> bool {
+        if let Some(cluster) = &self.cluster {
+            if self.is_leader() {
+                if cluster
+                    .tx
+                    .send(super::Event::AdvanceUncommittedIndex {
+                        uncommitted_index: index,
+                    })
+                    .await
+                    .is_ok()
+                {
+                    let mut commit_index_rx = cluster.commit_index_rx.clone();
+                    let wait_start = Instant::now();
+                    let mut wait_timeout = Duration::from_millis(COMMIT_TIMEOUT_MS);
+
+                    loop {
+                        match time::timeout(wait_timeout, commit_index_rx.changed()).await {
+                            Ok(Ok(())) => {
+                                let commit_index = *commit_index_rx.borrow();
+                                if commit_index >= index {
+                                    debug!(
+                                        "Successfully committed index {} in {}ms (latest index: {}).",
+                                        index, wait_start.elapsed().as_millis(), commit_index
+                                    );
+                                    return true;
+                                }
+
+                                let wait_elapsed = wait_start.elapsed().as_millis() as u64;
+                                if wait_elapsed >= COMMIT_TIMEOUT_MS {
+                                    break;
+                                }
+                                wait_timeout =
+                                    Duration::from_millis(COMMIT_TIMEOUT_MS - wait_elapsed);
+                            }
+                            Ok(Err(err)) => {
+                                error!(
+                                    "Failed to commit index {}, channel failure: {}",
+                                    index, err
+                                );
+                                break;
+                            }
+                            Err(_) => {
+                                error!(
+                                    "Failed to commit index {}, timeout after {} ms.",
+                                    index, COMMIT_TIMEOUT_MS
+                                );
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    error!(
+                        "Failed to commit index {}, unable to send store changed event.",
+                        index
+                    );
+                }
+            } else {
+                error!(
+                    "Failed to commit index {}, this node is no longer the leader.",
+                    index
+                );
+            }
         }
+        false
     }
 
     #[cfg(test)]
-    pub async fn update_uncommitted_index(&self) -> LogIndex {
+    pub async fn commit_last_index(&self) -> LogIndex {
         let uncommitted_index = self.get_last_log().await.unwrap().unwrap().index;
-        self.cluster_tx
-            .send(super::Event::AdvanceUncommittedIndex { uncommitted_index })
-            .await
-            .unwrap();
+        if !self.commit_index(uncommitted_index).await {
+            panic!("Failed to commit index {}", uncommitted_index);
+        }
         uncommitted_index
     }
 }

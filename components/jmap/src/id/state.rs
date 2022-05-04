@@ -46,11 +46,11 @@ impl JMAPState {
         })
     }
 
-    pub fn get_change_id(&self) -> Option<ChangeId> {
+    pub fn get_change_id(&self) -> ChangeId {
         match self {
-            JMAPState::Exact(id) => Some(*id),
-            JMAPState::Intermediate(intermediate) => Some(intermediate.to_id),
-            JMAPState::Initial => None,
+            JMAPState::Exact(id) => *id,
+            JMAPState::Intermediate(intermediate) => intermediate.to_id,
+            JMAPState::Initial => ChangeId::MAX,
         }
     }
 }

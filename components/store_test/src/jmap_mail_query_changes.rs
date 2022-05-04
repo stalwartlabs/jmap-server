@@ -135,14 +135,14 @@ where
             }
             LogAction::Update(id) => {
                 let id = *id_map.get(id).unwrap();
-                let mut batch = WriteBatch::new(account_id, false);
+                let mut batch = WriteBatch::new(account_id);
                 batch.log_update(Collection::Mail, id);
                 mail_store.write(batch).unwrap();
                 updated_ids.insert(id);
             }
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
-                let mut batch = WriteBatch::new(account_id, false);
+                let mut batch = WriteBatch::new(account_id);
                 batch.delete_document(Document::new(Collection::Mail, id.get_document_id()));
                 batch.log_delete(Collection::Mail, id);
                 mail_store.write(batch).unwrap();
@@ -152,7 +152,7 @@ where
                 let id = *id_map.get(from).unwrap();
                 let new_id = JMAPId::from_parts(thread_id, id.get_document_id());
 
-                let mut batch = WriteBatch::new(account_id, false);
+                let mut batch = WriteBatch::new(account_id);
                 let mut document = Document::new(Collection::Mail, id.get_document_id());
                 document.tag(
                     MessageField::ThreadId,

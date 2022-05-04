@@ -136,7 +136,7 @@ where
             ],
         ),
     ] {
-        let mut documents = WriteBatch::new(account_id, false);
+        let mut documents = WriteBatch::new(account_id);
 
         for change in changes {
             match change {

@@ -172,7 +172,7 @@ where
         let mut helper = SetObjectHelper {
             store: self,
             lock: None,
-            changes: WriteBatch::new(request.account_id, self.config.is_in_cluster),
+            changes: WriteBatch::new(request.account_id),
             document_ids: self
                 .get_document_ids(request.account_id, collection)?
                 .unwrap_or_else(RoaringBitmap::new),
@@ -225,8 +225,7 @@ where
                         helper.changes.log_insert(collection, result.get_id());
                         if helper.lock.is_some() {
                             change_id = self.write(helper.changes)?;
-                            helper.changes =
-                                WriteBatch::new(request.account_id, self.config.is_in_cluster);
+                            helper.changes = WriteBatch::new(request.account_id);
                             helper.lock = None;
                         }
                         helper.created.insert(create_id, result.into());
@@ -366,7 +365,11 @@ where
                 } else {
                     let mut document = Document::new(collection, document_id);
                     V::delete(self, helper.account_id, &mut document)?;
-                    helper.changes.delete_document(document);
+                    if !request.tombstone_deletions {
+                        helper.changes.delete_document(document);
+                    } else {
+                        helper.changes.tombstone_document(document);
+                    }
                     helper.changes.log_delete(collection, jmap_id);
                     helper.destroyed.push(jmap_id.to_jmap_string().into());
                 }

@@ -122,8 +122,17 @@ impl Invocation {
         })
     }
 
-    pub fn is_set(&self) -> bool {
-        matches!(self.call, Method::Set(_))
+    pub fn update_set_flags(&mut self, set_tombstone_deletions: bool) -> bool {
+        if let Method::Set(SetRequest {
+            tombstone_deletions,
+            ..
+        }) = &mut self.call
+        {
+            *tombstone_deletions = set_tombstone_deletions;
+            true
+        } else {
+            false
+        }
     }
 }
 
