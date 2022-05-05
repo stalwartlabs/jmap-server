@@ -30,11 +30,12 @@ use jmap_mail::mailbox::query::QueryMailbox;
 use jmap_mail::mailbox::set::SetMailbox;
 use jmap_mail::thread::changes::ChangesThread;
 use jmap_mail::thread::get::GetThread;
-use store::log::changes::ChangeId;
-use store::tracing::debug;
-use store::{AccountId, Store};
+use store::core::collection::Collection;
+use store::tracing::{debug, error};
+use store::Store;
 
 use super::server::JMAPServer;
+use super::state_change::{self, StateChange};
 
 pub async fn handle_jmap_request<T>(
     request: web::Bytes,
@@ -106,15 +107,22 @@ where
                 match handle_method_call(invocation, &core).await {
                     Ok(result) => {
                         // Add result
-                        let mut changes = Vec::with_capacity(2);
-                        if let Some(change) = result.change {
+                        if let Some(state_change) = result.change {
                             // Commit change
-                            if core.is_in_cluster() && !core.commit_index(change.id).await {
+                            if core.is_in_cluster() && !core.commit_index(state_change.id).await {
                                 response.push_error(call_id, MethodError::ServerPartialFail);
                                 continue;
                             }
 
-                            changes.push(change);
+                            // Broadcast change to subscribers
+                            if let Err(err) = core
+                                .state_change
+                                .clone()
+                                .send(state_change::Event::Publish { state_change })
+                                .await
+                            {
+                                error!("Failed to broadcast state change: {}", err);
+                            }
                         }
                         response.push_response(
                             name,
@@ -128,10 +136,10 @@ where
                             let name = next_invocation.to_string();
                             match handle_method_call(next_invocation, &core).await {
                                 Ok(result) => {
-                                    if let Some(change) = result.change {
+                                    if let Some(state_change) = result.change {
                                         // Commit change
                                         if core.is_in_cluster()
-                                            && !core.commit_index(change.id).await
+                                            && !core.commit_index(state_change.id).await
                                         {
                                             response.push_error(
                                                 call_id,
@@ -140,7 +148,15 @@ where
                                             continue;
                                         }
 
-                                        changes.push(change);
+                                        // Broadcast change to subscribers
+                                        if let Err(err) = core
+                                            .state_change
+                                            .clone()
+                                            .send(state_change::Event::Publish { state_change })
+                                            .await
+                                        {
+                                            error!("Failed to broadcast state change: {}", err);
+                                        }
                                     }
                                     response.push_response(name, call_id, result.result, false);
                                 }
@@ -148,12 +164,6 @@ where
                                     response.push_error(call_id, err);
                                 }
                             }
-                        }
-
-                        // TODO set tombstones flag
-                        // Notify clients
-                        if !changes.is_empty() {
-                            //TODO
                         }
                     }
                     Err(err) => {
@@ -175,13 +185,7 @@ where
 pub struct InvocationResult {
     result: JSONValue,
     next_invocation: Option<Invocation>,
-    change: Option<ObjectChange>,
-}
-
-pub struct ObjectChange {
-    pub object: Object,
-    pub account_id: AccountId,
-    pub id: ChangeId,
+    change: Option<StateChange>,
 }
 
 pub async fn handle_method_call<T>(
@@ -196,7 +200,7 @@ where
         Ok(match (invocation.obj, invocation.call) {
             (Object::Email, Method::Get(request)) => store.get::<GetMail<T>>(request)?.into(),
             (Object::Email, Method::Set(request)) => {
-                (Object::Email, store.set::<SetMail>(request)?).into()
+                (Collection::Mail, store.set::<SetMail>(request)?).into()
             }
             (Object::Email, Method::Query(request)) => store.query::<QueryMail<T>>(request)?.into(),
             (Object::Email, Method::QueryChanges(request)) => store
@@ -206,7 +210,7 @@ where
                 store.changes::<ChangesMail>(request)?.into()
             }
             (Object::Email, Method::Import(request)) => {
-                (Object::Email, store.import::<ImportMail<T>>(request)?).into()
+                (Collection::Mail, store.import::<ImportMail<T>>(request)?).into()
             }
             (Object::Email, Method::Parse(request)) => store.parse::<ParseMail>(request)?.into(),
             (Object::Thread, Method::Get(request)) => store.get::<GetThread<T>>(request)?.into(),
@@ -215,7 +219,7 @@ where
             }
             (Object::Mailbox, Method::Get(request)) => store.get::<GetMailbox<T>>(request)?.into(),
             (Object::Mailbox, Method::Set(request)) => {
-                (Object::Mailbox, store.set::<SetMailbox>(request)?).into()
+                (Collection::Mailbox, store.set::<SetMailbox>(request)?).into()
             }
             (Object::Mailbox, Method::Query(request)) => {
                 store.query::<QueryMailbox<T>>(request)?.into()
@@ -230,7 +234,7 @@ where
                 store.get::<GetIdentity<T>>(request)?.into()
             }
             (Object::Identity, Method::Set(request)) => {
-                (Object::Identity, store.set::<SetIdentity>(request)?).into()
+                (Collection::Identity, store.set::<SetIdentity>(request)?).into()
             }
             (Object::Identity, Method::Changes(request)) => {
                 store.changes::<ChangesIdentity>(request)?.into()
@@ -254,13 +258,13 @@ impl InvocationResult {
     }
 }
 
-impl From<(Object, SetResult)> for InvocationResult {
-    fn from(mut result: (Object, SetResult)) -> Self {
+impl From<(Collection, SetResult)> for InvocationResult {
+    fn from(mut result: (Collection, SetResult)) -> Self {
         InvocationResult {
             next_invocation: Option::take(&mut result.1.next_invocation),
             change: if result.1.new_state != result.1.old_state {
-                ObjectChange {
-                    object: result.0,
+                StateChange {
+                    collection: result.0,
                     account_id: result.1.account_id,
                     id: result.1.new_state.get_change_id(),
                 }
@@ -297,13 +301,13 @@ impl From<QueryChangesResult> for InvocationResult {
     }
 }
 
-impl From<(Object, ImportResult)> for InvocationResult {
-    fn from(mut result: (Object, ImportResult)) -> Self {
+impl From<(Collection, ImportResult)> for InvocationResult {
+    fn from(result: (Collection, ImportResult)) -> Self {
         InvocationResult {
             next_invocation: None,
             change: if result.1.new_state != result.1.old_state {
-                ObjectChange {
-                    object: result.0,
+                StateChange {
+                    collection: result.0,
                     account_id: result.1.account_id,
                     id: result.1.new_state.get_change_id(),
                 }

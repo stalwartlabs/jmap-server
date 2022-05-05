@@ -42,12 +42,7 @@ impl WriteBatch {
         }
     }
 
-    pub fn delete(
-        account_id: AccountId,
-        collection: Collection,
-        document_id: DocumentId,
-        set_tombstones: bool,
-    ) -> Self {
+    pub fn delete(account_id: AccountId, collection: Collection, document_id: DocumentId) -> Self {
         WriteBatch {
             account_id,
             changes: HashMap::new(),

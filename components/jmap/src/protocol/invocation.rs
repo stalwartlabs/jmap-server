@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use store::{config::jmap::JMAPConfig, AccountId};
+use store::{config::jmap::JMAPConfig, core::collection::Collection, AccountId};
 
 use crate::{
     error::method::MethodError,
@@ -19,7 +19,7 @@ pub struct Invocation {
     pub account_id: AccountId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, Eq, PartialEq, Hash, Clone)]
 pub enum Object {
     Core,
     Mailbox,
@@ -44,6 +44,53 @@ pub enum Method {
     Parse(ParseRequest),
 }
 
+impl Object {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "Core" => Some(Object::Core),
+            "Mailbox" => Some(Object::Mailbox),
+            "Thread" => Some(Object::Thread),
+            "Email" => Some(Object::Email),
+            "SearchSnippet" => Some(Object::SearchSnippet),
+            "Identity" => Some(Object::Identity),
+            "EmailSubmission" => Some(Object::EmailSubmission),
+            "VacationResponse" => Some(Object::VacationResponse),
+            "PushSubscription" => Some(Object::PushSubscription),
+            _ => None,
+        }
+    }
+}
+
+impl From<Collection> for Object {
+    fn from(col: Collection) -> Self {
+        match col {
+            Collection::Mail => Object::Email,
+            Collection::Mailbox => Object::Mailbox,
+            Collection::Thread => Object::Thread,
+            Collection::Identity => Object::Identity,
+            Collection::EmailSubmission => Object::EmailSubmission,
+            Collection::VacationResponse => Object::VacationResponse,
+            Collection::PushSubscription => Object::PushSubscription,
+            Collection::Account | Collection::None => unreachable!(),
+        }
+    }
+}
+
+impl From<Object> for Collection {
+    fn from(obj: Object) -> Self {
+        match obj {
+            Object::Email => Collection::Mail,
+            Object::Mailbox => Collection::Mailbox,
+            Object::Thread => Collection::Thread,
+            Object::Identity => Collection::Identity,
+            Object::EmailSubmission => Collection::EmailSubmission,
+            Object::VacationResponse => Collection::VacationResponse,
+            Object::PushSubscription => Collection::PushSubscription,
+            Object::SearchSnippet | Object::Core => Collection::None,
+        }
+    }
+}
+
 impl Invocation {
     pub fn parse(
         name: &str,
@@ -52,25 +99,9 @@ impl Invocation {
         config: &JMAPConfig,
     ) -> crate::Result<Self> {
         let mut name_parts = name.split('/');
-        let obj = match name_parts.next().ok_or_else(|| {
+        let obj = name_parts.next().and_then(Object::parse).ok_or_else(|| {
             MethodError::InvalidArguments(format!("Failed to parse method name: {}.", name))
-        })? {
-            "Core" => Object::Core,
-            "Mailbox" => Object::Mailbox,
-            "Thread" => Object::Thread,
-            "Email" => Object::Email,
-            "SearchSnippet" => Object::SearchSnippet,
-            "Identity" => Object::Identity,
-            "EmailSubmission" => Object::EmailSubmission,
-            "VacationResponse" => Object::VacationResponse,
-            "PushSubscription" => Object::PushSubscription,
-            _ => {
-                return Err(MethodError::UnknownMethod(format!(
-                    "Unknown object: {}",
-                    name
-                )))
-            }
-        };
+        })?;
 
         let (account_id, call) = match name_parts.next().ok_or_else(|| {
             MethodError::InvalidArguments(format!("Failed to parse method name: {}.", name))

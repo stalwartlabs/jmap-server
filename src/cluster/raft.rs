@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time;
 
 use crate::cluster::leader;
+use crate::jmap::state_change;
 use crate::JMAPServer;
 
 use super::log::{MergedChanges, RaftStore};
@@ -480,7 +481,7 @@ where
         self.cluster.is_some()
     }
 
-    pub fn set_leader(&self, term: TermId) {
+    pub async fn set_leader(&self, term: TermId) {
         self.cluster
             .as_ref()
             .unwrap()
@@ -488,14 +489,24 @@ where
             .store(RAFT_LOG_LEADER, Ordering::Relaxed);
         self.store.raft_term.store(term, Ordering::Relaxed);
         self.store.doc_id_cache.invalidate_all();
+        self.state_change
+            .clone()
+            .send(state_change::Event::Start)
+            .await
+            .ok();
     }
 
-    pub fn set_follower(&self) {
+    pub async fn set_follower(&self) {
         self.cluster
             .as_ref()
             .unwrap()
             .state
             .store(RAFT_LOG_BEHIND, Ordering::Relaxed);
+        self.state_change
+            .clone()
+            .send(state_change::Event::Stop)
+            .await
+            .ok();
     }
 
     pub fn is_leader(&self) -> bool {

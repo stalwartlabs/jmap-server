@@ -12,7 +12,7 @@ use store::{
     Store,
 };
 use store::{ColumnFamily, JMAPStore};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::cluster::{ClusterIpc, Event};
 use crate::jmap::api::handle_jmap_request;
@@ -22,6 +22,7 @@ use crate::jmap::session::handle_jmap_session;
 use crate::jmap::upload::handle_jmap_upload;
 
 use super::session::Session;
+use super::state_change::{self, spawn_state_manager};
 
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
 pub const DEFAULT_RPC_PORT: u16 = 7911;
@@ -31,6 +32,7 @@ pub struct JMAPServer<T> {
     pub worker_pool: rayon::ThreadPool,
     pub base_session: Session,
     pub cluster: Option<ClusterIpc>,
+    pub state_change: mpsc::Sender<state_change::Event>,
 
     #[cfg(test)]
     pub is_offline: std::sync::atomic::AtomicBool,
@@ -177,6 +179,7 @@ where
             )
             .build()
             .unwrap(),
+        state_change: spawn_state_manager(cluster.is_none()),
         cluster,
         #[cfg(test)]
         is_offline: false.into(),

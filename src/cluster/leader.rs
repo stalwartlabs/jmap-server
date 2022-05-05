@@ -641,7 +641,7 @@ where
                 error!("Failed to set leader commit index: {:?}", err);
                 return;
             }
-            core.set_leader(term);
+            core.set_leader(term).await;
 
             if tx.send(true).is_err() {
                 error!("Failed to send message to raft leader processes.");

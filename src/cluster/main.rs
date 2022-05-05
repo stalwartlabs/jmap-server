@@ -1,6 +1,5 @@
 use std::{
     net::SocketAddr,
-    sync::atomic::AtomicU8,
     time::{Duration, Instant},
 };
 

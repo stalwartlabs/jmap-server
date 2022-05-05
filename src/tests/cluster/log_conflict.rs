@@ -35,11 +35,11 @@ where
             for action in batch {
                 term_count += 1;
 
-                peer1.set_leader(term_count);
+                peer1.set_leader(term_count).await;
                 action.execute(&store1, &mailbox_map1, &email_map1, batch_num);
 
                 if term_count < conflict_term {
-                    peer2.set_leader(term_count);
+                    peer2.set_leader(term_count).await;
                     action.execute(&store2, &mailbox_map2, &email_map2, batch_num);
                 } else {
                     match term_count % 4 {
@@ -70,8 +70,8 @@ where
             .set_leader_commit_index(peer2.get_last_log().await.unwrap().unwrap().index)
             .await
             .unwrap();
-        peer1.set_follower();
-        peer2.set_follower();
+        peer1.set_follower().await;
+        peer2.set_follower().await;
 
         // Activate all nodes
         let peers = cluster.start_cluster().await;

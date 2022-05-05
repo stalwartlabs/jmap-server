@@ -1,8 +1,4 @@
-use super::{
-    get::GetObject,
-    orm::{JMAPOrm, PropertySchema, TinyORM},
-    set::SetObject,
-};
+use super::orm::{JMAPOrm, PropertySchema, TinyORM};
 use crate::Property;
 use store::{
     blob::BlobId,
