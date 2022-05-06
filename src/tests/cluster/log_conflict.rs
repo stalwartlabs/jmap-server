@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use store::{parking_lot::Mutex, Store};
 
-use crate::tests::cluster::{
+use crate::tests::cluster::utils::{
     assert_cluster_updated, assert_leader_elected, assert_mirrored_stores, shutdown_all,
     test_batch, Ac, Cluster,
 };

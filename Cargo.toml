@@ -1,36 +1,31 @@
 [package]
 name = "jmap-server"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
+resolver = "2"
 
 [dependencies]
-jmap = { path = "components/jmap" }
-jmap_mail = { path = "components/jmap_mail" }
+core = { path = "components/core" }
 store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
-actix-web = "4"
-openssl = "0.10"
 tracing-subscriber = "0.2"
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-gethostname = "0.2.2"
-rand = "0.8.5"
-tokio = { version = "1.16.1", features = ["full"] }
-tokio-util = "0.7.0"
-async-stream = "0.3.3"
-num_cpus = "1.13.1"
-futures = "0.3"
-rayon = "1.5.1"
 
 [dev-dependencies]
-store_test = { path = "components/store_test" }
+jmap = { path = "components/jmap" }
+jmap_mail = { path = "components/jmap_mail" }
+core = { path = "components/core", features = ["debug"] }
+csv = "1.1"
+flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
+serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+serde_yaml = "0.8"
+tokio-test = "0.4"
 
 [workspace]
-resolver = "2"
 members = [
+    "components/core",
     "components/store",
     "components/store_rocksdb",
-    "components/store_test",
     "components/jmap",
     "components/jmap_mail",
 ]

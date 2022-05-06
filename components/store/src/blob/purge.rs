@@ -7,6 +7,7 @@ use crate::serialize::StoreSerialize;
 use crate::WriteOperation;
 use crate::{ColumnFamily, Direction, JMAPStore, Store, StoreError};
 
+//TODO implement plus all housekeeping tasks
 /*
 impl<T> JMAPStore<T>
 where

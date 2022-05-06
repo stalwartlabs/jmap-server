@@ -1,16 +1,16 @@
-pub mod cluster;
-pub mod jmap;
 #[cfg(test)]
 pub mod tests;
 
-use crate::jmap::server::{init_jmap_server, start_jmap_server, JMAPServer, DEFAULT_HTTP_PORT};
-use cluster::main::init_cluster;
+use core::{
+    cluster::main::{init_cluster, start_cluster},
+    server::http::{init_jmap_server, start_jmap_server},
+    tokio, DEFAULT_HTTP_PORT,
+};
+
 use store::{config::env_settings::EnvSettings, tracing::info};
 use store_rocksdb::RocksDB;
 
-use crate::cluster::main::start_cluster;
-
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt::init();
 

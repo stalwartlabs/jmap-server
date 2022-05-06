@@ -4,3 +4,5 @@ pub mod mail;
 pub mod mailbox;
 pub mod thread;
 pub mod vacation_response;
+
+pub use mail_parser;

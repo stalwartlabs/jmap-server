@@ -1,18 +1,16 @@
-use actix_web::web;
+use core::actix_web::web;
+use core::{tokio, JMAPServer};
 
 use store::Store;
 
-use store_test::{
+use crate::tests::store::{
     jmap_mail_merge_threads::build_thread_test_messages, jmap_mail_set::insert_email,
     jmap_mailbox::insert_mailbox,
 };
 
-use crate::{
-    tests::cluster::{
-        activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
-        compact_log, shutdown_all, Cluster,
-    },
-    JMAPServer,
+use crate::tests::cluster::utils::{
+    activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
+    compact_log, shutdown_all, Cluster,
 };
 
 pub async fn merge_mail_threads<T>()

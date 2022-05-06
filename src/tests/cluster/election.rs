@@ -1,6 +1,6 @@
 use store::Store;
 
-use crate::tests::cluster::{
+use crate::tests::cluster::utils::{
     activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_no_quorum, Cluster,
 };
 

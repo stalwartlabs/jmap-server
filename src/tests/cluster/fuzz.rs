@@ -1,17 +1,19 @@
+use crate::tests::{
+    cluster::utils::{assert_mirrored_stores, num_online_peers, Ac},
+    store::{
+        jmap_mail_set::{delete_email, insert_email, update_email},
+        jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
+    },
+};
+use core::{
+    rand::{self, Rng},
+    tokio::{self, time::sleep},
+};
 use std::{collections::HashMap, sync::Arc, time::Duration};
-
-use rand::Rng;
+use store::core::JMAPIdPrefix;
 use store::{core::collection::Collection, parking_lot::Mutex, AccountId, JMAPId, Store};
 
-use crate::tests::cluster::{assert_mirrored_stores, num_online_peers, Ac};
-use store::core::JMAPIdPrefix;
-use store_test::{
-    jmap_mail_set::{delete_email, insert_email, update_email},
-    jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
-};
-use tokio::time::sleep;
-
-use super::{
+use super::utils::{
     activate_all_peers, assert_cluster_updated, assert_leader_elected, shutdown_all, Cluster, Cmd,
     Cmds,
 };
