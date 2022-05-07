@@ -116,15 +116,23 @@ where
         })
     }
 }
+impl GetResult {
+    pub fn no_account_id(mut self) -> Self {
+        self.account_id = AccountId::MAX;
+        self
+    }
+}
 
 impl From<GetResult> for JSONValue {
     fn from(get_result: GetResult) -> Self {
         let mut result = HashMap::new();
-        result.insert(
-            "accountId".to_string(),
-            (get_result.account_id as JMAPId).to_jmap_string().into(),
-        );
-        result.insert("state".to_string(), get_result.state.into());
+        if get_result.account_id != AccountId::MAX {
+            result.insert(
+                "accountId".to_string(),
+                (get_result.account_id as JMAPId).to_jmap_string().into(),
+            );
+            result.insert("state".to_string(), get_result.state.into());
+        }
         result.insert("list".to_string(), get_result.list.into());
         result.insert("notFound".to_string(), get_result.not_found.into());
         result.into()

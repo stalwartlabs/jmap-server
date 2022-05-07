@@ -2,6 +2,7 @@ pub mod error;
 pub mod id;
 pub mod jmap_store;
 pub mod protocol;
+pub mod push_subscription;
 pub mod request;
 
 use std::fmt::Display;

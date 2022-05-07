@@ -3,10 +3,10 @@ use std::{net::SocketAddr, time::Duration};
 
 use actix_web::web::{self, Buf};
 use futures::{stream::StreamExt, SinkExt};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use store::bincode;
 use store::log::raft::{RaftId, TermId};
+use store::rand::Rng;
 use store::serialize::leb128::Leb128;
 use store::tracing::{debug, error};
 use tokio::sync::watch;
@@ -293,7 +293,7 @@ pub fn spawn_peer_rpc(
                             // Truncated exponential backoff
                             let mut next_attempt_ms = std::cmp::min(
                                 2u64.pow(connection_attempts)
-                                    + rand::thread_rng().gen_range(0..1000),
+                                    + store::rand::thread_rng().gen_range(0..1000),
                                 RPC_MAX_BACKOFF_MS,
                             );
 

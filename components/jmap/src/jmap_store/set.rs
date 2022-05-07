@@ -42,6 +42,7 @@ where
 
 pub struct SetResult {
     pub account_id: AccountId,
+    pub collection: Collection,
     pub new_state: JMAPState,
     pub old_state: JMAPState,
     pub created: HashMap<String, JSONValue>,
@@ -387,6 +388,7 @@ where
 
         Ok(SetResult {
             account_id: request.account_id,
+            collection,
             new_state: if let Some(change_id) = change_id {
                 change_id.into()
             } else {
@@ -442,13 +444,25 @@ impl From<DefaultUpdateItem> for JSONValue {
 
 impl UpdateItemResult for DefaultUpdateItem {}
 
+impl SetResult {
+    pub fn no_account_id(mut self) -> Self {
+        self.account_id = AccountId::MAX;
+        self
+    }
+}
+
 impl From<SetResult> for JSONValue {
     fn from(set_result: SetResult) -> Self {
         let mut result = HashMap::with_capacity(9);
-        result.insert(
-            "accountId".to_string(),
-            (set_result.account_id as JMAPId).to_jmap_string().into(),
-        );
+        if set_result.account_id != AccountId::MAX {
+            result.insert(
+                "accountId".to_string(),
+                (set_result.account_id as JMAPId).to_jmap_string().into(),
+            );
+
+            result.insert("newState".to_string(), set_result.new_state.into());
+            result.insert("oldState".to_string(), set_result.old_state.into());
+        }
         result.insert("created".to_string(), set_result.created.into());
         result.insert("notCreated".to_string(), set_result.not_created.into());
 
@@ -458,8 +472,6 @@ impl From<SetResult> for JSONValue {
         result.insert("destroyed".to_string(), set_result.destroyed.into());
         result.insert("notDestroyed".to_string(), set_result.not_destroyed.into());
 
-        result.insert("newState".to_string(), set_result.new_state.into());
-        result.insert("oldState".to_string(), set_result.old_state.into());
         result.into()
     }
 }

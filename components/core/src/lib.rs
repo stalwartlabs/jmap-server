@@ -13,7 +13,6 @@ pub mod state;
 
 pub use actix_web;
 pub use futures;
-pub use rand;
 pub use rayon;
 pub use tokio;
 

@@ -18,7 +18,7 @@ pub struct ChangesRequest {
 impl ChangesRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ChangesRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             since_state: JMAPState::Initial,
             max_changes: 0,
             arguments: HashMap::new(),

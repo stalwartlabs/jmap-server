@@ -16,6 +16,7 @@ use jmap::{
         request::Request,
         response::Response,
     },
+    push_subscription::{get::GetPushSubscription, set::SetPushSubscription},
 };
 use jmap_mail::{
     identity::{changes::ChangesIdentity, get::GetIdentity, set::SetIdentity},
@@ -26,12 +27,9 @@ use jmap_mail::{
     mailbox::{changes::ChangesMailbox, get::GetMailbox, query::QueryMailbox, set::SetMailbox},
     thread::{changes::ChangesThread, get::GetThread},
 };
-use store::{core::collection::Collection, tracing::error, Store};
+use store::{tracing::error, Store};
 
-use crate::{
-    state::{self, StateChange},
-    JMAPServer,
-};
+use crate::{state::StateChange, JMAPServer};
 
 pub struct InvocationResult {
     result: JSONValue,
@@ -45,7 +43,7 @@ where
 {
     let include_created_ids = request.created_ids.is_some();
     let mut response = Response::new(
-        1234,
+        1234, //TODO
         request.created_ids.unwrap_or_default(),
         request.method_calls.len(),
     );
@@ -55,6 +53,7 @@ where
         match Invocation::parse(&name, arguments, &response, &core.store.config) {
             Ok(mut invocation) => {
                 let is_set = invocation.update_set_flags(core.is_in_cluster());
+                let account_id = invocation.account_id;
 
                 match handle_method_call(invocation, &core).await {
                     Ok(result) => {
@@ -67,13 +66,12 @@ where
                             }
 
                             // Broadcast change to subscribers
-                            if let Err(err) = core
-                                .state_change
-                                .clone()
-                                .send(state::Event::Publish { state_change })
-                                .await
+                            if let Err(err) =
+                                core.publish_state_change(account_id, state_change).await
                             {
-                                error!("Failed to broadcast state change: {}", err);
+                                error!("Failed to publish state change: {}", err);
+                                response.push_error(call_id, MethodError::ServerPartialFail);
+                                continue;
                             }
                         }
                         response.push_response(
@@ -102,12 +100,15 @@ where
 
                                         // Broadcast change to subscribers
                                         if let Err(err) = core
-                                            .state_change
-                                            .clone()
-                                            .send(state::Event::Publish { state_change })
+                                            .publish_state_change(account_id, state_change)
                                             .await
                                         {
-                                            error!("Failed to broadcast state change: {}", err);
+                                            error!("Failed to publish state change: {}", err);
+                                            response.push_error(
+                                                call_id,
+                                                MethodError::ServerPartialFail,
+                                            );
+                                            continue;
                                         }
                                     }
                                     response.push_response(name, call_id, result.result, false);
@@ -145,9 +146,7 @@ where
     core.spawn_jmap_request(move || {
         Ok(match (invocation.obj, invocation.call) {
             (Object::Email, Method::Get(request)) => store.get::<GetMail<T>>(request)?.into(),
-            (Object::Email, Method::Set(request)) => {
-                (Collection::Mail, store.set::<SetMail>(request)?).into()
-            }
+            (Object::Email, Method::Set(request)) => store.set::<SetMail>(request)?.into(),
             (Object::Email, Method::Query(request)) => store.query::<QueryMail<T>>(request)?.into(),
             (Object::Email, Method::QueryChanges(request)) => store
                 .query_changes::<ChangesMail, QueryMail<T>>(request)?
@@ -156,7 +155,7 @@ where
                 store.changes::<ChangesMail>(request)?.into()
             }
             (Object::Email, Method::Import(request)) => {
-                (Collection::Mail, store.import::<ImportMail<T>>(request)?).into()
+                store.import::<ImportMail<T>>(request)?.into()
             }
             (Object::Email, Method::Parse(request)) => store.parse::<ParseMail>(request)?.into(),
             (Object::Thread, Method::Get(request)) => store.get::<GetThread<T>>(request)?.into(),
@@ -164,9 +163,7 @@ where
                 store.changes::<ChangesThread>(request)?.into()
             }
             (Object::Mailbox, Method::Get(request)) => store.get::<GetMailbox<T>>(request)?.into(),
-            (Object::Mailbox, Method::Set(request)) => {
-                (Collection::Mailbox, store.set::<SetMailbox>(request)?).into()
-            }
+            (Object::Mailbox, Method::Set(request)) => store.set::<SetMailbox>(request)?.into(),
             (Object::Mailbox, Method::Query(request)) => {
                 store.query::<QueryMailbox<T>>(request)?.into()
             }
@@ -179,12 +176,18 @@ where
             (Object::Identity, Method::Get(request)) => {
                 store.get::<GetIdentity<T>>(request)?.into()
             }
-            (Object::Identity, Method::Set(request)) => {
-                (Collection::Identity, store.set::<SetIdentity>(request)?).into()
-            }
+            (Object::Identity, Method::Set(request)) => store.set::<SetIdentity>(request)?.into(),
             (Object::Identity, Method::Changes(request)) => {
                 store.changes::<ChangesIdentity>(request)?.into()
             }
+            (Object::PushSubscription, Method::Get(request)) => store
+                .get::<GetPushSubscription<T>>(request)?
+                .no_account_id()
+                .into(),
+            (Object::PushSubscription, Method::Set(request)) => store
+                .set::<SetPushSubscription>(request)?
+                .no_account_id()
+                .into(),
             (Object::Core, Method::Echo(arguments)) => InvocationResult::new(arguments),
             _ => {
                 return Err(MethodError::ServerUnavailable);
@@ -204,21 +207,21 @@ impl InvocationResult {
     }
 }
 
-impl From<(Collection, SetResult)> for InvocationResult {
-    fn from(mut result: (Collection, SetResult)) -> Self {
+impl From<SetResult> for InvocationResult {
+    fn from(mut result: SetResult) -> Self {
         InvocationResult {
-            next_invocation: Option::take(&mut result.1.next_invocation),
-            change: if result.1.new_state != result.1.old_state {
+            next_invocation: Option::take(&mut result.next_invocation),
+            change: if result.new_state != result.old_state {
                 StateChange {
-                    collection: result.0,
-                    account_id: result.1.account_id,
-                    id: result.1.new_state.get_change_id(),
+                    collection: result.collection,
+                    account_id: result.account_id,
+                    id: result.new_state.get_change_id(),
                 }
                 .into()
             } else {
                 None
             },
-            result: result.1.into(),
+            result: result.into(),
         }
     }
 }
@@ -247,21 +250,21 @@ impl From<QueryChangesResult> for InvocationResult {
     }
 }
 
-impl From<(Collection, ImportResult)> for InvocationResult {
-    fn from(result: (Collection, ImportResult)) -> Self {
+impl From<ImportResult> for InvocationResult {
+    fn from(result: ImportResult) -> Self {
         InvocationResult {
             next_invocation: None,
-            change: if result.1.new_state != result.1.old_state {
+            change: if result.new_state != result.old_state {
                 StateChange {
-                    collection: result.0,
-                    account_id: result.1.account_id,
-                    id: result.1.new_state.get_change_id(),
+                    collection: result.collection,
+                    account_id: result.account_id,
+                    id: result.new_state.get_change_id(),
                 }
                 .into()
             } else {
                 None
             },
-            result: result.1.into(),
+            result: result.into(),
         }
     }
 }

@@ -19,19 +19,20 @@ use std::{
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
 };
-
-pub use bincode;
-pub use chrono;
-pub use lz4_flex;
-pub use parking_lot;
-pub use roaring;
-pub use sha2;
-pub use tracing;
 use write::{
     id_assign::{IdAssigner, IdCacheKey},
     mutex_map::MutexMap,
     operation::WriteOperation,
 };
+
+pub use bincode;
+pub use chrono;
+pub use lz4_flex;
+pub use parking_lot;
+pub use rand;
+pub use roaring;
+pub use sha2;
+pub use tracing;
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 

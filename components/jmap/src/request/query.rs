@@ -31,7 +31,7 @@ pub struct Comparator {
 impl QueryRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = QueryRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             filter: JSONValue::Null,
             sort: None,
             position: 0,

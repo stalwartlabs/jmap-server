@@ -15,7 +15,7 @@ pub struct GetRequest {
 impl GetRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = GetRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             ids: None,
             properties: JSONValue::Null,
             arguments: HashMap::new(),

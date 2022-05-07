@@ -17,7 +17,7 @@ pub struct ImportRequest {
 impl ImportRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ImportRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             if_in_state: None,
             arguments: HashMap::new(),
         };

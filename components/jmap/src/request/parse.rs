@@ -17,7 +17,7 @@ pub struct ParseRequest {
 impl ParseRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = ParseRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             arguments: HashMap::new(),
             blob_ids: Vec::new(),
         };

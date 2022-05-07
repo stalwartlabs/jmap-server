@@ -14,6 +14,7 @@ use super::changes::JMAPChanges;
 #[derive(Default)]
 pub struct ImportResult {
     pub account_id: AccountId,
+    pub collection: Collection,
     pub old_state: JMAPState,
     pub new_state: JMAPState,
     pub created: HashMap<String, JSONValue>,
@@ -79,6 +80,7 @@ where
 
         Ok(ImportResult {
             account_id: request.account_id,
+            collection,
             new_state: if !created.is_empty() {
                 self.get_state(request.account_id, collection)?
             } else {

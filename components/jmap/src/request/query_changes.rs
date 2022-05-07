@@ -24,7 +24,7 @@ pub struct QueryChangesRequest {
 impl QueryChangesRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = QueryChangesRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             filter: JSONValue::Null,
             sort: None,
             since_query_state: JMAPState::Initial,

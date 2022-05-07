@@ -1,9 +1,9 @@
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use rand::Rng;
 use store::core::collection::Collection;
 use store::log::raft::{LogIndex, RaftId, TermId};
+use store::rand::Rng;
 use store::roaring::RoaringTreemap;
 use store::tracing::{debug, error, info};
 use store::{AccountId, Store};
@@ -467,7 +467,7 @@ pub fn election_timeout(now: bool) -> Instant {
     Instant::now()
         + Duration::from_millis(
             if now { 0 } else { ELECTION_TIMEOUT }
-                + rand::thread_rng()
+                + store::rand::thread_rng()
                     .gen_range(ELECTION_TIMEOUT_RAND_FROM..ELECTION_TIMEOUT_RAND_TO),
         )
 }

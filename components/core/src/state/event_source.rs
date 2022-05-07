@@ -15,7 +15,7 @@ use tokio::time::{self};
 
 use crate::JMAPServer;
 
-use super::{manager::subscribe_state_manager, StateChangeResponse};
+use super::StateChangeResponse;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum CloseAfter {
@@ -79,14 +79,14 @@ where
     } else {
         None
     };
-    let _account_id = 1;
-    let account_ids = vec![_account_id]; //TODO obtain from session, plus shared accounts
+    let _account_id = 1; //TODO obtain from session, plus shared accounts + device ids limit
     let mut response = StateChangeResponse::new();
     let close_after_state = matches!(params.closeafter, CloseAfter::State);
 
     // Register with state manager
-    let mut change_rx = if let Some(change_rx) =
-        subscribe_state_manager(core, _account_id, account_ids, collections).await
+    let mut change_rx = if let Some(change_rx) = core
+        .subscribe_state_manager(_account_id, _account_id, collections)
+        .await
     {
         change_rx
     } else {

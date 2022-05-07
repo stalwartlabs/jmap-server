@@ -19,7 +19,7 @@ pub struct SetRequest {
 impl SetRequest {
     pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
         let mut request = SetRequest {
-            account_id: 1, //TODO
+            account_id: AccountId::MAX,
             if_in_state: None,
             create: Vec::with_capacity(0),
             update: HashMap::with_capacity(0),

@@ -5,12 +5,10 @@ use crate::tests::{
         jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
     },
 };
-use core::{
-    rand::{self, Rng},
-    tokio::{self, time::sleep},
-};
+use core::tokio::{self, time::sleep};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use store::core::JMAPIdPrefix;
+use store::rand::{self, Rng};
 use store::{core::collection::Collection, parking_lot::Mutex, AccountId, JMAPId, Store};
 
 use super::utils::{

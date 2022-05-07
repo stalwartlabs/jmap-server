@@ -1,3 +1,6 @@
+//TODO implement plus all housekeeping tasks
+/*
+
 use std::time::SystemTime;
 
 use crate::blob::BlobId;
@@ -7,8 +10,6 @@ use crate::serialize::StoreSerialize;
 use crate::WriteOperation;
 use crate::{ColumnFamily, Direction, JMAPStore, Store, StoreError};
 
-//TODO implement plus all housekeeping tasks
-/*
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,

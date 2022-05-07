@@ -124,6 +124,24 @@ where
             .and_then(|value| value.to_string())
     }
 
+    pub fn remove_string(&mut self, property: &T) -> Option<String> {
+        self.properties
+            .remove(property)
+            .and_then(|value| value.unwrap_string())
+    }
+
+    pub fn get_object(&self, property: &T) -> Option<&HashMap<String, JSONValue>> {
+        self.properties
+            .get(property)
+            .and_then(|value| value.to_object())
+    }
+
+    pub fn get_array(&self, property: &T) -> Option<&Vec<JSONValue>> {
+        self.properties
+            .get(property)
+            .and_then(|value| value.to_array())
+    }
+
     pub fn insert_validate(self, document: &mut Document) -> crate::error::set::Result<()> {
         for property in T::required() {
             if self

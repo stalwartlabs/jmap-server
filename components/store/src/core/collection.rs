@@ -14,6 +14,12 @@ pub enum Collection {
     None = 8,
 }
 
+impl Default for Collection {
+    fn default() -> Self {
+        Collection::None
+    }
+}
+
 impl From<u8> for Collection {
     fn from(value: u8) -> Self {
         match value {
