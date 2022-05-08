@@ -103,11 +103,13 @@ where
                 if keys
                     .get("p256dh")
                     .and_then(|v| v.to_string())
-                    .map_or(false, |v| v.len() < 512)
+                    .and_then(|v| base64::decode_config(v, base64::URL_SAFE).ok())
+                    .map_or(false, |v| (5..=255).contains(&v.len()))
                     && keys
                         .get("auth")
                         .and_then(|v| v.to_string())
-                        .map_or(false, |v| v.len() < 255)
+                        .and_then(|v| base64::decode_config(v, base64::URL_SAFE).ok())
+                        .map_or(false, |v| (5..=255).contains(&v.len()))
                     && keys.len() == 2
                 {
                     Ok(value)

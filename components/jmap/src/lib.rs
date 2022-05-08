@@ -5,6 +5,8 @@ pub mod protocol;
 pub mod push_subscription;
 pub mod request;
 
+pub use base64;
+
 use std::fmt::Display;
 
 use error::method::MethodError;

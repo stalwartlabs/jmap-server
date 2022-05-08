@@ -24,3 +24,5 @@ num_cpus = "1.13.1"
 futures = "0.3"
 rayon = "1.5.1"
 reqwest = "0.11"
+ece = "2.2"
+

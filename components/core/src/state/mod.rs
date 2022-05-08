@@ -64,8 +64,8 @@ pub struct PushSubscription {
 
 #[derive(Debug, Clone)]
 pub struct EncriptionKeys {
-    pub p256dh: String,
-    pub auth: String,
+    pub p256dh: Vec<u8>,
+    pub auth: Vec<u8>,
 }
 
 #[derive(serde::Serialize)]

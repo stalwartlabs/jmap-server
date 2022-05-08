@@ -4,12 +4,13 @@ use std::{
 };
 
 use jmap::{
+    base64,
     id::{state::JMAPState, JMAPIdSerialize},
     jmap_store::orm::JMAPOrm,
     protocol::{invocation::Object, json::JSONValue},
     push_subscription::PushSubscriptionProperty,
 };
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use store::{
     core::{
         collection::{Collection, Collections},
@@ -291,16 +292,30 @@ impl PushSubscription {
     }
 }
 
-async fn http_request(url: String, body: String, keys: Option<EncriptionKeys>) -> bool {
-    if let Err(err) = reqwest::Client::new()
+async fn http_request(url: String, mut body: String, keys: Option<EncriptionKeys>) -> bool {
+    let mut client = reqwest::Client::new()
         .post(&url)
         .timeout(Duration::from_millis(PUSH_TIMEOUT_MS))
         .header(CONTENT_TYPE, "application/json")
-        .header("TTL", "86400")
-        .body(body)
-        .send()
-        .await
-    {
+        .header("TTL", "86400");
+
+    if let Some(keys) = keys {
+        match ece::encrypt(&keys.p256dh, &keys.auth, body.as_bytes())
+            .map(|b| base64::encode_config(b, base64::URL_SAFE))
+        {
+            Ok(body_) => {
+                body = body_;
+                client = client.header(CONTENT_ENCODING, "aes128gcm");
+            }
+            Err(err) => {
+                // Do not reattempt if encryption fails.
+                debug!("Failed to encrypt push subscription to {}: {}", url, err);
+                return true;
+            }
+        }
+    }
+
+    if let Err(err) = client.body(body).send().await {
         debug!("HTTP post to {} failed with: {}", url, err);
         false
     } else {
@@ -353,10 +368,12 @@ where
                             p256dh: keys
                                 .remove("p256dh")
                                 .and_then(|v| v.unwrap_string())
+                                .and_then(|v| base64::decode_config(v, base64::URL_SAFE).ok())
                                 .unwrap_or_default(),
                             auth: keys
                                 .remove("auth")
                                 .and_then(|v| v.unwrap_string())
+                                .and_then(|v| base64::decode_config(v, base64::URL_SAFE).ok())
                                 .unwrap_or_default(),
                         }
                         .into()
