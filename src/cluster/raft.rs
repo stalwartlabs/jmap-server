@@ -232,7 +232,7 @@ where
             self.addr, self.term
         );
 
-        #[cfg(feature = "debug")]
+        #[cfg(test)]
         {
             let db_index = self
                 .core
@@ -683,7 +683,7 @@ where
         false
     }
 
-    #[cfg(feature = "debug")]
+    #[cfg(test)]
     pub async fn commit_last_index(&self) -> LogIndex {
         let uncommitted_index = self.get_last_log().await.unwrap().unwrap().index;
         if !self.commit_index(uncommitted_index).await {

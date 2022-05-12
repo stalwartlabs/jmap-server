@@ -1064,7 +1064,7 @@ impl MailGetArguments {
             match arg_name.as_str() {
                 "bodyProperties" => body_properties = arg_value.parse_array_items(true)?,
                 "fetchTextBodyValues" => fetch_text_body_values = arg_value.parse_bool()?,
-                "fetchHtmlBodyValues" => fetch_html_body_values = arg_value.parse_bool()?,
+                "fetchHTMLBodyValues" => fetch_html_body_values = arg_value.parse_bool()?,
                 "fetchAllBodyValues" => fetch_all_body_values = arg_value.parse_bool()?,
                 "maxBodyValueBytes" => {
                     max_body_value_bytes = arg_value.parse_unsigned_int(false)?.unwrap() as usize

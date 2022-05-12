@@ -5,25 +5,35 @@ edition = "2021"
 resolver = "2"
 
 [dependencies]
-core = { path = "components/core" }
 store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
-tracing-subscriber = "0.2"
-
-[dev-dependencies]
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
-core = { path = "components/core", features = ["debug"] }
+tracing-subscriber = "0.2"
+actix-web = "4"
+openssl = "0.10"
+serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+gethostname = "0.2.2"
+tokio = { version = "1.16.1", features = ["full"] }
+tokio-util = "0.7.0"
+async-stream = "0.3.3"
+num_cpus = "1.13.1"
+futures = "0.3"
+rayon = "1.5.1"
+reqwest = "0.11"
+ece = "2.2"
+
+[dev-dependencies]
+jmap-client = { path = "/home/vagrant/code/jmap-client" }
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 serde_yaml = "0.8"
-tokio-test = "0.4"
 
 [workspace]
 members = [
-    "components/core",
     "components/store",
     "components/store_rocksdb",
     "components/jmap",

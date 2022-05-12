@@ -457,7 +457,7 @@ where
                             collection = update_collection;
                         }
                         Update::Change { change } => {
-                            #[cfg(feature = "debug")]
+                            #[cfg(test)]
                             {
                                 assert!(last_index != LogIndex::MAX);
                                 let existing_change = store
@@ -491,7 +491,7 @@ where
                                 .insert(collection);
                         }
                         Update::Log { raft_id, log } => {
-                            #[cfg(feature = "debug")]
+                            #[cfg(test)]
                             {
                                 //println!("Adding raft id {:?}", raft_id,);
 

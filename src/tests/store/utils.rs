@@ -187,7 +187,7 @@ pub fn init_settings(
                         ("cluster".to_string(), "secret_key".to_string()),
                         (
                             "jmap-url".to_string(),
-                            format!("http://127.0.0.1:{}/.well-known/jmap", 8000 + peer_num),
+                            format!("http://127.0.0.1:{}", 8000 + peer_num),
                         ),
                         ("http-port".to_string(), (8000 + peer_num).to_string()),
                         ("rpc-port".to_string(), (9000 + peer_num).to_string()),
@@ -211,10 +211,17 @@ pub fn init_settings(
         } else {
             EnvSettings {
                 args: HashMap::from_iter(
-                    vec![(
-                        "db-path".to_string(),
-                        temp_dir.to_str().unwrap().to_string(),
-                    )]
+                    vec![
+                        (
+                            "db-path".to_string(),
+                            temp_dir.to_str().unwrap().to_string(),
+                        ),
+                        (
+                            "jmap-url".to_string(),
+                            format!("http://127.0.0.1:{}", 8000 + peer_num),
+                        ),
+                        ("http-port".to_string(), (8000 + peer_num).to_string()),
+                    ]
                     .into_iter(),
                 ),
             }

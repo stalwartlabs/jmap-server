@@ -113,7 +113,7 @@ pub enum Event {
     },
     Shutdown,
 
-    #[cfg(feature = "debug")]
+    #[cfg(test)]
     SetOffline {
         is_offline: bool,
         notify_peers: bool,

@@ -94,13 +94,13 @@ pub async fn start_cluster<T>(
         let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
         let mut last_ping = Instant::now();
 
-        #[cfg(feature = "debug")]
+        #[cfg(test)]
         let mut is_offline = false;
 
         loop {
             match time::timeout(wait_timeout, main_rx.recv()).await {
                 Ok(Some(message)) => {
-                    #[cfg(feature = "debug")]
+                    #[cfg(test)]
                     if let Event::SetOffline {
                         is_offline: set_offline,
                         notify_peers,
@@ -131,7 +131,7 @@ pub async fn start_cluster<T>(
 
                         cluster.start_election_timer(!is_offline).await;
                     }
-                    #[cfg(feature = "debug")]
+                    #[cfg(test)]
                     if is_offline {
                         continue;
                     }
@@ -157,7 +157,7 @@ pub async fn start_cluster<T>(
                 }
                 Err(_) =>
                 {
-                    #[cfg(feature = "debug")]
+                    #[cfg(test)]
                     if is_offline {
                         continue;
                     }
@@ -167,7 +167,7 @@ pub async fn start_cluster<T>(
             if !cluster.peers.is_empty() {
                 let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
                 let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
-                    #[cfg(feature = "debug")]
+                    #[cfg(test)]
                     if time_since_last_ping > (PING_INTERVAL + 200) {
                         error!(
                             "[{}] Possible event loop block: {}ms since last ping.",
@@ -319,7 +319,7 @@ where
             }
             Event::Shutdown => return Ok(false),
 
-            #[cfg(feature = "debug")]
+            #[cfg(test)]
             Event::SetOffline { .. } => (),
         }
         Ok(true)

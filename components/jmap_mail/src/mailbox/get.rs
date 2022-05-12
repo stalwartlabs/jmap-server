@@ -17,7 +17,7 @@ use store::{DocumentId, Store};
 
 use crate::mail::{Keyword, MessageField};
 
-use super::MailboxProperty;
+use super::{MailboxProperty, MailboxRights};
 
 pub struct GetMailbox<'y, T>
 where
@@ -101,7 +101,7 @@ where
                         }
                     }
                     MailboxProperty::IsSubscribed => true.into(), //TODO implement
-                    MailboxProperty::MyRights => JSONValue::Object(HashMap::new()), //TODO implement
+                    MailboxProperty::MyRights => MailboxRights::default().into(), //TODO implement
                     MailboxProperty::TotalEmails => self
                         .get_mailbox_tag(document_id)?
                         .map(|v| v.len())

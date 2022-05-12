@@ -100,7 +100,7 @@ where
         }
     }
 
-    #[cfg(feature = "debug")]
+    #[cfg(test)]
     pub async fn set_offline(&self, is_offline: bool, notify_peers: bool) {
         self.is_offline
             .store(is_offline, std::sync::atomic::Ordering::Relaxed);
@@ -121,7 +121,7 @@ where
         }
     }
 
-    #[cfg(feature = "debug")]
+    #[cfg(test)]
     pub fn is_offline(&self) -> bool {
         self.is_offline.load(std::sync::atomic::Ordering::Relaxed)
     }

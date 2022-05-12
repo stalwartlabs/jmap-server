@@ -1,14 +1,37 @@
+pub mod api;
+pub mod blob;
+pub mod cluster;
+pub mod server;
+pub mod state;
+
 #[cfg(test)]
 pub mod tests;
 
-use core::{
-    cluster::main::{init_cluster, start_cluster},
-    server::http::{init_jmap_server, start_jmap_server},
-    tokio, DEFAULT_HTTP_PORT,
-};
+use std::sync::Arc;
 
-use store::{config::env_settings::EnvSettings, tracing::info};
+use api::session::Session;
+use cluster::{
+    main::{init_cluster, start_cluster},
+    ClusterIpc,
+};
+use server::http::{init_jmap_server, start_jmap_server};
+use store::{config::env_settings::EnvSettings, tracing::info, JMAPStore};
 use store_rocksdb::RocksDB;
+use tokio::sync::mpsc;
+
+pub const DEFAULT_HTTP_PORT: u16 = 8080;
+pub const DEFAULT_RPC_PORT: u16 = 7911;
+
+pub struct JMAPServer<T> {
+    pub store: Arc<JMAPStore<T>>,
+    pub worker_pool: rayon::ThreadPool,
+    pub base_session: Session,
+    pub cluster: Option<ClusterIpc>,
+    pub state_change: mpsc::Sender<state::Event>,
+
+    #[cfg(test)]
+    pub is_offline: std::sync::atomic::AtomicBool,
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

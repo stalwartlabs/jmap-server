@@ -36,6 +36,7 @@ impl Subscriber {
 const PURGE_EVERY_SECS: u64 = 3600;
 const SEND_TIMEOUT_MS: u64 = 500;
 
+//TODO: emailDelivery type
 pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
     let (change_tx, mut change_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
     let push_tx = spawn_push_manager();

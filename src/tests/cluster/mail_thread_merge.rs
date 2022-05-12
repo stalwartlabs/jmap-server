@@ -1,12 +1,11 @@
-use core::actix_web::web;
-use core::{tokio, JMAPServer};
-
+use actix_web::web;
 use store::Store;
 
 use crate::tests::store::{
     jmap_mail_merge_threads::build_thread_test_messages, jmap_mail_set::insert_email,
     jmap_mailbox::insert_mailbox,
 };
+use crate::JMAPServer;
 
 use crate::tests::cluster::utils::{
     activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,

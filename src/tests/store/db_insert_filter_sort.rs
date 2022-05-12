@@ -1,4 +1,3 @@
-use core::rayon;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},

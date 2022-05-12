@@ -4,6 +4,7 @@ pub mod query;
 pub mod raft;
 pub mod set;
 
+use std::collections::HashMap;
 use std::fmt::Display;
 
 use jmap::error::method::MethodError;
@@ -30,6 +31,19 @@ pub enum MailboxProperty {
     TotalThreads = 8,
     UnreadThreads = 9,
     MyRights = 10,
+}
+
+#[derive(Debug, Default)]
+pub struct MailboxRights {
+    may_read_items: bool,
+    may_add_items: bool,
+    may_remove_items: bool,
+    may_set_seen: bool,
+    may_set_keywords: bool,
+    may_create_child: bool,
+    may_rename: bool,
+    may_delete: bool,
+    may_submit: bool,
 }
 
 impl Property for MailboxProperty {
@@ -100,6 +114,22 @@ impl From<MailboxProperty> for FieldId {
 impl From<MailboxProperty> for JSONValue {
     fn from(value: MailboxProperty) -> Self {
         JSONValue::String(value.to_string())
+    }
+}
+
+impl From<MailboxRights> for JSONValue {
+    fn from(value: MailboxRights) -> Self {
+        let mut map = HashMap::new();
+        map.insert("mayReadItems".to_string(), value.may_read_items.into());
+        map.insert("mayAddItems".to_string(), value.may_add_items.into());
+        map.insert("mayRemoveItems".to_string(), value.may_remove_items.into());
+        map.insert("maySetSeen".to_string(), value.may_set_seen.into());
+        map.insert("maySetKeywords".to_string(), value.may_set_keywords.into());
+        map.insert("mayCreateChild".to_string(), value.may_create_child.into());
+        map.insert("mayRename".to_string(), value.may_rename.into());
+        map.insert("mayDelete".to_string(), value.may_delete.into());
+        map.insert("maySubmit".to_string(), value.may_submit.into());
+        map.into()
     }
 }
 

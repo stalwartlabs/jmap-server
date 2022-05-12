@@ -44,7 +44,7 @@ where
             .unwrap(),
         state_change: spawn_state_manager(cluster.is_none()),
         cluster,
-        #[cfg(feature = "debug")]
+        #[cfg(test)]
         is_offline: false.into(),
     })
 }

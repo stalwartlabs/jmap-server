@@ -1,11 +1,14 @@
-use core::{actix_web::web, tokio, JMAPServer};
 use std::{collections::HashMap, sync::Arc};
 
+use actix_web::web;
 use store::{parking_lot::Mutex, Store};
 
-use crate::tests::cluster::utils::{
-    activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
-    compact_log, shutdown_all, test_batch, Cluster,
+use crate::{
+    tests::cluster::utils::{
+        activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
+        compact_log, shutdown_all, test_batch, Cluster,
+    },
+    JMAPServer,
 };
 
 pub async fn crud_ops<T>()

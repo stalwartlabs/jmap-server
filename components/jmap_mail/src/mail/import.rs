@@ -58,7 +58,7 @@ where
 pub struct ImportItem {
     pub blob_id: JMAPBlob,
     pub mailbox_ids: Vec<DocumentId>,
-    pub keywords: Vec<Keyword>,
+    pub keywords: Vec<Tag>,
     pub received_at: Option<u64>,
 }
 
@@ -131,8 +131,22 @@ where
                     .collect(),
                 keywords: if let Some(keywords) = item_value.remove("keywords") {
                     keywords
-                        .parse_array_items::<Keyword>(true)?
-                        .unwrap_or_default()
+                        .unwrap_object()
+                        .ok_or_else(|| {
+                            MethodError::InvalidArguments(format!(
+                                "Expected keywords object for {}.",
+                                id
+                            ))
+                        })?
+                        .into_iter()
+                        .filter_map(|(k, v)| {
+                            if v.to_bool()? {
+                                Keyword::from_jmap(k).into()
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
                 } else {
                     vec![]
                 },
@@ -179,7 +193,7 @@ where
                     item.blob_id.id,
                     &blob,
                     item.mailbox_ids,
-                    item.keywords.into_iter().map(|k| k.tag).collect(),
+                    item.keywords,
                     item.received_at,
                 )
                 .map_err(|_| {

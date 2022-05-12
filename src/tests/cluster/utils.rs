@@ -1,17 +1,18 @@
-use crate::tests::store::utils::StoreCompareWith;
-use core::{
-    actix_web::web,
+use crate::{
     cluster::main::{init_cluster, start_cluster, ClusterInit},
-    futures::future::join_all,
     server::http::init_jmap_server,
-    tokio::{self, time::sleep},
+    tests::store::utils::StoreCompareWith,
     JMAPServer,
 };
+
+use actix_web::web;
+use futures::future::join_all;
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use store::{
     config::env_settings::EnvSettings, log::raft::RaftId, parking_lot::Mutex, AccountId, JMAPId,
     JMAPStore, Store,
 };
+use tokio::time::sleep;
 
 use crate::tests::store::{
     jmap_mail_set::{delete_email, insert_email, update_email},
