@@ -1,11 +1,13 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 4726,
-  "received_at": "2119-10-06T01:46:40Z",
-  "message_id": [
+  "receivedAt": "2119-10-06T01:46:40Z",
+  "messageId": [
     "NDBBIAKOPKHFGPLCODIGOEKECHAA.doug@example.com"
   ],
   "from": [
@@ -21,8 +23,8 @@
     }
   ],
   "subject": "Test message from Microsoft Outlook 00",
-  "sent_at": "2000-05-17T23:36:13Z",
-  "body_structure": {
+  "sentAt": "2000-05-17T23:36:13Z",
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -77,7 +79,7 @@
     "subParts": [
       {
         "partId": "0",
-        "blobId": "ignored_value",
+        "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
         "size": 1325,
         "headers": [
           {
@@ -99,7 +101,7 @@
       },
       {
         "partId": "1",
-        "blobId": "ignored_value",
+        "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
         "size": 1453,
         "headers": [
           {
@@ -121,12 +123,12 @@
       }
     ]
   },
-  "text_body": [],
-  "html_body": [],
+  "textBody": [],
+  "htmlBody": [],
   "attachments": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
         {
@@ -148,7 +150,7 @@
     },
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
       "size": 1453,
       "headers": [
         {
@@ -169,5 +171,5 @@
       "disposition": "attachment"
     }
   ],
-  "has_attachment": true
+  "hasAttachment": true
 }

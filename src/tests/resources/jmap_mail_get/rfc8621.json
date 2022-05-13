@@ -1,12 +1,14 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 870,
-  "received_at": "1997-07-27T10:40:00Z",
+  "receivedAt": "1997-07-27T10:40:00Z",
   "subject": "RFC 8621 Section 4.1.4 test",
-  "body_structure": {
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -21,7 +23,7 @@
     "subParts": [
       {
         "partId": "0",
-        "blobId": "ignored_value",
+        "blobId": "b559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd01",
         "size": 1,
         "headers": [
           {
@@ -65,7 +67,7 @@
                 "subParts": [
                   {
                     "partId": "4",
-                    "blobId": "ignored_value",
+                    "blobId": "bdf7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c01",
                     "size": 1,
                     "headers": [
                       {
@@ -82,7 +84,7 @@
                   },
                   {
                     "partId": "5",
-                    "blobId": "ignored_value",
+                    "blobId": "b6b23c0d5f35d1b11f9b683f0b0a617355deb11277d91ae091d399c655b87940d01",
                     "size": 1,
                     "headers": [
                       {
@@ -99,7 +101,7 @@
                   },
                   {
                     "partId": "6",
-                    "blobId": "ignored_value",
+                    "blobId": "b3f39d5c348e5b79d06e842c114e6cc571583bbf44e4b0ebfda1a01ec05745d4301",
                     "size": 1,
                     "headers": [
                       {
@@ -127,7 +129,7 @@
                 "subParts": [
                   {
                     "partId": "8",
-                    "blobId": "ignored_value",
+                    "blobId": "b219132b066ebcd6e2cb4bcc0b17a1432316e9f1ece62dd8a5c263f6053eb150c0e",
                     "size": 14,
                     "headers": [
                       {
@@ -139,7 +141,7 @@
                   },
                   {
                     "partId": "9",
-                    "blobId": "ignored_value",
+                    "blobId": "bf67ab10ad4e4c53121b6a5fe4da9c10ddee905b978d3788d2723d7bfacbe28a901",
                     "size": 1,
                     "headers": [
                       {
@@ -155,7 +157,7 @@
           },
           {
             "partId": "10",
-            "blobId": "ignored_value",
+            "blobId": "b333e0a1e27815d0ceee55c473fe3dc93d56c63e3bee2b3b4aee8eed6d70191a301",
             "size": 1,
             "headers": [
               {
@@ -172,7 +174,7 @@
           },
           {
             "partId": "11",
-            "blobId": "ignored_value",
+            "blobId": "b44bd7ae60f478fae1061e11a7739f4b94d1daf917982d33b6fc8a01a63f89c2101",
             "size": 1,
             "headers": [
               {
@@ -184,7 +186,7 @@
           },
           {
             "partId": "12",
-            "blobId": "ignored_value",
+            "blobId": "b0adf6a545653eb50ec4914ad3974b34ab453b3ff69f29a00a0482ac20c39c9fa11",
             "size": 17,
             "headers": [
               {
@@ -198,7 +200,7 @@
       },
       {
         "partId": "13",
-        "blobId": "ignored_value",
+        "blobId": "b86be9a55762d316a3026c2836d044f5fc76e34da10e1b45feee5f18be7edb17701",
         "size": 1,
         "headers": [
           {
@@ -215,7 +217,7 @@
       }
     ]
   },
-  "body_values": {
+  "bodyValues": {
     "0": {
       "value": "A",
       "isEncodingProblem": false,
@@ -252,10 +254,10 @@
       "isTruncated": false
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd01",
       "size": 1,
       "headers": [
         {
@@ -272,7 +274,7 @@
     },
     {
       "partId": "4",
-      "blobId": "ignored_value",
+      "blobId": "bdf7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c01",
       "size": 1,
       "headers": [
         {
@@ -289,7 +291,7 @@
     },
     {
       "partId": "5",
-      "blobId": "ignored_value",
+      "blobId": "b6b23c0d5f35d1b11f9b683f0b0a617355deb11277d91ae091d399c655b87940d01",
       "size": 1,
       "headers": [
         {
@@ -306,7 +308,7 @@
     },
     {
       "partId": "6",
-      "blobId": "ignored_value",
+      "blobId": "b3f39d5c348e5b79d06e842c114e6cc571583bbf44e4b0ebfda1a01ec05745d4301",
       "size": 1,
       "headers": [
         {
@@ -323,7 +325,7 @@
     },
     {
       "partId": "13",
-      "blobId": "ignored_value",
+      "blobId": "b86be9a55762d316a3026c2836d044f5fc76e34da10e1b45feee5f18be7edb17701",
       "size": 1,
       "headers": [
         {
@@ -339,16 +341,16 @@
       "disposition": "inline"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "14",
-      "blobId": "ignored_value",
+      "blobId": "bebd481a1bee3ad997d4a6593c4ed7cd7cd64b2a02d4c8aa487bb272171affafe1b",
       "size": 27,
       "type": "text/html"
     },
     {
       "partId": "8",
-      "blobId": "ignored_value",
+      "blobId": "b219132b066ebcd6e2cb4bcc0b17a1432316e9f1ece62dd8a5c263f6053eb150c0e",
       "size": 14,
       "headers": [
         {
@@ -360,7 +362,7 @@
     },
     {
       "partId": "15",
-      "blobId": "ignored_value",
+      "blobId": "bcb290313e061011dfa60c545f3633757e9a4fd7d3030376ba19cf4d9b5b225d71b",
       "size": 27,
       "type": "text/html"
     }
@@ -368,7 +370,7 @@
   "attachments": [
     {
       "partId": "5",
-      "blobId": "ignored_value",
+      "blobId": "b6b23c0d5f35d1b11f9b683f0b0a617355deb11277d91ae091d399c655b87940d01",
       "size": 1,
       "headers": [
         {
@@ -385,7 +387,7 @@
     },
     {
       "partId": "9",
-      "blobId": "ignored_value",
+      "blobId": "bf67ab10ad4e4c53121b6a5fe4da9c10ddee905b978d3788d2723d7bfacbe28a901",
       "size": 1,
       "headers": [
         {
@@ -397,7 +399,7 @@
     },
     {
       "partId": "10",
-      "blobId": "ignored_value",
+      "blobId": "b333e0a1e27815d0ceee55c473fe3dc93d56c63e3bee2b3b4aee8eed6d70191a301",
       "size": 1,
       "headers": [
         {
@@ -414,7 +416,7 @@
     },
     {
       "partId": "11",
-      "blobId": "ignored_value",
+      "blobId": "b44bd7ae60f478fae1061e11a7739f4b94d1daf917982d33b6fc8a01a63f89c2101",
       "size": 1,
       "headers": [
         {
@@ -426,7 +428,7 @@
     },
     {
       "partId": "12",
-      "blobId": "ignored_value",
+      "blobId": "b0adf6a545653eb50ec4914ad3974b34ab453b3ff69f29a00a0482ac20c39c9fa11",
       "size": 17,
       "headers": [
         {
@@ -437,6 +439,6 @@
       "type": "message/rfc822"
     }
   ],
-  "has_attachment": true,
+  "hasAttachment": true,
   "preview": "A"
 }

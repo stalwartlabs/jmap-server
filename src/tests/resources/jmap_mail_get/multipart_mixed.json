@@ -1,10 +1,12 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 1853,
-  "received_at": "2028-09-19T18:13:20Z",
+  "receivedAt": "2028-09-19T18:13:20Z",
   "from": [
     {
       "name": "Nathaniel Borenstein",
@@ -18,8 +20,8 @@
     }
   ],
   "subject": "A multipart example",
-  "sent_at": "1994-10-07T23:15:05Z",
-  "body_structure": {
+  "sentAt": "1994-10-07T23:15:05Z",
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -50,13 +52,13 @@
     "subParts": [
       {
         "partId": "0",
-        "blobId": "ignored_value",
+        "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
         "size": 262,
         "type": "text/plain"
       },
       {
         "partId": "1",
-        "blobId": "ignored_value",
+        "blobId": "b9032658848b2d19fe0b1892e11c31f72f218ccb8b18b6d43ce4ea4bb396b64756f",
         "size": 111,
         "headers": [
           {
@@ -78,7 +80,7 @@
         "subParts": [
           {
             "partId": "3",
-            "blobId": "ignored_value",
+            "blobId": "b1dbf453ada60e8359e03220411174eebdfd596bdf2e134f41b1c97dcba3ab00255",
             "size": 85,
             "headers": [
               {
@@ -94,7 +96,7 @@
           },
           {
             "partId": "4",
-            "blobId": "ignored_value",
+            "blobId": "b5e4e1aa56b433a968fcd5360ee27ff7256dca12de1705ae46b4af504f6c05e7d2c",
             "size": 44,
             "headers": [
               {
@@ -112,7 +114,7 @@
       },
       {
         "partId": "5",
-        "blobId": "ignored_value",
+        "blobId": "bfa7bff83afa6c5b29b2710fe776a204c07f11ef3da6463f4a2de8d697f3312a38c01",
         "size": 140,
         "headers": [
           {
@@ -124,7 +126,7 @@
       },
       {
         "partId": "6",
-        "blobId": "ignored_value",
+        "blobId": "b998fed679350b54f74b215f061023464eafe7187ca15abfdcaca0e779dcbce3ef301",
         "size": 243,
         "headers": [
           {
@@ -136,7 +138,7 @@
       }
     ]
   },
-  "body_values": {
+  "bodyValues": {
     "0": {
       "value": "... Some text appears here ...\n\n[Note that the blank between the boundary and the start\nof the te...",
       "isEncodingProblem": false,
@@ -158,16 +160,16 @@
       "isTruncated": true
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
       "size": 262,
       "type": "text/plain"
     },
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "b9032658848b2d19fe0b1892e11c31f72f218ccb8b18b6d43ce4ea4bb396b64756f",
       "size": 111,
       "headers": [
         {
@@ -179,16 +181,16 @@
       "charset": "US-ASCII"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "7",
-      "blobId": "ignored_value",
+      "blobId": "b87a218f3d261478417dcdddf6ca45f955dc5a10026549f36297a0852a8c35676bc02",
       "size": 316,
       "type": "text/html"
     },
     {
       "partId": "8",
-      "blobId": "ignored_value",
+      "blobId": "b0a9aca7b5d908f73948d7590a30990598f5484456f76bd19302cd4dcfda091f79501",
       "size": 149,
       "type": "text/html"
     }
@@ -196,7 +198,7 @@
   "attachments": [
     {
       "partId": "3",
-      "blobId": "ignored_value",
+      "blobId": "b1dbf453ada60e8359e03220411174eebdfd596bdf2e134f41b1c97dcba3ab00255",
       "size": 85,
       "headers": [
         {
@@ -212,7 +214,7 @@
     },
     {
       "partId": "4",
-      "blobId": "ignored_value",
+      "blobId": "b5e4e1aa56b433a968fcd5360ee27ff7256dca12de1705ae46b4af504f6c05e7d2c",
       "size": 44,
       "headers": [
         {
@@ -228,7 +230,7 @@
     },
     {
       "partId": "5",
-      "blobId": "ignored_value",
+      "blobId": "bfa7bff83afa6c5b29b2710fe776a204c07f11ef3da6463f4a2de8d697f3312a38c01",
       "size": 140,
       "headers": [
         {
@@ -240,7 +242,7 @@
     },
     {
       "partId": "6",
-      "blobId": "ignored_value",
+      "blobId": "b998fed679350b54f74b215f061023464eafe7187ca15abfdcaca0e779dcbce3ef301",
       "size": 243,
       "headers": [
         {
@@ -251,6 +253,6 @@
       "type": "message/rfc822"
     }
   ],
-  "has_attachment": true,
+  "hasAttachment": true,
   "preview": "... Some text appears here ...\n\n[Note that the blank between the boundary and the start\nof the text in this part means no header fields were\ngiven and this is text in the US-ASCII character set.\nIt could have been done with explicit typing as in the\nnex..."
 }

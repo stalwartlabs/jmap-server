@@ -3,8 +3,6 @@ pub mod db_insert_filter_sort;
 pub mod db_log;
 pub mod jmap_changes;
 pub mod jmap_mail_get;
-pub mod jmap_mail_merge_threads;
-pub mod jmap_mail_parse;
 pub mod jmap_mail_query;
 pub mod jmap_mail_query_changes;
 pub mod jmap_mail_set;
@@ -76,15 +74,6 @@ fn compact_log() {
 }
 
 #[test]
-fn jmap_mail_merge_threads() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_threads_test", true);
-
-    jmap_mail_merge_threads::jmap_mail_merge_threads(&db);
-
-    destroy_temp_dir(temp_dir);
-}
-
-#[test]
 fn jmap_mail_query() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_mail_query_test", true);
 
@@ -113,28 +102,10 @@ fn jmap_mail_query_changes() {
 }
 
 #[test]
-fn jmap_mail_get() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_mail_get_test", true);
-
-    jmap_mail_get::jmap_mail_get(&db, 1);
-
-    destroy_temp_dir(temp_dir);
-}
-
-#[test]
 fn jmap_mail_set() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_mail_set_test", true);
 
     jmap_mail_set::jmap_mail_set(&db, 1);
-
-    destroy_temp_dir(temp_dir);
-}
-
-#[test]
-fn jmap_mail_parse() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_mail_parse_test", true);
-
-    jmap_mail_parse::jmap_mail_parse(&db, 1);
 
     destroy_temp_dir(temp_dir);
 }

@@ -1,11 +1,13 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 7477,
-  "received_at": "2206-12-09T08:26:40Z",
-  "message_id": [
+  "receivedAt": "2206-12-09T08:26:40Z",
+  "messageId": [
     "NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com"
   ],
   "from": [
@@ -21,8 +23,8 @@
     }
   ],
   "subject": "Test message from Microsoft Outlook 00",
-  "sent_at": "2000-05-17T23:44:45Z",
-  "body_structure": {
+  "sentAt": "2000-05-17T23:44:45Z",
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -86,7 +88,7 @@
         "subParts": [
           {
             "partId": "1",
-            "blobId": "ignored_value",
+            "blobId": "b266c83a89aac2c140806b2f544b284952c38cb56dfc642c7c369b745be65fc4ef905",
             "size": 761,
             "headers": [
               {
@@ -103,7 +105,7 @@
           },
           {
             "partId": "2",
-            "blobId": "ignored_value",
+            "blobId": "bb67d2aab9df45ae64313cbc22409f9cca3ada3cb397829137079b7a8544025c5a20b",
             "size": 1442,
             "headers": [
               {
@@ -122,7 +124,7 @@
       },
       {
         "partId": "3",
-        "blobId": "ignored_value",
+        "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
         "size": 1325,
         "headers": [
           {
@@ -144,7 +146,7 @@
       },
       {
         "partId": "4",
-        "blobId": "ignored_value",
+        "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
         "size": 1453,
         "headers": [
           {
@@ -166,7 +168,7 @@
       }
     ]
   },
-  "body_values": {
+  "bodyValues": {
     "1": {
       "value": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoi...",
       "isEncodingProblem": false,
@@ -178,10 +180,10 @@
       "isTruncated": true
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "b266c83a89aac2c140806b2f544b284952c38cb56dfc642c7c369b745be65fc4ef905",
       "size": 761,
       "headers": [
         {
@@ -197,10 +199,10 @@
       "charset": "iso-8859-1"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "2",
-      "blobId": "ignored_value",
+      "blobId": "bb67d2aab9df45ae64313cbc22409f9cca3ada3cb397829137079b7a8544025c5a20b",
       "size": 1442,
       "headers": [
         {
@@ -219,7 +221,7 @@
   "attachments": [
     {
       "partId": "3",
-      "blobId": "ignored_value",
+      "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
         {
@@ -241,7 +243,7 @@
     },
     {
       "partId": "4",
-      "blobId": "ignored_value",
+      "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
       "size": 1453,
       "headers": [
         {
@@ -262,6 +264,6 @@
       "cid": "823504223@17052000-0f94"
     }
   ],
-  "has_attachment": true,
+  "hasAttachment": true,
   "preview": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoise, who replied, laughing:  \"Though you be swift as the wind, I will beat you in a race.\"  The Hare, believing her assertion to be simply impossible, assent..."
 }

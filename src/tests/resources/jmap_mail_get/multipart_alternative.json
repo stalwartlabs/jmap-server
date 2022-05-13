@@ -1,10 +1,12 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 616,
-  "received_at": "1989-07-09T15:06:40Z",
+  "receivedAt": "1989-07-09T15:06:40Z",
   "from": [
     {
       "name": null,
@@ -18,7 +20,7 @@
     }
   ],
   "subject": "Multipart Email Example",
-  "body_structure": {
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -41,7 +43,7 @@
     "subParts": [
       {
         "partId": "0",
-        "blobId": "ignored_value",
+        "blobId": "b09ff823bc64b5ed9037d994cf1649ce4f24c3a951c15f248b42c9418638faa8157",
         "size": 87,
         "headers": [
           {
@@ -63,7 +65,7 @@
       },
       {
         "partId": "1",
-        "blobId": "ignored_value",
+        "blobId": "b6f12eb3a38b19af12977ef8c705dde22a3720495a1a8e2f034a6396962ecb7665d",
         "size": 93,
         "headers": [
           {
@@ -85,7 +87,7 @@
       }
     ]
   },
-  "body_values": {
+  "bodyValues": {
     "0": {
       "value": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
       "isEncodingProblem": false,
@@ -97,10 +99,10 @@
       "isTruncated": false
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b09ff823bc64b5ed9037d994cf1649ce4f24c3a951c15f248b42c9418638faa8157",
       "size": 87,
       "headers": [
         {
@@ -121,10 +123,10 @@
       "disposition": "inline"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "b6f12eb3a38b19af12977ef8c705dde22a3720495a1a8e2f034a6396962ecb7665d",
       "size": 93,
       "headers": [
         {
@@ -146,6 +148,6 @@
     }
   ],
   "attachments": [],
-  "has_attachment": false,
+  "hasAttachment": false,
   "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n"
 }

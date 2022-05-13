@@ -1,11 +1,13 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 11304,
-  "received_at": "2328-03-18T08:00:00Z",
-  "message_id": [
+  "receivedAt": "2328-03-18T08:00:00Z",
+  "messageId": [
     "4.2.0.58.20000519003556.00a918e0@pop.example.com"
   ],
   "from": [
@@ -21,8 +23,8 @@
     }
   ],
   "subject": "Die Hasen und die Frosche",
-  "sent_at": "2000-05-19T04:36:58Z",
-  "body_structure": {
+  "sentAt": "2000-05-19T04:36:58Z",
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -87,7 +89,7 @@
             "subParts": [
               {
                 "partId": "2",
-                "blobId": "ignored_value",
+                "blobId": "bbb25cb6e9c15bac303b98e8c5612e05e0c56396502023253da61623a519079ce8b06",
                 "size": 779,
                 "headers": [
                   {
@@ -104,7 +106,7 @@
               },
               {
                 "partId": "3",
-                "blobId": "ignored_value",
+                "blobId": "bcc641a6263b305330407145b9c5b49109a6983e8f83224daaf6cfad823d784308209",
                 "size": 1154,
                 "headers": [
                   {
@@ -123,7 +125,7 @@
           },
           {
             "partId": "4",
-            "blobId": "ignored_value",
+            "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
             "size": 1325,
             "headers": [
               {
@@ -150,7 +152,7 @@
           },
           {
             "partId": "5",
-            "blobId": "ignored_value",
+            "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
             "size": 1453,
             "headers": [
               {
@@ -179,7 +181,7 @@
       },
       {
         "partId": "6",
-        "blobId": "ignored_value",
+        "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
         "size": 1325,
         "headers": [
           {
@@ -201,7 +203,7 @@
       },
       {
         "partId": "7",
-        "blobId": "ignored_value",
+        "blobId": "b258bcdd418e60b1f2dd911c83133e7aa07dd3d87ff09708384aba85e06f80e34920a",
         "size": 1298,
         "headers": [
           {
@@ -223,7 +225,7 @@
       }
     ]
   },
-  "body_values": {
+  "bodyValues": {
     "2": {
       "value": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprac...",
       "isEncodingProblem": false,
@@ -235,10 +237,10 @@
       "isTruncated": true
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "2",
-      "blobId": "ignored_value",
+      "blobId": "bbb25cb6e9c15bac303b98e8c5612e05e0c56396502023253da61623a519079ce8b06",
       "size": 779,
       "headers": [
         {
@@ -254,10 +256,10 @@
       "charset": "iso-8859-1"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "3",
-      "blobId": "ignored_value",
+      "blobId": "bcc641a6263b305330407145b9c5b49109a6983e8f83224daaf6cfad823d784308209",
       "size": 1154,
       "headers": [
         {
@@ -276,7 +278,7 @@
   "attachments": [
     {
       "partId": "4",
-      "blobId": "ignored_value",
+      "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
         {
@@ -303,7 +305,7 @@
     },
     {
       "partId": "5",
-      "blobId": "ignored_value",
+      "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
       "size": 1453,
       "headers": [
         {
@@ -330,7 +332,7 @@
     },
     {
       "partId": "6",
-      "blobId": "ignored_value",
+      "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
         {
@@ -352,7 +354,7 @@
     },
     {
       "partId": "7",
-      "blobId": "ignored_value",
+      "blobId": "b258bcdd418e60b1f2dd911c83133e7aa07dd3d87ff09708384aba85e06f80e34920a",
       "size": 1298,
       "headers": [
         {
@@ -373,6 +375,6 @@
       "disposition": "attachment"
     }
   ],
-  "has_attachment": true,
+  "hasAttachment": true,
   "preview": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprach ein Redner, \"in steter Furcht vor Menschen und Tieren, eine Beute der Hunde, der Adler, ja fast aller Raubtiere! Unsere stete Angst ist ärger als der Tod..."
 }

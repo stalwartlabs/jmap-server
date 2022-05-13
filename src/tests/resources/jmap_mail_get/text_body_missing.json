@@ -1,11 +1,13 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 2527,
-  "received_at": "2050-01-28T16:26:40Z",
-  "message_id": [
+  "receivedAt": "2050-01-28T16:26:40Z",
+  "messageId": [
     "NDBBIAKOPKHFGPLCODIGKEKECHAA.doug@example.com"
   ],
   "from": [
@@ -21,10 +23,10 @@
     }
   ],
   "subject": "Test message from Microsoft Outlook 00",
-  "sent_at": "2000-05-17T23:35:05Z",
-  "body_structure": {
+  "sentAt": "2000-05-17T23:35:05Z",
+  "bodyStructure": {
     "partId": "0",
-    "blobId": "ignored_value",
+    "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
     "size": 1453,
     "headers": [
       {
@@ -88,12 +90,12 @@
     "type": "image/png",
     "disposition": "attachment"
   },
-  "text_body": [],
-  "html_body": [],
+  "textBody": [],
+  "htmlBody": [],
   "attachments": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
       "size": 1453,
       "headers": [
         {
@@ -114,5 +116,5 @@
       "disposition": "attachment"
     }
   ],
-  "has_attachment": true
+  "hasAttachment": true
 }

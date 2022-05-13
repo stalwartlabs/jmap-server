@@ -1,10 +1,12 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 2651,
-  "received_at": "2054-01-02T20:53:20Z",
+  "receivedAt": "2054-01-02T20:53:20Z",
   "from": [
     {
       "name": "Al Gore",
@@ -18,7 +20,7 @@
     }
   ],
   "subject": "[Fwd: Map of Argentina with Description]",
-  "body_structure": {
+  "bodyStructure": {
     "headers": [
       {
         "name": "Content-Type",
@@ -41,7 +43,7 @@
     "subParts": [
       {
         "partId": "0",
-        "blobId": "ignored_value",
+        "blobId": "b0855eff89e41a035bcba5e95630bf0a2c04db40393cef1a6bfb33c5765fbf8773d",
         "size": 61,
         "headers": [
           {
@@ -58,7 +60,7 @@
       },
       {
         "partId": "1",
-        "blobId": "ignored_value",
+        "blobId": "be9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f",
         "size": 1980,
         "headers": [
           {
@@ -79,7 +81,7 @@
       }
     ]
   },
-  "body_values": {
+  "bodyValues": {
     "0": {
       "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
       "isEncodingProblem": false,
@@ -91,10 +93,10 @@
       "isTruncated": true
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b0855eff89e41a035bcba5e95630bf0a2c04db40393cef1a6bfb33c5765fbf8773d",
       "size": 61,
       "headers": [
         {
@@ -110,10 +112,10 @@
       "charset": "us-ascii"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "2",
-      "blobId": "ignored_value",
+      "blobId": "bc42fd3622fe117b228fc56f1b9c545bbdd08ecf805a42dbac340059223fb6e3d6b",
       "size": 107,
       "type": "text/html"
     }
@@ -121,7 +123,7 @@
   "attachments": [
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "be9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f",
       "size": 1980,
       "headers": [
         {
@@ -141,6 +143,6 @@
       "disposition": "inline"
     }
   ],
-  "has_attachment": true,
+  "hasAttachment": true,
   "preview": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl"
 }

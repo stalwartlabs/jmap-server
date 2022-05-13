@@ -206,6 +206,7 @@ impl From<QueryResult> for JSONValue {
             "accountId".to_string(),
             (query_result.account_id as JMAPId).to_jmap_string().into(),
         );
+        result.insert("canCalculateChanges".to_string(), true.into());
         result.insert("position".to_string(), query_result.position.into());
         result.insert("queryState".to_string(), query_result.query_state.into());
         if let Some(total) = query_result.total {

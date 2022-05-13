@@ -1,30 +1,23 @@
 {
-  "attachments": [
+  "mailboxIds": null,
+  "size": 1980,
+  "messageId": [
+    "199804130742.RAA20366@mai1host.whitehouse.gov"
+  ],
+  "from": [
     {
-      "blobId": "ignored_value",
-      "disposition": "inline",
-      "headers": [
-        {
-          "name": "Content-Disposition",
-          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
-        },
-        {
-          "name": "Content-Type",
-          "value": "image/gif; name=\"map_of_Argentina.gif\""
-        }
-      ],
-      "name": "map_of_Argentina.gif",
-      "partId": "1",
-      "size": 288,
-      "type": "image/gif"
+      "name": "Bill Clinton",
+      "email": "president@whitehouse.gov"
     }
   ],
-  "bcc": null,
-  "blobId": "ignored_value",
+  "to": [
+    {
+      "name": "A1 Gore (The Enforcer)",
+      "email": "vice-president@whitehouse.gov"
+    }
+  ],
+  "subject": "Map of Argentina with Description",
+  "sentAt": "1998-08-13T07:42:41Z",
   "bodyStructure": {
     "headers": [
       {
@@ -68,10 +61,12 @@
         "value": "A1 (The Enforcer) Gore <vice-president@whitehouse.gov>"
       }
     ],
+    "type": "multipart/mixed",
     "subParts": [
       {
-        "blobId": "ignored_value",
-        "charset": "us-ascii",
+        "partId": "0",
+        "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f00",
+        "size": 355,
         "headers": [
           {
             "name": "Content-Transfer-Encoding",
@@ -82,13 +77,13 @@
             "value": "text/plain; charset=us-ascii"
           }
         ],
-        "partId": "0",
-        "size": 355,
-        "type": "text/plain"
+        "type": "text/plain",
+        "charset": "us-ascii"
       },
       {
-        "blobId": "ignored_value",
-        "disposition": "inline",
+        "partId": "1",
+        "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+        "size": 288,
         "headers": [
           {
             "name": "Content-Disposition",
@@ -104,82 +99,28 @@
           }
         ],
         "name": "map_of_Argentina.gif",
-        "partId": "1",
-        "size": 288,
-        "type": "image/gif"
+        "type": "image/gif",
+        "disposition": "inline"
       }
-    ],
-    "type": "multipart/mixed"
+    ]
   },
   "bodyValues": {
     "0": {
+      "value": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au...",
       "isEncodingProblem": false,
-      "isTruncated": true,
-      "value": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au..."
+      "isTruncated": true
     },
     "2": {
+      "value": "<html><body>Hi A1,<br/><br/>I finally figured out this MIME thing.  Pretty cool.  I'll send you...",
       "isEncodingProblem": false,
-      "isTruncated": true,
-      "value": "<html><body>Hi A1,<br/><br/>I finally figured out this MIME thing.  Pretty cool.  I'll send you..."
+      "isTruncated": true
     }
   },
-  "cc": null,
-  "from": [
-    {
-      "email": "president@whitehouse.gov",
-      "name": "Bill Clinton"
-    }
-  ],
-  "hasAttachment": false,
-  "htmlBody": [
-    {
-      "blobId": "ignored_value",
-      "partId": "2",
-      "size": 429,
-      "type": "text/html"
-    },
-    {
-      "blobId": "ignored_value",
-      "disposition": "inline",
-      "headers": [
-        {
-          "name": "Content-Disposition",
-          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
-        },
-        {
-          "name": "Content-Type",
-          "value": "image/gif; name=\"map_of_Argentina.gif\""
-        }
-      ],
-      "name": "map_of_Argentina.gif",
-      "partId": "1",
-      "size": 288,
-      "type": "image/gif"
-    }
-  ],
-  "id": "ignored_value",
-  "inReplyTo": null,
-  "keywords": null,
-  "mailboxIds": null,
-  "messageId": [
-    "199804130742.RAA20366@mai1host.whitehouse.gov"
-  ],
-  "preview": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au files next week!\n\nAnyway, the attached image is really too small to get a good look at\nArgentina.  Try this for a much better map:\n\n     http://www.1one1yp...",
-  "receivedAt": null,
-  "references": null,
-  "replyTo": null,
-  "sender": null,
-  "sentAt": "1998-08-13T07:42:41Z",
-  "size": 1980,
-  "subject": "Map of Argentina with Description",
   "textBody": [
     {
-      "blobId": "ignored_value",
-      "charset": "us-ascii",
+      "partId": "0",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f00",
+      "size": 355,
       "headers": [
         {
           "name": "Content-Transfer-Encoding",
@@ -190,13 +131,13 @@
           "value": "text/plain; charset=us-ascii"
         }
       ],
-      "partId": "0",
-      "size": 355,
-      "type": "text/plain"
+      "type": "text/plain",
+      "charset": "us-ascii"
     },
     {
-      "blobId": "ignored_value",
-      "disposition": "inline",
+      "partId": "1",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "size": 288,
       "headers": [
         {
           "name": "Content-Disposition",
@@ -212,16 +153,64 @@
         }
       ],
       "name": "map_of_Argentina.gif",
-      "partId": "1",
-      "size": 288,
-      "type": "image/gif"
+      "type": "image/gif",
+      "disposition": "inline"
     }
   ],
-  "threadId": "ignored_value",
-  "to": [
+  "htmlBody": [
     {
-      "email": "vice-president@whitehouse.gov",
-      "name": "A1 Gore (The Enforcer)"
+      "partId": "2",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f02",
+      "size": 429,
+      "type": "text/html"
+    },
+    {
+      "partId": "1",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "size": 288,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/gif; name=\"map_of_Argentina.gif\""
+        }
+      ],
+      "name": "map_of_Argentina.gif",
+      "type": "image/gif",
+      "disposition": "inline"
     }
-  ]
+  ],
+  "attachments": [
+    {
+      "partId": "1",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "size": 288,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/gif; name=\"map_of_Argentina.gif\""
+        }
+      ],
+      "name": "map_of_Argentina.gif",
+      "type": "image/gif",
+      "disposition": "inline"
+    }
+  ],
+  "hasAttachment": false,
+  "preview": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au files next week!\n\nAnyway, the attached image is really too small to get a good look at\nArgentina.  Try this for a much better map:\n\n     http://www.1one1yp..."
 }

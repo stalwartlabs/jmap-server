@@ -348,6 +348,7 @@ where
                     JSONValue::Number(number) => {
                         document.number(property, &number, index_options);
                     }
+                    JSONValue::Null => (),
                     value => {
                         debug_assert!(false, "ORM unsupported type: {:?}", value);
                     }

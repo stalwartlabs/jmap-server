@@ -1,11 +1,13 @@
 {
-  "mailbox_ids": null,
+  "mailboxIds": {
+    "i00": true
+  },
   "keywords": {
     "tag": true
   },
   "size": 1378,
-  "received_at": "2013-09-01T01:46:40Z",
-  "message_id": [
+  "receivedAt": "2013-09-01T01:46:40Z",
+  "messageId": [
     "NDBBIAKOPKHFGPLCODIGIEKCCHAA.doug@example.com"
   ],
   "from": [
@@ -21,10 +23,10 @@
     }
   ],
   "subject": "Die Hasen und die Frösche (Microsoft Outlook 00)",
-  "sent_at": "2000-05-17T23:15:35Z",
-  "body_structure": {
+  "sentAt": "2000-05-17T23:15:35Z",
+  "bodyStructure": {
     "partId": "0",
-    "blobId": "ignored_value",
+    "blobId": "b4c451533d9a16c46949da15f8df5a94f823941e9652d6a4f49629ce24afd6ff9f205",
     "size": 754,
     "headers": [
       {
@@ -83,7 +85,7 @@
     "type": "text/plain",
     "charset": "iso-8859-1"
   },
-  "body_values": {
+  "bodyValues": {
     "0": {
       "value": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprac...",
       "isEncodingProblem": false,
@@ -95,10 +97,10 @@
       "isTruncated": true
     }
   },
-  "text_body": [
+  "textBody": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b4c451533d9a16c46949da15f8df5a94f823941e9652d6a4f49629ce24afd6ff9f205",
       "size": 754,
       "headers": [
         {
@@ -114,15 +116,15 @@
       "charset": "iso-8859-1"
     }
   ],
-  "html_body": [
+  "htmlBody": [
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "b0ca6895eec558a21e5ea7705bc7aef97e1e3860d7eb7a35b8e15dd8324e58c83a806",
       "size": 808,
       "type": "text/html"
     }
   ],
   "attachments": [],
-  "has_attachment": false,
+  "hasAttachment": false,
   "preview": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprach ein Redner, \"in steter Furcht vor Menschen und Tieren, eine Beute der Hunde, der Adler, ja fast aller Raubtiere! Unsere stete Angst ist ärger als der Tod..."
 }

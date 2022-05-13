@@ -1,7 +1,23 @@
 {
-  "attachments": [],
-  "bcc": null,
-  "blobId": "ignored_value",
+  "mailboxIds": null,
+  "size": 872,
+  "messageId": [
+    "random-message-id@example.com"
+  ],
+  "from": [
+    {
+      "name": "Name",
+      "email": "email@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "email@example.com",
+      "email": "email@example.com"
+    }
+  ],
+  "subject": "HTML test",
+  "sentAt": "2021-12-14T10:48:25Z",
   "bodyStructure": {
     "headers": [
       {
@@ -37,13 +53,15 @@
         "value": "\"email@example.com\" <email@example.com>"
       }
     ],
+    "type": "multipart/alternative",
     "language": [
       "en-US"
     ],
     "subParts": [
       {
-        "blobId": "ignored_value",
-        "charset": "utf-8",
+        "partId": "0",
+        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80600",
+        "size": 30,
         "headers": [
           {
             "name": "Content-Transfer-Encoding",
@@ -54,13 +72,13 @@
             "value": "text/plain; charset=utf-8; format=flowed"
           }
         ],
-        "partId": "0",
-        "size": 30,
-        "type": "text/plain"
+        "type": "text/plain",
+        "charset": "utf-8"
       },
       {
-        "blobId": "ignored_value",
-        "charset": "utf-8",
+        "partId": "1",
+        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
+        "size": 173,
         "headers": [
           {
             "name": "Content-Transfer-Encoding",
@@ -71,71 +89,28 @@
             "value": "text/html; charset=utf-8"
           }
         ],
-        "partId": "1",
-        "size": 173,
-        "type": "text/html"
+        "type": "text/html",
+        "charset": "utf-8"
       }
-    ],
-    "type": "multipart/alternative"
+    ]
   },
   "bodyValues": {
     "0": {
+      "value": "This is an *HTML* test message",
       "isEncodingProblem": false,
-      "isTruncated": false,
-      "value": "This is an *HTML* test message"
+      "isTruncated": false
     },
     "1": {
+      "value": "<html>\r\n  <head>\r\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\r\n  ...",
       "isEncodingProblem": false,
-      "isTruncated": true,
-      "value": "<html>\r\n  <head>\r\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\r\n  ..."
+      "isTruncated": true
     }
   },
-  "cc": null,
-  "from": [
-    {
-      "email": "email@example.com",
-      "name": "Name"
-    }
-  ],
-  "hasAttachment": false,
-  "htmlBody": [
-    {
-      "blobId": "ignored_value",
-      "charset": "utf-8",
-      "headers": [
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
-        },
-        {
-          "name": "Content-Type",
-          "value": "text/html; charset=utf-8"
-        }
-      ],
-      "partId": "1",
-      "size": 173,
-      "type": "text/html"
-    }
-  ],
-  "id": "ignored_value",
-  "inReplyTo": null,
-  "keywords": null,
-  "mailboxIds": null,
-  "messageId": [
-    "random-message-id@example.com"
-  ],
-  "preview": "This is an *HTML* test message",
-  "receivedAt": null,
-  "references": null,
-  "replyTo": null,
-  "sender": null,
-  "sentAt": "2021-12-14T10:48:25Z",
-  "size": 872,
-  "subject": "HTML test",
   "textBody": [
     {
-      "blobId": "ignored_value",
-      "charset": "utf-8",
+      "partId": "0",
+      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80600",
+      "size": 30,
       "headers": [
         {
           "name": "Content-Transfer-Encoding",
@@ -146,16 +121,30 @@
           "value": "text/plain; charset=utf-8; format=flowed"
         }
       ],
-      "partId": "0",
-      "size": 30,
-      "type": "text/plain"
+      "type": "text/plain",
+      "charset": "utf-8"
     }
   ],
-  "threadId": "ignored_value",
-  "to": [
+  "htmlBody": [
     {
-      "email": "email@example.com",
-      "name": "email@example.com"
+      "partId": "1",
+      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
+      "size": 173,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/html; charset=utf-8"
+        }
+      ],
+      "type": "text/html",
+      "charset": "utf-8"
     }
-  ]
+  ],
+  "attachments": [],
+  "hasAttachment": false,
+  "preview": "This is an *HTML* test message"
 }
