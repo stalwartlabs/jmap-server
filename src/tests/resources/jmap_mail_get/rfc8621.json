@@ -1,9 +1,28 @@
-[
-  {
-    "attachments": [
+{
+  "mailbox_ids": null,
+  "keywords": {
+    "tag": true
+  },
+  "size": 870,
+  "received_at": "1997-07-27T10:40:00Z",
+  "subject": "RFC 8621 Section 4.1.4 test",
+  "body_structure": {
+    "headers": [
       {
+        "name": "Content-Type",
+        "value": "multipart/mixed; boundary=\"1\""
+      },
+      {
+        "name": "Subject",
+        "value": "RFC 8621 Section 4.1.4 test"
+      }
+    ],
+    "type": "multipart/mixed",
+    "subParts": [
+      {
+        "partId": "0",
         "blobId": "ignored_value",
-        "disposition": "inline",
+        "size": 1,
         "headers": [
           {
             "name": "Content-Disposition",
@@ -11,436 +30,413 @@
           },
           {
             "name": "Content-Type",
-            "value": "image/jpeg"
+            "value": "text/plain"
           }
         ],
-        "partId": "5",
-        "size": 1,
-        "type": "image/jpeg"
+        "type": "text/plain",
+        "disposition": "inline"
       },
       {
-        "blobId": "ignored_value",
         "headers": [
           {
             "name": "Content-Type",
-            "value": "image/jpeg"
+            "value": "multipart/mixed; boundary=\"2\""
           }
         ],
-        "partId": "9",
-        "size": 1,
-        "type": "image/jpeg"
+        "type": "multipart/mixed",
+        "subParts": [
+          {
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "multipart/alternative; boundary=\"3\""
+              }
+            ],
+            "type": "multipart/alternative",
+            "subParts": [
+              {
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "multipart/mixed; boundary=\"4\""
+                  }
+                ],
+                "type": "multipart/mixed",
+                "subParts": [
+                  {
+                    "partId": "4",
+                    "blobId": "ignored_value",
+                    "size": 1,
+                    "headers": [
+                      {
+                        "name": "Content-Disposition",
+                        "value": "inline"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "text/plain"
+                      }
+                    ],
+                    "type": "text/plain",
+                    "disposition": "inline"
+                  },
+                  {
+                    "partId": "5",
+                    "blobId": "ignored_value",
+                    "size": 1,
+                    "headers": [
+                      {
+                        "name": "Content-Disposition",
+                        "value": "inline"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "image/jpeg"
+                      }
+                    ],
+                    "type": "image/jpeg",
+                    "disposition": "inline"
+                  },
+                  {
+                    "partId": "6",
+                    "blobId": "ignored_value",
+                    "size": 1,
+                    "headers": [
+                      {
+                        "name": "Content-Disposition",
+                        "value": "inline"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "text/plain"
+                      }
+                    ],
+                    "type": "text/plain",
+                    "disposition": "inline"
+                  }
+                ]
+              },
+              {
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "multipart/related; boundary=\"5\""
+                  }
+                ],
+                "type": "multipart/related",
+                "subParts": [
+                  {
+                    "partId": "8",
+                    "blobId": "ignored_value",
+                    "size": 14,
+                    "headers": [
+                      {
+                        "name": "Content-Type",
+                        "value": "text/html"
+                      }
+                    ],
+                    "type": "text/html"
+                  },
+                  {
+                    "partId": "9",
+                    "blobId": "ignored_value",
+                    "size": 1,
+                    "headers": [
+                      {
+                        "name": "Content-Type",
+                        "value": "image/jpeg"
+                      }
+                    ],
+                    "type": "image/jpeg"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "partId": "10",
+            "blobId": "ignored_value",
+            "size": 1,
+            "headers": [
+              {
+                "name": "Content-Disposition",
+                "value": "attachment"
+              },
+              {
+                "name": "Content-Type",
+                "value": "image/jpeg"
+              }
+            ],
+            "type": "image/jpeg",
+            "disposition": "attachment"
+          },
+          {
+            "partId": "11",
+            "blobId": "ignored_value",
+            "size": 1,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "application/x-excel"
+              }
+            ],
+            "type": "application/x-excel"
+          },
+          {
+            "partId": "12",
+            "blobId": "ignored_value",
+            "size": 17,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "message/rfc822"
+              }
+            ],
+            "type": "message/rfc822"
+          }
+        ]
       },
       {
+        "partId": "13",
         "blobId": "ignored_value",
-        "disposition": "attachment",
+        "size": 1,
         "headers": [
           {
             "name": "Content-Disposition",
-            "value": "attachment"
+            "value": "inline"
           },
           {
             "name": "Content-Type",
-            "value": "image/jpeg"
+            "value": "text/plain"
           }
         ],
-        "partId": "10",
-        "size": 1,
-        "type": "image/jpeg"
-      },
-      {
-        "blobId": "ignored_value",
-        "headers": [
-          {
-            "name": "Content-Type",
-            "value": "application/x-excel"
-          }
-        ],
-        "partId": "11",
-        "size": 1,
-        "type": "application/x-excel"
-      },
-      {
-        "blobId": "ignored_value",
-        "headers": [
-          {
-            "name": "Content-Type",
-            "value": "message/rfc822"
-          }
-        ],
-        "partId": "12",
-        "size": 17,
-        "type": "message/rfc822"
+        "type": "text/plain",
+        "disposition": "inline"
       }
-    ],
-    "blobId": "ignored_value",
-    "bodyStructure": {
+    ]
+  },
+  "body_values": {
+    "0": {
+      "value": "A",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "13": {
+      "value": "K",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "14": {
+      "value": "<html><body>A</body></html>",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "15": {
+      "value": "<html><body>K</body></html>",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "4": {
+      "value": "B",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "6": {
+      "value": "D",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "8": {
+      "value": "<html>E</html>",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "text_body": [
+    {
+      "partId": "0",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain"
+        }
+      ],
+      "type": "text/plain",
+      "disposition": "inline"
+    },
+    {
+      "partId": "4",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain"
+        }
+      ],
+      "type": "text/plain",
+      "disposition": "inline"
+    },
+    {
+      "partId": "5",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg",
+      "disposition": "inline"
+    },
+    {
+      "partId": "6",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain"
+        }
+      ],
+      "type": "text/plain",
+      "disposition": "inline"
+    },
+    {
+      "partId": "13",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain"
+        }
+      ],
+      "type": "text/plain",
+      "disposition": "inline"
+    }
+  ],
+  "html_body": [
+    {
+      "partId": "14",
+      "blobId": "ignored_value",
+      "size": 27,
+      "type": "text/html"
+    },
+    {
+      "partId": "8",
+      "blobId": "ignored_value",
+      "size": 14,
       "headers": [
         {
           "name": "Content-Type",
-          "value": "multipart/mixed; boundary=\"1\""
-        },
-        {
-          "name": "Subject",
-          "value": "RFC 8621 Section 4.1.4 test"
+          "value": "text/html"
         }
       ],
-      "subParts": [
+      "type": "text/html"
+    },
+    {
+      "partId": "15",
+      "blobId": "ignored_value",
+      "size": 27,
+      "type": "text/html"
+    }
+  ],
+  "attachments": [
+    {
+      "partId": "5",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
         {
-          "blobId": "ignored_value",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain"
-            }
-          ],
-          "partId": "0",
-          "size": 1,
-          "type": "text/plain"
+          "name": "Content-Disposition",
+          "value": "inline"
         },
         {
-          "headers": [
-            {
-              "name": "Content-Type",
-              "value": "multipart/mixed; boundary=\"2\""
-            }
-          ],
-          "subParts": [
-            {
-              "headers": [
-                {
-                  "name": "Content-Type",
-                  "value": "multipart/alternative; boundary=\"3\""
-                }
-              ],
-              "subParts": [
-                {
-                  "headers": [
-                    {
-                      "name": "Content-Type",
-                      "value": "multipart/mixed; boundary=\"4\""
-                    }
-                  ],
-                  "subParts": [
-                    {
-                      "blobId": "ignored_value",
-                      "disposition": "inline",
-                      "headers": [
-                        {
-                          "name": "Content-Disposition",
-                          "value": "inline"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "text/plain"
-                        }
-                      ],
-                      "partId": "4",
-                      "size": 1,
-                      "type": "text/plain"
-                    },
-                    {
-                      "blobId": "ignored_value",
-                      "disposition": "inline",
-                      "headers": [
-                        {
-                          "name": "Content-Disposition",
-                          "value": "inline"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "image/jpeg"
-                        }
-                      ],
-                      "partId": "5",
-                      "size": 1,
-                      "type": "image/jpeg"
-                    },
-                    {
-                      "blobId": "ignored_value",
-                      "disposition": "inline",
-                      "headers": [
-                        {
-                          "name": "Content-Disposition",
-                          "value": "inline"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "text/plain"
-                        }
-                      ],
-                      "partId": "6",
-                      "size": 1,
-                      "type": "text/plain"
-                    }
-                  ],
-                  "type": "multipart/mixed"
-                },
-                {
-                  "headers": [
-                    {
-                      "name": "Content-Type",
-                      "value": "multipart/related; boundary=\"5\""
-                    }
-                  ],
-                  "subParts": [
-                    {
-                      "blobId": "ignored_value",
-                      "headers": [
-                        {
-                          "name": "Content-Type",
-                          "value": "text/html"
-                        }
-                      ],
-                      "partId": "8",
-                      "size": 14,
-                      "type": "text/html"
-                    },
-                    {
-                      "blobId": "ignored_value",
-                      "headers": [
-                        {
-                          "name": "Content-Type",
-                          "value": "image/jpeg"
-                        }
-                      ],
-                      "partId": "9",
-                      "size": 1,
-                      "type": "image/jpeg"
-                    }
-                  ],
-                  "type": "multipart/related"
-                }
-              ],
-              "type": "multipart/alternative"
-            },
-            {
-              "blobId": "ignored_value",
-              "disposition": "attachment",
-              "headers": [
-                {
-                  "name": "Content-Disposition",
-                  "value": "attachment"
-                },
-                {
-                  "name": "Content-Type",
-                  "value": "image/jpeg"
-                }
-              ],
-              "partId": "10",
-              "size": 1,
-              "type": "image/jpeg"
-            },
-            {
-              "blobId": "ignored_value",
-              "headers": [
-                {
-                  "name": "Content-Type",
-                  "value": "application/x-excel"
-                }
-              ],
-              "partId": "11",
-              "size": 1,
-              "type": "application/x-excel"
-            },
-            {
-              "blobId": "ignored_value",
-              "headers": [
-                {
-                  "name": "Content-Type",
-                  "value": "message/rfc822"
-                }
-              ],
-              "partId": "12",
-              "size": 17,
-              "type": "message/rfc822"
-            }
-          ],
-          "type": "multipart/mixed"
-        },
-        {
-          "blobId": "ignored_value",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain"
-            }
-          ],
-          "partId": "13",
-          "size": 1,
-          "type": "text/plain"
+          "name": "Content-Type",
+          "value": "image/jpeg"
         }
       ],
-      "type": "multipart/mixed"
+      "type": "image/jpeg",
+      "disposition": "inline"
     },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "A"
-      },
-      "13": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "K"
-      },
-      "14": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "<html><body>A</body></html>"
-      },
-      "15": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "<html><body>K</body></html>"
-      },
-      "4": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "B"
-      },
-      "6": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "D"
-      },
-      "8": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "<html>E</html>"
-      }
+    {
+      "partId": "9",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg"
     },
-    "hasAttachment": true,
-    "htmlBody": [
-      {
-        "blobId": "ignored_value",
-        "partId": "14",
-        "size": 27,
-        "type": "text/html"
-      },
-      {
-        "blobId": "ignored_value",
-        "headers": [
-          {
-            "name": "Content-Type",
-            "value": "text/html"
-          }
-        ],
-        "partId": "8",
-        "size": 14,
-        "type": "text/html"
-      },
-      {
-        "blobId": "ignored_value",
-        "partId": "15",
-        "size": 27,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "keywords": {
-      "tag": true
+    {
+      "partId": "10",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "attachment"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg",
+      "disposition": "attachment"
     },
-    "preview": "A",
-    "receivedAt": "1997-07-27T10:40:00Z",
-    "size": 870,
-    "subject": "RFC 8621 Section 4.1.4 test",
-    "textBody": [
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "0",
-        "size": 1,
-        "type": "text/plain"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "4",
-        "size": 1,
-        "type": "text/plain"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Type",
-            "value": "image/jpeg"
-          }
-        ],
-        "partId": "5",
-        "size": 1,
-        "type": "image/jpeg"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "6",
-        "size": 1,
-        "type": "text/plain"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "13",
-        "size": 1,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value"
-  }
-]
+    {
+      "partId": "11",
+      "blobId": "ignored_value",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/x-excel"
+        }
+      ],
+      "type": "application/x-excel"
+    },
+    {
+      "partId": "12",
+      "blobId": "ignored_value",
+      "size": 17,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "message/rfc822"
+        }
+      ],
+      "type": "message/rfc822"
+    }
+  ],
+  "has_attachment": true,
+  "preview": "A"
+}

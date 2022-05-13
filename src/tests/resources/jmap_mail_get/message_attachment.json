@@ -1,9 +1,65 @@
-[
-  {
-    "attachments": [
+{
+  "mailbox_ids": null,
+  "keywords": {
+    "tag": true
+  },
+  "size": 2651,
+  "received_at": "2054-01-02T20:53:20Z",
+  "from": [
+    {
+      "name": "Al Gore",
+      "email": "vice-president@whitehouse.gov"
+    }
+  ],
+  "to": [
+    {
+      "name": "White House Transportation Coordinator",
+      "email": "transport@whitehouse.gov"
+    }
+  ],
+  "subject": "[Fwd: Map of Argentina with Description]",
+  "body_structure": {
+    "headers": [
       {
+        "name": "Content-Type",
+        "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
+      },
+      {
+        "name": "From",
+        "value": "Al Gore <vice-president@whitehouse.gov>"
+      },
+      {
+        "name": "Subject",
+        "value": "[Fwd: Map of Argentina with Description]"
+      },
+      {
+        "name": "To",
+        "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>"
+      }
+    ],
+    "type": "multipart/mixed",
+    "subParts": [
+      {
+        "partId": "0",
         "blobId": "ignored_value",
-        "disposition": "inline",
+        "size": 61,
+        "headers": [
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=us-ascii"
+          }
+        ],
+        "type": "text/plain",
+        "charset": "us-ascii"
+      },
+      {
+        "partId": "1",
+        "blobId": "ignored_value",
+        "size": 1980,
         "headers": [
           {
             "name": "Content-Disposition",
@@ -18,133 +74,73 @@
             "value": "message/rfc822"
           }
         ],
-        "partId": "1",
-        "size": 1980,
-        "type": "message/rfc822"
-      }
-    ],
-    "blobId": "ignored_value",
-    "bodyStructure": {
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
-        },
-        {
-          "name": "From",
-          "value": "Al Gore <vice-president@whitehouse.gov>"
-        },
-        {
-          "name": "Subject",
-          "value": "[Fwd: Map of Argentina with Description]"
-        },
-        {
-          "name": "To",
-          "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>"
-        }
-      ],
-      "subParts": [
-        {
-          "blobId": "ignored_value",
-          "charset": "us-ascii",
-          "headers": [
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain; charset=us-ascii"
-            }
-          ],
-          "partId": "0",
-          "size": 61,
-          "type": "text/plain"
-        },
-        {
-          "blobId": "ignored_value",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "message/rfc822"
-            }
-          ],
-          "partId": "1",
-          "size": 1980,
-          "type": "message/rfc822"
-        }
-      ],
-      "type": "multipart/mixed"
-    },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl"
-      },
-      "2": {
-        "isEncodingProblem": false,
-        "isTruncated": true,
-        "value": "<html><body>Fred,<br/><br/>Fire up Air Force One!  We're going South!<br/><br/>Thanks,<br/>Al..."
-      }
-    },
-    "from": [
-      {
-        "email": "vice-president@whitehouse.gov",
-        "name": "Al Gore"
-      }
-    ],
-    "hasAttachment": true,
-    "htmlBody": [
-      {
-        "blobId": "ignored_value",
-        "partId": "2",
-        "size": 107,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "keywords": {
-      "tag": true
-    },
-    "preview": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
-    "receivedAt": "2054-01-02T20:53:20Z",
-    "size": 2651,
-    "subject": "[Fwd: Map of Argentina with Description]",
-    "textBody": [
-      {
-        "blobId": "ignored_value",
-        "charset": "us-ascii",
-        "headers": [
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain; charset=us-ascii"
-          }
-        ],
-        "partId": "0",
-        "size": 61,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value",
-    "to": [
-      {
-        "email": "transport@whitehouse.gov",
-        "name": "White House Transportation Coordinator"
+        "type": "message/rfc822",
+        "disposition": "inline"
       }
     ]
-  }
-]
+  },
+  "body_values": {
+    "0": {
+      "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "2": {
+      "value": "<html><body>Fred,<br/><br/>Fire up Air Force One!  We're going South!<br/><br/>Thanks,<br/>Al...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    }
+  },
+  "text_body": [
+    {
+      "partId": "0",
+      "blobId": "ignored_value",
+      "size": 61,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain; charset=us-ascii"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii"
+    }
+  ],
+  "html_body": [
+    {
+      "partId": "2",
+      "blobId": "ignored_value",
+      "size": 107,
+      "type": "text/html"
+    }
+  ],
+  "attachments": [
+    {
+      "partId": "1",
+      "blobId": "ignored_value",
+      "size": 1980,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "message/rfc822"
+        }
+      ],
+      "type": "message/rfc822",
+      "disposition": "inline"
+    }
+  ],
+  "has_attachment": true,
+  "preview": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl"
+}

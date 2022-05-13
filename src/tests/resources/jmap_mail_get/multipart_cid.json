@@ -1,9 +1,129 @@
-[
-  {
-    "attachments": [
+{
+  "mailbox_ids": null,
+  "keywords": {
+    "tag": true
+  },
+  "size": 7477,
+  "received_at": "2206-12-09T08:26:40Z",
+  "message_id": [
+    "NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com"
+  ],
+  "from": [
+    {
+      "name": "Doug Sauder",
+      "email": "doug@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "Joe Blow",
+      "email": "jblow@example.com"
+    }
+  ],
+  "subject": "Test message from Microsoft Outlook 00",
+  "sent_at": "2000-05-17T23:44:45Z",
+  "body_structure": {
+    "headers": [
       {
+        "name": "Content-Type",
+        "value": "multipart/related;\n\tboundary=\"----=_NextPart_000_000C_01BFC038.5A5C8E60\""
+      },
+      {
+        "name": "Date",
+        "value": "Wed, 17 May 2000 19:44:45 -0400"
+      },
+      {
+        "name": "From",
+        "value": "\"Doug Sauder\" <doug@example.com>"
+      },
+      {
+        "name": "Importance",
+        "value": "Normal"
+      },
+      {
+        "name": "MIME-Version",
+        "value": "1.0"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Test message from Microsoft Outlook 00"
+      },
+      {
+        "name": "To",
+        "value": "\"Joe Blow\" <jblow@example.com>"
+      },
+      {
+        "name": "X-MSMail-Priority",
+        "value": "Normal"
+      },
+      {
+        "name": "X-Mailer",
+        "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+      },
+      {
+        "name": "X-MimeOLE",
+        "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+      },
+      {
+        "name": "X-Priority",
+        "value": "3 (Normal)"
+      }
+    ],
+    "type": "multipart/related",
+    "subParts": [
+      {
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "multipart/alternative;\n\tboundary=\"----=_NextPart_001_000D_01BFC038.5A5C8E60\""
+          }
+        ],
+        "type": "multipart/alternative",
+        "subParts": [
+          {
+            "partId": "1",
+            "blobId": "ignored_value",
+            "size": 761,
+            "headers": [
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "quoted-printable"
+              },
+              {
+                "name": "Content-Type",
+                "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+              }
+            ],
+            "type": "text/plain",
+            "charset": "iso-8859-1"
+          },
+          {
+            "partId": "2",
+            "blobId": "ignored_value",
+            "size": 1442,
+            "headers": [
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "quoted-printable"
+              },
+              {
+                "name": "Content-Type",
+                "value": "text/html;\n\tcharset=\"iso-8859-1\""
+              }
+            ],
+            "type": "text/html",
+            "charset": "iso-8859-1"
+          }
+        ]
+      },
+      {
+        "partId": "3",
         "blobId": "ignored_value",
-        "cid": "823504223@17052000-0f8d",
+        "size": 1325,
         "headers": [
           {
             "name": "Content-ID",
@@ -19,13 +139,13 @@
           }
         ],
         "name": "blueball.png",
-        "partId": "3",
-        "size": 1325,
-        "type": "image/png"
+        "type": "image/png",
+        "cid": "823504223@17052000-0f8d"
       },
       {
+        "partId": "4",
         "blobId": "ignored_value",
-        "cid": "823504223@17052000-0f94",
+        "size": 1453,
         "headers": [
           {
             "name": "Content-ID",
@@ -41,231 +161,107 @@
           }
         ],
         "name": "redball.png",
-        "partId": "4",
-        "size": 1453,
-        "type": "image/png"
-      }
-    ],
-    "blobId": "ignored_value",
-    "bodyStructure": {
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "multipart/related;\n\tboundary=\"----=_NextPart_000_000C_01BFC038.5A5C8E60\""
-        },
-        {
-          "name": "Date",
-          "value": "Wed, 17 May 2000 19:44:45 -0400"
-        },
-        {
-          "name": "From",
-          "value": "\"Doug Sauder\" <doug@example.com>"
-        },
-        {
-          "name": "Importance",
-          "value": "Normal"
-        },
-        {
-          "name": "MIME-Version",
-          "value": "1.0"
-        },
-        {
-          "name": "Message-ID",
-          "value": "<NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com>"
-        },
-        {
-          "name": "Subject",
-          "value": "Test message from Microsoft Outlook 00"
-        },
-        {
-          "name": "To",
-          "value": "\"Joe Blow\" <jblow@example.com>"
-        },
-        {
-          "name": "X-MSMail-Priority",
-          "value": "Normal"
-        },
-        {
-          "name": "X-Mailer",
-          "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
-        },
-        {
-          "name": "X-MimeOLE",
-          "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
-        },
-        {
-          "name": "X-Priority",
-          "value": "3 (Normal)"
-        }
-      ],
-      "subParts": [
-        {
-          "headers": [
-            {
-              "name": "Content-Type",
-              "value": "multipart/alternative;\n\tboundary=\"----=_NextPart_001_000D_01BFC038.5A5C8E60\""
-            }
-          ],
-          "subParts": [
-            {
-              "blobId": "ignored_value",
-              "charset": "iso-8859-1",
-              "headers": [
-                {
-                  "name": "Content-Transfer-Encoding",
-                  "value": "quoted-printable"
-                },
-                {
-                  "name": "Content-Type",
-                  "value": "text/plain;\n\tcharset=\"iso-8859-1\""
-                }
-              ],
-              "partId": "1",
-              "size": 761,
-              "type": "text/plain"
-            },
-            {
-              "blobId": "ignored_value",
-              "charset": "iso-8859-1",
-              "headers": [
-                {
-                  "name": "Content-Transfer-Encoding",
-                  "value": "quoted-printable"
-                },
-                {
-                  "name": "Content-Type",
-                  "value": "text/html;\n\tcharset=\"iso-8859-1\""
-                }
-              ],
-              "partId": "2",
-              "size": 1442,
-              "type": "text/html"
-            }
-          ],
-          "type": "multipart/alternative"
-        },
-        {
-          "blobId": "ignored_value",
-          "cid": "823504223@17052000-0f8d",
-          "headers": [
-            {
-              "name": "Content-ID",
-              "value": "<823504223@17052000-0f8d>"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "base64"
-            },
-            {
-              "name": "Content-Type",
-              "value": "image/png;\n\tname=\"blueball.png\""
-            }
-          ],
-          "name": "blueball.png",
-          "partId": "3",
-          "size": 1325,
-          "type": "image/png"
-        },
-        {
-          "blobId": "ignored_value",
-          "cid": "823504223@17052000-0f94",
-          "headers": [
-            {
-              "name": "Content-ID",
-              "value": "<823504223@17052000-0f94>"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "base64"
-            },
-            {
-              "name": "Content-Type",
-              "value": "image/png;\n\tname=\"redball.png\""
-            }
-          ],
-          "name": "redball.png",
-          "partId": "4",
-          "size": 1453,
-          "type": "image/png"
-        }
-      ],
-      "type": "multipart/related"
-    },
-    "bodyValues": {
-      "1": {
-        "isEncodingProblem": false,
-        "isTruncated": true,
-        "value": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoi..."
-      },
-      "2": {
-        "isEncodingProblem": false,
-        "isTruncated": true,
-        "value": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\">\n<HTML><HEAD>\n..."
-      }
-    },
-    "from": [
-      {
-        "email": "doug@example.com",
-        "name": "Doug Sauder"
-      }
-    ],
-    "hasAttachment": true,
-    "htmlBody": [
-      {
-        "blobId": "ignored_value",
-        "charset": "iso-8859-1",
-        "headers": [
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/html;\n\tcharset=\"iso-8859-1\""
-          }
-        ],
-        "partId": "2",
-        "size": 1442,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "keywords": {
-      "tag": true
-    },
-    "messageId": [
-      "NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com"
-    ],
-    "preview": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoise, who replied, laughing:  \"Though you be swift as the wind, I will beat you in a race.\"  The Hare, believing her assertion to be simply impossible, assent...",
-    "receivedAt": "2206-12-09T08:26:40Z",
-    "sentAt": "2000-05-17T23:44:45Z",
-    "size": 7477,
-    "subject": "Test message from Microsoft Outlook 00",
-    "textBody": [
-      {
-        "blobId": "ignored_value",
-        "charset": "iso-8859-1",
-        "headers": [
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain;\n\tcharset=\"iso-8859-1\""
-          }
-        ],
-        "partId": "1",
-        "size": 761,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value",
-    "to": [
-      {
-        "email": "jblow@example.com",
-        "name": "Joe Blow"
+        "type": "image/png",
+        "cid": "823504223@17052000-0f94"
       }
     ]
-  }
-]
+  },
+  "body_values": {
+    "1": {
+      "value": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoi...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    },
+    "2": {
+      "value": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\">\n<HTML><HEAD>\n...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    }
+  },
+  "text_body": [
+    {
+      "partId": "1",
+      "blobId": "ignored_value",
+      "size": 761,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "quoted-printable"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+        }
+      ],
+      "type": "text/plain",
+      "charset": "iso-8859-1"
+    }
+  ],
+  "html_body": [
+    {
+      "partId": "2",
+      "blobId": "ignored_value",
+      "size": 1442,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "quoted-printable"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/html;\n\tcharset=\"iso-8859-1\""
+        }
+      ],
+      "type": "text/html",
+      "charset": "iso-8859-1"
+    }
+  ],
+  "attachments": [
+    {
+      "partId": "3",
+      "blobId": "ignored_value",
+      "size": 1325,
+      "headers": [
+        {
+          "name": "Content-ID",
+          "value": "<823504223@17052000-0f8d>"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/png;\n\tname=\"blueball.png\""
+        }
+      ],
+      "name": "blueball.png",
+      "type": "image/png",
+      "cid": "823504223@17052000-0f8d"
+    },
+    {
+      "partId": "4",
+      "blobId": "ignored_value",
+      "size": 1453,
+      "headers": [
+        {
+          "name": "Content-ID",
+          "value": "<823504223@17052000-0f94>"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/png;\n\tname=\"redball.png\""
+        }
+      ],
+      "name": "redball.png",
+      "type": "image/png",
+      "cid": "823504223@17052000-0f94"
+    }
+  ],
+  "has_attachment": true,
+  "preview": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoise, who replied, laughing:  \"Though you be swift as the wind, I will beat you in a race.\"  The Hare, believing her assertion to be simply impossible, assent..."
+}

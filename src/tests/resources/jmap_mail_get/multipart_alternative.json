@@ -1,130 +1,48 @@
-[
-  {
-    "attachments": [],
-    "blobId": "ignored_value",
-    "bodyStructure": {
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "multipart/alternative; boundary=\"boundary-string\""
-        },
-        {
-          "name": "From",
-          "value": "sender@example.com"
-        },
-        {
-          "name": "Subject",
-          "value": "Multipart Email Example"
-        },
-        {
-          "name": "To",
-          "value": "recipient@example.com"
-        }
-      ],
-      "subParts": [
-        {
-          "blobId": "ignored_value",
-          "charset": "utf-8",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "quoted-printable"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain; charset=\"utf-8\""
-            }
-          ],
-          "partId": "0",
-          "size": 87,
-          "type": "text/plain"
-        },
-        {
-          "blobId": "ignored_value",
-          "charset": "utf-8",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "quoted-printable"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/html; charset=\"utf-8\""
-            }
-          ],
-          "partId": "1",
-          "size": 93,
-          "type": "text/html"
-        }
-      ],
-      "type": "multipart/alternative"
-    },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n"
+{
+  "mailbox_ids": null,
+  "keywords": {
+    "tag": true
+  },
+  "size": 616,
+  "received_at": "1989-07-09T15:06:40Z",
+  "from": [
+    {
+      "name": null,
+      "email": "sender@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": null,
+      "email": "recipient@example.com"
+    }
+  ],
+  "subject": "Multipart Email Example",
+  "body_structure": {
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "multipart/alternative; boundary=\"boundary-string\""
       },
-      "1": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "<h1>This is the HTML Section!</h1>\n<p>This is what displays in most modern email clients</p>\n"
-      }
-    },
-    "from": [
       {
-        "email": "sender@example.com",
-        "name": null
-      }
-    ],
-    "hasAttachment": false,
-    "htmlBody": [
+        "name": "From",
+        "value": "sender@example.com"
+      },
       {
-        "blobId": "ignored_value",
-        "charset": "utf-8",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/html; charset=\"utf-8\""
-          }
-        ],
-        "partId": "1",
-        "size": 93,
-        "type": "text/html"
+        "name": "Subject",
+        "value": "Multipart Email Example"
+      },
+      {
+        "name": "To",
+        "value": "recipient@example.com"
       }
     ],
-    "id": "ignored_value",
-    "keywords": {
-      "tag": true
-    },
-    "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
-    "receivedAt": "1989-07-09T15:06:40Z",
-    "size": 616,
-    "subject": "Multipart Email Example",
-    "textBody": [
+    "type": "multipart/alternative",
+    "subParts": [
       {
+        "partId": "0",
         "blobId": "ignored_value",
-        "charset": "utf-8",
-        "disposition": "inline",
+        "size": 87,
         "headers": [
           {
             "name": "Content-Disposition",
@@ -139,17 +57,95 @@
             "value": "text/plain; charset=\"utf-8\""
           }
         ],
-        "partId": "0",
-        "size": 87,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value",
-    "to": [
+        "type": "text/plain",
+        "charset": "utf-8",
+        "disposition": "inline"
+      },
       {
-        "email": "recipient@example.com",
-        "name": null
+        "partId": "1",
+        "blobId": "ignored_value",
+        "size": 93,
+        "headers": [
+          {
+            "name": "Content-Disposition",
+            "value": "inline"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "quoted-printable"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/html; charset=\"utf-8\""
+          }
+        ],
+        "type": "text/html",
+        "charset": "utf-8",
+        "disposition": "inline"
       }
     ]
-  }
-]
+  },
+  "body_values": {
+    "0": {
+      "value": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "1": {
+      "value": "<h1>This is the HTML Section!</h1>\n<p>This is what displays in most modern email clients</p>\n",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "text_body": [
+    {
+      "partId": "0",
+      "blobId": "ignored_value",
+      "size": 87,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "quoted-printable"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain; charset=\"utf-8\""
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8",
+      "disposition": "inline"
+    }
+  ],
+  "html_body": [
+    {
+      "partId": "1",
+      "blobId": "ignored_value",
+      "size": 93,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "quoted-printable"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/html; charset=\"utf-8\""
+        }
+      ],
+      "type": "text/html",
+      "charset": "utf-8",
+      "disposition": "inline"
+    }
+  ],
+  "attachments": [],
+  "has_attachment": false,
+  "preview": "Plain text email goes here!\nThis is the fallback if email client does not support HTML\n"
+}
