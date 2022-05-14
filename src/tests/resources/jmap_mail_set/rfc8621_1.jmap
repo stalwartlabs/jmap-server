@@ -1,10 +1,80 @@
-[
-  {
-    "attachments": [],
+{
+  "mailboxIds": {
+    "i00": true
+  },
+  "keywords": {
+    "$draft": true,
+    "$seen": true
+  },
+  "receivedAt": "2018-07-10T01:03:11Z",
+  "messageId": [
+    "my-message-id"
+  ],
+  "from": [
+    {
+      "name": "Joe Bloggs",
+      "email": "joe@example.com"
+    }
+  ],
+  "subject": "World domination",
+  "sentAt": "2018-07-10T01:03:11Z",
+  "bodyStructure": {
+    "partId": "0",
     "blobId": "ignored_value",
-    "bodyStructure": {
+    "size": 81,
+    "headers": [
+      {
+        "name": "Content-Language",
+        "value": "en"
+      },
+      {
+        "name": "Content-Transfer-Encoding",
+        "value": "7bit"
+      },
+      {
+        "name": "Content-Type",
+        "value": "text/plain; charset=\"utf-8\""
+      },
+      {
+        "name": "Date",
+        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+      },
+      {
+        "name": "From",
+        "value": "\"Joe Bloggs\" <joe@example.com>"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<my-message-id>"
+      },
+      {
+        "name": "Subject",
+        "value": "World domination"
+      }
+    ],
+    "type": "text/plain",
+    "charset": "utf-8",
+    "language": [
+      "en"
+    ]
+  },
+  "bodyValues": {
+    "0": {
+      "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "1": {
+      "value": "<html><body>I have the most brilliant plan.  Let me tell you all about it.  What we do is, we...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    }
+  },
+  "textBody": [
+    {
+      "partId": "0",
       "blobId": "ignored_value",
-      "charset": "utf-8",
+      "size": 81,
       "headers": [
         {
           "name": "Content-Language",
@@ -17,99 +87,24 @@
         {
           "name": "Content-Type",
           "value": "text/plain; charset=\"utf-8\""
-        },
-        {
-          "name": "Date",
-          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
-        },
-        {
-          "name": "From",
-          "value": "\"Joe Bloggs\" <joe@example.com>"
-        },
-        {
-          "name": "Message-ID",
-          "value": "<my-message-id>"
-        },
-        {
-          "name": "Subject",
-          "value": "World domination"
         }
       ],
+      "type": "text/plain",
+      "charset": "utf-8",
       "language": [
         "en"
-      ],
-      "partId": "0",
-      "size": 81,
-      "type": "text/plain"
-    },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
-      },
-      "1": {
-        "isEncodingProblem": false,
-        "isTruncated": true,
-        "value": "<html><body>I have the most brilliant plan.  Let me tell you all about it.  What we do is, we..."
-      }
-    },
-    "from": [
-      {
-        "email": "joe@example.com",
-        "name": "Joe Bloggs"
-      }
-    ],
-    "hasAttachment": false,
-    "htmlBody": [
-      {
-        "blobId": "ignored_value",
-        "partId": "1",
-        "size": 107,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "keywords": {
-      "$draft": true,
-      "$seen": true
-    },
-    "mailboxIds": {
-      "i00": true
-    },
-    "messageId": [
-      "my-message-id"
-    ],
-    "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
-    "receivedAt": "2018-07-10T01:03:11Z",
-    "sentAt": "2018-07-10T01:03:11Z",
-    "subject": "World domination",
-    "textBody": [
-      {
-        "blobId": "ignored_value",
-        "charset": "utf-8",
-        "headers": [
-          {
-            "name": "Content-Language",
-            "value": "en"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain; charset=\"utf-8\""
-          }
-        ],
-        "language": [
-          "en"
-        ],
-        "partId": "0",
-        "size": 81,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value"
-  }
-]
+      ]
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "1",
+      "blobId": "ignored_value",
+      "size": 107,
+      "type": "text/html"
+    }
+  ],
+  "attachments": [],
+  "hasAttachment": false,
+  "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
+}

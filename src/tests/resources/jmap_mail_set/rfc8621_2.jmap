@@ -1,109 +1,62 @@
-[
-  {
-    "attachments": [],
-    "blobId": "ignored_value",
-    "bodyStructure": {
-      "headers": [
-        {
-          "name": "Content-Type",
-          "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
-        },
-        {
-          "name": "Date",
-          "value": "Tue, 10 Jul 2018 01:05:08 +0000"
-        },
-        {
-          "name": "From",
-          "value": "\"Joe Bloggs\" <joe@example.com>"
-        },
-        {
-          "name": "Message-ID",
-          "value": "<my-message-id>"
-        },
-        {
-          "name": "Subject",
-          "value": "World domination"
-        },
-        {
-          "name": "To",
-          "value": "\"John\" <john@example.com>"
-        }
-      ],
-      "subParts": [
-        {
-          "blobId": "ignored_value",
-          "charset": "utf-8",
-          "headers": [
-            {
-              "name": "Content-Language",
-              "value": "en"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/html; charset=\"utf-8\""
-            }
-          ],
-          "language": [
-            "en"
-          ],
-          "partId": "0",
-          "size": 218,
-          "type": "text/html"
-        },
-        {
-          "blobId": "ignored_value",
-          "charset": "utf-8",
-          "headers": [
-            {
-              "name": "Content-Language",
-              "value": "en"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain; charset=\"utf-8\""
-            }
-          ],
-          "language": [
-            "en"
-          ],
-          "partId": "1",
-          "size": 81,
-          "type": "text/plain"
-        }
-      ],
-      "type": "multipart/alternative"
-    },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": true,
-        "value": "<!DOCTYPE html><html><head><title></title><style type=\"text/css\">div{font-size:16px}</style>..."
-      },
-      "1": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
-      }
-    },
-    "from": [
+{
+  "mailboxIds": {
+    "i00": true
+  },
+  "keywords": {
+    "$draft": true,
+    "$seen": true
+  },
+  "receivedAt": "2018-07-10T01:05:08Z",
+  "messageId": [
+    "my-message-id"
+  ],
+  "from": [
+    {
+      "name": "Joe Bloggs",
+      "email": "joe@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "John",
+      "email": "john@example.com"
+    }
+  ],
+  "subject": "World domination",
+  "sentAt": "2018-07-10T01:05:08Z",
+  "bodyStructure": {
+    "headers": [
       {
-        "email": "joe@example.com",
-        "name": "Joe Bloggs"
+        "name": "Content-Type",
+        "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
+      },
+      {
+        "name": "Date",
+        "value": "Tue, 10 Jul 2018 01:05:08 +0000"
+      },
+      {
+        "name": "From",
+        "value": "\"Joe Bloggs\" <joe@example.com>"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<my-message-id>"
+      },
+      {
+        "name": "Subject",
+        "value": "World domination"
+      },
+      {
+        "name": "To",
+        "value": "\"John\" <john@example.com>"
       }
     ],
-    "hasAttachment": false,
-    "htmlBody": [
+    "type": "multipart/alternative",
+    "subParts": [
       {
+        "partId": "0",
         "blobId": "ignored_value",
-        "charset": "utf-8",
+        "size": 218,
         "headers": [
           {
             "name": "Content-Language",
@@ -118,33 +71,16 @@
             "value": "text/html; charset=\"utf-8\""
           }
         ],
+        "type": "text/html",
+        "charset": "utf-8",
         "language": [
           "en"
-        ],
-        "partId": "0",
-        "size": 218,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "keywords": {
-      "$draft": true,
-      "$seen": true
-    },
-    "mailboxIds": {
-      "i00": true
-    },
-    "messageId": [
-      "my-message-id"
-    ],
-    "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
-    "receivedAt": "2018-07-10T01:05:08Z",
-    "sentAt": "2018-07-10T01:05:08Z",
-    "subject": "World domination",
-    "textBody": [
+        ]
+      },
       {
+        "partId": "1",
         "blobId": "ignored_value",
-        "charset": "utf-8",
+        "size": 81,
         "headers": [
           {
             "name": "Content-Language",
@@ -159,20 +95,79 @@
             "value": "text/plain; charset=\"utf-8\""
           }
         ],
+        "type": "text/plain",
+        "charset": "utf-8",
         "language": [
           "en"
-        ],
-        "partId": "1",
-        "size": 81,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value",
-    "to": [
-      {
-        "email": "john@example.com",
-        "name": "John"
+        ]
       }
     ]
-  }
-]
+  },
+  "bodyValues": {
+    "0": {
+      "value": "<!DOCTYPE html><html><head><title></title><style type=\"text/css\">div{font-size:16px}</style>...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    },
+    "1": {
+      "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "textBody": [
+    {
+      "partId": "1",
+      "blobId": "ignored_value",
+      "size": 81,
+      "headers": [
+        {
+          "name": "Content-Language",
+          "value": "en"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain; charset=\"utf-8\""
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8",
+      "language": [
+        "en"
+      ]
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "0",
+      "blobId": "ignored_value",
+      "size": 218,
+      "headers": [
+        {
+          "name": "Content-Language",
+          "value": "en"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/html; charset=\"utf-8\""
+        }
+      ],
+      "type": "text/html",
+      "charset": "utf-8",
+      "language": [
+        "en"
+      ]
+    }
+  ],
+  "attachments": [],
+  "hasAttachment": false,
+  "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
+}

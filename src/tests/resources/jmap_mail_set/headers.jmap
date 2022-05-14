@@ -1,264 +1,178 @@
-[
-  {
-    "attachments": [],
-    "bcc": [
-      {
-        "email": "addr1@example.com",
-        "name": "¡El ñandú comió ñoquis!"
-      }
-    ],
-    "blobId": "ignored_value",
-    "bodyStructure": {
-      "headers": [
-        {
-          "name": "Bcc",
-          "value": "\"=?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\"\r\n\t<addr1@example.com>"
-        },
-        {
-          "name": "Cc",
-          "value": "\"=?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?=\" <addr0@example.com>"
-        },
-        {
-          "name": "Content-Type",
-          "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
-        },
-        {
-          "name": "Date",
-          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
-        },
-        {
-          "name": "From",
-          "value": "\"Joe Bloggs\" <joe@example.com>"
-        },
-        {
-          "name": "In-Reply-To",
-          "value": "<other-message-id> <yet-another-message-id>"
-        },
-        {
-          "name": "List-Owner",
-          "value": "<http://www.host.com/list.cgi?cmd=sub&lst=list>\r\n\t<mailto:list-manager@host.com?body=subscribe%20list>"
-        },
-        {
-          "name": "List-Subscribe",
-          "value": "<ftp://ftp.host.com/list.txt>\r\n\t<mailto:list@host.com?subject=subscribe>"
-        },
-        {
-          "name": "List-Subscribe",
-          "value": "<mailto:list-manager@host.com?body=subscribe%20list>"
-        },
-        {
-          "name": "Message-ID",
-          "value": "<my-message-id>"
-        },
-        {
-          "name": "References",
-          "value": "<first-message-id> <second-message-id>"
-        },
-        {
-          "name": "Reply-To",
-          "value": "\"=?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?=\" <addr2@example.com>, \r\n\t\"=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?=\" <addr3@example.com>"
-        },
-        {
-          "name": "Resent-Date",
-          "value": "Mon, 04 Jul 2005 09:52:37 +0000"
-        },
-        {
-          "name": "Resent-Date",
-          "value": "Sat, 02 Jul 2005 09:52:37 +0000"
-        },
-        {
-          "name": "Resent-Date",
-          "value": "Sun, 03 Jul 2005 09:52:37 +0000"
-        },
-        {
-          "name": "Sender",
-          "value": "\"=?utf-8?B?44OP44Ot44O844O744Ov44O844Or44OJ?=\" <joe@example.com>"
-        },
-        {
-          "name": "Subject",
-          "value": "Headers test"
-        },
-        {
-          "name": "To",
-          "value": "\"Greg Vaudreuil\" <gvaudre@NRI.Reston.VA.US>, \r\n\t\"Ned Freed\" <ned@innosoft.com>, \"Keith Moore\" <moore@cs.utk.edu>"
-        },
-        {
-          "name": "X-AddressesGroup",
-          "value": "\"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>"
-        },
-        {
-          "name": "X-AddressesGroup",
-          "value": "\"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>"
-        },
-        {
-          "name": "X-References",
-          "value": "<1234@local.machine.example> <3456@example.net>"
-        },
-        {
-          "name": "X-References",
-          "value": "<789@local.machine.example> <abcd@example.net>"
-        },
-        {
-          "name": "X-Text",
-          "value": "a b"
-        },
-        {
-          "name": "X-Text",
-          "value": "this is some text"
-        }
-      ],
-      "subParts": [
-        {
-          "blobId": "ignored_value",
-          "charset": "us-ascii",
-          "headers": [
-            {
-              "name": "Content-Language",
-              "value": "en"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain; charset=\"us-ascii\""
-            },
-            {
-              "name": "X-Header",
-              "value": "just a value"
-            },
-            {
-              "name": "X-Text",
-              "value": "more text"
-            }
-          ],
-          "language": [
-            "en"
-          ],
-          "partId": "0",
-          "size": 81,
-          "type": "text/plain"
-        },
-        {
-          "blobId": "ignored_value",
-          "charset": "utf-8",
-          "headers": [
-            {
-              "name": "Content-Location",
-              "value": "https://example.com/html-body.html"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/html; charset=\"utf-8\"; name=\"html-body.html\""
-            }
-          ],
-          "location": "https://example.com/html-body.html",
-          "name": "html-body.html",
-          "partId": "1",
-          "size": 218,
-          "type": "text/html"
-        }
-      ],
-      "type": "multipart/alternative"
+{
+  "mailboxIds": {
+    "i00": true
+  },
+  "keywords": {
+    "$draft": true,
+    "$seen": true
+  },
+  "receivedAt": "2018-07-10T01:03:11Z",
+  "messageId": [
+    "my-message-id"
+  ],
+  "inReplyTo": [
+    "other-message-id",
+    "yet-another-message-id"
+  ],
+  "references": [
+    "first-message-id",
+    "second-message-id"
+  ],
+  "sender": [
+    {
+      "name": "ハロー・ワールド",
+      "email": "joe@example.com"
+    }
+  ],
+  "from": [
+    {
+      "name": "Joe Bloggs",
+      "email": "joe@example.com"
+    }
+  ],
+  "to": [
+    {
+      "name": "Greg Vaudreuil",
+      "email": "gvaudre@NRI.Reston.VA.US"
     },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
-      },
-      "1": {
-        "isEncodingProblem": false,
-        "isTruncated": true,
-        "value": "<!DOCTYPE html><html><head><title></title><style type=\"text/css\">div{font-size:16px}</style>..."
-      }
+    {
+      "name": "Ned Freed",
+      "email": "ned@innosoft.com"
     },
-    "cc": [
-      {
-        "email": "addr0@example.com",
-        "name": "Привет, мир"
-      }
-    ],
-    "from": [
-      {
-        "email": "joe@example.com",
-        "name": "Joe Bloggs"
-      }
-    ],
-    "hasAttachment": false,
-    "htmlBody": [
-      {
-        "blobId": "ignored_value",
-        "charset": "utf-8",
-        "headers": [
-          {
-            "name": "Content-Location",
-            "value": "https://example.com/html-body.html"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/html; charset=\"utf-8\"; name=\"html-body.html\""
-          }
-        ],
-        "location": "https://example.com/html-body.html",
-        "name": "html-body.html",
-        "partId": "1",
-        "size": 218,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "inReplyTo": [
-      "other-message-id",
-      "yet-another-message-id"
-    ],
-    "keywords": {
-      "$draft": true,
-      "$seen": true
+    {
+      "name": "Keith Moore",
+      "email": "moore@cs.utk.edu"
+    }
+  ],
+  "cc": [
+    {
+      "name": "Привет, мир",
+      "email": "addr0@example.com"
+    }
+  ],
+  "bcc": [
+    {
+      "name": "¡El ñandú comió ñoquis!",
+      "email": "addr1@example.com"
+    }
+  ],
+  "replyTo": [
+    {
+      "name": "안녕하세요 세계",
+      "email": "addr2@example.com"
     },
-    "mailboxIds": {
-      "i00": true
-    },
-    "messageId": [
-      "my-message-id"
-    ],
-    "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
-    "receivedAt": "2018-07-10T01:03:11Z",
-    "references": [
-      "first-message-id",
-      "second-message-id"
-    ],
-    "replyTo": [
+    {
+      "name": "Antoine de Saint-Exupéry",
+      "email": "addr3@example.com"
+    }
+  ],
+  "subject": "Headers test",
+  "sentAt": "2018-07-10T01:03:11Z",
+  "bodyStructure": {
+    "headers": [
       {
-        "email": "addr2@example.com",
-        "name": "안녕하세요 세계"
+        "name": "Bcc",
+        "value": "\"=?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\"\r\n\t<addr1@example.com>"
       },
       {
-        "email": "addr3@example.com",
-        "name": "Antoine de Saint-Exupéry"
+        "name": "Cc",
+        "value": "\"=?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?=\" <addr0@example.com>"
+      },
+      {
+        "name": "Content-Type",
+        "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
+      },
+      {
+        "name": "Date",
+        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+      },
+      {
+        "name": "From",
+        "value": "\"Joe Bloggs\" <joe@example.com>"
+      },
+      {
+        "name": "In-Reply-To",
+        "value": "<other-message-id> <yet-another-message-id>"
+      },
+      {
+        "name": "List-Owner",
+        "value": "<http://www.host.com/list.cgi?cmd=sub&lst=list>\r\n\t<mailto:list-manager@host.com?body=subscribe%20list>"
+      },
+      {
+        "name": "List-Subscribe",
+        "value": "<ftp://ftp.host.com/list.txt>\r\n\t<mailto:list@host.com?subject=subscribe>"
+      },
+      {
+        "name": "List-Subscribe",
+        "value": "<mailto:list-manager@host.com?body=subscribe%20list>"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<my-message-id>"
+      },
+      {
+        "name": "References",
+        "value": "<first-message-id> <second-message-id>"
+      },
+      {
+        "name": "Reply-To",
+        "value": "\"=?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?=\" <addr2@example.com>, \r\n\t\"=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?=\" <addr3@example.com>"
+      },
+      {
+        "name": "Resent-Date",
+        "value": "Mon, 04 Jul 2005 09:52:37 +0000"
+      },
+      {
+        "name": "Resent-Date",
+        "value": "Sat, 02 Jul 2005 09:52:37 +0000"
+      },
+      {
+        "name": "Resent-Date",
+        "value": "Sun, 03 Jul 2005 09:52:37 +0000"
+      },
+      {
+        "name": "Sender",
+        "value": "\"=?utf-8?B?44OP44Ot44O844O744Ov44O844Or44OJ?=\" <joe@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Headers test"
+      },
+      {
+        "name": "To",
+        "value": "\"Greg Vaudreuil\" <gvaudre@NRI.Reston.VA.US>, \r\n\t\"Ned Freed\" <ned@innosoft.com>, \"Keith Moore\" <moore@cs.utk.edu>"
+      },
+      {
+        "name": "X-AddressesGroup",
+        "value": "\"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>"
+      },
+      {
+        "name": "X-AddressesGroup",
+        "value": "\"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>"
+      },
+      {
+        "name": "X-References",
+        "value": "<1234@local.machine.example> <3456@example.net>"
+      },
+      {
+        "name": "X-References",
+        "value": "<789@local.machine.example> <abcd@example.net>"
+      },
+      {
+        "name": "X-Text",
+        "value": "a b"
+      },
+      {
+        "name": "X-Text",
+        "value": "this is some text"
       }
     ],
-    "sender": [
+    "type": "multipart/alternative",
+    "subParts": [
       {
-        "email": "joe@example.com",
-        "name": "ハロー・ワールド"
-      }
-    ],
-    "sentAt": "2018-07-10T01:03:11Z",
-    "subject": "Headers test",
-    "textBody": [
-      {
+        "partId": "0",
         "blobId": "ignored_value",
-        "charset": "us-ascii",
+        "size": 81,
         "headers": [
           {
             "name": "Content-Language",
@@ -281,28 +195,109 @@
             "value": "more text"
           }
         ],
+        "type": "text/plain",
+        "charset": "us-ascii",
         "language": [
           "en"
+        ]
+      },
+      {
+        "partId": "1",
+        "blobId": "ignored_value",
+        "size": 218,
+        "headers": [
+          {
+            "name": "Content-Location",
+            "value": "https://example.com/html-body.html"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": "7bit"
+          },
+          {
+            "name": "Content-Type",
+            "value": "text/html; charset=\"utf-8\"; name=\"html-body.html\""
+          }
         ],
-        "partId": "0",
-        "size": 81,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value",
-    "to": [
-      {
-        "email": "gvaudre@NRI.Reston.VA.US",
-        "name": "Greg Vaudreuil"
-      },
-      {
-        "email": "ned@innosoft.com",
-        "name": "Ned Freed"
-      },
-      {
-        "email": "moore@cs.utk.edu",
-        "name": "Keith Moore"
+        "name": "html-body.html",
+        "type": "text/html",
+        "charset": "utf-8",
+        "location": "https://example.com/html-body.html"
       }
     ]
-  }
-]
+  },
+  "bodyValues": {
+    "0": {
+      "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "1": {
+      "value": "<!DOCTYPE html><html><head><title></title><style type=\"text/css\">div{font-size:16px}</style>...",
+      "isEncodingProblem": false,
+      "isTruncated": true
+    }
+  },
+  "textBody": [
+    {
+      "partId": "0",
+      "blobId": "ignored_value",
+      "size": 81,
+      "headers": [
+        {
+          "name": "Content-Language",
+          "value": "en"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain; charset=\"us-ascii\""
+        },
+        {
+          "name": "X-Header",
+          "value": "just a value"
+        },
+        {
+          "name": "X-Text",
+          "value": "more text"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii",
+      "language": [
+        "en"
+      ]
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "1",
+      "blobId": "ignored_value",
+      "size": 218,
+      "headers": [
+        {
+          "name": "Content-Location",
+          "value": "https://example.com/html-body.html"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/html; charset=\"utf-8\"; name=\"html-body.html\""
+        }
+      ],
+      "name": "html-body.html",
+      "type": "text/html",
+      "charset": "utf-8",
+      "location": "https://example.com/html-body.html"
+    }
+  ],
+  "attachments": [],
+  "hasAttachment": false,
+  "preview": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we"
+}

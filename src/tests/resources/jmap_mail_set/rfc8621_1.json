@@ -1,7 +1,4 @@
 {
-    "mailboxIds": {
-        "i0": true
-    },
     "keywords": {
         "$seen": true,
         "$draft": true

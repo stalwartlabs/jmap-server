@@ -1,9 +1,52 @@
-[
-  {
-    "attachments": [
+{
+  "mailboxIds": {
+    "i00": true
+  },
+  "keywords": {
+    "$draft": true,
+    "$seen": true
+  },
+  "receivedAt": "2018-07-10T01:03:11Z",
+  "messageId": [
+    "my-message-id"
+  ],
+  "from": [
+    {
+      "name": "Joe Bloggs",
+      "email": "joe@example.com"
+    }
+  ],
+  "subject": "RFC 8621 Section 4.1.4 test",
+  "sentAt": "2018-07-10T01:03:11Z",
+  "bodyStructure": {
+    "headers": [
       {
+        "name": "Content-Type",
+        "value": "multipart/mixed; \r\n\tboundary=\"boundary_0\""
+      },
+      {
+        "name": "Date",
+        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+      },
+      {
+        "name": "From",
+        "value": "\"Joe Bloggs\" <joe@example.com>"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<my-message-id>"
+      },
+      {
+        "name": "Subject",
+        "value": "RFC 8621 Section 4.1.4 test"
+      }
+    ],
+    "type": "multipart/mixed",
+    "subParts": [
+      {
+        "partId": "0",
         "blobId": "ignored_value",
-        "disposition": "inline",
+        "size": 6,
         "headers": [
           {
             "name": "Content-Disposition",
@@ -11,545 +54,497 @@
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": "7bit"
           },
           {
             "name": "Content-Type",
-            "value": "image/jpeg"
+            "value": "text/plain"
           }
         ],
-        "partId": "5",
-        "size": 6,
-        "type": "image/jpeg"
+        "type": "text/plain",
+        "disposition": "inline"
       },
       {
-        "blobId": "ignored_value",
         "headers": [
           {
-            "name": "Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
             "name": "Content-Type",
-            "value": "image/jpeg"
+            "value": "multipart/mixed; \r\n\tboundary=\"boundary_1\""
           }
         ],
-        "partId": "9",
-        "size": 6,
-        "type": "image/jpeg"
+        "type": "multipart/mixed",
+        "subParts": [
+          {
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "multipart/alternative; \r\n\tboundary=\"boundary_2\""
+              }
+            ],
+            "type": "multipart/alternative",
+            "subParts": [
+              {
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "multipart/mixed; \r\n\tboundary=\"boundary_3\""
+                  }
+                ],
+                "type": "multipart/mixed",
+                "subParts": [
+                  {
+                    "partId": "4",
+                    "blobId": "ignored_value",
+                    "size": 6,
+                    "headers": [
+                      {
+                        "name": "Content-Disposition",
+                        "value": "inline"
+                      },
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": "7bit"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "text/plain"
+                      }
+                    ],
+                    "type": "text/plain",
+                    "disposition": "inline"
+                  },
+                  {
+                    "partId": "5",
+                    "blobId": "ignored_value",
+                    "size": 6,
+                    "headers": [
+                      {
+                        "name": "Content-Disposition",
+                        "value": "inline"
+                      },
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": "base64"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "image/jpeg"
+                      }
+                    ],
+                    "type": "image/jpeg",
+                    "disposition": "inline"
+                  },
+                  {
+                    "partId": "6",
+                    "blobId": "ignored_value",
+                    "size": 6,
+                    "headers": [
+                      {
+                        "name": "Content-Disposition",
+                        "value": "inline"
+                      },
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": "7bit"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "text/plain"
+                      }
+                    ],
+                    "type": "text/plain",
+                    "disposition": "inline"
+                  }
+                ]
+              },
+              {
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "multipart/related; \r\n\tboundary=\"boundary_4\""
+                  }
+                ],
+                "type": "multipart/related",
+                "subParts": [
+                  {
+                    "partId": "8",
+                    "blobId": "ignored_value",
+                    "size": 6,
+                    "headers": [
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": "7bit"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "text/html"
+                      }
+                    ],
+                    "type": "text/html"
+                  },
+                  {
+                    "partId": "9",
+                    "blobId": "ignored_value",
+                    "size": 6,
+                    "headers": [
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": "base64"
+                      },
+                      {
+                        "name": "Content-Type",
+                        "value": "image/jpeg"
+                      }
+                    ],
+                    "type": "image/jpeg"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "partId": "10",
+            "blobId": "ignored_value",
+            "size": 6,
+            "headers": [
+              {
+                "name": "Content-Disposition",
+                "value": "attachment"
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "base64"
+              },
+              {
+                "name": "Content-Type",
+                "value": "image/jpeg"
+              }
+            ],
+            "type": "image/jpeg",
+            "disposition": "attachment"
+          },
+          {
+            "partId": "11",
+            "blobId": "ignored_value",
+            "size": 6,
+            "headers": [
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "base64"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/x-excel"
+              }
+            ],
+            "type": "application/x-excel"
+          },
+          {
+            "partId": "12",
+            "blobId": "ignored_value",
+            "size": 6,
+            "headers": [
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": "base64"
+              },
+              {
+                "name": "Content-Type",
+                "value": "x-message/rfc822"
+              }
+            ],
+            "type": "x-message/rfc822"
+          }
+        ]
       },
       {
+        "partId": "13",
         "blobId": "ignored_value",
-        "disposition": "attachment",
+        "size": 6,
         "headers": [
           {
             "name": "Content-Disposition",
-            "value": "attachment"
+            "value": "inline"
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": "7bit"
           },
           {
             "name": "Content-Type",
-            "value": "image/jpeg"
+            "value": "text/plain"
           }
         ],
-        "partId": "10",
-        "size": 6,
-        "type": "image/jpeg"
-      },
-      {
-        "blobId": "ignored_value",
-        "headers": [
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
-            "name": "Content-Type",
-            "value": "application/x-excel"
-          }
-        ],
-        "partId": "11",
-        "size": 6,
-        "type": "application/x-excel"
-      },
-      {
-        "blobId": "ignored_value",
-        "headers": [
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
-            "name": "Content-Type",
-            "value": "x-message/rfc822"
-          }
-        ],
-        "partId": "12",
-        "size": 6,
-        "type": "x-message/rfc822"
+        "type": "text/plain",
+        "disposition": "inline"
       }
-    ],
-    "blobId": "ignored_value",
-    "bodyStructure": {
+    ]
+  },
+  "bodyValues": {
+    "0": {
+      "value": "Part A",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "13": {
+      "value": "Part K",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "14": {
+      "value": "<html><body>Part A</body></html>",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "15": {
+      "value": "<html><body>Part K</body></html>",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "4": {
+      "value": "Part B",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "6": {
+      "value": "Part D",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "8": {
+      "value": "Part E",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    }
+  },
+  "textBody": [
+    {
+      "partId": "0",
+      "blobId": "ignored_value",
+      "size": 6,
       "headers": [
         {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
           "name": "Content-Type",
-          "value": "multipart/mixed; \r\n\tboundary=\"boundary_0\""
-        },
-        {
-          "name": "Date",
-          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
-        },
-        {
-          "name": "From",
-          "value": "\"Joe Bloggs\" <joe@example.com>"
-        },
-        {
-          "name": "Message-ID",
-          "value": "<my-message-id>"
-        },
-        {
-          "name": "Subject",
-          "value": "RFC 8621 Section 4.1.4 test"
+          "value": "text/plain"
         }
       ],
-      "subParts": [
+      "type": "text/plain",
+      "disposition": "inline"
+    },
+    {
+      "partId": "4",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
         {
-          "blobId": "ignored_value",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain"
-            }
-          ],
-          "partId": "0",
-          "size": 6,
-          "type": "text/plain"
+          "name": "Content-Disposition",
+          "value": "inline"
         },
         {
-          "headers": [
-            {
-              "name": "Content-Type",
-              "value": "multipart/mixed; \r\n\tboundary=\"boundary_1\""
-            }
-          ],
-          "subParts": [
-            {
-              "headers": [
-                {
-                  "name": "Content-Type",
-                  "value": "multipart/alternative; \r\n\tboundary=\"boundary_2\""
-                }
-              ],
-              "subParts": [
-                {
-                  "headers": [
-                    {
-                      "name": "Content-Type",
-                      "value": "multipart/mixed; \r\n\tboundary=\"boundary_3\""
-                    }
-                  ],
-                  "subParts": [
-                    {
-                      "blobId": "ignored_value",
-                      "disposition": "inline",
-                      "headers": [
-                        {
-                          "name": "Content-Disposition",
-                          "value": "inline"
-                        },
-                        {
-                          "name": "Content-Transfer-Encoding",
-                          "value": "7bit"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "text/plain"
-                        }
-                      ],
-                      "partId": "4",
-                      "size": 6,
-                      "type": "text/plain"
-                    },
-                    {
-                      "blobId": "ignored_value",
-                      "disposition": "inline",
-                      "headers": [
-                        {
-                          "name": "Content-Disposition",
-                          "value": "inline"
-                        },
-                        {
-                          "name": "Content-Transfer-Encoding",
-                          "value": "base64"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "image/jpeg"
-                        }
-                      ],
-                      "partId": "5",
-                      "size": 6,
-                      "type": "image/jpeg"
-                    },
-                    {
-                      "blobId": "ignored_value",
-                      "disposition": "inline",
-                      "headers": [
-                        {
-                          "name": "Content-Disposition",
-                          "value": "inline"
-                        },
-                        {
-                          "name": "Content-Transfer-Encoding",
-                          "value": "7bit"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "text/plain"
-                        }
-                      ],
-                      "partId": "6",
-                      "size": 6,
-                      "type": "text/plain"
-                    }
-                  ],
-                  "type": "multipart/mixed"
-                },
-                {
-                  "headers": [
-                    {
-                      "name": "Content-Type",
-                      "value": "multipart/related; \r\n\tboundary=\"boundary_4\""
-                    }
-                  ],
-                  "subParts": [
-                    {
-                      "blobId": "ignored_value",
-                      "headers": [
-                        {
-                          "name": "Content-Transfer-Encoding",
-                          "value": "7bit"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "text/html"
-                        }
-                      ],
-                      "partId": "8",
-                      "size": 6,
-                      "type": "text/html"
-                    },
-                    {
-                      "blobId": "ignored_value",
-                      "headers": [
-                        {
-                          "name": "Content-Transfer-Encoding",
-                          "value": "base64"
-                        },
-                        {
-                          "name": "Content-Type",
-                          "value": "image/jpeg"
-                        }
-                      ],
-                      "partId": "9",
-                      "size": 6,
-                      "type": "image/jpeg"
-                    }
-                  ],
-                  "type": "multipart/related"
-                }
-              ],
-              "type": "multipart/alternative"
-            },
-            {
-              "blobId": "ignored_value",
-              "disposition": "attachment",
-              "headers": [
-                {
-                  "name": "Content-Disposition",
-                  "value": "attachment"
-                },
-                {
-                  "name": "Content-Transfer-Encoding",
-                  "value": "base64"
-                },
-                {
-                  "name": "Content-Type",
-                  "value": "image/jpeg"
-                }
-              ],
-              "partId": "10",
-              "size": 6,
-              "type": "image/jpeg"
-            },
-            {
-              "blobId": "ignored_value",
-              "headers": [
-                {
-                  "name": "Content-Transfer-Encoding",
-                  "value": "base64"
-                },
-                {
-                  "name": "Content-Type",
-                  "value": "application/x-excel"
-                }
-              ],
-              "partId": "11",
-              "size": 6,
-              "type": "application/x-excel"
-            },
-            {
-              "blobId": "ignored_value",
-              "headers": [
-                {
-                  "name": "Content-Transfer-Encoding",
-                  "value": "base64"
-                },
-                {
-                  "name": "Content-Type",
-                  "value": "x-message/rfc822"
-                }
-              ],
-              "partId": "12",
-              "size": 6,
-              "type": "x-message/rfc822"
-            }
-          ],
-          "type": "multipart/mixed"
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
         },
         {
-          "blobId": "ignored_value",
-          "disposition": "inline",
-          "headers": [
-            {
-              "name": "Content-Disposition",
-              "value": "inline"
-            },
-            {
-              "name": "Content-Transfer-Encoding",
-              "value": "7bit"
-            },
-            {
-              "name": "Content-Type",
-              "value": "text/plain"
-            }
-          ],
-          "partId": "13",
-          "size": 6,
-          "type": "text/plain"
+          "name": "Content-Type",
+          "value": "text/plain"
         }
       ],
-      "type": "multipart/mixed"
+      "type": "text/plain",
+      "disposition": "inline"
     },
-    "bodyValues": {
-      "0": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Part A"
-      },
-      "13": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Part K"
-      },
-      "14": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "<html><body>Part A</body></html>"
-      },
-      "15": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "<html><body>Part K</body></html>"
-      },
-      "4": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Part B"
-      },
-      "6": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Part D"
-      },
-      "8": {
-        "isEncodingProblem": false,
-        "isTruncated": false,
-        "value": "Part E"
-      }
+    {
+      "partId": "5",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg",
+      "disposition": "inline"
     },
-    "from": [
-      {
-        "email": "joe@example.com",
-        "name": "Joe Bloggs"
-      }
-    ],
-    "hasAttachment": true,
-    "htmlBody": [
-      {
-        "blobId": "ignored_value",
-        "partId": "14",
-        "size": 32,
-        "type": "text/html"
-      },
-      {
-        "blobId": "ignored_value",
-        "headers": [
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/html"
-          }
-        ],
-        "partId": "8",
-        "size": 6,
-        "type": "text/html"
-      },
-      {
-        "blobId": "ignored_value",
-        "partId": "15",
-        "size": 32,
-        "type": "text/html"
-      }
-    ],
-    "id": "ignored_value",
-    "keywords": {
-      "$draft": true,
-      "$seen": true
+    {
+      "partId": "6",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain"
+        }
+      ],
+      "type": "text/plain",
+      "disposition": "inline"
     },
-    "mailboxIds": {
-      "i00": true
+    {
+      "partId": "13",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/plain"
+        }
+      ],
+      "type": "text/plain",
+      "disposition": "inline"
+    }
+  ],
+  "htmlBody": [
+    {
+      "partId": "14",
+      "blobId": "ignored_value",
+      "size": 32,
+      "type": "text/html"
     },
-    "messageId": [
-      "my-message-id"
-    ],
-    "preview": "Part A",
-    "receivedAt": "2018-07-10T01:03:11Z",
-    "sentAt": "2018-07-10T01:03:11Z",
-    "subject": "RFC 8621 Section 4.1.4 test",
-    "textBody": [
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "0",
-        "size": 6,
-        "type": "text/plain"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "4",
-        "size": 6,
-        "type": "text/plain"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "base64"
-          },
-          {
-            "name": "Content-Type",
-            "value": "image/jpeg"
-          }
-        ],
-        "partId": "5",
-        "size": 6,
-        "type": "image/jpeg"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "6",
-        "size": 6,
-        "type": "text/plain"
-      },
-      {
-        "blobId": "ignored_value",
-        "disposition": "inline",
-        "headers": [
-          {
-            "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
-          }
-        ],
-        "partId": "13",
-        "size": 6,
-        "type": "text/plain"
-      }
-    ],
-    "threadId": "ignored_value"
-  }
-]
+    {
+      "partId": "8",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "7bit"
+        },
+        {
+          "name": "Content-Type",
+          "value": "text/html"
+        }
+      ],
+      "type": "text/html"
+    },
+    {
+      "partId": "15",
+      "blobId": "ignored_value",
+      "size": 32,
+      "type": "text/html"
+    }
+  ],
+  "attachments": [
+    {
+      "partId": "5",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "inline"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg",
+      "disposition": "inline"
+    },
+    {
+      "partId": "9",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg"
+    },
+    {
+      "partId": "10",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": "attachment"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "image/jpeg"
+        }
+      ],
+      "type": "image/jpeg",
+      "disposition": "attachment"
+    },
+    {
+      "partId": "11",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/x-excel"
+        }
+      ],
+      "type": "application/x-excel"
+    },
+    {
+      "partId": "12",
+      "blobId": "ignored_value",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": "base64"
+        },
+        {
+          "name": "Content-Type",
+          "value": "x-message/rfc822"
+        }
+      ],
+      "type": "x-message/rfc822"
+    }
+  ],
+  "hasAttachment": true,
+  "preview": "Part A"
+}
