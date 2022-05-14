@@ -83,7 +83,7 @@ impl From<SetError> for JSONValue {
     fn from(err: SetError) -> Self {
         let mut o = HashMap::with_capacity(2);
         o.insert(
-            "error_type".to_string(),
+            "type".to_string(),
             err.error_type.as_str().to_string().into(),
         );
         if let Some(description) = err.description {

@@ -27,7 +27,7 @@ impl ChangesRequest {
         invocation.parse_arguments(response, |name, value| {
             match name.as_str() {
                 "accountId" => request.account_id = value.parse_document_id()?,
-                "sinceQueryState" => request.since_state = value.parse_jmap_state(false)?.unwrap(),
+                "sinceState" => request.since_state = value.parse_jmap_state(false)?.unwrap(),
                 "maxChanges" => {
                     request.max_changes = value.parse_unsigned_int(true)?.unwrap() as usize
                 }

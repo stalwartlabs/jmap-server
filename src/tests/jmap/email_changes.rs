@@ -1,26 +1,18 @@
-use std::collections::{HashMap, HashSet};
+use actix_web::web;
+use jmap::id::JMAPIdSerialize;
+use jmap_client::client::Client;
+use store::Store;
 
-use jmap::{
-    id::state::JMAPState, jmap_store::changes::JMAPChanges, protocol::json::JSONValue,
-    request::changes::ChangesRequest,
-};
-use jmap_mail::mail::changes::ChangesMail;
-use store::{
-    core::collection::Collection, write::batch::WriteBatch, AccountId, JMAPId, JMAPStore, Store,
-};
+use std::collections::HashSet;
 
-use crate::tests::store::db_log::assert_compaction;
+use jmap::id::state::JMAPState;
+use store::{core::collection::Collection, write::batch::WriteBatch, JMAPId};
 
-#[derive(Debug, Clone, Copy)]
-pub enum LogAction {
-    Insert(JMAPId),
-    Update(JMAPId),
-    Delete(JMAPId),
-    UpdateChild(JMAPId),
-    Move(JMAPId, JMAPId),
-}
+use crate::tests::store::log::assert_compaction;
 
-pub fn jmap_changes<T>(mail_store: &JMAPStore<T>, account_id: AccountId)
+use crate::JMAPServer;
+
+pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -136,7 +128,7 @@ where
             ],
         ),
     ] {
-        let mut documents = WriteBatch::new(account_id);
+        let mut documents = WriteBatch::new(1);
 
         for change in changes {
             match change {
@@ -150,44 +142,35 @@ where
             }
         }
 
-        mail_store.write(documents).unwrap();
+        server.store.write(documents).unwrap();
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
-            let changes: JSONValue = mail_store
-                .changes::<ChangesMail>(ChangesRequest {
-                    account_id,
-                    since_state: state.clone(),
-                    max_changes: 0,
-                    arguments: HashMap::new(),
-                })
-                .unwrap()
-                .into();
+            let changes = client
+                .email_changes(state.to_jmap_string(), 0)
+                .await
+                .unwrap();
 
             assert_eq!(
                 expected_changelog[test_num],
-                vec![
-                    changes.eval_unwrap_array("/created"),
-                    changes.eval_unwrap_array("/updated"),
-                    changes.eval_unwrap_array("/destroyed")
-                ]
-                .into_iter()
-                .map(|list| {
-                    let mut list = list
-                        .into_iter()
-                        .map(|i| i.to_jmap_id().unwrap())
-                        .collect::<Vec<_>>();
-                    list.sort_unstable();
-                    list
-                })
-                .collect::<Vec<Vec<_>>>(),
+                [changes.created(), changes.updated(), changes.destroyed()]
+                    .into_iter()
+                    .map(|list| {
+                        let mut list = list
+                            .iter()
+                            .map(|i| JMAPId::from_jmap_string(i).unwrap())
+                            .collect::<Vec<_>>();
+                        list.sort_unstable();
+                        list
+                    })
+                    .collect::<Vec<Vec<_>>>(),
                 "test_num: {}, state: {:?}",
                 test_num,
                 state
             );
 
             if let JMAPState::Initial = state {
-                new_state = changes.eval_unwrap_jmap_state("/newState");
+                new_state = JMAPState::from_jmap_string(changes.new_state()).unwrap();
             }
 
             for max_changes in 1..=8 {
@@ -207,39 +190,51 @@ where
                 let mut int_state = state.clone();
 
                 for _ in 0..100 {
-                    let changes: JSONValue = mail_store
-                        .changes::<ChangesMail>(ChangesRequest {
-                            account_id,
-                            since_state: int_state,
-                            max_changes,
-                            arguments: HashMap::new(),
-                        })
-                        .unwrap()
-                        .into();
+                    let changes = client
+                        .email_changes(int_state.to_jmap_string(), max_changes)
+                        .await
+                        .unwrap();
 
                     assert!(
-                        changes.eval_unwrap_unsigned_int("/totalChanges") <= max_changes as u64,
+                        changes.created().len()
+                            + changes.updated().len()
+                            + changes.destroyed().len()
+                            <= max_changes,
                         "{} > {}",
-                        changes.eval_unwrap_unsigned_int("/totalChanges"),
+                        changes.created().len()
+                            + changes.updated().len()
+                            + changes.destroyed().len(),
                         max_changes
                     );
 
-                    changes.eval_unwrap_array("/created").iter().for_each(|id| {
-                        assert!(insertions.remove(&id.to_jmap_id().unwrap()));
+                    changes.created().iter().for_each(|id| {
+                        assert!(
+                            insertions.remove(&JMAPId::from_jmap_string(id).unwrap()),
+                            "{:?} != {}",
+                            insertions,
+                            JMAPId::from_jmap_string(id).unwrap()
+                        );
                     });
-                    changes.eval_unwrap_array("/updated").iter().for_each(|id| {
-                        assert!(updates.remove(&id.to_jmap_id().unwrap()));
+                    changes.updated().iter().for_each(|id| {
+                        assert!(
+                            updates.remove(&JMAPId::from_jmap_string(id).unwrap()),
+                            "{:?} != {}",
+                            updates,
+                            JMAPId::from_jmap_string(id).unwrap()
+                        );
                     });
-                    changes
-                        .eval_unwrap_array("/destroyed")
-                        .iter()
-                        .for_each(|id| {
-                            assert!(deletions.remove(&id.to_jmap_id().unwrap()));
-                        });
+                    changes.destroyed().iter().for_each(|id| {
+                        assert!(
+                            deletions.remove(&JMAPId::from_jmap_string(id).unwrap()),
+                            "{:?} != {}",
+                            deletions,
+                            JMAPId::from_jmap_string(id).unwrap()
+                        );
+                    });
 
-                    int_state = changes.eval("/newState").unwrap().to_jmap_state().unwrap();
+                    int_state = JMAPState::from_jmap_string(changes.new_state()).unwrap();
 
-                    if !changes.eval_unwrap_bool("/hasMoreChanges") {
+                    if !changes.has_more_changes() {
                         break;
                     }
                 }
@@ -253,32 +248,30 @@ where
         states.push(new_state);
     }
 
-    assert_compaction(mail_store, 1);
+    assert_compaction(&server.store, 1);
 
-    let changes: JSONValue = mail_store
-        .changes::<ChangesMail>(ChangesRequest {
-            account_id,
-            since_state: JMAPState::Initial,
-            max_changes: 0,
-            arguments: HashMap::new(),
-        })
-        .unwrap()
-        .into();
+    let changes = client
+        .email_changes(JMAPState::Initial.to_jmap_string(), 0)
+        .await
+        .unwrap();
 
     assert_eq!(
         changes
-            .eval_unwrap_array("/created")
-            .into_iter()
-            .map(|i| i.to_jmap_id().unwrap())
+            .created()
+            .iter()
+            .map(|i| JMAPId::from_jmap_string(i).unwrap())
             .collect::<Vec<_>>(),
         vec![2, 3, 11, 12]
     );
-    assert_eq!(
-        changes.eval_unwrap_array("/updated"),
-        Vec::<JSONValue>::new()
-    );
-    assert_eq!(
-        changes.eval_unwrap_array("/destroyed"),
-        Vec::<JSONValue>::new()
-    );
+    assert_eq!(changes.updated(), Vec::<String>::new());
+    assert_eq!(changes.destroyed(), Vec::<String>::new());
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LogAction {
+    Insert(JMAPId),
+    Update(JMAPId),
+    Delete(JMAPId),
+    UpdateChild(JMAPId),
+    Move(JMAPId, JMAPId),
 }

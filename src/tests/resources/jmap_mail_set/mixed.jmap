@@ -73,7 +73,7 @@
         "subParts": [
           {
             "partId": "1",
-            "blobId": "ignored_value",
+            "blobId": "bb1f3e8adde0ce6870eff3579b2d5fa4907089fd1b757c1f293947da9ad53586d8101",
             "size": 129,
             "headers": [
               {
@@ -96,7 +96,7 @@
           },
           {
             "partId": "2",
-            "blobId": "ignored_value",
+            "blobId": "bc68c92b63f8ded4901373055cbe46a77fa17d61543242093e8291d6710f6878caf01",
             "size": 175,
             "headers": [
               {
@@ -121,7 +121,7 @@
       },
       {
         "partId": "3",
-        "blobId": "ignored_value",
+        "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
         "size": 37,
         "headers": [
           {
@@ -142,7 +142,7 @@
       },
       {
         "partId": "4",
-        "blobId": "ignored_value",
+        "blobId": "b87c8dda104d5bb89e0dbd24ed7ff67d81d5e327e6e1ad3bf9428a256044339437f",
         "size": 127,
         "headers": [
           {
@@ -179,7 +179,7 @@
   "textBody": [
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "bb1f3e8adde0ce6870eff3579b2d5fa4907089fd1b757c1f293947da9ad53586d8101",
       "size": 129,
       "headers": [
         {
@@ -202,7 +202,7 @@
     },
     {
       "partId": "3",
-      "blobId": "ignored_value",
+      "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
       "size": 37,
       "headers": [
         {
@@ -225,7 +225,7 @@
   "htmlBody": [
     {
       "partId": "2",
-      "blobId": "ignored_value",
+      "blobId": "bc68c92b63f8ded4901373055cbe46a77fa17d61543242093e8291d6710f6878caf01",
       "size": 175,
       "headers": [
         {
@@ -248,7 +248,7 @@
     },
     {
       "partId": "3",
-      "blobId": "ignored_value",
+      "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
       "size": 37,
       "headers": [
         {
@@ -271,7 +271,7 @@
   "attachments": [
     {
       "partId": "3",
-      "blobId": "ignored_value",
+      "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
       "size": 37,
       "headers": [
         {
@@ -292,7 +292,7 @@
     },
     {
       "partId": "4",
-      "blobId": "ignored_value",
+      "blobId": "b87c8dda104d5bb89e0dbd24ed7ff67d81d5e327e6e1ad3bf9428a256044339437f",
       "size": 127,
       "headers": [
         {

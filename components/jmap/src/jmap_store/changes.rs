@@ -189,10 +189,6 @@ impl From<ChangesResult> for JSONValue {
             "hasMoreChanges".to_string(),
             changes_result.has_more_changes.into(),
         );
-        result.insert(
-            "totalChanges".to_string(),
-            changes_result.total_changes.into(),
-        );
         result.insert("newState".to_string(), changes_result.new_state.into());
         result.insert("oldState".to_string(), changes_result.old_state.into());
         result.insert("created".to_string(), changes_result.created.into());

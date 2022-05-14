@@ -9,7 +9,7 @@
   "sentAt": "2018-07-10T01:03:11Z",
   "bodyStructure": {
     "partId": "0",
-    "blobId": "ignored_value",
+    "blobId": "b7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a602",
     "size": 2,
     "headers": [
       {
@@ -47,7 +47,7 @@
   "textBody": [
     {
       "partId": "0",
-      "blobId": "ignored_value",
+      "blobId": "b7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a602",
       "size": 2,
       "headers": [
         {
@@ -66,7 +66,7 @@
   "htmlBody": [
     {
       "partId": "1",
-      "blobId": "ignored_value",
+      "blobId": "ba65fab0fe1985b442263be760464b115fbc4259253c348d9e75e064d607851d31f",
       "size": 31,
       "type": "text/html"
     }

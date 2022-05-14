@@ -33,10 +33,10 @@ impl From<&EnvSettings> for JMAPConfig {
             max_concurrent_requests: 8,
             max_calls_in_request: 32,
             max_objects_in_get: 500,
-            max_objects_in_set: 500,
-            blob_temp_ttl: 3600, //TODO configure all params
+            max_objects_in_set: 100000, // Temporarily, for email_query tests
+            blob_temp_ttl: 3600,        //TODO configure all params
             changes_max_results: 1000,
-            query_max_results: 1000,
+            query_max_results: 100000, // Temporarily, for email_query tests
             mailbox_name_max_len: 255, //TODO implement
             mailbox_max_total: 1000,
             mailbox_max_depth: 10,

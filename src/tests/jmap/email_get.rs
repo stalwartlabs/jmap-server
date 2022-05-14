@@ -4,7 +4,6 @@ use actix_web::web;
 use jmap::id::JMAPIdSerialize;
 use jmap_client::{
     client::Client,
-    core::response::EmailGetResponse,
     email::{self, Header, HeaderForm},
     mailbox::Role,
 };
@@ -122,7 +121,7 @@ where
             .max_body_value_bytes(100);
 
         let mut result = request
-            .send_single::<EmailGetResponse>()
+            .send_get_email()
             .await
             .unwrap()
             .unwrap_list()
@@ -136,7 +135,7 @@ where
                 request.get_email().ids([email.id()]).properties([property]);
                 result.headers.extend(
                     request
-                        .send_single::<EmailGetResponse>()
+                        .send_get_email()
                         .await
                         .unwrap()
                         .unwrap_list()

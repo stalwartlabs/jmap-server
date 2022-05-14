@@ -7,10 +7,14 @@ use crate::server::http::{init_jmap_server, start_jmap_server};
 
 use super::store::utils::{destroy_temp_dir, init_settings};
 
+pub mod email_changes;
 pub mod email_get;
-pub mod email_merge_threads;
 pub mod email_parse;
+pub mod email_query;
+pub mod email_query_changes;
 pub mod email_set;
+pub mod email_thread;
+pub mod email_thread_merge;
 
 #[actix_web::test]
 async fn jmap_tests() {
@@ -32,9 +36,14 @@ async fn jmap_tests() {
     let mut client = Client::connect(&session_url).await.unwrap();
 
     // Run tests
-    //email_merge_threads::test(server.clone(), &mut client).await;
+    //email_thread_merge::test(server.clone(), &mut client).await;
     //email_get::test(server.clone(), &mut client).await;
-    email_parse::test(server.clone(), &mut client).await;
+    //email_parse::test(server.clone(), &mut client).await;
+    //email_set::test(server.clone(), &mut client).await;
+    //email_query::test(server.clone(), &mut client).await;
+    //email_thread::test(server.clone(), &mut client).await;
+    //email_changes::test(server.clone(), &mut client).await;
+    email_query_changes::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

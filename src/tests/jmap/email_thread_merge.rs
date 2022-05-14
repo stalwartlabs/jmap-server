@@ -40,7 +40,7 @@ where
                 .email_import(
                     message.to_string().into_bytes(),
                     [mailbox_ids[0].clone()],
-                    None,
+                    None::<Vec<String>>,
                     None,
                 )
                 .await
@@ -53,7 +53,7 @@ where
                 .email_import(
                     message.to_string().into_bytes(),
                     [mailbox_ids[1].clone()],
-                    None,
+                    None::<Vec<String>>,
                     None,
                 )
                 .await
@@ -68,7 +68,7 @@ where
                     .email_import(
                         message.to_string().into_bytes(),
                         [mailbox_ids[2].clone()],
-                        None,
+                        None::<Vec<String>>,
                         None,
                     )
                     .await
@@ -82,7 +82,7 @@ where
                     .email_import(
                         message.to_string().into_bytes(),
                         [mailbox_ids[3].clone()],
-                        None,
+                        None::<Vec<String>>,
                         None,
                     )
                     .await
@@ -98,7 +98,7 @@ where
                     .email_import(
                         message.to_string().into_bytes(),
                         [mailbox_ids[4].clone()],
-                        None,
+                        None::<Vec<String>>,
                         None,
                     )
                     .await
@@ -112,7 +112,7 @@ where
                     .email_import(
                         message.to_string().into_bytes(),
                         [mailbox_ids[5].clone()],
-                        None,
+                        None::<Vec<String>>,
                         None,
                     )
                     .await

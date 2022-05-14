@@ -40,7 +40,7 @@ where
             .email_import(
                 fs::read(&test_file).unwrap(),
                 [mailbox_id.clone()],
-                None,
+                None::<Vec<String>>,
                 None,
             )
             .await

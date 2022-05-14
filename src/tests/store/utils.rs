@@ -220,6 +220,8 @@ pub fn init_settings(
                             "jmap-url".to_string(),
                             format!("http://127.0.0.1:{}", 8000 + peer_num),
                         ),
+                        ("max-objects-in-set".to_string(), "100000".to_string()),
+                        ("query-max-results".to_string(), "100000".to_string()),
                         ("http-port".to_string(), (8000 + peer_num).to_string()),
                     ]
                     .into_iter(),

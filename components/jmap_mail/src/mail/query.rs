@@ -208,7 +208,7 @@ where
 
                     // TODO special case for message references
                     if let Some(value) = value {
-                        Filter::eq(header.into(), FieldValue::Text(value))
+                        Filter::eq(header.into(), FieldValue::Keyword(value))
                     } else {
                         Filter::eq(
                             MessageField::HasHeader.into(),
