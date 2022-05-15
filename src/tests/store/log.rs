@@ -18,7 +18,7 @@ use store::{
     AccountId, ColumnFamily, Direction, JMAPStore, Store,
 };
 
-pub fn compact_log<T>(mail_store: JMAPStore<T>)
+pub fn test<T>(mail_store: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {

@@ -39,26 +39,26 @@ where
 }
 
 #[test]
-fn insert_filter_sort() {
+fn store_query() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_filter_test", true);
-    query::insert_filter_sort(db, true);
+    query::test(db, true);
     destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn blobs() {
+fn store_blobs() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_blobs", true);
 
-    blobs::blobs(db);
+    blobs::test(db);
 
     destroy_temp_dir(temp_dir);
 }
 
 #[test]
-fn compact_log() {
+fn store_compact_log() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_log", true);
 
-    log::compact_log(db);
+    log::test(db);
 
     destroy_temp_dir(temp_dir);
 }

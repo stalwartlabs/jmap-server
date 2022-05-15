@@ -43,7 +43,7 @@ where
     }
 }*/
 
-pub fn blobs<T>(_db: JMAPStore<T>)
+pub fn test<T>(_db: JMAPStore<T>)
 where
     T: for<'x> Store<'x> + 'static,
 {

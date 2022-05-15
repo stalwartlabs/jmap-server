@@ -591,6 +591,7 @@ where
             }
             keys.insert(cf, total_keys);
         }
-        //println!("Store is empty: {:?}", keys);
+
+        self.doc_id_cache.invalidate_all();
     }
 }

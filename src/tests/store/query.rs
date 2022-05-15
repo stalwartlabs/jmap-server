@@ -74,7 +74,7 @@ const FIELDS_OPTIONS: [FieldType; 20] = [
 ];
 
 #[allow(clippy::mutex_atomic)]
-pub fn insert_filter_sort<T>(db: JMAPStore<T>, do_insert: bool)
+pub fn test<T>(db: JMAPStore<T>, do_insert: bool)
 where
     T: for<'x> Store<'x> + 'static,
 {
