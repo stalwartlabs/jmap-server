@@ -15,6 +15,7 @@ pub mod email_query_changes;
 pub mod email_set;
 pub mod email_thread;
 pub mod email_thread_merge;
+pub mod event_source;
 pub mod mailbox;
 
 #[actix_web::test]
@@ -37,7 +38,7 @@ async fn jmap_tests() {
     let mut client = Client::connect(&session_url).await.unwrap();
 
     // Run tests
-    email_changes::test(server.clone(), &mut client).await;
+    /*email_changes::test(server.clone(), &mut client).await;
     email_query_changes::test(server.clone(), &mut client).await;
     email_thread::test(server.clone(), &mut client).await;
     email_thread_merge::test(server.clone(), &mut client).await;
@@ -45,7 +46,8 @@ async fn jmap_tests() {
     email_parse::test(server.clone(), &mut client).await;
     email_set::test(server.clone(), &mut client).await;
     email_query::test(server.clone(), &mut client).await;
-    mailbox::test(server.clone(), &mut client).await;
+    mailbox::test(server.clone(), &mut client).await;*/
+    event_source::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

@@ -67,7 +67,11 @@ where
         }
     }
     let mut ping = if params.ping > 0 {
+        #[cfg(not(test))]
         let interval = std::cmp::max(params.ping, 30);
+        #[cfg(test)]
+        let interval = params.ping;
+
         Ping {
             interval: interval as u64,
             payload: web::Bytes::from(format!(
