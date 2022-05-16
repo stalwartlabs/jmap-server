@@ -5,6 +5,7 @@ use actix_web::{
 use jmap::{
     error::problem_details::ProblemDetails, id::JMAPIdSerialize, jmap_store::blob::JMAPBlobStore,
 };
+use reqwest::header::CONTENT_TYPE;
 use store::{tracing::error, AccountId, JMAPId, Store};
 
 use crate::JMAPServer;
@@ -51,7 +52,7 @@ where
                             blob_id: blob_id.to_jmap_string(),
                             c_type: request
                                 .headers()
-                                .get("content-type")
+                                .get(CONTENT_TYPE)
                                 .and_then(|h| h.to_str().ok())
                                 .unwrap_or("application/octet-stream")
                                 .to_string(),

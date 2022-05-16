@@ -25,6 +25,7 @@ use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 
 use super::{EncriptionKeys, StateChange, StateChangeResponse, UpdateSubscription};
 
+#[derive(Debug)]
 pub enum Event {
     Update {
         updates: Vec<PushUpdate>,
@@ -43,6 +44,7 @@ pub enum Event {
     Reset,
 }
 
+#[derive(Debug)]
 pub enum PushUpdate {
     Verify {
         id: DocumentId,
@@ -61,19 +63,30 @@ pub enum PushUpdate {
     },
 }
 
+#[derive(Debug)]
 pub struct PushSubscription {
     url: String,
     keys: Option<EncriptionKeys>,
     num_attempts: u32,
-    last_attempt: Instant,
+    last_request: Instant,
     state_changes: Vec<StateChange>,
     in_flight: bool,
 }
 
-const PUSH_MAX_ATTEMPTS: u32 = 3;
+#[cfg(test)]
+const PUSH_ATTEMPT_INTERVAL_MS: u64 = 500;
+#[cfg(test)]
+const PUSH_THROTTLE_MS: u64 = 500;
+
+#[cfg(not(test))]
 const PUSH_ATTEMPT_INTERVAL_MS: u64 = 60 * 1000;
+#[cfg(not(test))]
+const PUSH_THROTTLE_MS: u64 = 1000;
+
+const PUSH_MAX_ATTEMPTS: u32 = 3;
 const PUSH_TIMEOUT_MS: u64 = 10 * 1000;
 const RETRY_MS: u64 = 1000;
+const VERIFY_WAIT_SECS: u64 = 60;
 const LONG_SLUMBER_SECS: u64 = 60 * 60 * 24;
 
 pub fn spawn_push_manager() -> mpsc::Sender<Event> {
@@ -89,115 +102,133 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
 
         loop {
             match time::timeout(retry_timeout, push_rx.recv()).await {
-                Ok(Some(event)) => match event {
-                    Event::Update { updates } => {
-                        for update in updates {
-                            match update {
-                                PushUpdate::Verify {
-                                    id,
-                                    account_id,
-                                    url,
-                                    code,
-                                    keys,
-                                } => {
-                                    let current_time = SystemTime::now()
-                                        .duration_since(SystemTime::UNIX_EPOCH)
-                                        .map(|d| d.as_secs())
-                                        .unwrap_or(0);
-                                    if last_verify
-                                        .get(&account_id)
-                                        .map(|last_verify| last_verify > &(current_time - 60))
-                                        .unwrap_or(true)
-                                    {
-                                        tokio::spawn(async move {
-                                            http_request(
-                                                url,
-                                                format!(
-                                                    concat!(
-                                                        "{{\"@type\":\"PushVerification\",",
-                                                        "\"pushSubscriptionId\":\"{}\",",
-                                                        "\"verificationCode\":\"{}\"}}"
-                                                    ),
-                                                    (id as JMAPId).to_jmap_string(),
-                                                    code
-                                                ),
-                                                keys,
-                                            )
-                                            .await;
-                                        });
+                Ok(Some(event)) => {
+                    //println!("Push: {:?}", event);
 
-                                        last_verify.insert(account_id, current_time);
-                                    } else {
-                                        debug!(
-                                            concat!(
-                                                "Failed to verify push subscription: ",
-                                                "Too many requests for from accountId {}."
-                                            ),
-                                            account_id
-                                        );
-                                        continue;
+                    match event {
+                        Event::Update { updates } => {
+                            for update in updates {
+                                match update {
+                                    PushUpdate::Verify {
+                                        id,
+                                        account_id,
+                                        url,
+                                        code,
+                                        keys,
+                                    } => {
+                                        let current_time = SystemTime::now()
+                                            .duration_since(SystemTime::UNIX_EPOCH)
+                                            .map(|d| d.as_secs())
+                                            .unwrap_or(0);
+
+                                        #[cfg(test)]
+                                        if url.contains("skip_checks") {
+                                            last_verify.insert(
+                                                account_id,
+                                                current_time - (VERIFY_WAIT_SECS + 1),
+                                            );
+                                        }
+
+                                        if last_verify
+                                            .get(&account_id)
+                                            .map(|last_verify| {
+                                                current_time - *last_verify > VERIFY_WAIT_SECS
+                                            })
+                                            .unwrap_or(true)
+                                        {
+                                            tokio::spawn(async move {
+                                                http_request(
+                                                    url,
+                                                    format!(
+                                                        concat!(
+                                                            "{{\"@type\":\"PushVerification\",",
+                                                            "\"pushSubscriptionId\":\"{}\",",
+                                                            "\"verificationCode\":\"{}\"}}"
+                                                        ),
+                                                        (id as JMAPId).to_jmap_string(),
+                                                        code
+                                                    ),
+                                                    keys,
+                                                )
+                                                .await;
+                                            });
+
+                                            last_verify.insert(account_id, current_time);
+                                        } else {
+                                            debug!(
+                                                concat!(
+                                                    "Failed to verify push subscription: ",
+                                                    "Too many requests for from accountId {}."
+                                                ),
+                                                account_id
+                                            );
+                                            continue;
+                                        }
                                     }
-                                }
-                                PushUpdate::Register { id, url, keys } => {
-                                    if let Entry::Vacant(entry) = subscriptions.entry(id) {
-                                        entry.insert(PushSubscription {
-                                            url,
-                                            keys,
-                                            num_attempts: 0,
-                                            last_attempt: Instant::now(),
-                                            state_changes: Vec::new(),
-                                            in_flight: false,
-                                        });
+                                    PushUpdate::Register { id, url, keys } => {
+                                        if let Entry::Vacant(entry) = subscriptions.entry(id) {
+                                            entry.insert(PushSubscription {
+                                                url,
+                                                keys,
+                                                num_attempts: 0,
+                                                last_request: Instant::now()
+                                                    - Duration::from_millis(PUSH_THROTTLE_MS + 1),
+                                                state_changes: Vec::new(),
+                                                in_flight: false,
+                                            });
+                                        }
                                     }
-                                }
-                                PushUpdate::Unregister { id } => {
-                                    subscriptions.remove(&id);
+                                    PushUpdate::Unregister { id } => {
+                                        subscriptions.remove(&id);
+                                    }
                                 }
                             }
                         }
-                    }
-                    Event::Push { ids, state_change } => {
-                        for id in ids {
-                            if let Some(subscription) = subscriptions.get_mut(&id) {
-                                subscription.state_changes.push(state_change.clone());
+                        Event::Push { ids, state_change } => {
+                            for id in ids {
+                                if let Some(subscription) = subscriptions.get_mut(&id) {
+                                    subscription.state_changes.push(state_change.clone());
+                                    let last_request =
+                                        subscription.last_request.elapsed().as_millis() as u64;
 
-                                if subscription.num_attempts == 0
-                                    || (subscription.num_attempts < PUSH_MAX_ATTEMPTS
-                                        && subscription.last_attempt.elapsed().as_millis() as u64
-                                            > PUSH_ATTEMPT_INTERVAL_MS)
-                                {
-                                    if !subscription.in_flight {
+                                    if !subscription.in_flight
+                                        && ((subscription.num_attempts == 0
+                                            && last_request > PUSH_THROTTLE_MS)
+                                            || ((1..PUSH_MAX_ATTEMPTS)
+                                                .contains(&subscription.num_attempts)
+                                                && last_request > PUSH_ATTEMPT_INTERVAL_MS))
+                                    {
                                         subscription.send(id, push_tx.clone());
                                         retry_ids.remove(&id);
                                     } else {
                                         retry_ids.insert(id);
                                     }
+                                } else {
+                                    debug!("No push subscription found for id: {}", id);
                                 }
-                            } else {
-                                debug!("No push subscription found for id: {}", id);
+                            }
+                        }
+                        Event::Reset => {
+                            subscriptions.clear();
+                        }
+                        Event::DeliverySuccess { id } => {
+                            if let Some(subscription) = subscriptions.get_mut(&id) {
+                                subscription.num_attempts = 0;
+                                subscription.in_flight = false;
+                                retry_ids.remove(&id);
+                            }
+                        }
+                        Event::DeliveryFailure { id, state_changes } => {
+                            if let Some(subscription) = subscriptions.get_mut(&id) {
+                                subscription.last_request = Instant::now();
+                                subscription.num_attempts += 1;
+                                subscription.state_changes.extend(state_changes);
+                                subscription.in_flight = false;
+                                retry_ids.insert(id);
                             }
                         }
                     }
-                    Event::Reset => {
-                        subscriptions.clear();
-                    }
-                    Event::DeliverySuccess { id } => {
-                        if let Some(subscription) = subscriptions.get_mut(&id) {
-                            subscription.num_attempts = 0;
-                            subscription.in_flight = false;
-                            retry_ids.remove(&id);
-                        }
-                    }
-                    Event::DeliveryFailure { id, state_changes } => {
-                        if let Some(subscription) = subscriptions.get_mut(&id) {
-                            subscription.last_attempt = Instant::now();
-                            subscription.num_attempts += 1;
-                            subscription.state_changes.extend(state_changes);
-                            subscription.in_flight = false;
-                            retry_ids.insert(id);
-                        }
-                    }
-                },
+                }
                 Ok(None) => {
                     break;
                 }
@@ -212,10 +243,14 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
 
                     for retry_id in &retry_ids {
                         if let Some(subscription) = subscriptions.get_mut(retry_id) {
+                            let last_request =
+                                subscription.last_request.elapsed().as_millis() as u64;
+
                             if !subscription.in_flight
-                                && (subscription.num_attempts == 0
-                                    || subscription.last_attempt.elapsed().as_millis() as u64
-                                        >= PUSH_ATTEMPT_INTERVAL_MS)
+                                && ((subscription.num_attempts == 0
+                                    && last_request >= PUSH_THROTTLE_MS)
+                                    || (subscription.num_attempts > 0
+                                        && last_request >= PUSH_ATTEMPT_INTERVAL_MS))
                             {
                                 if subscription.num_attempts < PUSH_MAX_ATTEMPTS {
                                     subscription.send(*retry_id, push_tx.clone());
@@ -246,11 +281,12 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                         Duration::from_secs(LONG_SLUMBER_SECS)
                     }
                 } else {
-                    Duration::from_secs(RETRY_MS - last_retry_elapsed)
+                    Duration::from_millis(RETRY_MS - last_retry_elapsed)
                 }
             } else {
                 Duration::from_secs(LONG_SLUMBER_SECS)
             };
+            //println!("Retry ids {:?} in {:?}", retry_ids, retry_timeout);
         }
     });
 
@@ -264,6 +300,7 @@ impl PushSubscription {
         let state_changes = std::mem::take(&mut self.state_changes);
 
         self.in_flight = true;
+        self.last_request = Instant::now();
 
         tokio::spawn(async move {
             let mut response = StateChangeResponse::new();
@@ -277,6 +314,8 @@ impl PushSubscription {
                         JMAPState::from(state_change.id).to_jmap_string(),
                     );
             }
+
+            //println!("Posting to {}: {:?}", url, response);
 
             push_tx
                 .send(
@@ -293,9 +332,15 @@ impl PushSubscription {
 }
 
 async fn http_request(url: String, mut body: String, keys: Option<EncriptionKeys>) -> bool {
-    let mut client = reqwest::Client::new()
+    let client_builder = reqwest::Client::builder().timeout(Duration::from_millis(PUSH_TIMEOUT_MS));
+
+    #[cfg(test)]
+    let client_builder = client_builder.danger_accept_invalid_certs(true);
+
+    let mut client = client_builder
+        .build()
+        .unwrap_or_default()
         .post(&url)
-        .timeout(Duration::from_millis(PUSH_TIMEOUT_MS))
         .header(CONTENT_TYPE, "application/json")
         .header("TTL", "86400");
 
@@ -315,11 +360,12 @@ async fn http_request(url: String, mut body: String, keys: Option<EncriptionKeys
         }
     }
 
-    if let Err(err) = client.body(body).send().await {
-        debug!("HTTP post to {} failed with: {}", url, err);
-        false
-    } else {
-        true
+    match client.body(body).send().await {
+        Ok(response) => response.status().is_success(),
+        Err(err) => {
+            debug!("HTTP post to {} failed with: {}", url, err);
+            false
+        }
     }
 }
 
@@ -444,16 +490,3 @@ where
         .await
     }
 }
-
-/*let host_name = if let Some(host_name) = url.split('/').nth(2) {
-    LastVerify::Host {
-        account_id,
-        host: host_name.to_lowercase(),
-    }
-} else {
-    debug!(
-        "Failed to verify push subscription: Invalid url '{}'.",
-        url
-    );
-    continue;
-};*/

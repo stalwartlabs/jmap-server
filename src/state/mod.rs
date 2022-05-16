@@ -68,14 +68,14 @@ pub struct EncriptionKeys {
     pub auth: Vec<u8>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum StateChangeType {
     StateChange,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct StateChangeResponse {
-    #[serde(rename(serialize = "@type"))]
+    #[serde(rename = "@type")]
     pub type_: StateChangeType,
     pub changed: HashMap<String, HashMap<Object, String>>,
 }

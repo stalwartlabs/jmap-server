@@ -1,0 +1,266 @@
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
+
+use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer};
+use ece::EcKeyComponents;
+use jmap::{base64, id::JMAPIdSerialize, protocol::invocation::Object};
+use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys};
+use reqwest::header::CONTENT_ENCODING;
+use store::Store;
+use tokio::{sync::mpsc, time};
+
+use crate::{
+    server::tls::load_tls_config, state::StateChangeResponse,
+    tests::store::utils::StoreCompareWith, JMAPServer,
+};
+
+pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    // Create channels
+    let (event_tx, mut event_rx) = mpsc::channel::<PushMessage>(100);
+
+    // Create subscription keys
+    let (keypair, auth_secret) = ece::generate_keypair_and_auth_secret().unwrap();
+    let pubkey = keypair.pub_as_raw().unwrap();
+    let keys = Keys::new(&pubkey, &auth_secret);
+
+    let push_server = web::Data::new(PushServer {
+        keypair: keypair.raw_components().unwrap(),
+        auth_secret: auth_secret.to_vec(),
+        tx: event_tx,
+        fail_requests: false.into(),
+    });
+    let data = push_server.clone();
+
+    // Start mock push server
+    actix_web::rt::spawn(async move {
+        let mut pem_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        pem_dir.push("src");
+        pem_dir.push("tests");
+        pem_dir.push("resources");
+        pem_dir.push("cert.pem");
+        let cert = pem_dir.to_str().unwrap().to_string();
+        pem_dir.set_file_name("key.pem");
+        let key = pem_dir.to_str().unwrap().to_string();
+
+        HttpServer::new(move || {
+            App::new()
+                .wrap(middleware::Logger::default())
+                .app_data(data.clone())
+                .route("/push", web::post().to(handle_push))
+        })
+        .bind_rustls("127.0.0.1:9000", load_tls_config(&cert, &key))?
+        .run()
+        .await
+    });
+
+    // Register push notification (no encryption)
+    let push_id = client
+        .push_subscription_create("123", "https://127.0.0.1:9000/push", None)
+        .await
+        .unwrap()
+        .unwrap_id();
+
+    // Expect push verification
+    let verification = expect_push(&mut event_rx).await.unwrap_verification();
+    assert_eq!(verification.push_subscription_id, push_id);
+
+    // Update verification code
+    client
+        .push_subscription_verify(&push_id, verification.verification_code)
+        .await
+        .unwrap();
+
+    // Create a mailbox and expect a state change
+    let mailbox_id = client
+        .set_default_account_id(1u64.to_jmap_string())
+        .mailbox_create("PushSubscription Test", None::<String>, Role::None)
+        .await
+        .unwrap()
+        .unwrap_id();
+
+    assert_state(&mut event_rx, Object::Mailbox).await;
+
+    // Destroy subscription
+    client.push_subscription_destroy(&push_id).await.unwrap();
+
+    // Only one verification per minute is allowed
+    let push_id = client
+        .push_subscription_create("invalid", "https://127.0.0.1:9000/push", None)
+        .await
+        .unwrap()
+        .unwrap_id();
+    expect_nothing(&mut event_rx).await;
+    client.push_subscription_destroy(&push_id).await.unwrap();
+
+    // Register push notification (with encryption)
+    let push_id = client
+        .push_subscription_create(
+            "123",
+            "https://127.0.0.1:9000/push?skip_checks=true", // skip_checks only works in cfg(test)
+            keys.into(),
+        )
+        .await
+        .unwrap()
+        .unwrap_id();
+
+    // Expect push verification
+    let verification = expect_push(&mut event_rx).await.unwrap_verification();
+    assert_eq!(verification.push_subscription_id, push_id);
+
+    // Update verification code
+    client
+        .push_subscription_verify(&push_id, verification.verification_code)
+        .await
+        .unwrap();
+
+    // Failed deliveries should be re-attempted
+    push_server.fail_requests.store(true, Ordering::Relaxed);
+    client
+        .mailbox_update_sort_order(&mailbox_id, 101)
+        .await
+        .unwrap();
+    push_server.fail_requests.store(false, Ordering::Relaxed);
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert_state(&mut event_rx, Object::Mailbox).await;
+
+    // Make a mailbox change and expect state change
+    client
+        .mailbox_rename(&mailbox_id, "My Mailbox")
+        .await
+        .unwrap();
+    assert_state(&mut event_rx, Object::Mailbox).await;
+
+    // Multiple change updates should be grouped and pushed in intervals
+    for num in 0..50 {
+        client
+            .mailbox_update_sort_order(&mailbox_id, num)
+            .await
+            .unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_state(&mut event_rx, Object::Mailbox).await;
+    expect_nothing(&mut event_rx).await;
+
+    // Destroy mailbox
+    client.mailbox_destroy(&mailbox_id, true).await.unwrap();
+
+    server.store.assert_is_empty();
+}
+
+struct PushServer {
+    keypair: EcKeyComponents,
+    auth_secret: Vec<u8>,
+    tx: mpsc::Sender<PushMessage>,
+    fail_requests: AtomicBool,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(untagged)]
+enum PushMessage {
+    StateChange(StateChangeResponse),
+    Verification(PushVerification),
+}
+
+impl PushMessage {
+    pub fn unwrap_state_change(self) -> StateChangeResponse {
+        match self {
+            PushMessage::StateChange(state_change) => state_change,
+            _ => panic!("Expected StateChange"),
+        }
+    }
+
+    pub fn unwrap_verification(self) -> PushVerification {
+        match self {
+            PushMessage::Verification(verification) => verification,
+            _ => panic!("Expected Verification"),
+        }
+    }
+}
+
+#[derive(serde::Deserialize, Debug)]
+enum PushVerificationType {
+    PushVerification,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct PushVerification {
+    #[serde(rename = "@type")]
+    _type: PushVerificationType,
+    #[serde(rename = "pushSubscriptionId")]
+    pub push_subscription_id: String,
+    #[serde(rename = "verificationCode")]
+    pub verification_code: String,
+}
+
+async fn handle_push(
+    payload: web::Bytes,
+    request: HttpRequest,
+    data: web::Data<PushServer>,
+) -> HttpResponse {
+    if data.fail_requests.load(Ordering::Relaxed) {
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    let is_encrypted = request
+        .headers()
+        .get(CONTENT_ENCODING)
+        .map_or(false, |encoding| encoding.to_str().unwrap() == "aes128gcm");
+
+    let message = serde_json::from_slice::<PushMessage>(&if is_encrypted {
+        ece::decrypt(
+            &data.keypair,
+            &data.auth_secret,
+            &base64::decode_config(payload, base64::URL_SAFE).unwrap(),
+        )
+        .unwrap()
+    } else {
+        payload.to_vec()
+    })
+    .unwrap();
+
+    //println!("Push received ({}): {:?}", is_encrypted, message);
+
+    data.tx.send(message).await.unwrap();
+
+    HttpResponse::Ok().body("")
+}
+
+async fn expect_push(event_rx: &mut mpsc::Receiver<PushMessage>) -> PushMessage {
+    match time::timeout(Duration::from_millis(300), event_rx.recv()).await {
+        Ok(Some(push)) => push,
+        result => {
+            panic!("Timeout waiting for push: {:?}", result);
+        }
+    }
+}
+
+async fn expect_nothing(event_rx: &mut mpsc::Receiver<PushMessage>) {
+    match time::timeout(Duration::from_millis(300), event_rx.recv()).await {
+        Err(_) => {}
+        message => {
+            panic!("Received a message when expecting nothing: {:?}", message);
+        }
+    }
+}
+
+async fn assert_state(event_rx: &mut mpsc::Receiver<PushMessage>, state: Object) {
+    assert_eq!(
+        expect_push(event_rx)
+            .await
+            .unwrap_state_change()
+            .changed
+            .get(&1u64.to_jmap_string())
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap()
+            .0,
+        &state
+    );
+}

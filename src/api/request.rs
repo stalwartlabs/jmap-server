@@ -18,18 +18,18 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let (status_code, body) = if request.len() < core.store.config.max_size_request {
-        println!(
+        /*println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::from_slice::<JSONValue>(&request).unwrap())
                 .unwrap()
-        );
+        );*/
 
         match serde_json::from_slice::<Request>(&request) {
             Ok(request) => {
                 if request.method_calls.len() < core.store.config.max_calls_in_request {
                     (StatusCode::OK, {
                         let result = handle_method_calls(request, core).await;
-                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+                        //println!("{}", serde_json::to_string_pretty(&result).unwrap());
                         result.to_json()
                     })
                 } else {

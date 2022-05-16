@@ -31,6 +31,7 @@ use store::{tracing::error, Store};
 
 use crate::{state::StateChange, JMAPServer};
 
+#[derive(Debug)]
 pub struct InvocationResult {
     result: JSONValue,
     next_invocation: Option<Invocation>,
@@ -53,7 +54,13 @@ where
         match Invocation::parse(&name, arguments, &response, &core.store.config) {
             Ok(mut invocation) => {
                 let is_set = invocation.update_set_flags(core.is_in_cluster());
-                let account_id = invocation.account_id;
+                let account_id = if invocation.account_id != u32::MAX {
+                    invocation.account_id
+                } else {
+                    //TODO use session account
+                    invocation.account_id = 1;
+                    1
+                };
 
                 match handle_method_call(invocation, &core).await {
                     Ok(result) => {

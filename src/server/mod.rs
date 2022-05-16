@@ -1,4 +1,5 @@
 pub mod http;
+pub mod tls;
 
 use crate::cluster::Event;
 use crate::JMAPServer;
