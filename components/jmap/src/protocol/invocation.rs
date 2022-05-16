@@ -19,7 +19,7 @@ pub struct Invocation {
     pub account_id: AccountId,
 }
 
-#[derive(Debug, serde::Serialize, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Eq, PartialEq, Hash, Clone)]
 pub enum Object {
     Core,
     Mailbox,
@@ -107,11 +107,17 @@ impl Invocation {
             MethodError::InvalidArguments(format!("Failed to parse method name: {}.", name))
         })? {
             "get" => {
-                let r = GetRequest::parse(arguments, response)?;
+                let mut r = GetRequest::parse(arguments, response)?;
+                if r.account_id == AccountId::MAX {
+                    r.account_id = 1; //TODO use session accountId
+                }
                 (r.account_id, Method::Get(r))
             }
             "set" => {
-                let r = SetRequest::parse(arguments, response)?;
+                let mut r = SetRequest::parse(arguments, response)?;
+                if r.account_id == AccountId::MAX {
+                    r.account_id = 1; //TODO use session accountId
+                }
                 if r.create.len() + r.update.len() + r.destroy.len() > config.max_objects_in_set {
                     return Err(MethodError::RequestTooLarge);
                 }

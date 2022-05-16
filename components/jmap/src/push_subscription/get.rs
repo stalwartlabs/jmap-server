@@ -57,8 +57,6 @@ where
                 let value = match property {
                     PushSubscriptionProperty::Id => jmap_id.to_jmap_string().into(),
                     PushSubscriptionProperty::DeviceClientId
-                    | PushSubscriptionProperty::Url
-                    | PushSubscriptionProperty::Keys
                     | PushSubscriptionProperty::VerificationCode
                     | PushSubscriptionProperty::Types => {
                         subscription.remove(property).unwrap_or_default()
@@ -67,7 +65,9 @@ where
                         .remove(property)
                         .map(|utc_date| utc_date.into_utc_date())
                         .unwrap_or_default(),
-                    PushSubscriptionProperty::VerificationCode_ => {
+                    PushSubscriptionProperty::Url
+                    | PushSubscriptionProperty::Keys
+                    | PushSubscriptionProperty::VerificationCode_ => {
                         continue;
                     }
                 };
@@ -94,8 +94,6 @@ where
         vec![
             PushSubscriptionProperty::Id,
             PushSubscriptionProperty::DeviceClientId,
-            PushSubscriptionProperty::Url,
-            PushSubscriptionProperty::Keys,
             PushSubscriptionProperty::VerificationCode,
             PushSubscriptionProperty::Expires,
             PushSubscriptionProperty::Types,

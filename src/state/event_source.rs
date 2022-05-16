@@ -5,7 +5,10 @@ use jmap::{
     id::{state::JMAPState, JMAPIdSerialize},
     protocol::invocation::Object,
 };
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use store::{
     core::collection::{Collection, Collections},
     tracing::debug,
@@ -16,6 +19,13 @@ use tokio::time::{self};
 use crate::JMAPServer;
 
 use super::StateChangeResponse;
+
+#[cfg(test)]
+const THROTTLE_MS: u64 = 500;
+
+#[cfg(not(test))]
+const THROTTLE_MS: u64 = 1000;
+const LONG_SLUMBER_MS: u64 = 60 * 60 * 24 * 1000;
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum CloseAfter {
@@ -35,6 +45,7 @@ pub struct Params {
 
 struct Ping {
     interval: u64,
+    last_ping: Instant,
     payload: web::Bytes,
 }
 
@@ -70,10 +81,11 @@ where
         #[cfg(not(test))]
         let interval = std::cmp::max(params.ping, 30);
         #[cfg(test)]
-        let interval = params.ping;
+        let interval = params.ping * 1000;
 
         Ping {
             interval: interval as u64,
+            last_ping: Instant::now() - Duration::from_millis(interval as u64),
             payload: web::Bytes::from(format!(
                 "event: ping\ndata: {{\"interval\": {}}}\n\n",
                 interval
@@ -103,53 +115,62 @@ where
         .insert_header(("Content-Type", "text/event-stream"))
         .insert_header(("Cache-Control", "no-store"))
         .streaming::<_, std::io::Error>(stream! {
+            let mut last_message = Instant::now() - Duration::from_millis(THROTTLE_MS);
+            let mut timeout = Duration::from_millis(LONG_SLUMBER_MS);
+
             loop {
-                if let Some(ping) = &mut ping {
-                    match time::timeout( Duration::from_secs(ping.interval), change_rx.recv()).await {
-                        Ok(Some(state_change)) => {
-                            response
-                                .changed
-                                .entry((state_change.account_id as JMAPId).to_jmap_string())
-                                .or_insert_with(HashMap::new)
-                                .insert(
-                                    state_change.collection.into(),
-                                    JMAPState::from(state_change.id).to_jmap_string(),
-                                );
-                        }
-                        Ok(None) => {
-                            debug!("Broadcast channel was closed.");
+                match time::timeout(timeout, change_rx.recv()).await {
+                    Ok(Some(state_change)) => {
+                        response
+                            .changed
+                            .entry((state_change.account_id as JMAPId).to_jmap_string())
+                            .or_insert_with(HashMap::new)
+                            .insert(
+                                state_change.collection.into(),
+                                JMAPState::from(state_change.id).to_jmap_string(),
+                            );
+                    }
+                    Ok(None) => {
+                        debug!("Broadcast channel was closed.");
+                        break;
+                    }
+                    Err(_) => (),
+                }
+
+                timeout = if !response.changed.is_empty() {
+                    let elapsed = last_message.elapsed().as_millis() as u64;
+                    if elapsed >= THROTTLE_MS {
+                        last_message = Instant::now();
+                        yield Ok(web::Bytes::from(format!(
+                            "event: state\ndata: {}\n\n",
+                            serde_json::to_string(&response).unwrap()
+                        )));
+
+                        if close_after_state {
                             break;
                         }
-                        Err(_) => (),
-                    }
 
-                    if response.changed.is_empty() {
+                        response.changed.clear();
+                        Duration::from_millis(
+                            ping.as_ref().map(|p| p.interval).unwrap_or(LONG_SLUMBER_MS),
+                        )
+                    } else {
+                        Duration::from_millis(THROTTLE_MS - elapsed)
+                    }
+                } else if let Some(ping) = &mut ping {
+                    let elapsed = ping.last_ping.elapsed().as_millis() as u64;
+                    if elapsed >= ping.interval {
+                        ping.last_ping = Instant::now();
                         yield Ok(ping.payload.clone());
-                        continue;
+                        Duration::from_millis(ping.interval)
+                    } else {
+                        Duration::from_millis(ping.interval - elapsed)
                     }
-                } else if let Some(state_change) = change_rx.recv().await {
-                    response
-                        .changed
-                        .entry((state_change.account_id as JMAPId).to_jmap_string())
-                        .or_insert_with(HashMap::new)
-                        .insert(
-                            state_change.collection.into(),
-                            JMAPState::from(state_change.id).to_jmap_string(),
-                        );
                 } else {
-                    debug!("Broadcast channel was closed.");
-                    break;
-                }
-
-                yield Ok(web::Bytes::from(format!(
-                    "event: state\ndata: {}\n\n",
-                    serde_json::to_string(&response).unwrap()
-                )));
-
-                if close_after_state {
-                    break;
-                }
-                response.changed.clear();
+                    Duration::from_millis(
+                        ping.as_ref().map(|p| p.interval).unwrap_or(LONG_SLUMBER_MS),
+                    )
+                };
             }
         })
 }

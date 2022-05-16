@@ -210,6 +210,7 @@ where
 
     pub fn merge(mut self, document: &mut Document, changes: Self) -> store::Result<bool> {
         let indexed = T::indexed();
+        let mut has_changes = false;
 
         for (property, value) in changes.properties {
             let (is_indexed, index_options) = indexed
@@ -268,6 +269,10 @@ where
                     self.properties.insert(property, value);
                 }
             }
+
+            if !has_changes {
+                has_changes = true;
+            }
         }
 
         if self.tags != changes.tags {
@@ -300,9 +305,13 @@ where
             }
 
             self.tags = changes.tags;
+
+            if !has_changes {
+                has_changes = true;
+            }
         }
 
-        if !document.is_empty() {
+        if has_changes {
             self.insert_orm(document)?;
             Ok(true)
         } else {

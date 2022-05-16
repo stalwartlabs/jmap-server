@@ -54,6 +54,7 @@ where
     assert_state(&mut event_rx, TypeState::Email).await;
 
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     assert_state(&mut event_rx, TypeState::Mailbox).await;
     assert_ping(&mut event_rx).await;

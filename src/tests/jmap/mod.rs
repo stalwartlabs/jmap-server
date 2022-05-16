@@ -47,9 +47,9 @@ async fn jmap_tests() {
     email_parse::test(server.clone(), &mut client).await;
     email_set::test(server.clone(), &mut client).await;
     email_query::test(server.clone(), &mut client).await;
-    mailbox::test(server.clone(), &mut client).await;
-    event_source::test(server.clone(), &mut client).await;*/
-    push_subscription::test(server.clone(), &mut client).await;
+    mailbox::test(server.clone(), &mut client).await;*/
+    event_source::test(server.clone(), &mut client).await;
+    //push_subscription::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

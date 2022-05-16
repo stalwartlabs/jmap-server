@@ -454,6 +454,7 @@ impl SetResult {
 impl From<SetResult> for JSONValue {
     fn from(set_result: SetResult) -> Self {
         let mut result = HashMap::with_capacity(9);
+        // TODO use object flag
         if set_result.account_id != AccountId::MAX {
             result.insert(
                 "accountId".to_string(),

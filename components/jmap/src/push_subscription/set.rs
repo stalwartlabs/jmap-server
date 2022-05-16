@@ -120,14 +120,20 @@ where
                     ))
                 }
             }
-            (PushSubscriptionProperty::VerificationCode, JSONValue::String(name))
+            (PushSubscriptionProperty::VerificationCode, JSONValue::String(name)) => {
                 if self
                     .current_subscription
                     .as_ref()
                     .and_then(|c| c.get_string(&PushSubscriptionProperty::VerificationCode_))
-                    .map_or(false, |v| v == name) =>
-            {
-                Ok(value)
+                    .map_or(false, |v| v == name)
+                {
+                    Ok(value)
+                } else {
+                    Err(SetError::invalid_property(
+                        field.to_string(),
+                        "Verification code does not match.".to_string(),
+                    ))
+                }
             }
             (PushSubscriptionProperty::Expires, JSONValue::String(expires)) => {
                 let expires = parse_utc_date(expires).ok_or_else(|| {
@@ -210,6 +216,22 @@ where
                 "There are too many subscriptions, please delete some before adding a new one."
                     .to_string(),
             ));
+        }
+
+        // Add expire time if missing
+        if !self
+            .subscription
+            .has_property(&PushSubscriptionProperty::Expires)
+        {
+            self.subscription.set(
+                PushSubscriptionProperty::Expires,
+                (SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+                    + EXPIRES_MAX)
+                    .into(),
+            );
         }
 
         // Generate random verification code

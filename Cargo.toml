@@ -10,8 +10,9 @@ store_rocksdb = { path = "components/store_rocksdb" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 tracing-subscriber = "0.2"
-actix-web = "4"
-openssl = "0.10"
+actix-web = { version = "4", features = ["rustls"] }
+rustls = "0.20"
+rustls-pemfile = "1.0"
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 gethostname = "0.2.2"
@@ -21,7 +22,7 @@ async-stream = "0.3.3"
 num_cpus = "1.13.1"
 futures = "0.3"
 rayon = "1.5.1"
-reqwest = "0.11"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"]}
 ece = "2.2"
 
 [dev-dependencies]
