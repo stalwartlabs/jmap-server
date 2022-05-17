@@ -1,6 +1,6 @@
 use actix::{Actor, ActorContext, AsyncContext, Handler, Message, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
-use actix_web_actors::ws;
+use actix_web_actors::ws::{self, WsResponseBuilder};
 use jmap::error::request::{RequestError, RequestErrorType, RequestLimitError};
 use jmap::id::state::JMAPState;
 use jmap::id::JMAPIdSerialize;
@@ -376,7 +376,9 @@ pub async fn handle_ws<T>(
 where
     T: for<'x> Store<'x> + 'static,
 {
-    ws::start(WebSocket::new(core), &req, stream)
+    WsResponseBuilder::new(WebSocket::new(core), &req, stream)
+        .protocols(&["jmap"])
+        .start()
 }
 
 impl WebSocketRequestError {
