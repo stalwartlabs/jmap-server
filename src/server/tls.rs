@@ -2,6 +2,7 @@ use std::{fs::File, io::BufReader};
 
 use rustls::{Certificate, PrivateKey, ServerConfig};
 use rustls_pemfile::{certs, pkcs8_private_keys};
+use store::tracing::error;
 
 pub fn load_tls_config(cert: &str, key: &str) -> rustls::ServerConfig {
     // init server config builder with safe defaults
@@ -27,7 +28,7 @@ pub fn load_tls_config(cert: &str, key: &str) -> rustls::ServerConfig {
 
     // exit if no keys could be parsed
     if keys.is_empty() {
-        eprintln!("Could not locate PKCS 8 private keys.");
+        error!("Could not locate PKCS 8 private keys.");
         std::process::exit(1);
     }
 

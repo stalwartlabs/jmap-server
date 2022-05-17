@@ -77,7 +77,7 @@ pub struct PeerInfo {
     pub last_log_index: LogIndex,
     pub generation: GenerationId,
     pub addr: SocketAddr,
-    pub jmap_url: String,
+    pub hostname: String,
 }
 
 impl From<&Peer> for PeerInfo {
@@ -90,7 +90,7 @@ impl From<&Peer> for PeerInfo {
             addr: peer.addr,
             last_log_index: peer.last_log_index,
             last_log_term: peer.last_log_term,
-            jmap_url: peer.jmap_url.clone(),
+            hostname: peer.hostname.clone(),
         }
     }
 }
@@ -108,7 +108,7 @@ where
             last_log_term: cluster.last_log.term,
             generation: cluster.generation,
             addr: cluster.addr,
-            jmap_url: cluster.jmap_url.clone(),
+            hostname: cluster.hostname.clone(),
         }
     }
 }
@@ -465,7 +465,7 @@ where
                                 }
                                 local_peer.generation = peer.generation;
                                 local_peer.shard_id = peer.shard_id;
-                                local_peer.jmap_url = peer.jmap_url;
+                                local_peer.hostname = peer.hostname;
                                 peers_changed = true;
                             }
 

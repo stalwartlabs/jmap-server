@@ -8,9 +8,9 @@ use super::json::JSONValue;
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Response {
-    #[serde(rename(serialize = "methodResponses"))]
+    #[serde(rename = "methodResponses")]
     pub method_responses: Vec<(String, JSONValue, String)>,
-    #[serde(rename(serialize = "sessionState"))]
+    #[serde(rename = "sessionState")]
     #[serde(serialize_with = "serialize_hex")]
     pub session_state: u64,
     #[serde(rename(deserialize = "createdIds"))]

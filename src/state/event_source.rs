@@ -18,14 +18,7 @@ use tokio::time::{self};
 
 use crate::JMAPServer;
 
-use super::StateChangeResponse;
-
-#[cfg(test)]
-const THROTTLE_MS: u64 = 500;
-
-#[cfg(not(test))]
-const THROTTLE_MS: u64 = 1000;
-const LONG_SLUMBER_MS: u64 = 60 * 60 * 24 * 1000;
+use super::{StateChangeResponse, LONG_SLUMBER_MS, THROTTLE_MS};
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum CloseAfter {
@@ -167,9 +160,7 @@ where
                         Duration::from_millis(ping.interval - elapsed)
                     }
                 } else {
-                    Duration::from_millis(
-                        ping.as_ref().map(|p| p.interval).unwrap_or(LONG_SLUMBER_MS),
-                    )
+                    Duration::from_millis(LONG_SLUMBER_MS)
                 };
             }
         })

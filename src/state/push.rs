@@ -23,7 +23,10 @@ use tokio::{sync::mpsc, time};
 
 use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 
-use super::{EncriptionKeys, StateChange, StateChangeResponse, UpdateSubscription};
+use super::{
+    EncriptionKeys, StateChange, StateChangeResponse, UpdateSubscription, LONG_SLUMBER_MS,
+    THROTTLE_MS,
+};
 
 #[derive(Debug)]
 pub enum Event {
@@ -75,19 +78,12 @@ pub struct PushSubscription {
 
 #[cfg(test)]
 const PUSH_ATTEMPT_INTERVAL_MS: u64 = 500;
-#[cfg(test)]
-const PUSH_THROTTLE_MS: u64 = 500;
-
 #[cfg(not(test))]
 const PUSH_ATTEMPT_INTERVAL_MS: u64 = 60 * 1000;
-#[cfg(not(test))]
-const PUSH_THROTTLE_MS: u64 = 1000;
-
 const PUSH_MAX_ATTEMPTS: u32 = 3;
 const PUSH_TIMEOUT_MS: u64 = 10 * 1000;
 const RETRY_MS: u64 = 1000;
-const VERIFY_WAIT_SECS: u64 = 60;
-const LONG_SLUMBER_SECS: u64 = 60 * 60 * 24;
+const VERIFY_WAIT_MS: u64 = 60 * 1000;
 
 pub fn spawn_push_manager() -> mpsc::Sender<Event> {
     let (push_tx_, mut push_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
@@ -97,7 +93,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
         let mut subscriptions = HashMap::new();
         let mut last_verify: HashMap<AccountId, u64> = HashMap::new();
         let mut last_retry = Instant::now();
-        let mut retry_timeout = Duration::from_secs(LONG_SLUMBER_SECS);
+        let mut retry_timeout = Duration::from_millis(LONG_SLUMBER_MS);
         let mut retry_ids = HashSet::new();
 
         loop {
@@ -125,14 +121,14 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                         if url.contains("skip_checks") {
                                             last_verify.insert(
                                                 account_id,
-                                                current_time - (VERIFY_WAIT_SECS + 1),
+                                                current_time - (VERIFY_WAIT_MS + 1),
                                             );
                                         }
 
                                         if last_verify
                                             .get(&account_id)
                                             .map(|last_verify| {
-                                                current_time - *last_verify > VERIFY_WAIT_SECS
+                                                current_time - *last_verify > VERIFY_WAIT_MS
                                             })
                                             .unwrap_or(true)
                                         {
@@ -172,7 +168,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                                 keys,
                                                 num_attempts: 0,
                                                 last_request: Instant::now()
-                                                    - Duration::from_millis(PUSH_THROTTLE_MS + 1),
+                                                    - Duration::from_millis(THROTTLE_MS + 1),
                                                 state_changes: Vec::new(),
                                                 in_flight: false,
                                             });
@@ -193,7 +189,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
 
                                     if !subscription.in_flight
                                         && ((subscription.num_attempts == 0
-                                            && last_request > PUSH_THROTTLE_MS)
+                                            && last_request > THROTTLE_MS)
                                             || ((1..PUSH_MAX_ATTEMPTS)
                                                 .contains(&subscription.num_attempts)
                                                 && last_request > PUSH_ATTEMPT_INTERVAL_MS))
@@ -247,8 +243,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                 subscription.last_request.elapsed().as_millis() as u64;
 
                             if !subscription.in_flight
-                                && ((subscription.num_attempts == 0
-                                    && last_request >= PUSH_THROTTLE_MS)
+                                && ((subscription.num_attempts == 0 && last_request >= THROTTLE_MS)
                                     || (subscription.num_attempts > 0
                                         && last_request >= PUSH_ATTEMPT_INTERVAL_MS))
                             {
@@ -278,13 +273,13 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                         Duration::from_millis(RETRY_MS)
                     } else {
                         retry_ids.clear();
-                        Duration::from_secs(LONG_SLUMBER_SECS)
+                        Duration::from_millis(LONG_SLUMBER_MS)
                     }
                 } else {
                     Duration::from_millis(RETRY_MS - last_retry_elapsed)
                 }
             } else {
-                Duration::from_secs(LONG_SLUMBER_SECS)
+                Duration::from_millis(LONG_SLUMBER_MS)
             };
             //println!("Retry ids {:?} in {:?}", retry_ids, retry_timeout);
         }

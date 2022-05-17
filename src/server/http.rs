@@ -14,6 +14,7 @@ use crate::{
     },
     blob::{download::handle_jmap_download, upload::handle_jmap_upload},
     cluster::ClusterIpc,
+    server::{tls::load_tls_config, websocket::handle_ws},
     state::{event_source::handle_jmap_event_source, manager::spawn_state_manager},
     JMAPServer, DEFAULT_HTTP_PORT,
 };
@@ -62,9 +63,30 @@ where
         settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT),
     ));
 
-    info!("Starting JMAP server at {} (TCP)...", http_addr);
+    // Obtain TLS path
+    let tls_config = if let Some(cert_path) = settings.get("cert-path") {
+        load_tls_config(
+            &cert_path,
+            &settings
+                .get("key-path")
+                .expect("Missing 'key-path' argument."),
+        )
+        .into()
+    } else {
+        None
+    };
 
-    HttpServer::new(move || {
+    info!(
+        "Starting JMAP server at {} ({})...",
+        http_addr,
+        if tls_config.is_some() {
+            "https"
+        } else {
+            "http"
+        }
+    );
+
+    let server = HttpServer::new(move || {
         App::new()
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())
@@ -83,8 +105,12 @@ where
                 "/jmap/eventsource",
                 web::get().to(handle_jmap_event_source::<T>),
             )
-    })
-    .bind(http_addr)?
-    .run()
-    .await
+            .route("/jmap/ws", web::get().to(handle_ws::<T>))
+    });
+
+    if let Some(tls_config) = tls_config {
+        server.bind_rustls(http_addr, tls_config)?.run().await
+    } else {
+        server.bind(http_addr)?.run().await
+    }
 }

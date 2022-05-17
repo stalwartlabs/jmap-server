@@ -7,10 +7,10 @@ use std::{
 use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use ece::EcKeyComponents;
 use jmap::{base64, id::JMAPIdSerialize, protocol::invocation::Object};
-use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys};
+use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys, TypeState};
 use reqwest::header::CONTENT_ENCODING;
 use store::Store;
-use tokio::{sync::mpsc, time};
+use tokio::sync::mpsc;
 
 use crate::{
     server::tls::load_tls_config, state::StateChangeResponse,
@@ -86,6 +86,17 @@ where
 
     assert_state(&mut event_rx, Object::Mailbox).await;
 
+    // Receive states just for the requested types
+    client
+        .push_subscription_update_types(&push_id, [TypeState::Email].into())
+        .await
+        .unwrap();
+    client
+        .mailbox_update_sort_order(&mailbox_id, 123)
+        .await
+        .unwrap();
+    expect_nothing(&mut event_rx).await;
+
     // Destroy subscription
     client.push_subscription_destroy(&push_id).await.unwrap();
 
@@ -125,8 +136,8 @@ where
         .mailbox_update_sort_order(&mailbox_id, 101)
         .await
         .unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
     push_server.fail_requests.store(false, Ordering::Relaxed);
-    tokio::time::sleep(Duration::from_millis(800)).await;
     assert_state(&mut event_rx, Object::Mailbox).await;
 
     // Make a mailbox change and expect state change
@@ -143,12 +154,12 @@ where
             .await
             .unwrap();
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_state(&mut event_rx, Object::Mailbox).await;
     expect_nothing(&mut event_rx).await;
 
     // Destroy mailbox
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();
+    client.push_subscription_destroy(&push_id).await.unwrap();
 
     server.store.assert_is_empty();
 }
@@ -232,7 +243,7 @@ async fn handle_push(
 }
 
 async fn expect_push(event_rx: &mut mpsc::Receiver<PushMessage>) -> PushMessage {
-    match time::timeout(Duration::from_millis(300), event_rx.recv()).await {
+    match tokio::time::timeout(Duration::from_millis(1500), event_rx.recv()).await {
         Ok(Some(push)) => push,
         result => {
             panic!("Timeout waiting for push: {:?}", result);
@@ -241,7 +252,7 @@ async fn expect_push(event_rx: &mut mpsc::Receiver<PushMessage>) -> PushMessage 
 }
 
 async fn expect_nothing(event_rx: &mut mpsc::Receiver<PushMessage>) {
-    match time::timeout(Duration::from_millis(300), event_rx.recv()).await {
+    match tokio::time::timeout(Duration::from_millis(1000), event_rx.recv()).await {
         Err(_) => {}
         message => {
             panic!("Received a message when expecting nothing: {:?}", message);

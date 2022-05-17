@@ -9,7 +9,7 @@ pub enum RequestLimitError {
 }
 
 #[derive(Debug, serde::Serialize)]
-enum RequestErrorType {
+pub enum RequestErrorType {
     #[serde(rename(serialize = "urn:ietf:params:jmap:error:unknownCapability"))]
     UnknownCapability,
     #[serde(rename(serialize = "urn:ietf:params:jmap:error:notJSON"))]
@@ -23,11 +23,11 @@ enum RequestErrorType {
 #[derive(Debug, serde::Serialize)]
 pub struct RequestError {
     #[serde(rename(serialize = "type"))]
-    error: RequestErrorType,
+    pub error: RequestErrorType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    limit: Option<RequestLimitError>,
-    status: u32,
-    detail: String,
+    pub limit: Option<RequestLimitError>,
+    pub status: u32,
+    pub detail: String,
 }
 
 impl RequestError {

@@ -39,17 +39,17 @@ async fn main() -> std::io::Result<()> {
 
     // Read configuration parameters
     let mut settings = EnvSettings::new();
-    if !settings.contains_key("jmap-url") {
-        let default_url = format!(
-            "http://{}:{}",
+    if !settings.contains_key("hostname") {
+        let default_hostname = format!(
+            "{}:{}",
             settings.parse_ipaddr("advertise-addr", "127.0.0.1"),
             settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT)
         );
         info!(
-            "Warning: JMAP base URL parameter 'jmap-url' was not specified, using default '{}'.",
-            default_url
+            "Warning: Hostname parameter 'hostname' was not specified, using default '{}'.",
+            default_hostname
         );
-        settings.set_value("jmap-url".to_string(), default_url);
+        settings.set_value("hostname".to_string(), default_hostname);
     }
 
     // Start JMAP server

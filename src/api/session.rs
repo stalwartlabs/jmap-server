@@ -60,6 +60,7 @@ enum Capabilities {
     Mail(MailCapabilities),
     Submission(SubmissionCapabilities),
     VacationResponse(VacationResponseCapabilities),
+    WebSocket(WebSocketCapabilities),
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -80,6 +81,14 @@ struct CoreCapabilities {
     max_objects_in_set: usize,
     #[serde(rename(serialize = "collationAlgorithms"))]
     collation_algorithms: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct WebSocketCapabilities {
+    #[serde(rename(serialize = "url"))]
+    url: String,
+    #[serde(rename(serialize = "supportsPush"))]
+    supports_push: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -111,24 +120,34 @@ struct VacationResponseCapabilities {}
 
 impl Session {
     pub fn new(settings: &EnvSettings, config: &JMAPConfig) -> Session {
-        let jmap_base_url = settings.get("jmap-url").unwrap();
+        let hostname = settings.get("hostname").unwrap();
+        let (prefix, is_tls) = if settings.contains_key("cert-path") {
+            ("https", true)
+        } else {
+            ("http", false)
+        };
+
         Session {
             capabilities: HashMap::from_iter([
                 (URI::Core, Capabilities::Core(CoreCapabilities::new(config))),
                 (URI::Mail, Capabilities::Mail(MailCapabilities::new(config))),
+                (
+                    URI::WebSocket,
+                    Capabilities::WebSocket(WebSocketCapabilities::new(&hostname, is_tls)),
+                ),
             ]),
             accounts: HashMap::new(),
             primary_accounts: HashMap::new(),
             username: "".to_string(),
-            api_url: format!("{}/jmap/", jmap_base_url),
+            api_url: format!("{}://{}/jmap/", prefix, hostname),
             download_url: format!(
-                "{}/jmap/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}",
-                jmap_base_url
+                "{}://{}/jmap/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}",
+                prefix, hostname
             ),
-            upload_url: format!("{}/jmap/upload/{{accountId}}/", jmap_base_url),
+            upload_url: format!("{}://{}/jmap/upload/{{accountId}}/", prefix, hostname),
             event_source_url: format!(
-                "{}/jmap/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}",
-                jmap_base_url
+                "{}://{}/jmap/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}",
+                prefix, hostname
             ),
             state: 0,
         }
@@ -243,6 +262,19 @@ impl CoreCapabilities {
                 "i;ascii-casemap".to_string(),
                 "i;unicode-casemap".to_string(),
             ],
+        }
+    }
+}
+
+impl WebSocketCapabilities {
+    pub fn new(hostname: &str, is_tls: bool) -> Self {
+        WebSocketCapabilities {
+            url: format!(
+                "{}://{}/jmap/ws",
+                if is_tls { "wss" } else { "ws" },
+                hostname
+            ),
+            supports_push: true,
         }
     }
 }

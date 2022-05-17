@@ -61,7 +61,7 @@ where
 
     // Local gossip address and API urls
     pub addr: SocketAddr,
-    pub jmap_url: String,
+    pub hostname: String,
 
     // Cluster key
     pub key: String,
@@ -134,7 +134,7 @@ pub struct Peer {
 
     // Peer addresses
     pub addr: SocketAddr,
-    pub jmap_url: String,
+    pub hostname: String,
 
     // Heartbeat state
     pub last_heartbeat: Instant,
@@ -252,12 +252,12 @@ where
         let addr = SocketAddr::from((advertise_addr, rpc_port));
 
         // Calculate generationId
-        let jmap_url = settings.get("jmap-url").unwrap();
+        let hostname = settings.get("hostname").unwrap();
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
         shard_id.hash(&mut generation);
         addr.hash(&mut generation);
-        jmap_url.hash(&mut generation);
+        hostname.hash(&mut generation);
 
         // Rollback uncommitted entries for a previous leader term.
         core.commit_leader(LogIndex::MAX, true).await.unwrap();
@@ -278,7 +278,7 @@ where
             epoch: 0,
             addr,
             key,
-            jmap_url,
+            hostname,
             term: last_log.term,
             uncommitted_index: last_log.index,
             last_log,
@@ -354,7 +354,7 @@ impl Peer {
             generation: 0,
             addr,
             state: gossip::State::Seed,
-            jmap_url: "".to_string(),
+            hostname: "".to_string(),
             last_heartbeat: Instant::now(),
             hb_window: vec![0; HEARTBEAT_WINDOW],
             hb_window_pos: 0,
@@ -387,7 +387,7 @@ impl Peer {
             epoch: peer.epoch,
             generation: peer.generation,
             addr: peer.addr,
-            jmap_url: peer.jmap_url,
+            hostname: peer.hostname,
             state,
             last_heartbeat: Instant::now(),
             hb_window: vec![0; HEARTBEAT_WINDOW],

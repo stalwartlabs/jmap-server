@@ -18,6 +18,7 @@ pub mod email_thread_merge;
 pub mod event_source;
 pub mod mailbox;
 pub mod push_subscription;
+pub mod websocket;
 
 #[actix_web::test]
 async fn jmap_tests() {
@@ -25,7 +26,10 @@ async fn jmap_tests() {
 
     let (settings, temp_dir) = init_settings("jmap_tests", 1, 1, true);
     let server = init_jmap_server::<RocksDB>(&settings, None);
-    let session_url = format!("{}/.well-known/jmap", settings.get("jmap-url").unwrap());
+    let session_url = format!(
+        "http://{}/.well-known/jmap",
+        settings.get("hostname").unwrap()
+    );
 
     // Start web server
     let _server = server.clone();
@@ -48,8 +52,9 @@ async fn jmap_tests() {
     email_set::test(server.clone(), &mut client).await;
     email_query::test(server.clone(), &mut client).await;
     mailbox::test(server.clone(), &mut client).await;*/
-    event_source::test(server.clone(), &mut client).await;
+    //event_source::test(server.clone(), &mut client).await;
     //push_subscription::test(server.clone(), &mut client).await;
+    websocket::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

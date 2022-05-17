@@ -11,6 +11,8 @@ jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 tracing-subscriber = "0.2"
 actix-web = { version = "4", features = ["rustls"] }
+actix-web-actors = "4"
+actix = "0.13"
 rustls = "0.20"
 rustls-pemfile = "1.0"
 serde = { version = "1.0", features = ["derive"]}
@@ -26,7 +28,7 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 ece = "2.2"
 
 [dev-dependencies]
-jmap-client = { path = "/home/vagrant/code/jmap-client", features = ["debug"] }
+jmap-client = { path = "/home/vagrant/code/jmap-client", features = ["websockets", "debug"] }
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
