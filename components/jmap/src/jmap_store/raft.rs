@@ -1,5 +1,7 @@
-use super::orm::{JMAPOrm, PropertySchema, TinyORM};
-use crate::Property;
+use super::{
+    orm::{JMAPOrm, TinyORM},
+    Object,
+};
 use store::{
     blob::BlobId,
     core::{document::Document, error::StoreError, JMAPIdPrefix},
@@ -52,7 +54,7 @@ where
         as_insert: bool,
     ) -> store::Result<Option<RaftUpdate>>
     where
-        U: RaftObject<T>;
+        U: RaftObject<T> + 'static;
 
     fn raft_apply_update<U>(
         &self,
@@ -60,7 +62,7 @@ where
         update: RaftUpdate,
     ) -> store::Result<()>
     where
-        U: RaftObject<T>;
+        U: RaftObject<T> + 'static;
 }
 
 impl<T> JMAPRaftStore<T> for JMAPStore<T>
@@ -74,11 +76,11 @@ where
         as_insert: bool,
     ) -> store::Result<Option<RaftUpdate>>
     where
-        U: RaftObject<T>,
+        U: RaftObject<T> + 'static,
     {
         Ok(
             if let (Some(fields), Some(jmap_id)) = (
-                self.get_orm::<U::Property>(account_id, document_id)?,
+                self.get_orm::<U>(account_id, document_id)?,
                 U::get_jmap_id(self, account_id, document_id)?,
             ) {
                 let fields = fields.serialize().ok_or_else(|| {
@@ -90,7 +92,7 @@ where
                         blobs: U::get_blobs(self, account_id, document_id)?,
                         term_index: self.get_term_index_id(
                             account_id,
-                            U::Property::collection(),
+                            U::collection(),
                             document_id,
                         )?,
                         jmap_id,
@@ -111,7 +113,7 @@ where
         update: RaftUpdate,
     ) -> store::Result<()>
     where
-        U: RaftObject<T>,
+        U: RaftObject<T> + 'static,
     {
         match update {
             RaftUpdate::Insert {
@@ -121,8 +123,8 @@ where
                 term_index,
             } => {
                 let document_id = jmap_id.get_document_id();
-                let mut document = Document::new(U::Property::collection(), document_id);
-                TinyORM::<U::Property>::deserialize(&fields)
+                let mut document = Document::new(U::collection(), document_id);
+                TinyORM::<U>::deserialize(&fields)
                     .ok_or_else(|| {
                         StoreError::InternalError("Failed to deserialize ORM.".to_string())
                     })?
@@ -137,18 +139,18 @@ where
             }
             RaftUpdate::Update { jmap_id, fields } => {
                 let document_id = jmap_id.get_document_id();
-                let mut document = Document::new(U::Property::collection(), document_id);
-                self.get_orm::<U::Property>(write_batch.account_id, document_id)?
+                let mut document = Document::new(U::collection(), document_id);
+                self.get_orm::<U>(write_batch.account_id, document_id)?
                     .ok_or_else(|| {
                         StoreError::InternalError(format!(
                             "ORM for document {:?}/{} not found.",
-                            U::Property::collection(),
+                            U::collection(),
                             document_id
                         ))
                     })?
                     .merge(
                         &mut document,
-                        TinyORM::<U::Property>::deserialize(&fields).ok_or_else(|| {
+                        TinyORM::<U>::deserialize(&fields).ok_or_else(|| {
                             StoreError::InternalError("Failed to deserialize ORM.".to_string())
                         })?,
                     )?;
@@ -165,12 +167,10 @@ where
     }
 }
 
-pub trait RaftObject<T>
+pub trait RaftObject<T>: Object
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property: PropertySchema + 'static;
-
     fn on_raft_update(
         store: &JMAPStore<T>,
         write_batch: &mut WriteBatch,

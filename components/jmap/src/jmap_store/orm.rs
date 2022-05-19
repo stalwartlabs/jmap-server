@@ -7,45 +7,53 @@ use store::write::options::{IndexOptions, Options};
 use store::{AccountId, DocumentId, JMAPStore, Store};
 
 use crate::error::set::SetError;
-use crate::{protocol::json::JSONValue, Property};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-pub trait PropertySchema:
-    Property
-    + Eq
-    + Hash
-    + Copy
-    + Into<u8>
-    + serde::Serialize
-    + for<'de> serde::Deserialize<'de>
-    + Sync
-    + Send
-{
-    fn required() -> &'static [Self];
-    fn indexed() -> &'static [(Self, u64)];
-}
+use super::Object;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
 pub struct TinyORM<T>
 where
-    T: PropertySchema,
+    T: Object,
 {
     #[serde(bound(
-        serialize = "HashMap<T, JSONValue>: serde::Serialize",
-        deserialize = "HashMap<T, JSONValue>: serde::Deserialize<'de>"
+        serialize = "HashMap<T::Property, Value<T::Value>>: serde::Serialize",
+        deserialize = "HashMap<T::Property, Value<T::Value>>: serde::Deserialize<'de>"
     ))]
-    properties: HashMap<T, JSONValue>,
+    properties: HashMap<T::Property, Value<T::Value>>,
     #[serde(bound(
-        serialize = "HashMap<T, HashSet<Tag>>: serde::Serialize",
-        deserialize = "HashMap<T, HashSet<Tag>>: serde::Deserialize<'de>"
+        serialize = "HashMap<T::Property, HashSet<Tag>>: serde::Serialize",
+        deserialize = "HashMap<T::Property, HashSet<Tag>>: serde::Deserialize<'de>"
     ))]
-    tags: HashMap<T, HashSet<Tag>>,
+    tags: HashMap<T::Property, HashSet<Tag>>,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+pub enum Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    String(String),
+    Number(Number),
+    Bool(bool),
+    Object(T),
+    List(Vec<Value<T>>),
+    Null,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
+pub enum Number {
+    PosInt(u64),
+    NegInt(i64),
+    Float(f64),
+}
+
+impl Eq for Number {}
 
 impl<T> Default for TinyORM<T>
 where
-    T: PropertySchema,
+    T: Object,
 {
     fn default() -> Self {
         Self {
@@ -57,7 +65,7 @@ where
 
 impl<T> TinyORM<T>
 where
-    T: PropertySchema + 'static,
+    T: Object + 'static,
 {
     pub const FIELD_ID: u8 = u8::MAX;
 
@@ -72,77 +80,68 @@ where
         }
     }
 
-    pub fn set(&mut self, property: T, value: JSONValue) {
-        self.properties.insert(property, value);
+    pub fn set(&mut self, property: T::Property, value: impl Into<Value<T::Value>>) {
+        self.properties.insert(property, value.into());
     }
 
-    pub fn remove(&mut self, property: &T) -> Option<JSONValue> {
+    pub fn remove(&mut self, property: &T::Property) -> Option<Value<T::Value>> {
         self.properties.remove(property)
     }
 
-    pub fn has_property(&self, property: &T) -> bool {
+    pub fn has_property(&self, property: &T::Property) -> bool {
         self.properties.contains_key(property)
     }
 
-    pub fn tag(&mut self, property: T, tag: Tag) {
+    pub fn tag(&mut self, property: T::Property, tag: Tag) {
         self.tags
             .entry(property)
             .or_insert_with(HashSet::new)
             .insert(tag);
     }
 
-    pub fn untag(&mut self, property: &T, tag: &Tag) {
+    pub fn untag(&mut self, property: &T::Property, tag: &Tag) {
         self.tags.get_mut(property).map(|set| set.remove(tag));
     }
 
-    pub fn untag_all(&mut self, property: &T) {
+    pub fn untag_all(&mut self, property: &T::Property) {
         if let Some(set) = self.tags.get_mut(property) {
             set.clear()
         }
     }
 
-    pub fn get_tags(&self, property: &T) -> Option<&HashSet<Tag>> {
+    pub fn get_tags(&self, property: &T::Property) -> Option<&HashSet<Tag>> {
         self.tags.get(property)
     }
 
-    pub fn has_tags(&self, property: &T) -> bool {
+    pub fn has_tags(&self, property: &T::Property) -> bool {
         self.tags
             .get(property)
             .map(|set| !set.is_empty())
             .unwrap_or(false)
     }
 
-    pub fn get_unsigned_int(&self, property: &T) -> Option<u64> {
+    pub fn get_unsigned_int(&self, property: &T::Property) -> Option<u64> {
         self.properties
             .get(property)
             .and_then(|value| value.to_unsigned_int())
     }
 
-    pub fn get_string(&self, property: &T) -> Option<&str> {
+    pub fn get_string(&self, property: &T::Property) -> Option<&str> {
         self.properties
             .get(property)
             .and_then(|value| value.to_string())
     }
 
-    pub fn remove_string(&mut self, property: &T) -> Option<String> {
+    pub fn remove_string(&mut self, property: &T::Property) -> Option<String> {
         self.properties
             .remove(property)
             .and_then(|value| value.unwrap_string())
     }
 
-    pub fn get_object(&self, property: &T) -> Option<&HashMap<String, JSONValue>> {
-        self.properties
-            .get(property)
-            .and_then(|value| value.to_object())
-    }
-
-    pub fn get_array(&self, property: &T) -> Option<&Vec<JSONValue>> {
-        self.properties
-            .get(property)
-            .and_then(|value| value.to_array())
-    }
-
-    pub fn insert_validate(self, document: &mut Document) -> crate::error::set::Result<()> {
+    pub fn insert_validate(
+        self,
+        document: &mut Document,
+    ) -> crate::error::set::Result<(), T::Property> {
         for property in T::required() {
             if self
                 .properties
@@ -151,7 +150,7 @@ where
                 .unwrap_or(true)
             {
                 return Err(SetError::invalid_property(
-                    property.to_string(),
+                    property.clone(),
                     "Property cannot be empty.".to_string(),
                 ));
             }
@@ -169,7 +168,7 @@ where
         self,
         document: &mut Document,
         changes: TinyORM<T>,
-    ) -> crate::error::set::Result<bool> {
+    ) -> crate::error::set::Result<bool, T::Property> {
         for property in T::required() {
             if changes
                 .properties
@@ -178,7 +177,7 @@ where
                 .unwrap_or_else(|| self.properties.get(property).is_none())
             {
                 return Err(SetError::invalid_property(
-                    property.to_string(),
+                    property.clone(),
                     "Property cannot be empty.".to_string(),
                 ));
             }
@@ -186,7 +185,7 @@ where
         self.merge(document, changes).map_err(|err| err.into())
     }
 
-    pub fn get_changed_tags(&self, changes: &Self, property: &T) -> HashSet<Tag> {
+    pub fn get_changed_tags(&self, changes: &Self, property: &T::Property) -> HashSet<Tag> {
         match (self.tags.get(property), changes.tags.get(property)) {
             (Some(this), Some(changes)) if this != changes => {
                 let mut tag_diff = HashSet::new();
@@ -230,16 +229,16 @@ where
                     continue;
                 } else if is_indexed {
                     match &current_value {
-                        JSONValue::String(text) => {
+                        Value::String(text) => {
                             document.text(
-                                property,
+                                property.clone(),
                                 text.clone(),
                                 Language::Unknown,
                                 (*index_options).clear(),
                             );
                         }
-                        JSONValue::Number(number) => {
-                            document.number(property, number, (*index_options).clear());
+                        Value::Number(number) => {
+                            document.number(property.clone(), number, (*index_options).clear());
                         }
                         value => {
                             debug_assert!(false, "ORM unsupported type: {:?}", value);
@@ -249,20 +248,25 @@ where
             }
 
             match &value {
-                JSONValue::String(text) => {
+                Value::String(text) => {
                     if is_indexed {
-                        document.text(property, text.clone(), Language::Unknown, *index_options);
+                        document.text(
+                            property.clone(),
+                            text.clone(),
+                            Language::Unknown,
+                            *index_options,
+                        );
                     }
 
                     self.properties.insert(property, value);
                 }
-                JSONValue::Number(number) => {
+                Value::Number(number) => {
                     if is_indexed {
-                        document.number(property, number, *index_options);
+                        document.number(property.clone(), number, *index_options);
                     }
                     self.properties.insert(property, value);
                 }
-                JSONValue::Null => {
+                Value::Null => {
                     self.properties.remove(&property);
                 }
                 _ => {
@@ -281,7 +285,11 @@ where
                     if tags != changed_tags {
                         for tag in tags {
                             if !changed_tags.contains(tag) {
-                                document.tag(*property, tag.clone(), IndexOptions::new().clear());
+                                document.tag(
+                                    property.clone(),
+                                    tag.clone(),
+                                    IndexOptions::new().clear(),
+                                );
                             }
                         }
                     }
@@ -293,13 +301,17 @@ where
                     if changed_tags != tags {
                         for changed_tag in changed_tags {
                             if !tags.contains(changed_tag) {
-                                document.tag(*property, changed_tag.clone(), IndexOptions::new());
+                                document.tag(
+                                    property.clone(),
+                                    changed_tag.clone(),
+                                    IndexOptions::new(),
+                                );
                             }
                         }
                     }
                 } else {
                     for changed_tag in changed_tags {
-                        document.tag(*property, changed_tag.clone(), IndexOptions::new());
+                        document.tag(property.clone(), changed_tag.clone(), IndexOptions::new());
                     }
                 }
             }
@@ -351,13 +363,13 @@ where
                 .unwrap_or((false, 0));
             if is_indexed {
                 match value {
-                    JSONValue::String(text) => {
+                    Value::String(text) => {
                         document.text(property, text, Language::Unknown, index_options);
                     }
-                    JSONValue::Number(number) => {
+                    Value::Number(number) => {
                         document.number(property, &number, index_options);
                     }
-                    JSONValue::Null => (),
+                    Value::Null => (),
                     value => {
                         debug_assert!(false, "ORM unsupported type: {:?}", value);
                     }
@@ -372,7 +384,7 @@ where
         };
         for (property, tags) in self.tags {
             for tag in tags {
-                document.tag(property, tag, index_options);
+                document.tag(property.clone(), tag, index_options);
             }
         }
     }
@@ -397,33 +409,103 @@ where
     }
 }
 
-impl<T> From<HashMap<T, JSONValue>> for TinyORM<T>
+impl<T> Value<T>
 where
-    T: PropertySchema,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
 {
-    fn from(properties: HashMap<T, JSONValue>) -> Self {
-        TinyORM {
-            properties,
-            ..Default::default()
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Value::String(string) => string.is_empty(),
+            Value::Number(_) | Value::Bool(_) | Value::Object(_) => false,
+            Value::List(list) => list.is_empty(),
+            Value::Null => true,
+        }
+    }
+
+    pub fn to_string(&self) -> Option<&str> {
+        match self {
+            Value::String(string) => Some(string.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_string(self) -> Option<String> {
+        match self {
+            Value::String(string) => Some(string),
+            _ => None,
+        }
+    }
+
+    pub fn to_unsigned_int(&self) -> Option<u64> {
+        match self {
+            Value::Number(number) => number.to_unsigned_int().into(),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_object(self) -> Option<T> {
+        match self {
+            Value::Object(object) => object.into(),
+            _ => None,
+        }
+    }
+}
+
+impl Number {
+    pub fn to_unsigned_int(&self) -> u64 {
+        match self {
+            Number::PosInt(i) => *i,
+            Number::NegInt(i) => {
+                if *i > 0 {
+                    *i as u64
+                } else {
+                    0
+                }
+            }
+            Number::Float(f) => {
+                if *f > 0.0 {
+                    *f as u64
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
+    pub fn to_int(&self) -> i64 {
+        match self {
+            Number::PosInt(i) => *i as i64,
+            Number::NegInt(i) => *i,
+            Number::Float(f) => *f as i64,
+        }
+    }
+}
+
+impl From<&Number> for store::core::number::Number {
+    fn from(value: &Number) -> Self {
+        match value {
+            Number::PosInt(i) => store::core::number::Number::LongInteger(*i),
+            Number::NegInt(i) => store::core::number::Number::LongInteger(*i as u64),
+            Number::Float(f) => store::core::number::Number::Float(*f),
         }
     }
 }
 
 impl<T> StoreSerialize for TinyORM<T>
 where
-    T: PropertySchema,
+    T: Object,
 {
     fn serialize(&self) -> Option<Vec<u8>> {
-        rmp_serde::encode::to_vec(&self).ok()
+        store::bincode::serialize(self).ok()
     }
 }
 
 impl<T> StoreDeserialize for TinyORM<T>
 where
-    T: PropertySchema,
+    T: Object,
 {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        rmp_serde::decode::from_slice(bytes).ok()
+        store::bincode::deserialize(bytes).ok()
     }
 }
 
@@ -434,7 +516,7 @@ pub trait JMAPOrm {
         document: DocumentId,
     ) -> store::Result<Option<TinyORM<U>>>
     where
-        U: PropertySchema + 'static;
+        U: Object + 'static;
 }
 
 impl<T> JMAPOrm for JMAPStore<T>
@@ -447,7 +529,7 @@ where
         document: DocumentId,
     ) -> store::Result<Option<TinyORM<U>>>
     where
-        U: PropertySchema + 'static,
+        U: Object + 'static,
     {
         self.get_document_value::<TinyORM<U>>(
             account,

@@ -48,22 +48,8 @@ impl JMAPBlob {
             inner_id: inner_id.into(),
         }
     }
-}
 
-impl From<&BlobId> for JMAPBlob {
-    fn from(id: &BlobId) -> Self {
-        JMAPBlob::new(id.clone())
-    }
-}
-
-impl From<BlobId> for JMAPBlob {
-    fn from(id: BlobId) -> Self {
-        JMAPBlob::new(id)
-    }
-}
-
-impl JMAPIdSerialize for JMAPBlob {
-    fn from_jmap_string(id: &str) -> Option<Self>
+    pub fn parse(id: &str) -> Option<Self>
     where
         Self: Sized,
     {
@@ -88,9 +74,59 @@ impl JMAPIdSerialize for JMAPBlob {
             },
         })
     }
+}
 
+impl From<&BlobId> for JMAPBlob {
+    fn from(id: &BlobId) -> Self {
+        JMAPBlob::new(id.clone())
+    }
+}
+
+impl From<BlobId> for JMAPBlob {
+    fn from(id: BlobId) -> Self {
+        JMAPBlob::new(id)
+    }
+}
+
+impl serde::Serialize for JMAPBlob {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+struct JMAPBlobVisitor;
+
+impl<'de> serde::de::Visitor<'de> for JMAPBlobVisitor {
+    type Value = JMAPBlob;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a valid JMAP state")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        JMAPBlob::parse(v)
+            .ok_or_else(|| serde::de::Error::custom(format!("Failed to parse JMAP state '{}'", v)))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for JMAPBlob {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(JMAPBlobVisitor)
+    }
+}
+
+impl std::fmt::Display for JMAPBlob {
     #[allow(clippy::unused_io_amount)]
-    fn to_jmap_string(&self) -> String {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut writer = HexWriter::with_capacity(40);
         if let Some(inner_id) = self.inner_id {
             writer.result.push('i');
@@ -102,7 +138,20 @@ impl JMAPIdSerialize for JMAPBlob {
             writer.write(&self.id.hash).unwrap();
             self.id.size.to_leb128_writer(&mut writer).unwrap();
         }
-        writer.result
+        write!(f, "{}", writer.result)
+    }
+}
+
+impl JMAPIdSerialize for JMAPBlob {
+    fn from_jmap_string(id: &str) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    fn to_jmap_string(&self) -> String {
+        String::default()
     }
 }
 

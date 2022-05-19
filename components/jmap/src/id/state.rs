@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{error::method::MethodError, protocol::json::JSONValue};
 
 use super::{hex_reader, HexWriter, JMAPIdSerialize};
@@ -53,13 +55,8 @@ impl JMAPState {
             JMAPState::Initial => ChangeId::MAX,
         }
     }
-}
 
-impl JMAPIdSerialize for JMAPState {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized,
-    {
+    pub fn parse(id: &str) -> Option<Self> {
         match id.as_bytes().get(0)? {
             b'n' => JMAPState::Initial.into(),
             b's' => JMAPState::Exact(ChangeId::from_str_radix(id.get(1..)?, 16).ok()?).into(),
@@ -83,6 +80,73 @@ impl JMAPIdSerialize for JMAPState {
             }
             _ => None,
         }
+    }
+}
+
+impl serde::Serialize for JMAPState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+struct JMAPStateVisitor;
+
+impl<'de> serde::de::Visitor<'de> for JMAPStateVisitor {
+    type Value = JMAPState;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a valid JMAP state")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        JMAPState::parse(v)
+            .ok_or_else(|| serde::de::Error::custom(format!("Failed to parse JMAP state '{}'", v)))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for JMAPState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(JMAPStateVisitor)
+    }
+}
+
+impl std::fmt::Display for JMAPState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JMAPState::Initial => write!(f, "n"),
+            JMAPState::Exact(id) => write!(f, "s{:02x}", id),
+            JMAPState::Intermediate(intermediate) => {
+                let mut writer = HexWriter::with_capacity(10);
+                writer.result.push('r');
+                intermediate.from_id.to_leb128_writer(&mut writer).unwrap();
+                (intermediate.to_id - intermediate.from_id)
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                intermediate
+                    .items_sent
+                    .to_leb128_writer(&mut writer)
+                    .unwrap();
+                write!(f, "{}", writer.result)
+            }
+        }
+    }
+}
+
+impl JMAPIdSerialize for JMAPState {
+    fn from_jmap_string(id: &str) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
     }
 
     fn to_jmap_string(&self) -> String {

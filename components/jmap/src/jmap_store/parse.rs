@@ -6,7 +6,6 @@ use crate::{
     error::method::MethodError,
     id::{blob::JMAPBlob, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::parse::ParseRequest,
 };
 
 use super::blob::{InnerBlobFnc, JMAPBlobStore};

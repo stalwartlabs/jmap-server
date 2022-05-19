@@ -8,7 +8,6 @@ use crate::jmap_store::set::{
 };
 use crate::protocol::invocation::{Invocation, Object};
 use crate::protocol::json::JSONValue;
-use crate::request::parse_utc_date;
 use crate::request::set::SetRequest;
 
 use store::core::document::Document;

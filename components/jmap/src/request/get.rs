@@ -1,42 +1,57 @@
 use std::collections::HashMap;
 
-use store::{AccountId, JMAPId};
+use store::{AccountId, Store};
 
-use crate::protocol::{json::JSONValue, response::Response};
+use crate::{
+    id::{jmap::JMAPId, state::JMAPState},
+    jmap_store::{get::GetObject, Object},
+    protocol::{json::JSONValue, response::Response},
+};
 
-#[derive(Debug, Clone)]
-pub struct GetRequest {
-    pub account_id: AccountId,
+use super::{MaybeResultReference, ResultReference};
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct GetRequest<O, T>
+where
+    O: GetObject<T>,
+    T: for<'x> Store<'x> + 'static,
+{
+    #[serde(rename = "accountId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<JMAPId>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ids: Option<Vec<JMAPId>>,
-    pub properties: JSONValue,
-    pub arguments: HashMap<String, JSONValue>,
+
+    #[serde(rename = "#ids")]
+    #[serde(skip_deserializing)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ids_ref: Option<ResultReference>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<Vec<O::Property>>,
+
+    #[serde(flatten)]
+    pub arguments: O::GetArguments,
 }
 
-impl GetRequest {
-    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
-        let mut request = GetRequest {
-            account_id: AccountId::MAX,
-            ids: None,
-            properties: JSONValue::Null,
-            arguments: HashMap::new(),
-        };
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GetResponse<O, T>
+where
+    O: GetObject<T>,
+    T: for<'x> Store<'x> + 'static,
+{
+    #[serde(rename = "accountId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<JMAPId>,
 
-        invocation.parse_arguments(response, |name, value| {
-            match name.as_str() {
-                "accountId" => request.account_id = value.parse_document_id()?,
-                "ids" => request.ids = value.parse_array_items(true)?,
-                "properties" => request.properties = value,
-                _ => {
-                    request.arguments.insert(name, value);
-                }
-            }
-            Ok(())
-        })?;
+    pub state: JMAPState,
 
-        if matches!(request.ids, Some(ref ids) if ids.is_empty()) {
-            request.ids = None;
-        }
+    pub list: Vec<O>,
 
-        Ok(request)
-    }
+    #[serde(rename = "notFound")]
+    pub not_found: Vec<JMAPId>,
+
+    #[serde(skip)]
+    pub _p: std::marker::PhantomData<T>,
 }

@@ -15,6 +15,7 @@ use log::raft::{LogIndex, RaftId};
 use moka::sync::Cache;
 use parking_lot::{Mutex, MutexGuard};
 use serialize::StoreDeserialize;
+use std::sync::atomic::AtomicBool;
 use std::{
     sync::{atomic::AtomicU64, Arc},
     time::Duration,
@@ -100,6 +101,7 @@ pub struct JMAPStore<T> {
 
     pub raft_term: AtomicU64,
     pub raft_index: AtomicU64,
+    pub tombstone_deletions: AtomicBool,
 }
 
 impl<T> JMAPStore<T>
@@ -118,6 +120,7 @@ where
             account_lock: MutexMap::with_capacity(1024),
             raft_index: 0.into(),
             raft_term: 0.into(),
+            tombstone_deletions: false.into(),
             db,
         };
 
@@ -136,6 +139,11 @@ where
         store.raft_term = raft_id.term.into();
         store.raft_index = raft_id.index.into();
         store
+    }
+
+    pub fn tombstone_deletions(&self) -> bool {
+        self.tombstone_deletions
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn lock_account(&self, account: AccountId, collection: Collection) -> MutexGuard<'_, ()> {

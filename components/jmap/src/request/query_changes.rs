@@ -1,67 +1,79 @@
 use std::collections::HashMap;
 
-use store::AccountId;
+use store::{AccountId, Store};
 
 use crate::{
-    id::state::JMAPState,
+    id::{jmap::JMAPId, state::JMAPState},
+    jmap_store::query::QueryObject,
     protocol::{json::JSONValue, response::Response},
 };
 
-use super::query::Comparator;
+use super::query::{Comparator, Filter};
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct QueryChangesRequest<O, T>
+where
+    O: QueryObject<T>,
+    T: for<'x> Store<'x> + 'static,
+{
+    #[serde(rename = "accountId")]
+    pub account_id: JMAPId,
 
-#[derive(Debug, Clone)]
-pub struct QueryChangesRequest {
-    pub account_id: AccountId,
-    pub filter: JSONValue,
-    pub sort: Option<Vec<Comparator>>,
+    #[serde(rename = "filter")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Filter<O::Filter>>,
+
+    #[serde(rename = "sort")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<Vec<Comparator<O::Comparator>>>,
+
+    #[serde(rename = "sinceQueryState")]
     pub since_query_state: JMAPState,
-    pub max_changes: usize,
-    pub up_to_id: JSONValue,
-    pub calculate_total: bool,
-    pub arguments: HashMap<String, JSONValue>,
+
+    #[serde(rename = "maxChanges")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_changes: Option<usize>,
+
+    #[serde(rename = "upToId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up_to_id: Option<JMAPId>,
+
+    #[serde(rename = "calculateTotal")]
+    pub calculate_total: Option<bool>,
+
+    #[serde(flatten)]
+    pub arguments: O::QueryArguments,
 }
 
-impl QueryChangesRequest {
-    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
-        let mut request = QueryChangesRequest {
-            account_id: AccountId::MAX,
-            filter: JSONValue::Null,
-            sort: None,
-            since_query_state: JMAPState::Initial,
-            max_changes: 0,
-            up_to_id: JSONValue::Null,
-            calculate_total: false,
-            arguments: HashMap::new(),
-        };
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct QueryChangesResponse {
+    #[serde(rename = "accountId")]
+    pub account_id: JMAPId,
 
-        invocation.parse_arguments(response, |name, value| {
-            match name.as_str() {
-                "accountId" => request.account_id = value.parse_document_id()?,
-                "filter" => request.filter = value,
-                "sort" => {
-                    if let JSONValue::Array(sort) = value {
-                        let mut result = Vec::with_capacity(sort.len());
-                        for comparator in sort {
-                            result.push(comparator.parse_comparator()?);
-                        }
-                        request.sort = Some(result);
-                    }
-                }
-                "sinceQueryState" => {
-                    request.since_query_state = value.parse_jmap_state(false)?.unwrap()
-                }
-                "maxChanges" => {
-                    request.max_changes = value.parse_unsigned_int(true)?.unwrap() as usize
-                }
-                "upToId" => request.up_to_id = value,
-                "calculateTotal" => request.calculate_total = value.parse_bool()?,
-                _ => {
-                    request.arguments.insert(name, value);
-                }
-            }
-            Ok(())
-        })?;
+    #[serde(rename = "oldQueryState")]
+    pub old_query_state: JMAPState,
 
-        Ok(request)
+    #[serde(rename = "newQueryState")]
+    pub new_query_state: JMAPState,
+
+    #[serde(rename = "total")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<usize>,
+
+    #[serde(rename = "removed")]
+    pub removed: Vec<JMAPId>,
+
+    #[serde(rename = "added")]
+    pub added: Vec<AddedItem>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AddedItem {
+    id: JMAPId,
+    index: usize,
+}
+
+impl AddedItem {
+    pub fn new(id: JMAPId, index: usize) -> Self {
+        Self { id, index }
     }
 }

@@ -1,99 +1,115 @@
 use std::collections::HashMap;
 
-use store::{AccountId, JMAPId};
+use store::{AccountId, Store};
 
 use crate::{
+    id::{jmap::JMAPId, state::JMAPState},
+    jmap_store::query::QueryObject,
     protocol::{json::JSONValue, response::Response},
     MethodError,
 };
 
-#[derive(Debug, Clone)]
-pub struct QueryRequest {
-    pub account_id: AccountId,
-    pub filter: JSONValue,
-    pub sort: Option<Vec<Comparator>>,
-    pub position: i64,
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct QueryRequest<O, T>
+where
+    O: QueryObject<T>,
+    T: for<'x> Store<'x> + 'static,
+{
+    #[serde(rename = "accountId")]
+    pub account_id: JMAPId,
+
+    #[serde(rename = "filter")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Filter<O::Filter>>,
+
+    #[serde(rename = "sort")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<Vec<Comparator<O::Comparator>>>,
+
+    #[serde(rename = "position")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<i32>,
+
+    #[serde(rename = "anchor")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor: Option<JMAPId>,
-    pub anchor_offset: i64,
-    pub limit: usize,
-    pub calculate_total: bool,
-    pub arguments: HashMap<String, JSONValue>,
+
+    #[serde(rename = "anchorOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_offset: Option<i32>,
+
+    #[serde(rename = "limit")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+
+    #[serde(rename = "calculateTotal")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calculate_total: Option<bool>,
+
+    #[serde(flatten)]
+    pub arguments: O::QueryArguments,
 }
 
-#[derive(Debug, Clone)]
-pub struct Comparator {
-    pub property: String,
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+pub enum Filter<T> {
+    FilterOperator(FilterOperator<T>),
+    FilterCondition(T),
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct FilterOperator<T> {
+    pub operator: Operator,
+    pub conditions: Vec<Filter<T>>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub enum Operator {
+    #[serde(rename = "AND")]
+    And,
+    #[serde(rename = "OR")]
+    Or,
+    #[serde(rename = "NOT")]
+    Not,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Comparator<A> {
+    #[serde(rename = "isAscending")]
     pub is_ascending: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub collation: Option<String>,
-    pub arguments: HashMap<String, JSONValue>,
+
+    #[serde(flatten)]
+    pub arguments: A,
 }
 
-impl QueryRequest {
-    pub fn parse(invocation: JSONValue, response: &Response) -> crate::Result<Self> {
-        let mut request = QueryRequest {
-            account_id: AccountId::MAX,
-            filter: JSONValue::Null,
-            sort: None,
-            position: 0,
-            anchor: None,
-            anchor_offset: 0,
-            limit: 0,
-            calculate_total: false,
-            arguments: HashMap::new(),
-        };
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct QueryResponse {
+    #[serde(rename = "accountId")]
+    pub account_id: JMAPId,
 
-        invocation.parse_arguments(response, |name, value| {
-            match name.as_str() {
-                "accountId" => request.account_id = value.parse_document_id()?,
-                "filter" => request.filter = value,
-                "sort" => {
-                    if let JSONValue::Array(sort) = value {
-                        let mut result = Vec::with_capacity(sort.len());
-                        for comparator in sort {
-                            result.push(comparator.parse_comparator()?);
-                        }
-                        request.sort = Some(result);
-                    }
-                }
-                "position" => request.position = value.parse_int(false)?.unwrap(),
-                "anchor" => request.anchor = value.parse_jmap_id(true)?,
-                "anchorOffset" => request.anchor_offset = value.parse_int(false)?.unwrap(),
-                "limit" => request.limit = value.parse_unsigned_int(false)?.unwrap() as usize,
-                "calculateTotal" => request.calculate_total = value.parse_bool()?,
-                _ => {
-                    request.arguments.insert(name, value);
-                }
-            }
-            Ok(())
-        })?;
+    #[serde(rename = "queryState")]
+    pub query_state: JMAPState,
 
-        Ok(request)
-    }
-}
+    #[serde(rename = "canCalculateChanges")]
+    pub can_calculate_changes: bool,
 
-impl JSONValue {
-    pub fn parse_comparator(self) -> crate::Result<Comparator> {
-        let mut comparator = self.unwrap_object().ok_or_else(|| {
-            MethodError::InvalidArguments("Comparator is not an object.".to_string())
-        })?;
+    #[serde(rename = "position")]
+    pub position: i32,
 
-        Ok(Comparator {
-            property: comparator
-                .remove("property")
-                .and_then(|v| v.unwrap_string())
-                .ok_or_else(|| {
-                    MethodError::InvalidArguments(
-                        "Comparator has no 'property' parameter.".to_string(),
-                    )
-                })?,
-            is_ascending: comparator
-                .remove("isAscending")
-                .and_then(|v| v.unwrap_bool())
-                .unwrap_or(true),
-            collation: comparator
-                .remove("collation")
-                .and_then(|v| v.unwrap_string()),
-            arguments: comparator,
-        })
-    }
+    #[serde(rename = "ids")]
+    pub ids: Vec<JMAPId>,
+
+    #[serde(rename = "total")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<usize>,
+
+    #[serde(rename = "limit")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+
+    #[serde(skip)]
+    pub is_immutable: bool,
 }

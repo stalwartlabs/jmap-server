@@ -1,219 +1,144 @@
 pub mod changes;
+pub mod copy;
 pub mod get;
-pub mod import;
-pub mod parse;
 pub mod query;
 pub mod query_changes;
 pub mod set;
 
-use store::{chrono::DateTime, DocumentId, JMAPId};
+use store::{chrono::DateTime, DocumentId};
 
 use crate::{
-    id::blob::JMAPBlob,
+    id::{blob::JMAPBlob, jmap::JMAPId},
     protocol::{json::JSONValue, response::Response},
     MethodError,
 };
 
-pub trait JSONArgumentParser: Sized {
-    fn parse_argument(argument: JSONValue) -> crate::Result<Self>;
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ResultReference {
+    #[serde(rename = "resultOf")]
+    result_of: String,
+    name: Method,
+    path: String,
 }
 
-impl<T> JSONArgumentParser for Vec<T>
-where
-    T: JSONArgumentParser,
-{
-    fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
-        if let JSONValue::Array(array) = argument {
-            let mut result = Vec::with_capacity(array.len());
-            for value in array {
-                result.push(T::parse_argument(value)?);
-            }
-            Ok(result)
-        } else {
-            Err(MethodError::InvalidArguments("Expected Array.".to_string()))
-        }
-    }
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+pub enum MaybeResultReference<T> {
+    Value(T),
+    Reference(ResultReference),
 }
 
-impl JSONArgumentParser for JMAPId {
-    fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
-        argument
-            .to_jmap_id()
-            .ok_or_else(|| MethodError::InvalidArguments("Failed to parse JMAP Id.".to_string()))
-    }
+#[derive(Debug, Clone)]
+pub enum MaybeIdReference {
+    Value(JMAPId),
+    Reference(String),
 }
 
-impl JSONArgumentParser for DocumentId {
-    fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
-        argument
-            .to_jmap_id()
-            .map(|id| id as DocumentId)
-            .ok_or_else(|| MethodError::InvalidArguments("Failed to parse JMAP Id.".to_string()))
-    }
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub enum Method {
+    #[serde(rename = "Core/echo")]
+    Echo,
+    #[serde(rename = "Blob/copy")]
+    CopyBlob,
+    #[serde(rename = "PushSubscription/get")]
+    GetPushSubscription,
+    #[serde(rename = "PushSubscription/set")]
+    SetPushSubscription,
+    #[serde(rename = "Mailbox/get")]
+    GetMailbox,
+    #[serde(rename = "Mailbox/changes")]
+    ChangesMailbox,
+    #[serde(rename = "Mailbox/query")]
+    QueryMailbox,
+    #[serde(rename = "Mailbox/queryChanges")]
+    QueryChangesMailbox,
+    #[serde(rename = "Mailbox/set")]
+    SetMailbox,
+    #[serde(rename = "Thread/get")]
+    GetThread,
+    #[serde(rename = "Thread/changes")]
+    ChangesThread,
+    #[serde(rename = "Email/get")]
+    GetEmail,
+    #[serde(rename = "Email/changes")]
+    ChangesEmail,
+    #[serde(rename = "Email/query")]
+    QueryEmail,
+    #[serde(rename = "Email/queryChanges")]
+    QueryChangesEmail,
+    #[serde(rename = "Email/set")]
+    SetEmail,
+    #[serde(rename = "Email/copy")]
+    CopyEmail,
+    #[serde(rename = "Email/import")]
+    ImportEmail,
+    #[serde(rename = "Email/parse")]
+    ParseEmail,
+    #[serde(rename = "SearchSnippet/get")]
+    GetSearchSnippet,
+    #[serde(rename = "Identity/get")]
+    GetIdentity,
+    #[serde(rename = "Identity/changes")]
+    ChangesIdentity,
+    #[serde(rename = "Identity/set")]
+    SetIdentity,
+    #[serde(rename = "EmailSubmission/get")]
+    GetEmailSubmission,
+    #[serde(rename = "EmailSubmission/changes")]
+    ChangesEmailSubmission,
+    #[serde(rename = "EmailSubmission/query")]
+    QueryEmailSubmission,
+    #[serde(rename = "EmailSubmission/queryChanges")]
+    QueryChangesEmailSubmission,
+    #[serde(rename = "EmailSubmission/set")]
+    SetEmailSubmission,
+    #[serde(rename = "VacationResponse/get")]
+    GetVacationResponse,
+    #[serde(rename = "VacationResponse/set")]
+    SetVacationResponse,
+    #[serde(rename = "error")]
+    Error,
 }
 
-impl JSONArgumentParser for JMAPBlob {
-    fn parse_argument(argument: JSONValue) -> crate::Result<Self> {
-        argument
-            .parse_blob(false)?
-            .ok_or_else(|| MethodError::InvalidArguments("Failed to parse Blob Id.".to_string()))
-    }
-}
+struct MaybeIdReferenceVisitor;
 
-impl JSONValue {
-    fn eval_result_reference(&self, response: &Response) -> crate::Result<JSONValue> {
-        if let JSONValue::Object(obj) = self {
-            let result_of = obj
-                .get("resultOf")
-                .ok_or_else(|| MethodError::InvalidArguments("resultOf key missing.".to_string()))?
-                .to_string()
-                .ok_or_else(|| {
-                    MethodError::InvalidArguments("resultOf key is not a string.".to_string())
-                })?;
-            let name = obj
-                .get("name")
-                .ok_or_else(|| MethodError::InvalidArguments("name key missing.".to_string()))?
-                .to_string()
-                .ok_or_else(|| {
-                    MethodError::InvalidArguments("name key is not a string.".to_string())
-                })?;
-            let path = obj
-                .get("path")
-                .ok_or_else(|| MethodError::InvalidArguments("path key missing.".to_string()))?
-                .to_string()
-                .ok_or_else(|| {
-                    MethodError::InvalidArguments("path key is not a string.".to_string())
-                })?;
+impl<'de> serde::de::Visitor<'de> for MaybeIdReferenceVisitor {
+    type Value = MaybeIdReference;
 
-            for (method_name, result, call_id) in &response.method_responses {
-                if name == method_name && call_id == result_of {
-                    return result.eval(path);
-                }
-            }
-
-            Err(MethodError::InvalidArguments(format!(
-                "No methodResponse found with name '{}' and call id '{}'.",
-                name, result_of
-            )))
-        } else {
-            Err(MethodError::InvalidArguments(
-                "ResultReference is not an object".to_string(),
-            ))
-        }
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a valid JMAP state")
     }
 
-    pub fn parse_document_id(self) -> crate::Result<DocumentId> {
-        self.to_jmap_id()
-            .map(|id| id as DocumentId)
-            .ok_or_else(|| MethodError::InvalidArguments("Failed to parse JMAP Id.".to_string()))
-    }
-
-    pub fn parse_unsigned_int(self, optional: bool) -> crate::Result<Option<u64>> {
-        match self {
-            JSONValue::Number(number) => Ok(Some(number.to_unsigned_int())),
-            JSONValue::Null if optional => Ok(None),
-            _ => Err(MethodError::InvalidArguments(
-                "Expected unsigned integer.".to_string(),
-            )),
-        }
-    }
-
-    pub fn parse_int(self, optional: bool) -> crate::Result<Option<i64>> {
-        match self {
-            JSONValue::Number(number) => Ok(Some(number.to_int())),
-            JSONValue::Null if optional => Ok(None),
-            _ => Err(MethodError::InvalidArguments(
-                "Expected integer.".to_string(),
-            )),
-        }
-    }
-
-    pub fn parse_string(self) -> crate::Result<String> {
-        self.unwrap_string()
-            .ok_or_else(|| MethodError::InvalidArguments("Expected string.".to_string()))
-    }
-
-    pub fn parse_bool(self) -> crate::Result<bool> {
-        self.to_bool()
-            .ok_or_else(|| MethodError::InvalidArguments("Expected boolean.".to_string()))
-    }
-
-    pub fn parse_utc_date(self, optional: bool) -> crate::Result<Option<u64>> {
-        match self {
-            JSONValue::String(date_time) => {
-                Ok(Some(parse_utc_date(&date_time).ok_or_else(|| {
-                    MethodError::InvalidArguments(format!(
-                        "Failed to parse UTC Date '{}'",
-                        date_time
-                    ))
-                })?))
-            }
-            JSONValue::Null if optional => Ok(None),
-            _ => Err(MethodError::InvalidArguments(
-                "Expected UTC date.".to_string(),
-            )),
-        }
-    }
-
-    pub fn parse_array_items<T>(self, optional: bool) -> crate::Result<Option<Vec<T>>>
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
     where
-        T: JSONArgumentParser,
+        E: serde::de::Error,
     {
-        match self {
-            JSONValue::Array(items) => {
-                if !items.is_empty() {
-                    let mut result = Vec::with_capacity(items.len());
-                    for item in items {
-                        result.push(T::parse_argument(item)?);
-                    }
-                    Ok(Some(result))
-                } else if optional {
-                    Ok(None)
-                } else {
-                    Err(MethodError::InvalidArguments(
-                        "Expected array with at least one item.".to_string(),
-                    ))
-                }
-            }
-            JSONValue::Null if optional => Ok(None),
-            _ => Err(MethodError::InvalidArguments("Expected array.".to_string())),
-        }
+        Ok(if !v.starts_with('#') {
+            MaybeIdReference::Value(JMAPId::parse(v).ok_or_else(|| {
+                serde::de::Error::custom(format!("Failed to parse JMAP id '{}'", v))
+            })?)
+        } else {
+            MaybeIdReference::Reference(
+                v.get(1..)
+                    .ok_or_else(|| {
+                        serde::de::Error::custom(format!("Failed to parse JMAP id '{}'", v))
+                    })?
+                    .to_string(),
+            )
+        })
     }
+}
 
-    fn parse_arguments<T>(self, response: &Response, mut parse_fnc: T) -> crate::Result<()>
+impl<'de> serde::Deserialize<'de> for MaybeIdReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        T: FnMut(String, JSONValue) -> crate::Result<()>,
+        D: serde::Deserializer<'de>,
     {
-        for (arg_name, arg_value) in self
-            .unwrap_object()
-            .ok_or_else(|| MethodError::InvalidArguments("Expected object.".to_string()))?
-            .into_iter()
-        {
-            if arg_name.starts_with('#') {
-                parse_fnc(
-                    arg_name
-                        .get(1..)
-                        .ok_or_else(|| {
-                            MethodError::InvalidArguments(
-                                "Failed to parse argument name.".to_string(),
-                            )
-                        })?
-                        .to_string(),
-                    arg_value.eval_result_reference(response)?,
-                )?;
-            } else {
-                parse_fnc(arg_name, arg_value)?;
-            }
-        }
-
-        Ok(())
+        deserializer.deserialize_str(MaybeIdReferenceVisitor)
     }
 }
 
-pub fn parse_utc_date(date_time: &str) -> Option<u64> {
-    (DateTime::parse_from_rfc3339(date_time).ok()?.timestamp() as u64).into()
-}
-
+/*
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -221,11 +146,7 @@ mod tests {
     use store::config::{env_settings::EnvSettings, jmap::JMAPConfig};
 
     use crate::{
-        protocol::{
-            invocation::{Invocation, Method},
-            json::JSONValue,
-            request::Request,
-        },
+        protocol::{json::JSONValue, request::Request},
         MethodError,
     };
 
@@ -542,3 +463,4 @@ mod tests {
         };
     }
 }
+*/

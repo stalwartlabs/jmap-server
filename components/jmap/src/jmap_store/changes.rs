@@ -9,33 +9,22 @@ use store::{
 use crate::{
     id::{state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::changes::ChangesRequest,
+    request::changes::{ChangesRequest, ChangesResponse},
 };
 
-pub trait ChangesObject {
-    fn collection() -> Collection;
-    fn handle_result(result: &mut ChangesResult);
-}
+use super::Object;
 
-#[derive(Default)]
-pub struct ChangesResult {
-    pub account_id: AccountId,
-    pub total_changes: usize,
-    pub has_children_changes: bool,
-    pub has_more_changes: bool,
-    pub old_state: JMAPState,
-    pub new_state: JMAPState,
-    pub created: Vec<JSONValue>,
-    pub updated: Vec<JSONValue>,
-    pub destroyed: Vec<JSONValue>,
-    pub arguments: HashMap<String, JSONValue>,
+pub trait ChangesObject: Object {
+    type ChangesResponse: Default;
+
+    fn update_response(response: &mut ChangesResponse<Self>);
 }
 
 pub trait JMAPChanges {
     fn get_state(&self, account: AccountId, collection: Collection) -> store::Result<JMAPState>;
-    fn changes<T>(&self, request: ChangesRequest) -> crate::Result<ChangesResult>
+    fn changes<O>(&self, request: ChangesRequest) -> crate::Result<ChangesResponse<O>>
     where
-        T: ChangesObject;
+        O: ChangesObject;
 }
 
 impl<T> JMAPChanges for JMAPStore<T>
@@ -49,43 +38,48 @@ where
             .unwrap_or(JMAPState::Initial))
     }
 
-    fn changes<U>(&self, request: ChangesRequest) -> crate::Result<ChangesResult>
+    fn changes<O>(&self, request: ChangesRequest) -> crate::Result<ChangesResponse<O>>
     where
-        U: ChangesObject,
+        O: ChangesObject,
     {
-        let collection = U::collection();
+        let collection = O::collection();
+        let max_changes = request.max_changes.unwrap_or(0);
         let max_changes = if self.config.changes_max_results > 0
-            && self.config.changes_max_results < request.max_changes
+            && self.config.changes_max_results < max_changes
         {
             self.config.changes_max_results
         } else {
-            request.max_changes
+            max_changes
         };
 
         let (items_sent, mut changelog) = match &request.since_state {
             JMAPState::Initial => {
                 let changelog = self
-                    .get_changes(request.account_id, collection, Query::All)?
+                    .get_changes(request.account_id.into(), collection, Query::All)?
                     .unwrap();
                 if changelog.changes.is_empty() && changelog.from_change_id == 0 {
-                    return Ok(ChangesResult::default());
+                    return Ok(ChangesResponse::empty(request.account_id));
                 }
 
                 (0, changelog)
             }
             JMAPState::Exact(change_id) => (
                 0,
-                self.get_changes(request.account_id, collection, Query::Since(*change_id))?
-                    .ok_or_else(|| {
-                        StoreError::InvalidArguments(
-                            "The specified stateId does could not be found.".to_string(),
-                        )
-                    })?,
+                self.get_changes(
+                    request.account_id.into(),
+                    collection,
+                    Query::Since(*change_id),
+                )?
+                .ok_or_else(|| {
+                    StoreError::InvalidArguments(
+                        "The specified stateId does could not be found.".to_string(),
+                    )
+                })?,
             ),
             JMAPState::Intermediate(intermediate_state) => {
                 let mut changelog = self
                     .get_changes(
-                        request.account_id,
+                        request.account_id.into(),
                         collection,
                         Query::RangeInclusive(intermediate_state.from_id, intermediate_state.to_id),
                     )?
@@ -98,7 +92,7 @@ where
                     (
                         0,
                         self.get_changes(
-                            request.account_id,
+                            request.account_id.into(),
                             collection,
                             Query::Since(intermediate_state.to_id),
                         )?
@@ -136,17 +130,17 @@ where
         if total_changes > 0 {
             for change in changelog.changes {
                 match change {
-                    Change::Insert(item) => created.push(item.to_jmap_string().into()),
+                    Change::Insert(item) => created.push(item.into()),
                     Change::Update(item) => {
                         items_changed = true;
-                        updated.push(item.to_jmap_string().into())
+                        updated.push(item.into())
                     }
-                    Change::Delete(item) => destroyed.push(item.to_jmap_string().into()),
-                    Change::ChildUpdate(item) => updated.push(item.to_jmap_string().into()),
+                    Change::Delete(item) => destroyed.push(item.into()),
+                    Change::ChildUpdate(item) => updated.push(item.into()),
                 };
             }
         }
-        let mut result = ChangesResult {
+        let mut result = ChangesResponse {
             account_id: request.account_id,
             total_changes,
             has_children_changes: !updated.is_empty() && !items_changed,
@@ -164,37 +158,11 @@ where
             created,
             updated,
             destroyed,
-            arguments: HashMap::with_capacity(0),
+            arguments: O::ChangesResponse::default(),
         };
-        U::handle_result(&mut result);
+
+        O::update_response(&mut result);
 
         Ok(result)
-    }
-}
-
-impl From<ChangesResult> for JSONValue {
-    fn from(changes_result: ChangesResult) -> Self {
-        let mut result = if changes_result.arguments.is_empty() {
-            HashMap::with_capacity(7)
-        } else {
-            changes_result.arguments
-        };
-        result.insert(
-            "accountId".to_string(),
-            (changes_result.account_id as JMAPId)
-                .to_jmap_string()
-                .into(),
-        );
-        result.insert(
-            "hasMoreChanges".to_string(),
-            changes_result.has_more_changes.into(),
-        );
-        result.insert("newState".to_string(), changes_result.new_state.into());
-        result.insert("oldState".to_string(), changes_result.old_state.into());
-        result.insert("created".to_string(), changes_result.created.into());
-        result.insert("updated".to_string(), changes_result.updated.into());
-        result.insert("destroyed".to_string(), changes_result.destroyed.into());
-
-        result.into()
     }
 }

@@ -487,6 +487,7 @@ where
             .state
             .store(RAFT_LOG_LEADER, Ordering::Relaxed);
         self.store.raft_term.store(term, Ordering::Relaxed);
+        self.store.tombstone_deletions.store(true, Ordering::Relaxed);
         self.store.doc_id_cache.invalidate_all();
         self.state_change
             .clone()
@@ -501,6 +502,7 @@ where
             .unwrap()
             .state
             .store(RAFT_LOG_BEHIND, Ordering::Relaxed);
+        self.store.tombstone_deletions.store(false, Ordering::Relaxed);
         self.state_change
             .clone()
             .send(state::Event::Stop)

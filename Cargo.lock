@@ -1189,7 +1189,6 @@ name = "jmap"
 version = "0.1.0"
 dependencies = [
  "base64",
- "rmp-serde",
  "serde",
  "serde_json",
  "store",
@@ -1237,7 +1236,6 @@ dependencies = [
  "store",
  "store_rocksdb",
  "tokio",
- "tokio-util 0.7.1",
  "tracing-subscriber",
 ]
 
@@ -1248,7 +1246,6 @@ dependencies = [
  "jmap",
  "mail-builder",
  "mail-parser",
- "rmp-serde",
  "serde",
  "store",
 ]
@@ -1404,7 +1401,6 @@ dependencies = [
 [[package]]
 name = "mail-parser"
 version = "0.4.6"
-source = "git+https://github.com/stalwartlabs/mail-parser#e2b33a90f34094318d7831c1d00c07b9a4751440"
 dependencies = [
  "encoding_rs",
  "serde",
@@ -1953,28 +1949,6 @@ dependencies = [
  "untrusted",
  "web-sys",
  "winapi",
-]
-
-[[package]]
-name = "rmp"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44519172358fd6d58656c86ab8e7fbc9e1490c3e8f14d35ed78ca0dd07403c9f"
-dependencies = [
- "byteorder",
- "num-traits",
- "paste",
-]
-
-[[package]]
-name = "rmp-serde"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25786b0d276110195fa3d6f3f31299900cf71dfbd6c28450f3f58a0e7f7a347e"
-dependencies = [
- "byteorder",
- "rmp",
- "serde",
 ]
 
 [[package]]

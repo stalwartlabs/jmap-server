@@ -1,15 +1,13 @@
 use crate::mail::import::JMAPMailImport;
 use crate::mail::parse::get_message_part;
-use crate::mail::{
-    HeaderName, Keyword, MailHeaderForm, MailHeaderProperty, MailProperty, MessageField,
-};
+use crate::mail::{HeaderForm, HeaderName, HeaderProperty, Keyword, MessageField, Property};
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::blob::JMAPBlob;
 use jmap::id::JMAPIdSerialize;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
-use jmap::jmap_store::set::{DefaultUpdateItem, SetObject, SetObjectData, SetObjectHelper};
-use jmap::protocol::invocation::Invocation;
+use jmap::jmap_store::set::SetObject;
+
 use jmap::protocol::json::JSONValue;
 use jmap::request::set::SetRequest;
 use mail_builder::headers::address::Address;
@@ -86,7 +84,7 @@ impl<'y, T> SetObject<'y, T> for SetMail
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property = MailProperty;
+    type Property = Property;
     type Helper = SetMailHelper;
     type CreateItemResult = MailImportResult;
     type UpdateItemResult = DefaultUpdateItem;
@@ -123,7 +121,7 @@ where
     ) -> jmap::error::set::Result<()> {
         match (field, self) {
             (
-                field @ MailProperty::MailboxIds,
+                field @ Property::MailboxIds,
                 SetMail::Create { fields, .. } | SetMail::Update { fields, .. },
             ) => {
                 fields.untag_all(&MessageField::Mailbox);
@@ -157,7 +155,7 @@ where
                 }
             }
             (
-                field @ MailProperty::Keywords,
+                field @ Property::Keywords,
                 SetMail::Create { fields, .. } | SetMail::Update { fields, .. },
             ) => {
                 fields.untag_all(&MessageField::Keyword);
@@ -181,47 +179,47 @@ where
                     }
                 }
             }
-            (MailProperty::ReceivedAt, SetMail::Create { received_at, .. }) => {
+            (Property::ReceivedAt, SetMail::Create { received_at, .. }) => {
                 *received_at = value.parse_json_date()?.into();
             }
-            (MailProperty::MessageId, SetMail::Create { builder, .. }) => builder.header(
+            (Property::MessageId, SetMail::Create { builder, .. }) => builder.header(
                 "Message-ID",
                 MessageId::from(value.parse_json_string_list()?),
             ),
-            (MailProperty::InReplyTo, SetMail::Create { builder, .. }) => builder.header(
+            (Property::InReplyTo, SetMail::Create { builder, .. }) => builder.header(
                 "In-Reply-To",
                 MessageId::from(value.parse_json_string_list()?),
             ),
-            (MailProperty::References, SetMail::Create { builder, .. }) => builder.header(
+            (Property::References, SetMail::Create { builder, .. }) => builder.header(
                 "References",
                 MessageId::from(value.parse_json_string_list()?),
             ),
-            (MailProperty::Sender, SetMail::Create { builder, .. }) => {
+            (Property::Sender, SetMail::Create { builder, .. }) => {
                 builder.header("Sender", Address::List(value.parse_json_addresses()?))
             }
-            (MailProperty::From, SetMail::Create { builder, .. }) => {
+            (Property::From, SetMail::Create { builder, .. }) => {
                 builder.header("From", Address::List(value.parse_json_addresses()?))
             }
-            (MailProperty::To, SetMail::Create { builder, .. }) => {
+            (Property::To, SetMail::Create { builder, .. }) => {
                 builder.header("To", Address::List(value.parse_json_addresses()?))
             }
-            (MailProperty::Cc, SetMail::Create { builder, .. }) => {
+            (Property::Cc, SetMail::Create { builder, .. }) => {
                 builder.header("Cc", Address::List(value.parse_json_addresses()?))
             }
-            (MailProperty::Bcc, SetMail::Create { builder, .. }) => {
+            (Property::Bcc, SetMail::Create { builder, .. }) => {
                 builder.header("Bcc", Address::List(value.parse_json_addresses()?))
             }
-            (MailProperty::ReplyTo, SetMail::Create { builder, .. }) => {
+            (Property::ReplyTo, SetMail::Create { builder, .. }) => {
                 builder.header("Reply-To", Address::List(value.parse_json_addresses()?))
             }
-            (MailProperty::Subject, SetMail::Create { builder, .. }) => {
+            (Property::Subject, SetMail::Create { builder, .. }) => {
                 builder.header("Subject", Text::new(value.parse_json_string()?));
             }
-            (MailProperty::SentAt, SetMail::Create { builder, .. }) => {
+            (Property::SentAt, SetMail::Create { builder, .. }) => {
                 builder.header("Date", Date::new(value.parse_json_date()? as i64))
             }
             (
-                field @ MailProperty::TextBody,
+                field @ Property::TextBody,
                 SetMail::Create {
                     builder,
                     body_values,
@@ -240,7 +238,7 @@ where
                     .into();
             }
             (
-                field @ MailProperty::HtmlBody,
+                field @ Property::HtmlBody,
                 SetMail::Create {
                     builder,
                     body_values,
@@ -259,7 +257,7 @@ where
                     .into();
             }
             (
-                MailProperty::Attachments,
+                Property::Attachments,
                 SetMail::Create {
                     builder,
                     body_values,
@@ -271,7 +269,7 @@ where
                     .into();
             }
             (
-                MailProperty::BodyStructure,
+                Property::BodyStructure,
                 SetMail::Create {
                     builder,
                     body_values,
@@ -281,7 +279,7 @@ where
                 builder.body = value.parse_body_structure(helper, body_values)?.into();
             }
             (
-                MailProperty::Header(MailHeaderProperty { form, header, all }),
+                Property::Header(HeaderProperty { form, header, all }),
                 SetMail::Create { builder, .. },
             ) => {
                 if !all {
@@ -317,7 +315,7 @@ where
         value: JSONValue,
     ) -> jmap::error::set::Result<()> {
         let (property, tag) = match &field {
-            MailProperty::MailboxIds => match JMAPId::from_jmap_string(property.as_ref()) {
+            Property::MailboxIds => match JMAPId::from_jmap_string(property.as_ref()) {
                 Some(mailbox_id) => {
                     let document_id = mailbox_id.get_document_id();
                     if helper.data.mailbox_ids.contains(document_id) {
@@ -336,7 +334,7 @@ where
                     ));
                 }
             },
-            MailProperty::Keywords => (MessageField::Keyword, Keyword::from_jmap(property)),
+            Property::Keywords => (MessageField::Keyword, Keyword::from_jmap(property)),
             _ => {
                 return Err(SetError::invalid_property(
                     format!("{}/{}", field, property),
@@ -567,7 +565,7 @@ pub trait JSONMailValue {
         self,
         builder: &mut MessageBuilder,
         header: HeaderName,
-        form: MailHeaderForm,
+        form: HeaderForm,
     ) -> jmap::error::set::Result<()>;
     fn parse_body_structure<T>(
         self,
@@ -606,30 +604,28 @@ impl JSONMailValue for JSONValue {
         self,
         builder: &mut MessageBuilder,
         header: HeaderName,
-        form: MailHeaderForm,
+        form: HeaderForm,
     ) -> jmap::error::set::Result<()> {
         match form {
-            MailHeaderForm::Raw => {
-                builder.header(header.unwrap(), Raw::new(self.parse_json_string()?))
-            }
-            MailHeaderForm::Text => {
+            HeaderForm::Raw => builder.header(header.unwrap(), Raw::new(self.parse_json_string()?)),
+            HeaderForm::Text => {
                 builder.header(header.unwrap(), Text::new(self.parse_json_string()?))
             }
-            MailHeaderForm::Addresses => {
+            HeaderForm::Addresses => {
                 builder.header(header.unwrap(), Address::List(self.parse_json_addresses()?))
             }
-            MailHeaderForm::GroupedAddresses => builder.header(
+            HeaderForm::GroupedAddresses => builder.header(
                 header.unwrap(),
                 Address::List(self.parse_json_grouped_addresses()?),
             ),
-            MailHeaderForm::MessageIds => builder.header(
+            HeaderForm::MessageIds => builder.header(
                 header.unwrap(),
                 MessageId::from(self.parse_json_string_list()?),
             ),
-            MailHeaderForm::Date => {
+            HeaderForm::Date => {
                 builder.header(header.unwrap(), Date::new(self.parse_json_date()? as i64))
             }
-            MailHeaderForm::URLs => {
+            HeaderForm::URLs => {
                 builder.header(header.unwrap(), URL::from(self.parse_json_string_list()?))
             }
         }

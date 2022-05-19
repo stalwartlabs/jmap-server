@@ -1,140 +1,127 @@
 use std::collections::HashMap;
 
-use store::{
-    core::JMAPIdPrefix, roaring::RoaringBitmap, AccountId, DocumentId, JMAPId, JMAPStore, Store,
-};
+use store::{core::JMAPIdPrefix, roaring::RoaringBitmap, AccountId, DocumentId, JMAPStore, Store};
 
 use crate::{
     error::method::MethodError,
-    id::{state::JMAPState, JMAPIdSerialize},
+    id::{jmap::JMAPId, state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::get::GetRequest,
-    Property,
+    request::get::{GetRequest, GetResponse},
 };
 
-use super::changes::JMAPChanges;
+use super::{changes::JMAPChanges, Object};
 
-pub trait GetObject<'y, T>: Sized
+pub struct GetHelper<'y, O, T>
+where
+    T: for<'x> Store<'x> + 'static,
+    O: GetObject<T>,
+{
+    pub store: &'y JMAPStore<T>,
+    pub account_id: AccountId,
+    pub properties: Vec<O::Property>,
+    pub request: GetRequest<O, T>,
+    pub response: GetResponse<O, T>,
+    pub data: O::GetHelper,
+}
+
+pub trait GetObject<T>: Object
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property: Property;
+    type GetArguments;
+    type GetHelper: Default;
 
-    fn new(
-        store: &'y JMAPStore<T>,
-        request: &mut GetRequest,
-        properties: &[Self::Property],
-    ) -> crate::Result<Self>;
-    fn get_item(
-        &self,
-        jmap_id: JMAPId,
-        properties: &[Self::Property],
-    ) -> crate::Result<Option<JSONValue>>;
-    fn map_ids<W>(&self, document_ids: W) -> crate::Result<Vec<JMAPId>>
+    fn init_get(helper: &mut GetHelper<Self, T>) -> crate::Result<()>;
+    fn get_item(helper: &mut GetHelper<Self, T>, jmap_id: JMAPId) -> crate::Result<Option<Self>>;
+    fn map_ids<W>(store: &JMAPStore<T>, document_ids: W) -> crate::Result<Vec<JMAPId>>
     where
         W: Iterator<Item = DocumentId>;
+
     fn is_virtual() -> bool;
     fn default_properties() -> Vec<Self::Property>;
-}
-
-#[derive(Default)]
-pub struct GetResult {
-    pub account_id: AccountId,
-    pub state: JMAPState,
-    pub list: Vec<JSONValue>,
-    pub not_found: Vec<JSONValue>,
 }
 
 pub trait JMAPGet<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn get<'y, 'z: 'y, U>(&'z self, request: GetRequest) -> crate::Result<GetResult>
+    fn get<'y, 'z: 'y, O>(&'z self, request: GetRequest<O, T>) -> crate::Result<GetResponse<O, T>>
     where
-        U: GetObject<'y, T>;
+        O: GetObject<T>;
 }
 
 impl<T> JMAPGet<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn get<'y, 'z: 'y, U>(&'z self, mut request: GetRequest) -> crate::Result<GetResult>
+    fn get<'y, 'z: 'y, O>(
+        &'z self,
+        mut request: GetRequest<O, T>,
+    ) -> crate::Result<GetResponse<O, T>>
     where
-        U: GetObject<'y, T>,
+        O: GetObject<T>,
     {
-        let collection = U::Property::collection();
-        let is_virtual = U::is_virtual();
-        let properties: Vec<U::Property> = request
+        let collection = O::collection();
+        let is_virtual = O::is_virtual();
+        let properties: Vec<O::Property> = request
             .properties
-            .to_array()
-            .map(|properties| {
-                properties
-                    .iter()
-                    .filter_map(|property| property.to_string().and_then(U::Property::parse))
-                    .collect::<Vec<U::Property>>()
-            })
-            .unwrap_or_else(|| U::default_properties());
-        let object = U::new(self, &mut request, &properties)?;
+            .take()
+            .unwrap_or_else(|| O::default_properties());
 
+        let account_id = request.account_id.as_ref().unwrap().get_document_id();
         let document_ids = if !is_virtual {
-            self.get_document_ids(request.account_id, collection)?
+            self.get_document_ids(account_id, collection)?
                 .unwrap_or_default()
         } else {
             RoaringBitmap::new()
         };
 
-        let request_ids = if let Some(request_ids) = request.ids {
+        let request_ids = if let Some(request_ids) = request.ids.take() {
             if request_ids.len() > self.config.max_objects_in_get {
                 return Err(MethodError::RequestTooLarge);
             } else {
                 request_ids
             }
         } else if !document_ids.is_empty() {
-            object.map_ids(document_ids.iter().take(self.config.max_objects_in_get))?
+            O::map_ids(
+                self,
+                document_ids.iter().take(self.config.max_objects_in_get),
+            )?
         } else {
             Vec::new()
         };
 
-        let mut not_found = Vec::new();
-        let mut list = Vec::with_capacity(request_ids.len());
+        let mut helper = GetHelper {
+            store: self,
+            properties: if !properties.is_empty() {
+                properties
+            } else {
+                O::default_properties()
+            },
+            response: GetResponse {
+                account_id: request.account_id.clone(),
+                state: self.get_state(account_id, collection)?,
+                list: Vec::with_capacity(request_ids.len()),
+                not_found: Vec::new(),
+                _p: Default::default(),
+            },
+            account_id,
+            request,
+            data: O::GetHelper::default(),
+        };
+
+        O::init_get(&mut helper)?;
 
         for jmap_id in request_ids {
             if is_virtual || document_ids.contains(jmap_id.get_document_id()) {
-                if let Some(result) = object.get_item(jmap_id, &properties)? {
-                    list.push(result);
+                if let Some(result) = O::get_item(&mut helper, jmap_id)? {
+                    helper.response.list.push(result);
                     continue;
                 }
             }
-            not_found.push(jmap_id.to_jmap_string().into());
+            helper.response.not_found.push(jmap_id.into());
         }
 
-        Ok(GetResult {
-            account_id: request.account_id,
-            state: self.get_state(request.account_id, collection)?,
-            list,
-            not_found,
-        })
-    }
-}
-impl GetResult {
-    pub fn no_account_id(mut self) -> Self {
-        self.account_id = AccountId::MAX;
-        self
-    }
-}
-
-impl From<GetResult> for JSONValue {
-    fn from(get_result: GetResult) -> Self {
-        let mut result = HashMap::new();
-        if get_result.account_id != AccountId::MAX {
-            result.insert(
-                "accountId".to_string(),
-                (get_result.account_id as JMAPId).to_jmap_string().into(),
-            );
-            result.insert("state".to_string(), get_result.state.into());
-        }
-        result.insert("list".to_string(), get_result.list.into());
-        result.insert("notFound".to_string(), get_result.not_found.into());
-        result.into()
+        Ok(helper.response)
     }
 }

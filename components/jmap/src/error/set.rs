@@ -4,26 +4,60 @@ use crate::protocol::json::JSONValue;
 use store::core::error::StoreError;
 use store::tracing::error;
 
-pub struct SetError {
-    pub error_type: SetErrorType,
-    pub description: Option<String>,
-    pub properties: Option<Vec<JSONValue>>,
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SetError<U> {
+    #[serde(rename = "type")]
+    pub type_: SetErrorType,
+    description: Option<String>,
+    properties: Option<Vec<U>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum SetErrorType {
+    #[serde(rename = "forbidden")]
     Forbidden,
+    #[serde(rename = "overQuota")]
     OverQuota,
+    #[serde(rename = "tooLarge")]
     TooLarge,
-    RateLimit, // TODO implement rate limits
+    #[serde(rename = "rateLimit")] //TODO implement
+    RateLimit,
+    #[serde(rename = "notFound")]
     NotFound,
+    #[serde(rename = "invalidPatch")]
     InvalidPatch,
+    #[serde(rename = "willDestroy")]
     WillDestroy,
+    #[serde(rename = "invalidProperties")]
     InvalidProperties,
+    #[serde(rename = "singleton")]
     Singleton,
-    BlobNotFound,
-    MailboxHasChild, //TODO abstract
+    #[serde(rename = "mailboxHasChild")]
+    MailboxHasChild,
+    #[serde(rename = "mailboxHasEmail")]
     MailboxHasEmail,
+    #[serde(rename = "blobNotFound")]
+    BlobNotFound,
+    #[serde(rename = "tooManyKeywords")]
+    TooManyKeywords,
+    #[serde(rename = "tooManyMailboxes")]
+    TooManyMailboxes,
+    #[serde(rename = "forbiddenFrom")]
+    ForbiddenFrom,
+    #[serde(rename = "invalidEmail")]
+    InvalidEmail,
+    #[serde(rename = "tooManyRecipients")]
+    TooManyRecipients,
+    #[serde(rename = "noRecipients")]
+    NoRecipients,
+    #[serde(rename = "invalidRecipients")]
+    InvalidRecipients,
+    #[serde(rename = "forbiddenMailFrom")]
+    ForbiddenMailFrom,
+    #[serde(rename = "forbiddenToSend")]
+    ForbiddenToSend,
+    #[serde(rename = "cannotUnsend")]
+    CannotUnsend,
 }
 
 impl SetErrorType {
@@ -41,81 +75,55 @@ impl SetErrorType {
             SetErrorType::BlobNotFound => "blobNotFound",
             SetErrorType::MailboxHasChild => "mailboxHasChild",
             SetErrorType::MailboxHasEmail => "mailboxHasEmail",
+            SetErrorType::TooManyKeywords => "tooManyKeywords",
+            SetErrorType::TooManyMailboxes => "tooManyMailboxes",
+            SetErrorType::ForbiddenFrom => "forbiddenFrom",
+            SetErrorType::InvalidEmail => "invalidEmail",
+            SetErrorType::TooManyRecipients => "tooManyRecipients",
+            SetErrorType::NoRecipients => "noRecipients",
+            SetErrorType::InvalidRecipients => "invalidRecipients",
+            SetErrorType::ForbiddenMailFrom => "forbiddenMailFrom",
+            SetErrorType::ForbiddenToSend => "forbiddenToSend",
+            SetErrorType::CannotUnsend => "cannotUnsend",
         }
     }
 }
 
-impl SetError {
-    pub fn new_err(error_type: SetErrorType) -> Self {
+impl<U> SetError<U> {
+    pub fn new_err(type_: SetErrorType) -> Self {
         SetError {
-            error_type,
+            type_,
             description: None,
             properties: None,
         }
     }
 
-    pub fn new(error_type: SetErrorType, description: impl Into<String>) -> Self {
+    pub fn new(type_: SetErrorType, description: impl Into<String>) -> Self {
         SetError {
-            error_type,
+            type_,
             description: description.into().into(),
             properties: None,
         }
     }
 
-    pub fn invalid_property(property: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn invalid_property(property: U, description: impl Into<String>) -> Self {
         SetError {
-            error_type: SetErrorType::InvalidProperties,
+            type_: SetErrorType::InvalidProperties,
             description: description.into().into(),
-            properties: vec![property.into().into()].into(),
+            properties: vec![property].into(),
         }
     }
 
     pub fn forbidden(description: impl Into<String>) -> Self {
         SetError {
-            error_type: SetErrorType::Forbidden,
+            type_: SetErrorType::Forbidden,
             description: description.into().into(),
             properties: None,
         }
     }
 }
 
-impl From<SetError> for JSONValue {
-    fn from(err: SetError) -> Self {
-        let mut o = HashMap::with_capacity(2);
-        o.insert(
-            "type".to_string(),
-            err.error_type.as_str().to_string().into(),
-        );
-        if let Some(description) = err.description {
-            o.insert("description".to_string(), description.into());
-        } else {
-            o.insert(
-                "description".to_string(),
-                match err.error_type {
-                    SetErrorType::Forbidden => "Forbidden.".to_string().into(),
-                    SetErrorType::OverQuota => "Over quota.".to_string().into(),
-                    SetErrorType::TooLarge => "Too large.".to_string().into(),
-                    SetErrorType::RateLimit => "Rate limit.".to_string().into(),
-                    SetErrorType::NotFound => "Not found.".to_string().into(),
-                    SetErrorType::InvalidPatch => "Invalid patch.".to_string().into(),
-                    SetErrorType::WillDestroy => "Will be destroyed.".to_string().into(),
-                    SetErrorType::InvalidProperties => "Invalid properties.".to_string().into(),
-                    SetErrorType::Singleton => "Singleton.".to_string().into(),
-                    SetErrorType::BlobNotFound => "Blob not found.".to_string().into(),
-                    SetErrorType::MailboxHasChild => "Mailbox has child.".to_string().into(),
-                    SetErrorType::MailboxHasEmail => "Mailbox has email.".to_string().into(),
-                },
-            );
-        }
-        if let Some(properties) = err.properties {
-            o.insert("properties".to_string(), properties.into());
-        }
-
-        o.into()
-    }
-}
-
-impl From<StoreError> for SetError {
+impl<U> From<StoreError> for SetError<U> {
     fn from(error: StoreError) -> Self {
         error!("Failed store operation: {:?}", error);
         SetError::new(
@@ -125,4 +133,4 @@ impl From<StoreError> for SetError {
     }
 }
 
-pub type Result<T> = std::result::Result<T, SetError>;
+pub type Result<T, U> = std::result::Result<T, SetError<U>>;

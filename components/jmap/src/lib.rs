@@ -31,8 +31,3 @@ pub enum URI {
 }
 
 pub type Result<T> = std::result::Result<T, MethodError>;
-
-pub trait Property: Sized + Display {
-    fn parse(value: &str) -> Option<Self>;
-    fn collection() -> Collection;
-}

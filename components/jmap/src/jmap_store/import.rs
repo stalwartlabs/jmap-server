@@ -6,7 +6,6 @@ use crate::{
     error::method::MethodError,
     id::{state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::import::ImportRequest,
 };
 
 use super::changes::JMAPChanges;
@@ -34,63 +33,6 @@ where
     ) -> crate::Result<HashMap<String, Self::Item>>;
     fn import_item(&self, item: Self::Item) -> crate::error::set::Result<JSONValue>;
     fn collection() -> Collection;
-}
-
-pub trait JMAPImport<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn import<'y, 'z: 'y, U>(&'z self, request: ImportRequest) -> crate::Result<ImportResult>
-    where
-        U: ImportObject<'y, T>;
-}
-
-impl<T> JMAPImport<T> for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn import<'y, 'z: 'y, U>(&'z self, mut request: ImportRequest) -> crate::Result<ImportResult>
-    where
-        U: ImportObject<'y, T>,
-    {
-        let object = U::new(self, &mut request)?;
-        let collection = U::collection();
-        let items = object.parse_items(&mut request)?;
-
-        let old_state = self.get_state(request.account_id, collection)?;
-        if let Some(if_in_state) = request.if_in_state {
-            if old_state != if_in_state {
-                return Err(MethodError::StateMismatch);
-            }
-        }
-
-        let mut created = HashMap::with_capacity(items.len());
-        let mut not_created = HashMap::with_capacity(items.len());
-
-        for (id, item) in items {
-            match object.import_item(item) {
-                Ok(value) => {
-                    created.insert(id, value);
-                }
-                Err(value) => {
-                    not_created.insert(id, value.into());
-                }
-            }
-        }
-
-        Ok(ImportResult {
-            account_id: request.account_id,
-            collection,
-            new_state: if !created.is_empty() {
-                self.get_state(request.account_id, collection)?
-            } else {
-                old_state.clone()
-            },
-            old_state,
-            created,
-            not_created,
-        })
-    }
 }
 
 impl From<ImportResult> for JSONValue {

@@ -1,4 +1,4 @@
-pub mod api;
+/*pub mod api;
 pub mod blob;
 pub mod cluster;
 pub mod server;
@@ -64,4 +64,10 @@ async fn main() -> std::io::Result<()> {
         settings,
     )
     .await
+}
+*/
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    Ok(())
 }

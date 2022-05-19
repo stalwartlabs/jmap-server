@@ -1,23 +1,21 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
-
-use crate::mail::parse::get_message_part;
-use crate::mail::Keyword;
 
 use jmap::error::method::MethodError;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::blob::JMAPBlob;
-use jmap::id::JMAPIdSerialize;
+use jmap::id::jmap::JMAPId;
+use jmap::id::state::JMAPState;
 use jmap::jmap_store::blob::JMAPBlobStore;
-use jmap::jmap_store::import::ImportObject;
+use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::orm::TinyORM;
-use jmap::jmap_store::set::CreateItemResult;
-use jmap::protocol::json::JSONValue;
-use jmap::request::import::ImportRequest;
+use jmap::request::ResultReference;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
 use store::blob::BlobId;
+use store::chrono::DateTime;
 use store::core::collection::Collection;
 use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
 use store::core::error::StoreError;
@@ -33,35 +31,71 @@ use store::serialize::StoreSerialize;
 use store::tracing::log::error;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
-use store::{roaring::RoaringBitmap, AccountId, JMAPId, JMAPStore, Store, ThreadId};
-use store::{DocumentId, Integer};
+use store::{roaring::RoaringBitmap, AccountId, JMAPStore, Store, ThreadId};
+use store::{DocumentId, Integer, LongInteger};
 
 use crate::mail::MessageField;
 
-use super::parse::{
-    empty_text_mime_headers, header_to_jmap_address, header_to_jmap_date, header_to_jmap_id,
-    header_to_jmap_text, header_to_jmap_url, mime_header_to_jmap, mime_parts_to_jmap,
-};
-use super::{
-    HeaderName, MailHeaderForm, MailHeaderProperty, MailProperty, MessageData, MessageOutline,
-    MimePart, MAX_MESSAGE_PARTS,
-};
+use super::conv::HeaderValueInto;
+use super::schema::{Email, Keyword, Property};
+use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PARTS};
 
-pub struct ImportMail<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    pub store: &'y JMAPStore<T>,
-    pub account_id: AccountId,
-    pub mailbox_ids: RoaringBitmap,
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct EmailImportRequest {
+    #[serde(rename = "accountId")]
+    pub account_id: JMAPId,
+
+    #[serde(rename = "ifInState")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub if_in_state: Option<JMAPState>,
+
+    pub emails: HashMap<String, EmailImport>,
 }
-pub struct ImportItem {
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct EmailImport {
+    #[serde(rename = "blobId")]
     pub blob_id: JMAPBlob,
-    pub mailbox_ids: Vec<DocumentId>,
-    pub keywords: Vec<Tag>,
-    pub received_at: Option<u64>,
+
+    #[serde(rename = "mailboxIds")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mailbox_ids: Option<HashMap<JMAPId, bool>>,
+
+    #[serde(rename = "#mailboxIds")]
+    #[serde(skip_deserializing)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mailbox_ids_ref: Option<ResultReference>,
+
+    #[serde(rename = "keywords")]
+    pub keywords: HashMap<Keyword, bool>,
+
+    #[serde(rename = "receivedAt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub received_at: Option<DateTime<store::chrono::Utc>>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmailImportResponse {
+    #[serde(rename = "accountId")]
+    pub account_id: JMAPId,
+
+    #[serde(rename = "oldState")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_state: Option<JMAPState>,
+
+    #[serde(rename = "newState")]
+    pub new_state: JMAPState,
+
+    #[serde(rename = "created")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created: Option<HashMap<String, Email>>,
+
+    #[serde(rename = "notCreated")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub not_created: Option<HashMap<String, SetError<Property>>>,
+}
+
+/*
 impl<'y, T> ImportObject<'y, T> for ImportMail<'y, T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -71,9 +105,9 @@ where
     fn new(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> jmap::Result<Self> {
         Ok(ImportMail {
             store,
-            account_id: request.account_id,
+            account_id: account_id,
             mailbox_ids: store
-                .get_document_ids(request.account_id, Collection::Mailbox)?
+                .get_document_ids(account_id, Collection::Mailbox)?
                 .unwrap_or_default(),
         })
     }
@@ -163,76 +197,33 @@ where
     }
 
     fn import_item(&self, item: Self::Item) -> jmap::error::set::Result<JSONValue> {
-        if item.mailbox_ids.is_empty() {
-            return Err(SetError::invalid_property(
-                "mailboxIds",
-                "Message must belong to at least one mailbox.",
-            ));
-        }
 
-        for &mailbox_id in &item.mailbox_ids {
-            if !self.mailbox_ids.contains(mailbox_id) {
-                return Err(SetError::invalid_property(
-                    "mailboxIds",
-                    format!(
-                        "Mailbox {} does not exist.",
-                        (mailbox_id as JMAPId).to_jmap_string()
-                    ),
-                ));
-            }
-        }
-
-        if let Some(blob) =
-            self.store
-                .blob_jmap_get(self.account_id, &item.blob_id, get_message_part)?
-        {
-            Ok(self
-                .store
-                .mail_import(
-                    self.account_id,
-                    item.blob_id.id,
-                    &blob,
-                    item.mailbox_ids,
-                    item.keywords,
-                    item.received_at,
-                )
-                .map_err(|_| {
-                    SetError::new(
-                        SetErrorType::Forbidden,
-                        "Failed to insert message, please try again later.",
-                    )
-                })?
-                .into())
-        } else {
-            Err(SetError::new(
-                SetErrorType::BlobNotFound,
-                format!("BlobId {} not found.", item.blob_id.to_jmap_string()),
-            ))
-        }
     }
 
     fn collection() -> Collection {
         Collection::Mail
     }
-}
+}*/
 
 pub trait JMAPMailImport {
-    fn mail_import(
+    fn mail_import(&self, request: EmailImportRequest) -> jmap::Result<EmailImportResponse>;
+
+    fn mail_import_item(
         &self,
         account_id: AccountId,
         blob_id: BlobId,
         blob: &[u8],
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
-        received_at: Option<u64>,
-    ) -> jmap::Result<MailImportResult>;
+        received_at: Option<i64>,
+    ) -> jmap::Result<Email>;
 
     fn mail_parse(
         &self,
         document: &mut Document,
         blob_id: BlobId,
         raw_message: &[u8],
-        received_at: Option<u64>,
+        received_at: Option<i64>,
     ) -> store::Result<()>;
 
     fn mail_set_thread(
@@ -255,43 +246,117 @@ pub struct MailImportResult {
     pub size: usize,
 }
 
-impl CreateItemResult for MailImportResult {
-    fn get_id(&self) -> JMAPId {
-        self.id
-    }
-}
-
-impl From<MailImportResult> for JSONValue {
-    fn from(import_result: MailImportResult) -> Self {
-        // Generate JSON object
-        let mut result = HashMap::with_capacity(4);
-        result.insert("id".to_string(), import_result.id.to_jmap_string().into());
-        result.insert(
-            "blobId".to_string(),
-            import_result.blob_id.to_jmap_string().into(),
-        );
-        result.insert(
-            "threadId".to_string(),
-            (import_result.thread_id as JMAPId).to_jmap_string().into(),
-        );
-        result.insert("size".to_string(), import_result.size.into());
-        result.into()
-    }
-}
-
 impl<T> JMAPMailImport for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_import(
+    fn mail_import(&self, request: EmailImportRequest) -> jmap::Result<EmailImportResponse> {
+        let account_id = request.account_id.get_document_id();
+        let mailbox_document_ids = self
+            .get_document_ids(account_id, Collection::Mailbox)?
+            .unwrap_or_default();
+
+        let old_state = self.get_state(account_id, Collection::Mail)?;
+        if let Some(if_in_state) = request.if_in_state {
+            if old_state != if_in_state {
+                return Err(MethodError::StateMismatch);
+            }
+        }
+
+        let mut created = HashMap::with_capacity(request.emails.len());
+        let mut not_created = HashMap::with_capacity(request.emails.len());
+
+        'outer: for (id, item) in request.emails {
+            if let Some(mailbox_ids) = item.mailbox_ids {
+                for mailbox_id in mailbox_ids.keys() {
+                    if !mailbox_document_ids.contains(mailbox_id.get_document_id()) {
+                        not_created.insert(
+                            id,
+                            SetError::invalid_property(
+                                Property::MailboxIds,
+                                format!("Mailbox {} does not exist.", mailbox_id),
+                            ),
+                        );
+                        continue 'outer;
+                    }
+                }
+
+                if let Some(blob) =
+                    self.blob_jmap_get(account_id, &item.blob_id, get_message_part)?
+                {
+                    created.insert(
+                        id,
+                        self.mail_import_item(
+                            account_id,
+                            item.blob_id.id,
+                            &blob,
+                            mailbox_ids
+                                .into_iter()
+                                .filter_map(|(id, set)| {
+                                    if set {
+                                        id.get_document_id().into()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect(),
+                            item.keywords
+                                .into_iter()
+                                .filter_map(|(k, set)| if set { k.tag.into() } else { None })
+                                .collect(),
+                            item.received_at.map(|t| t.timestamp()),
+                        )?,
+                    );
+                } else {
+                    not_created.insert(
+                        id,
+                        SetError::new(
+                            SetErrorType::BlobNotFound,
+                            format!("BlobId {} not found.", item.blob_id),
+                        ),
+                    );
+                }
+            } else {
+                not_created.insert(
+                    id,
+                    SetError::invalid_property(
+                        Property::MailboxIds,
+                        "Message must belong to at least one mailbox.",
+                    ),
+                );
+            }
+        }
+
+        Ok(EmailImportResponse {
+            account_id: request.account_id,
+            new_state: if !created.is_empty() {
+                self.get_state(account_id, Collection::Mail)?
+            } else {
+                old_state.clone()
+            },
+            old_state: old_state.into(),
+            created: if !created.is_empty() {
+                created.into()
+            } else {
+                None
+            },
+            not_created: if !not_created.is_empty() {
+                not_created.into()
+            } else {
+                None
+            },
+        })
+    }
+
+    fn mail_import_item(
         &self,
         account_id: AccountId,
         blob_id: BlobId,
         blob: &[u8],
         mailbox_ids: Vec<DocumentId>,
         keywords: Vec<Tag>,
-        received_at: Option<u64>,
-    ) -> jmap::Result<MailImportResult> {
+        received_at: Option<i64>,
+    ) -> jmap::Result<Email> {
         let document_id = self.assign_document_id(account_id, Collection::Mail)?;
         let mut batch = WriteBatch::new(account_id);
         let mut document = Document::new(Collection::Mail, document_id);
@@ -302,15 +367,15 @@ where
         self.mail_parse(&mut document, blob_id, blob, received_at)?;
 
         // Add keyword tags
-        let mut orm = TinyORM::<MessageField>::new();
+        let mut orm = TinyORM::<Email>::new();
         for keyword in keywords {
-            orm.tag(MessageField::Keyword, keyword);
+            orm.tag(Property::Keywords, keyword);
         }
 
         // Add mailbox tags
         for mailbox_id in mailbox_ids {
             batch.log_child_update(Collection::Mailbox, mailbox_id);
-            orm.tag(MessageField::Mailbox, Tag::Id(mailbox_id));
+            orm.tag(Property::MailboxIds, Tag::Id(mailbox_id));
         }
 
         // Serialize ORM
@@ -323,17 +388,18 @@ where
         let thread_id = self.mail_set_thread(&mut batch, &mut document)?;
 
         // Write document to store
-        let result = MailImportResult {
-            id: JMAPId::from_parts(thread_id, document_id),
-            blob_id: raw_blob,
-            thread_id,
-            size,
-        };
-        batch.log_insert(Collection::Mail, result.id);
+        let id = JMAPId::from_parts(thread_id, document_id);
+        batch.log_insert(Collection::Mail, id);
         batch.insert_document(document);
         self.write(batch)?;
 
-        Ok(result)
+        Ok(Email {
+            id: id.into(),
+            blob_id: raw_blob.into(),
+            thread_id: JMAPId::from(thread_id).into(),
+            size: size.into(),
+            ..Default::default()
+        })
     }
 
     fn mail_parse(
@@ -341,19 +407,27 @@ where
         document: &mut Document,
         blob_id: BlobId,
         raw_message: &[u8],
-        received_at: Option<u64>,
+        received_at: Option<i64>,
     ) -> store::Result<()> {
         let message = Message::parse(raw_message).ok_or_else(|| {
             StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
         })?;
         let mut total_parts = message.parts.len();
         let mut message_data = MessageData {
-            properties: HashMap::with_capacity(message.headers_rfc.len() + 3),
+            headers: HashMap::with_capacity(message.headers_rfc.len()),
             mime_parts: Vec::with_capacity(total_parts + 1),
             html_body: message.html_body,
             text_body: message.text_body,
             attachments: message.attachments,
             raw_message: blob_id,
+            size: message.raw_message.len(),
+            received_at: received_at.unwrap_or_else(|| {
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0) as i64
+            }),
+            has_attachments: false,
         };
         let mut message_outline = MessageOutline {
             body_offset: message.offset_body,
@@ -368,25 +442,7 @@ where
             ));
         }
 
-        // Add size
-        message_data
-            .properties
-            .insert(MailProperty::Size, message.raw_message.len().into());
-
-        // Add received at
-        message_data.properties.insert(
-            MailProperty::ReceivedAt,
-            received_at
-                .unwrap_or_else(|| {
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0)
-                })
-                .into(),
-        );
-
-        let mut mime_parts = HashMap::with_capacity(5);
+        let mut mime_headers = MimeHeaders::default();
 
         // Build JMAP headers
         for (header_name, header_value) in message.headers_rfc {
@@ -395,15 +451,9 @@ where
                 | RfcHeader::InReplyTo
                 | RfcHeader::References
                 | RfcHeader::ResentMessageId => {
-                    let (value, is_collection) = header_to_jmap_id(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::MessageIds,
-                            is_collection,
-                        )),
-                        value,
-                    );
+                    message_data
+                        .headers
+                        .insert(header_name, header_value.into_keyword());
                 }
                 RfcHeader::From
                 | RfcHeader::To
@@ -416,31 +466,14 @@ where
                 | RfcHeader::ResentBcc
                 | RfcHeader::ResentCc
                 | RfcHeader::ResentSender => {
-                    let (value, is_grouped, is_collection) =
-                        header_to_jmap_address(header_value, false);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            if is_grouped {
-                                MailHeaderForm::GroupedAddresses
-                            } else {
-                                MailHeaderForm::Addresses
-                            },
-                            is_collection,
-                        )),
-                        value,
-                    );
+                    message_data
+                        .headers
+                        .insert(header_name, header_value.into_address());
                 }
                 RfcHeader::Date | RfcHeader::ResentDate => {
-                    let (value, is_collection) = header_to_jmap_date(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::Date,
-                            is_collection,
-                        )),
-                        value,
-                    );
+                    message_data
+                        .headers
+                        .insert(header_name, header_value.into_date());
                 }
                 RfcHeader::ListArchive
                 | RfcHeader::ListHelp
@@ -448,15 +481,9 @@ where
                 | RfcHeader::ListPost
                 | RfcHeader::ListSubscribe
                 | RfcHeader::ListUnsubscribe => {
-                    let (value, is_collection) = header_to_jmap_url(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::URLs,
-                            is_collection,
-                        )),
-                        value,
-                    );
+                    message_data
+                        .headers
+                        .insert(header_name, header_value.into_url());
                 }
                 RfcHeader::Subject
                 | RfcHeader::Comments
@@ -485,22 +512,16 @@ where
                         }
                     }
 
-                    let (value, is_collection) = header_to_jmap_text(header_value);
-                    message_data.properties.insert(
-                        MailProperty::Header(MailHeaderProperty::new_rfc(
-                            header_name,
-                            MailHeaderForm::Text,
-                            is_collection,
-                        )),
-                        value,
-                    );
+                    message_data
+                        .headers
+                        .insert(header_name, header_value.into_text());
                 }
                 RfcHeader::ContentType
                 | RfcHeader::ContentDisposition
                 | RfcHeader::ContentId
                 | RfcHeader::ContentLanguage
                 | RfcHeader::ContentLocation => {
-                    mime_header_to_jmap(&mut mime_parts, header_name, header_value);
+                    mime_headers.add_header(header_name, header_value);
                 }
                 RfcHeader::ContentTransferEncoding
                 | RfcHeader::ContentDescription
@@ -511,7 +532,9 @@ where
         }
 
         // Add main headers as a MimePart
-        message_data.mime_parts.push(MimePart::new_part(mime_parts));
+        message_data
+            .mime_parts
+            .push(MimePart::new_part(mime_headers));
         message_outline.headers.push(
             message
                 .headers_raw
@@ -533,7 +556,7 @@ where
                     {
                         message_data.text_body[pos] = total_parts;
                         extra_mime_parts.push(MimePart::new_text(
-                            empty_text_mime_headers(false, text_len),
+                            MimeHeaders::empty(false, text_len),
                             self.blob_store(text.as_bytes())?,
                             false,
                         ));
@@ -554,7 +577,7 @@ where
                     );
 
                     message_data.mime_parts.push(MimePart::new_html(
-                        mime_parts_to_jmap(html.headers_rfc, html_len),
+                        MimeHeaders::from_headers(html.headers_rfc, html_len),
                         self.blob_store(html.body.as_bytes())?,
                         html.is_encoding_problem,
                     ));
@@ -574,7 +597,7 @@ where
                         let html_len = html.len();
 
                         extra_mime_parts.push(MimePart::new_html(
-                            empty_text_mime_headers(true, html_len),
+                            MimeHeaders::empty(true, html_len),
                             self.blob_store(html.as_bytes())?,
                             false,
                         ));
@@ -589,7 +612,7 @@ where
                     };
 
                     message_data.mime_parts.push(MimePart::new_text(
-                        mime_parts_to_jmap(text.headers_rfc, text_len),
+                        MimeHeaders::from_headers(text.headers_rfc, text_len),
                         self.blob_store(text.body.as_bytes())?,
                         text.is_encoding_problem,
                     ));
@@ -612,7 +635,7 @@ where
                         has_attachments = true;
                     }
                     message_data.mime_parts.push(MimePart::new_binary(
-                        mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                        MimeHeaders::from_headers(binary.headers_rfc, binary.body.len()),
                         self.blob_store(binary.body.as_ref())?,
                         binary.is_encoding_problem,
                     ));
@@ -626,7 +649,7 @@ where
                 }
                 MessagePart::InlineBinary(binary) => {
                     message_data.mime_parts.push(MimePart::new_binary(
-                        mime_parts_to_jmap(binary.headers_rfc, binary.body.len()),
+                        MimeHeaders::from_headers(binary.headers_rfc, binary.body.len()),
                         self.blob_store(binary.body.as_ref())?,
                         binary.is_encoding_problem,
                     ));
@@ -661,7 +684,7 @@ where
                     };
 
                     message_data.mime_parts.push(MimePart::new_binary(
-                        mime_parts_to_jmap(nested_message.headers_rfc, part_len),
+                        MimeHeaders::from_headers(nested_message.headers_rfc, part_len),
                         blob_id,
                         false,
                     ));
@@ -677,7 +700,10 @@ where
                 MessagePart::Multipart(part) => {
                     message_data
                         .mime_parts
-                        .push(MimePart::new_part(mime_parts_to_jmap(part.headers_rfc, 0)));
+                        .push(MimePart::new_part(MimeHeaders::from_headers(
+                            part.headers_rfc,
+                            0,
+                        )));
                     message_outline.headers.push(
                         part.headers_raw
                             .into_iter()
@@ -694,9 +720,9 @@ where
         }
 
         // Set attachment properties
-        message_data
-            .properties
-            .insert(MailProperty::HasAttachment, has_attachments.into());
+        if has_attachments {
+            message_data.has_attachments = true;
+        }
 
         // Serialize message data and outline
         let mut message_data_bytes = message_data
@@ -933,48 +959,42 @@ impl MessageData {
             IndexOptions::new().clear()
         };
 
-        for (property, value) in self.properties {
-            match property {
-                MailProperty::Size => {
-                    document.number(
-                        MessageField::Size,
-                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)? as Integer,
-                        IndexOptions::new().sort() | options,
-                    );
-                }
-                MailProperty::ReceivedAt => {
-                    document.number(
-                        MessageField::ReceivedAt,
-                        value.to_unsigned_int().ok_or(StoreError::DataCorruption)?,
-                        IndexOptions::new().sort() | options,
-                    );
-                }
-                MailProperty::HasAttachment => {
-                    if value.unwrap_bool().ok_or(StoreError::DataCorruption)? {
-                        document.tag(
-                            MessageField::Attachment,
-                            Tag::Default,
-                            IndexOptions::new() | options,
-                        );
-                    }
-                }
-                MailProperty::Header(MailHeaderProperty {
-                    header: HeaderName::Rfc(header_name),
-                    ..
-                }) => {
-                    document.tag(
-                        MessageField::HasHeader,
-                        Tag::Static(header_name.into()),
-                        IndexOptions::new() | options,
-                    );
+        document.number(
+            MessageField::Size,
+            self.size as Integer,
+            IndexOptions::new().sort() | options,
+        );
 
-                    match header_name {
-                        RfcHeader::MessageId
-                        | RfcHeader::InReplyTo
-                        | RfcHeader::References
-                        | RfcHeader::ResentMessageId => value.unwrap_values(|value| {
-                            match value {
-                                JSONValue::String(id) if id.len() <= MAX_ID_LENGTH => {
+        document.number(
+            MessageField::ReceivedAt,
+            self.received_at as LongInteger,
+            IndexOptions::new().sort() | options,
+        );
+
+        if self.has_attachments {
+            document.tag(
+                MessageField::Attachment,
+                Tag::Default,
+                IndexOptions::new() | options,
+            );
+        }
+
+        for (header_name, mut values) in self.headers {
+            document.tag(
+                MessageField::HasHeader,
+                Tag::Static(header_name.into()),
+                IndexOptions::new() | options,
+            );
+
+            match header_name {
+                RfcHeader::MessageId
+                | RfcHeader::InReplyTo
+                | RfcHeader::References
+                | RfcHeader::ResentMessageId => {
+                    for value in values {
+                        if let Some(ids) = value.unwrap_textlist() {
+                            for id in ids {
+                                if id.len() <= MAX_ID_LENGTH {
                                     if header_name == RfcHeader::MessageId {
                                         document.text(
                                             header_name,
@@ -990,140 +1010,126 @@ impl MessageData {
                                         IndexOptions::new().keyword() | options,
                                     );
                                 }
-                                _ => (),
                             }
-                            true
-                        }),
+                        }
+                    }
+                }
 
-                        RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
-                            let mut sort_text = String::with_capacity(MAX_SORT_FIELD_LENGTH);
-                            let mut found_addr = false;
-                            let mut last_is_space = true;
+                RfcHeader::From | RfcHeader::To | RfcHeader::Cc | RfcHeader::Bcc => {
+                    let mut sort_text = String::with_capacity(MAX_SORT_FIELD_LENGTH);
+                    let mut found_addr = false;
+                    let mut last_is_space = true;
 
-                            value.unwrap_object_properties(
-                                &["name", "email"],
-                                |property_idx, value| {
-                                    if let Some(value) = value.unwrap_string() {
-                                        let is_addr = property_idx == 1;
-
-                                        if !found_addr {
-                                            if !sort_text.is_empty() {
-                                                sort_text.push(' ');
-                                                last_is_space = true;
-                                            }
-                                            found_addr = is_addr;
-                                            'outer: for ch in value.chars() {
-                                                for ch in ch.to_lowercase() {
-                                                    if sort_text.len() < MAX_SORT_FIELD_LENGTH {
-                                                        let is_space = ch.is_whitespace();
-                                                        if !is_space || !last_is_space {
-                                                            sort_text.push(ch);
-                                                            last_is_space = is_space;
-                                                        }
-                                                    } else {
-                                                        found_addr = true;
-                                                        break 'outer;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if is_addr {
-                                            if value.len() <= MAX_ID_LENGTH {
-                                                document.text(
-                                                    header_name,
-                                                    value.to_lowercase(),
-                                                    Language::Unknown,
-                                                    IndexOptions::new().keyword() | options,
-                                                );
-                                            }
-                                        } else {
-                                            document.text(
-                                                header_name,
-                                                value,
-                                                Language::Unknown,
-                                                IndexOptions::new().tokenize() | options,
-                                            );
-                                        }
-                                    }
-
-                                    true
-                                },
-                            );
-
-                            document.text(
-                                header_name,
+                    for value in values {
+                        value.visit_addresses(|value, is_addr| {
+                            if !found_addr {
                                 if !sort_text.is_empty() {
-                                    sort_text
-                                } else {
-                                    "!".to_string()
-                                },
-                                Language::Unknown,
-                                IndexOptions::new().sort() | options,
-                            );
-                        }
-                        RfcHeader::Date => value.unwrap_values(|value| {
-                            if let Some(timestamp) = value.to_unsigned_int() {
-                                document.number(
-                                    header_name,
-                                    timestamp,
-                                    IndexOptions::new().sort() | options,
-                                );
-                            }
-                            false
-                        }),
-                        RfcHeader::Subject => {
-                            value.unwrap_values(|value| {
-                                if let Some(subject) = value.unwrap_string() {
-                                    // Obtain thread name
-                                    let thread_name = thread_name(&subject);
-                                    document.text(
-                                        MessageField::ThreadName,
-                                        if !thread_name.is_empty() {
-                                            thread_name.to_string()
+                                    sort_text.push(' ');
+                                    last_is_space = true;
+                                }
+                                found_addr = is_addr;
+                                'outer: for ch in value.chars() {
+                                    for ch in ch.to_lowercase() {
+                                        if sort_text.len() < MAX_SORT_FIELD_LENGTH {
+                                            let is_space = ch.is_whitespace();
+                                            if !is_space || !last_is_space {
+                                                sort_text.push(ch);
+                                                last_is_space = is_space;
+                                            }
                                         } else {
-                                            "!".to_string()
-                                        },
-                                        Language::Unknown,
-                                        IndexOptions::new().keyword().sort() | options,
-                                    );
-                                }
-
-                                false
-                            });
-                        }
-                        RfcHeader::Keywords => {
-                            value.unwrap_values(|value| {
-                                match value {
-                                    JSONValue::String(keyword)
-                                        if keyword.len() <= MAX_ID_LENGTH =>
-                                    {
-                                        document.text(
-                                            MessageField::MessageIdRef,
-                                            keyword,
-                                            Language::Unknown,
-                                            IndexOptions::new().keyword() | options,
-                                        );
+                                            found_addr = true;
+                                            break 'outer;
+                                        }
                                     }
-                                    _ => (),
                                 }
-                                true
-                            });
-                        }
-                        RfcHeader::Comments => {
-                            value.unwrap_values(|value| {
-                                if let Some(value) = value.unwrap_string() {
+                            }
+
+                            if is_addr {
+                                if value.len() <= MAX_ID_LENGTH {
                                     document.text(
                                         header_name,
-                                        value,
+                                        value.to_lowercase(),
                                         Language::Unknown,
-                                        IndexOptions::new().tokenize() | options,
+                                        IndexOptions::new().keyword() | options,
                                     );
                                 }
-                                true
-                            });
+                            } else {
+                                document.text(
+                                    header_name,
+                                    value,
+                                    Language::Unknown,
+                                    IndexOptions::new().tokenize() | options,
+                                );
+                            }
+
+                            true
+                        });
+                    }
+
+                    document.text(
+                        header_name,
+                        if !sort_text.is_empty() {
+                            sort_text
+                        } else {
+                            "!".to_string()
+                        },
+                        Language::Unknown,
+                        IndexOptions::new().sort() | options,
+                    );
+                }
+                RfcHeader::Date => {
+                    if let Some(timestamp) = values.pop().and_then(|t| t.unwrap_timestamp()) {
+                        document.number(
+                            header_name,
+                            timestamp as LongInteger,
+                            IndexOptions::new().sort() | options,
+                        );
+                    }
+                }
+                RfcHeader::Subject => {
+                    if let Some(subject) = values.pop().and_then(|t| t.unwrap_text()) {
+                        // Obtain thread name
+                        let thread_name = thread_name(&subject);
+                        document.text(
+                            MessageField::ThreadName,
+                            if !thread_name.is_empty() {
+                                thread_name.to_string()
+                            } else {
+                                "!".to_string()
+                            },
+                            Language::Unknown,
+                            IndexOptions::new().keyword().sort() | options,
+                        );
+                    }
+                }
+                RfcHeader::Keywords => {
+                    for value in values {
+                        if let Some(keywords) = value.unwrap_textlist() {
+                            for keyword in keywords {
+                                if keyword.len() <= MAX_ID_LENGTH {
+                                    document.text(
+                                        MessageField::MessageIdRef,
+                                        keyword,
+                                        Language::Unknown,
+                                        IndexOptions::new().keyword() | options,
+                                    );
+                                }
+                            }
                         }
-                        _ => (),
+                    }
+                }
+                RfcHeader::Comments => {
+                    for value in values {
+                        if let Some(comments) = value.unwrap_textlist() {
+                            for comment in comments {
+                                document.text(
+                                    header_name,
+                                    comment,
+                                    Language::Unknown,
+                                    IndexOptions::new().tokenize() | options,
+                                );
+                            }
+                        }
                     }
                 }
                 _ => (),

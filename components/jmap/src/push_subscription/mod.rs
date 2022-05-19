@@ -1,9 +1,9 @@
-pub mod get;
-pub mod set;
+//pub mod get;
+//pub mod set;
 
 use std::fmt::Display;
 
-use crate::{jmap_store::orm::PropertySchema, protocol::json::JSONValue, Property};
+use crate::protocol::json::JSONValue;
 use store::{core::collection::Collection, FieldId};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -19,7 +19,7 @@ pub enum PushSubscriptionProperty {
     VerificationCode_ = 7,
 }
 
-impl Property for PushSubscriptionProperty {
+/*impl Property for PushSubscriptionProperty {
     fn parse(value: &str) -> Option<Self> {
         match value {
             "id" => Some(PushSubscriptionProperty::Id),
@@ -36,7 +36,7 @@ impl Property for PushSubscriptionProperty {
     fn collection() -> store::core::collection::Collection {
         Collection::PushSubscription
     }
-}
+}*/
 
 impl Display for PushSubscriptionProperty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -53,7 +53,7 @@ impl Display for PushSubscriptionProperty {
     }
 }
 
-impl PropertySchema for PushSubscriptionProperty {
+/*impl PropertySchema for PushSubscriptionProperty {
     fn required() -> &'static [Self] {
         &[
             PushSubscriptionProperty::DeviceClientId,
@@ -64,16 +64,10 @@ impl PropertySchema for PushSubscriptionProperty {
     fn indexed() -> &'static [(Self, u64)] {
         &[]
     }
-}
+}*/
 
 impl From<PushSubscriptionProperty> for FieldId {
     fn from(field: PushSubscriptionProperty) -> Self {
         field as FieldId
-    }
-}
-
-impl From<PushSubscriptionProperty> for JSONValue {
-    fn from(value: PushSubscriptionProperty) -> Self {
-        JSONValue::String(value.to_string())
     }
 }

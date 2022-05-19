@@ -7,97 +7,143 @@ use store::{
         filter::{Filter, FilterOperator, LogicalOperator},
         QueryFilterMap,
     },
-    AccountId, JMAPId, JMAPStore, Store,
+    AccountId, JMAPStore, Store,
 };
 
 use crate::{
     error::method::MethodError,
-    id::{state::JMAPState, JMAPIdSerialize},
+    id::{jmap::JMAPId, state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
-    request::query::QueryRequest,
+    request::query::{self, QueryRequest, QueryResponse},
 };
 
-use super::changes::JMAPChanges;
+use super::{changes::JMAPChanges, get::GetObject, Object};
 
-pub trait QueryObject<'y, T>: QueryFilterMap + Sized
+pub struct QueryHelper<'y, O, T>
+where
+    T: for<'x> Store<'x> + 'static,
+    O: QueryObject<T>,
+{
+    pub store: &'y JMAPStore<T>,
+    pub account_id: AccountId,
+    pub request: QueryRequest<O, T>,
+    pub data: O::QueryHelper,
+}
+
+impl<'y, O, T> QueryFilterMap for QueryHelper<'y, O, T>
+where
+    T: for<'x> Store<'x> + 'static,
+    O: QueryObject<T>,
+{
+    fn filter_map_id(
+        &mut self,
+        document_id: store::DocumentId,
+    ) -> store::Result<Option<store::JMAPId>> {
+        O::filter_map_id(self, document_id)
+    }
+}
+
+pub trait QueryObject<T>: Object
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn new(store: &'y JMAPStore<T>, request: &QueryRequest) -> crate::Result<Self>;
-    fn parse_filter(&mut self, cond: HashMap<String, JSONValue>) -> crate::Result<Filter>;
+    type QueryArguments;
+    type QueryHelper: Default;
+    type Filter: for<'de> serde::Deserialize<'de>;
+    type Comparator: for<'de> serde::Deserialize<'de>;
+
+    fn init_query(helper: &mut QueryHelper<Self, T>) -> crate::Result<()>;
+    fn parse_filter(
+        helper: &mut QueryHelper<Self, T>,
+        filter: Self::Filter,
+    ) -> crate::Result<Filter>;
     fn parse_comparator(
-        &mut self,
-        property: String,
-        is_ascending: bool,
-        collation: Option<String>,
-        arguments: HashMap<String, JSONValue>,
+        helper: &mut QueryHelper<Self, T>,
+        comparator: query::Comparator<Self::Comparator>,
     ) -> crate::Result<Comparator>;
-    fn has_more_filters(&self) -> bool;
-    fn apply_filters(&mut self, results: Vec<JMAPId>) -> crate::Result<Vec<JMAPId>>;
-    fn is_immutable(&self) -> bool;
-    fn collection() -> Collection;
+    fn has_more_filters(helper: &mut QueryHelper<Self, T>) -> bool;
+    fn apply_filters(
+        helper: &mut QueryHelper<Self, T>,
+        results: Vec<JMAPId>,
+    ) -> crate::Result<Vec<JMAPId>>;
+    fn filter_map_id(
+        helper: &mut QueryHelper<Self, T>,
+        document_id: store::DocumentId,
+    ) -> store::Result<Option<store::JMAPId>>;
+    fn is_immutable(helper: &mut QueryHelper<Self, T>) -> bool;
 }
 
-struct QueryState {
+struct QueryState<O, T>
+where
+    O: QueryObject<T>,
+    T: for<'x> Store<'x> + 'static,
+{
     op: LogicalOperator,
     terms: Vec<Filter>,
-    it: std::vec::IntoIter<JSONValue>,
-}
-
-pub struct QueryResult {
-    pub account_id: AccountId,
-    pub position: usize,
-    pub query_state: JMAPState,
-    pub total: Option<usize>,
-    pub limit: Option<usize>,
-    pub ids: Vec<JSONValue>,
-    pub is_immutable: bool,
+    it: std::vec::IntoIter<query::Filter<O::Filter>>,
 }
 
 pub trait JMAPQuery<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn query<'y, 'z: 'y, V>(&'z self, request: QueryRequest) -> crate::Result<QueryResult>
+    fn query<'y, 'z: 'y, O>(&'z self, request: QueryRequest<O, T>) -> crate::Result<QueryResponse>
     where
-        V: QueryObject<'y, T>;
+        O: QueryObject<T>;
 }
 
 impl<T> JMAPQuery<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn query<'y, 'z: 'y, V>(&'z self, request: QueryRequest) -> crate::Result<QueryResult>
+    fn query<'y, 'z: 'y, O>(
+        &'z self,
+        mut request: QueryRequest<O, T>,
+    ) -> crate::Result<QueryResponse>
     where
-        V: QueryObject<'y, T>,
+        O: QueryObject<T>,
     {
-        let mut object = V::new(self, &request)?;
-        let collection = V::collection();
-
-        let state: Option<QueryState> = match request.filter.parse_operator() {
-            Ok(state) => state,
-            Err(obj) => Some(QueryState {
-                op: LogicalOperator::And,
-                it: vec![JSONValue::Object(obj)].into_iter(),
-                terms: Vec::with_capacity(1),
-            }),
+        let collection = O::collection();
+        let mut helper = QueryHelper {
+            store: self,
+            account_id: request.account_id.into(),
+            request,
+            data: O::QueryHelper::default(),
         };
 
-        let filter = if let Some(mut state) = state {
+        O::init_query(&mut helper)?;
+
+        let filter = if let Some(state) = helper.request.filter.take() {
+            let mut state = match state {
+                query::Filter::FilterOperator(op) => QueryState::<O, T> {
+                    op: op.operator.into(),
+                    terms: Vec::with_capacity(op.conditions.len()),
+                    it: op.conditions.into_iter(),
+                },
+                condition => QueryState {
+                    op: LogicalOperator::And,
+                    it: vec![condition].into_iter(),
+                    terms: Vec::with_capacity(1),
+                },
+            };
+
             let mut state_stack = Vec::new();
             let mut filter;
 
             'outer: loop {
                 while let Some(term) = state.it.next() {
-                    match term.parse_operator() {
-                        Ok(Some(new_state)) => {
+                    match term {
+                        query::Filter::FilterOperator(op) => {
                             state_stack.push(state);
-                            state = new_state;
+                            state = QueryState {
+                                op: op.operator.into(),
+                                terms: Vec::with_capacity(op.conditions.len()),
+                                it: op.conditions.into_iter(),
+                            };
                         }
-                        Err(cond) => {
-                            state.terms.push(object.parse_filter(cond)?);
+                        query::Filter::FilterCondition(cond) => {
+                            state.terms.push(O::parse_filter(&mut helper, cond)?);
                         }
-                        Ok(None) => {}
                     }
                 }
 
@@ -119,34 +165,29 @@ where
             Filter::None
         };
 
-        let sort = if let Some(sort) = request.sort {
+        let sort = if let Some(sort) = helper.request.sort.take() {
             let mut terms: Vec<store::read::comparator::Comparator> =
                 Vec::with_capacity(sort.len());
             for comp in sort {
-                terms.push(object.parse_comparator(
-                    comp.property,
-                    comp.is_ascending,
-                    comp.collation,
-                    comp.arguments,
-                )?);
+                terms.push(O::parse_comparator(&mut helper, comp)?);
             }
             store::read::comparator::Comparator::List(terms)
         } else {
             store::read::comparator::Comparator::None
         };
 
-        let results_it = self.query_store::<V>(request.account_id, collection, filter, sort)?;
+        let results_it =
+            self.query_store::<QueryHelper<'_, O, T>>(helper.account_id, collection, filter, sort)?;
 
-        let limit = if request.limit == 0 || request.limit > self.config.query_max_results {
-            self.config.query_max_results
-        } else {
-            request.limit
+        let mut limit = helper.request.limit.as_ref().copied().unwrap_or(0);
+        if limit == 0 || limit > self.config.query_max_results {
+            limit = self.config.query_max_results
         };
 
-        let mut result = QueryResult {
-            account_id: request.account_id,
-            position: 0,
-            query_state: self.get_state(request.account_id, collection)?,
+        let mut result = QueryResponse {
+            account_id: helper.request.account_id,
+            position: 0.into(),
+            query_state: self.get_state(helper.account_id, collection)?,
             total: None,
             limit: None,
             ids: Vec::with_capacity(if limit > 0 && limit < results_it.len() {
@@ -154,35 +195,38 @@ where
             } else {
                 results_it.len()
             }),
-            is_immutable: object.is_immutable(),
+            is_immutable: O::is_immutable(&mut helper),
+            can_calculate_changes: true,
         };
 
-        let total_results = if !object.has_more_filters() {
+        let position = helper.request.position.unwrap_or(0);
+        let anchor = helper.request.anchor;
+        let anchor_offset = helper.request.anchor_offset.unwrap_or(0);
+
+        let total_results = if !O::has_more_filters(&mut helper) {
             let total_results = results_it.len();
             result.paginate(
-                results_it.set_filter_map(&mut object),
+                results_it
+                    .set_filter_map(&mut helper)
+                    .into_iter()
+                    .map(|id| id.into()),
                 limit,
-                request.position,
-                request.anchor,
-                request.anchor_offset,
+                position,
+                anchor,
+                anchor_offset,
             )?;
 
             total_results
         } else {
             let results = results_it
-                .set_filter_map(&mut object)
+                .set_filter_map(&mut helper)
                 .into_iter()
+                .map(|id| id.into())
                 .collect::<Vec<JMAPId>>();
-            let results = object.apply_filters(results)?;
+            let results = O::apply_filters(&mut helper, results)?;
             let total_results = results.len();
 
-            result.paginate(
-                results.into_iter(),
-                limit,
-                request.position,
-                request.anchor,
-                request.anchor_offset,
-            )?;
+            result.paginate(results.into_iter(), limit, position, anchor, anchor_offset)?;
 
             total_results
         };
@@ -191,7 +235,7 @@ where
             result.limit = limit.into();
         }
 
-        if request.calculate_total {
+        if helper.request.calculate_total.unwrap_or(false) {
             result.total = Some(total_results);
         }
 
@@ -199,35 +243,14 @@ where
     }
 }
 
-impl From<QueryResult> for JSONValue {
-    fn from(query_result: QueryResult) -> Self {
-        let mut result = HashMap::new();
-        result.insert(
-            "accountId".to_string(),
-            (query_result.account_id as JMAPId).to_jmap_string().into(),
-        );
-        result.insert("canCalculateChanges".to_string(), true.into());
-        result.insert("position".to_string(), query_result.position.into());
-        result.insert("queryState".to_string(), query_result.query_state.into());
-        if let Some(total) = query_result.total {
-            result.insert("total".to_string(), total.into());
-        }
-        if let Some(limit) = query_result.limit {
-            result.insert("limit".to_string(), limit.into());
-        }
-        result.insert("ids".to_string(), query_result.ids.into());
-        result.into()
-    }
-}
-
-impl QueryResult {
+impl QueryResponse {
     pub fn paginate<W>(
         &mut self,
         jmap_ids: W,
         limit: usize,
-        mut position: i64,
+        mut position: i32,
         anchor: Option<JMAPId>,
-        mut anchor_offset: i64,
+        mut anchor_offset: i32,
     ) -> crate::Result<()>
     where
         W: Iterator<Item = JMAPId>,
@@ -241,13 +264,13 @@ impl QueryResult {
                     if position > 0 {
                         position -= 1;
                     } else {
-                        self.ids.push(jmap_id.to_jmap_string().into());
+                        self.ids.push(jmap_id);
                         if limit > 0 && self.ids.len() == limit {
                             break;
                         }
                     }
                 } else {
-                    self.ids.push(jmap_id.to_jmap_string().into());
+                    self.ids.push(jmap_id);
                 }
             } else if anchor_offset >= 0 {
                 if !anchor_found {
@@ -260,14 +283,14 @@ impl QueryResult {
                 if anchor_offset > 0 {
                     anchor_offset -= 1;
                 } else {
-                    self.ids.push(jmap_id.to_jmap_string().into());
+                    self.ids.push(jmap_id);
                     if limit > 0 && self.ids.len() == limit {
                         break;
                     }
                 }
             } else {
                 anchor_found = &jmap_id == anchor.as_ref().unwrap();
-                self.ids.push(jmap_id.to_jmap_string().into());
+                self.ids.push(jmap_id);
 
                 if !anchor_found {
                     continue;
@@ -281,7 +304,7 @@ impl QueryResult {
 
         if !has_anchor || anchor_found {
             if position >= 0 {
-                self.position = position as usize;
+                self.position = position;
             } else {
                 let position = position.abs() as usize;
                 let start_offset = if position < self.ids.len() {
@@ -289,7 +312,7 @@ impl QueryResult {
                 } else {
                     0
                 };
-                self.position = start_offset;
+                self.position = start_offset as i32;
                 let end_offset = if limit > 0 {
                     std::cmp::min(start_offset + limit, self.ids.len())
                 } else {
@@ -306,30 +329,12 @@ impl QueryResult {
     }
 }
 
-impl JSONValue {
-    fn parse_operator(self) -> Result<Option<QueryState>, HashMap<String, JSONValue>> {
-        match self {
-            JSONValue::Object(mut obj) => {
-                if let (Some(JSONValue::String(operator)), Some(JSONValue::Array(conditions))) =
-                    (obj.remove("operator"), obj.remove("conditions"))
-                {
-                    let op = match operator.as_str() {
-                        "AND" => LogicalOperator::And,
-                        "OR" => LogicalOperator::Or,
-                        "NOT" => LogicalOperator::Not,
-                        _ => return Err(obj),
-                    };
-
-                    Ok(Some(QueryState {
-                        op,
-                        terms: Vec::with_capacity(conditions.len()),
-                        it: conditions.into_iter(),
-                    }))
-                } else {
-                    Err(obj)
-                }
-            }
-            _ => Ok(None),
+impl From<query::Operator> for LogicalOperator {
+    fn from(op: query::Operator) -> Self {
+        match op {
+            query::Operator::And => LogicalOperator::And,
+            query::Operator::Or => LogicalOperator::Or,
+            query::Operator::Not => LogicalOperator::Not,
         }
     }
 }

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::mail::{Keyword, MessageField};
 use jmap::error::method::MethodError;
-use jmap::jmap_store::query::{JMAPQuery, QueryObject, QueryResult};
+use jmap::jmap_store::query::{JMAPQuery, QueryObject};
 use jmap::protocol::json::JSONValue;
 use jmap::request::query::QueryRequest;
 use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};

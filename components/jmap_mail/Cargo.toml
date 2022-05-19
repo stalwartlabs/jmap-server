@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 jmap = { path = "../jmap" }
 store = { path = "../store" }
-mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" }
+#mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" } TODO remove
+mail-parser = { path = "/home/vagrant/code/mail-parser" }
 mail-builder = { git = "https://github.com/stalwartlabs/mail-builder" }
 serde = { version = "1.0", features = ["derive"]}
-rmp-serde = "1.0.0"

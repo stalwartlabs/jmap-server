@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use crate::identity::IdentityProperty;
 use crate::mail::get::get_rfc_header;
-use crate::mail::{MailHeaderForm, MailProperty, MessageData, MessageField};
+use crate::mail::{HeaderForm, MessageData, MessageField, Property};
 
 use super::EmailSubmissionProperty;
 use jmap::error::set::{SetError, SetErrorType};
@@ -335,14 +335,12 @@ where
 
         // Obtain recipients from e-mail if missing
         if envelope.rcpt_to.is_empty() {
-            for (property, header) in [
-                (MailProperty::To, RfcHeader::To),
-                (MailProperty::Cc, RfcHeader::Cc),
-            ] {
+            for (property, header) in [(Property::To, RfcHeader::To), (Property::Cc, RfcHeader::Cc)]
+            {
                 if let Some(recipients) = get_rfc_header(
                     &mut message_data.properties,
                     header,
-                    MailHeaderForm::Addresses,
+                    HeaderForm::Addresses,
                     false,
                 )
                 .map_err(|_| {
