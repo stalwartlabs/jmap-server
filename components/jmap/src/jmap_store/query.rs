@@ -5,9 +5,8 @@ use store::{
     read::{
         comparator::Comparator,
         filter::{Filter, FilterOperator, LogicalOperator},
-        QueryFilterMap,
     },
-    AccountId, JMAPStore, Store,
+    AccountId, DocumentId, JMAPStore, Store,
 };
 
 use crate::{
@@ -22,100 +21,49 @@ use super::{changes::JMAPChanges, get::GetObject, Object};
 pub struct QueryHelper<'y, O, T>
 where
     T: for<'x> Store<'x> + 'static,
-    O: QueryObject<T>,
+    O: QueryObject,
 {
     pub store: &'y JMAPStore<T>,
     pub account_id: AccountId,
-    pub request: QueryRequest<O, T>,
-    pub data: O::QueryHelper,
+    pub request: QueryRequest<O>,
+    pub filter: Filter,
+    pub comparator: Comparator,
 }
 
-impl<'y, O, T> QueryFilterMap for QueryHelper<'y, O, T>
-where
-    T: for<'x> Store<'x> + 'static,
-    O: QueryObject<T>,
-{
-    fn filter_map_id(
-        &mut self,
-        document_id: store::DocumentId,
-    ) -> store::Result<Option<store::JMAPId>> {
-        O::filter_map_id(self, document_id)
-    }
-}
-
-pub trait QueryObject<T>: Object
-where
-    T: for<'x> Store<'x> + 'static,
-{
+pub trait QueryObject: Object {
     type QueryArguments;
-    type QueryHelper: Default;
     type Filter: for<'de> serde::Deserialize<'de>;
     type Comparator: for<'de> serde::Deserialize<'de>;
-
-    fn init_query(helper: &mut QueryHelper<Self, T>) -> crate::Result<()>;
-    fn parse_filter(
-        helper: &mut QueryHelper<Self, T>,
-        filter: Self::Filter,
-    ) -> crate::Result<Filter>;
-    fn parse_comparator(
-        helper: &mut QueryHelper<Self, T>,
-        comparator: query::Comparator<Self::Comparator>,
-    ) -> crate::Result<Comparator>;
-    fn has_more_filters(helper: &mut QueryHelper<Self, T>) -> bool;
-    fn apply_filters(
-        helper: &mut QueryHelper<Self, T>,
-        results: Vec<JMAPId>,
-    ) -> crate::Result<Vec<JMAPId>>;
-    fn filter_map_id(
-        helper: &mut QueryHelper<Self, T>,
-        document_id: store::DocumentId,
-    ) -> store::Result<Option<store::JMAPId>>;
-    fn is_immutable(helper: &mut QueryHelper<Self, T>) -> bool;
 }
 
-struct QueryState<O, T>
-where
-    O: QueryObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+struct QueryState<O: QueryObject> {
     op: LogicalOperator,
     terms: Vec<Filter>,
     it: std::vec::IntoIter<query::Filter<O::Filter>>,
 }
 
-pub trait JMAPQuery<T>
+impl<'y, O, T> QueryHelper<'y, O, T>
 where
     T: for<'x> Store<'x> + 'static,
+    O: QueryObject,
 {
-    fn query<'y, 'z: 'y, O>(&'z self, request: QueryRequest<O, T>) -> crate::Result<QueryResponse>
-    where
-        O: QueryObject<T>;
-}
-
-impl<T> JMAPQuery<T> for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn query<'y, 'z: 'y, O>(
-        &'z self,
-        mut request: QueryRequest<O, T>,
-    ) -> crate::Result<QueryResponse>
-    where
-        O: QueryObject<T>,
-    {
-        let collection = O::collection();
-        let mut helper = QueryHelper {
-            store: self,
+    pub fn new(store: &'y JMAPStore<T>, request: QueryRequest<O>) -> crate::Result<Self> {
+        Ok(QueryHelper {
+            store,
             account_id: request.account_id.into(),
             request,
-            data: O::QueryHelper::default(),
-        };
+            filter: Filter::None,
+            comparator: Comparator::None,
+        })
+    }
 
-        O::init_query(&mut helper)?;
-
-        let filter = if let Some(state) = helper.request.filter.take() {
+    pub fn parse_filter(
+        &mut self,
+        mut parse_fnc: impl FnMut(O::Filter) -> crate::Result<Filter>,
+    ) -> crate::Result<()> {
+        if let Some(state) = self.request.filter.take() {
             let mut state = match state {
-                query::Filter::FilterOperator(op) => QueryState::<O, T> {
+                query::Filter::FilterOperator(op) => QueryState::<O> {
                     op: op.operator.into(),
                     terms: Vec::with_capacity(op.conditions.len()),
                     it: op.conditions.into_iter(),
@@ -142,7 +90,7 @@ where
                             };
                         }
                         query::Filter::FilterCondition(cond) => {
-                            state.terms.push(O::parse_filter(&mut helper, cond)?);
+                            state.terms.push(parse_fnc(cond)?);
                         }
                     }
                 }
@@ -160,34 +108,51 @@ where
                 }
             }
 
-            filter
-        } else {
-            Filter::None
-        };
+            self.filter = filter;
+        }
+        Ok(())
+    }
 
-        let sort = if let Some(sort) = helper.request.sort.take() {
-            let mut terms: Vec<store::read::comparator::Comparator> =
-                Vec::with_capacity(sort.len());
+    pub fn parse_comparator(
+        &mut self,
+        mut parse_fnc: impl FnMut(query::Comparator<O::Comparator>) -> crate::Result<Comparator>,
+    ) -> crate::Result<()> {
+        if let Some(sort) = self.request.sort.take() {
+            let mut terms: Vec<Comparator> = Vec::with_capacity(sort.len());
             for comp in sort {
-                terms.push(O::parse_comparator(&mut helper, comp)?);
+                terms.push(parse_fnc(comp)?);
             }
-            store::read::comparator::Comparator::List(terms)
-        } else {
-            store::read::comparator::Comparator::None
-        };
+            self.comparator = Comparator::List(terms);
+        }
+        Ok(())
+    }
 
-        let results_it =
-            self.query_store::<QueryHelper<'_, O, T>>(helper.account_id, collection, filter, sort)?;
+    pub fn query<X, W>(
+        self,
+        filter_map_fnc: X,
+        extra_filters: Option<W>,
+    ) -> crate::Result<QueryResponse>
+    where
+        X: FnMut(DocumentId) -> store::Result<Option<store::JMAPId>>,
+        W: FnMut(Vec<JMAPId>) -> crate::Result<Vec<JMAPId>>,
+    {
+        let collection = O::collection();
+        let results_it = self.store.query_store::<X>(
+            self.account_id,
+            collection,
+            self.filter,
+            self.comparator,
+        )?;
 
-        let mut limit = helper.request.limit.as_ref().copied().unwrap_or(0);
-        if limit == 0 || limit > self.config.query_max_results {
-            limit = self.config.query_max_results
+        let mut limit = self.request.limit.as_ref().copied().unwrap_or(0);
+        if limit == 0 || limit > self.store.config.query_max_results {
+            limit = self.store.config.query_max_results
         };
 
         let mut result = QueryResponse {
-            account_id: helper.request.account_id,
+            account_id: self.request.account_id,
             position: 0.into(),
-            query_state: self.get_state(helper.account_id, collection)?,
+            query_state: self.store.get_state(self.account_id, collection)?,
             total: None,
             limit: None,
             ids: Vec::with_capacity(if limit > 0 && limit < results_it.len() {
@@ -195,19 +160,32 @@ where
             } else {
                 results_it.len()
             }),
-            is_immutable: O::is_immutable(&mut helper),
+            is_immutable: false,
             can_calculate_changes: true,
         };
 
-        let position = helper.request.position.unwrap_or(0);
-        let anchor = helper.request.anchor;
-        let anchor_offset = helper.request.anchor_offset.unwrap_or(0);
+        let position = self.request.position.unwrap_or(0);
+        let anchor = self.request.anchor;
+        let anchor_offset = self.request.anchor_offset.unwrap_or(0);
 
-        let total_results = if !O::has_more_filters(&mut helper) {
+        let total_results = if let Some(mut extra_filters) = extra_filters {
+            let results = results_it
+                .set_filter_map(filter_map_fnc)
+                .into_iter()
+                .map(|id| id.into())
+                .collect::<Vec<JMAPId>>();
+
+            let results = extra_filters(results)?;
+            let total_results = results.len();
+
+            result.paginate(results.into_iter(), limit, position, anchor, anchor_offset)?;
+
+            total_results
+        } else {
             let total_results = results_it.len();
             result.paginate(
                 results_it
-                    .set_filter_map(&mut helper)
+                    .set_filter_map(filter_map_fnc)
                     .into_iter()
                     .map(|id| id.into()),
                 limit,
@@ -217,31 +195,40 @@ where
             )?;
 
             total_results
-        } else {
-            let results = results_it
-                .set_filter_map(&mut helper)
-                .into_iter()
-                .map(|id| id.into())
-                .collect::<Vec<JMAPId>>();
-            let results = O::apply_filters(&mut helper, results)?;
-            let total_results = results.len();
-
-            result.paginate(results.into_iter(), limit, position, anchor, anchor_offset)?;
-
-            total_results
         };
 
         if limit > 0 && limit < total_results {
             result.limit = limit.into();
         }
 
-        if helper.request.calculate_total.unwrap_or(false) {
+        if self.request.calculate_total.unwrap_or(false) {
             result.total = Some(total_results);
         }
 
         Ok(result)
     }
 }
+
+/*pub trait JMAPQuery<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn query<'y, 'z: 'y, O>(&'z self, request: QueryRequest<O>) -> crate::Result<QueryResponse>
+    where
+        O: QueryObject<T>;
+}
+
+impl<T> JMAPQuery<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn query<'y, 'z: 'y, O>(&'z self, mut request: QueryRequest<O>) -> crate::Result<QueryResponse>
+    where
+        O: QueryObject<T>,
+    {
+
+    }
+}*/
 
 impl QueryResponse {
     pub fn paginate<W>(

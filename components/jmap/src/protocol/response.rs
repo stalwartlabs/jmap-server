@@ -45,10 +45,9 @@ impl<U: serde::Serialize> Response<U> {
         self.method_responses.push((Method::Error, error, call_id));
     }
 
-    pub fn sort_map_references<O, T>(&mut self, request: &mut SetRequest<O, T>) -> crate::Result<()>
+    pub fn sort_map_references<O>(&mut self, request: &mut SetRequest<O>) -> crate::Result<()>
     where
-        O: SetObject<T>,
-        T: for<'x> Store<'x> + 'static,
+        O: SetObject,
     {
         if let Some(mut objects) = request.create.take() {
             let mut create = Vec::with_capacity(objects.len());

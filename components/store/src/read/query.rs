@@ -5,7 +5,7 @@ use crate::{
         bitmap::bitmap_op,
         key::{BitmapKey, IndexKey},
     },
-    AccountId, JMAPStore, Store,
+    AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };
 
 use roaring::RoaringBitmap;
@@ -15,7 +15,6 @@ use super::{
     comparator::Comparator,
     filter::{FieldValue, Filter, FilterOperator, LogicalOperator},
     iterator::StoreIterator,
-    QueryFilterMap,
 };
 
 struct State {
@@ -37,7 +36,7 @@ where
         sort: Comparator,
     ) -> crate::Result<StoreIterator<'x, T, U>>
     where
-        U: QueryFilterMap,
+        U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
     {
         let document_ids = self
             .get_document_ids(account_id, collection)?

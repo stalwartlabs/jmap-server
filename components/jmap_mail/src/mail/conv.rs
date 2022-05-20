@@ -390,3 +390,25 @@ impl MimeHeaders {
         }
     }
 }
+
+impl From<super::EmailAddress> for mail_builder::headers::address::Address<'_> {
+    fn from(addr: super::EmailAddress) -> Self {
+        mail_builder::headers::address::Address::Address(
+            mail_builder::headers::address::EmailAddress {
+                name: addr.name.map(|name| name.into()),
+                email: addr.email.into(),
+            },
+        )
+    }
+}
+
+impl From<super::EmailAddressGroup> for mail_builder::headers::address::Address<'_> {
+    fn from(addr: super::EmailAddressGroup) -> Self {
+        mail_builder::headers::address::Address::Group(
+            mail_builder::headers::address::GroupedAddresses {
+                name: addr.name.map(|name| name.into()),
+                addresses: addr.addresses.into_iter().map(Into::into).collect(),
+            },
+        )
+    }
+}

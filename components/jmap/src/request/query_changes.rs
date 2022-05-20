@@ -10,11 +10,7 @@ use crate::{
 
 use super::query::{Comparator, Filter};
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct QueryChangesRequest<O, T>
-where
-    O: QueryObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+pub struct QueryChangesRequest<O: QueryObject> {
     #[serde(rename = "accountId")]
     pub account_id: JMAPId,
 

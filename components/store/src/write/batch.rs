@@ -112,6 +112,14 @@ impl WriteBatch {
         change.deletes.insert(old_jmap_id.into());
         change.inserts.insert(new_jmap_id.into());
     }
+
+    pub fn take(&mut self) -> WriteBatch {
+        WriteBatch {
+            account_id: self.account_id,
+            changes: std::mem::take(&mut self.changes),
+            documents: std::mem::take(&mut self.documents),
+        }
+    }
 }
 
 impl From<Change> for Vec<u8> {

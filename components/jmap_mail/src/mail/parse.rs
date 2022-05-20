@@ -555,6 +555,8 @@ impl ParseMail {
     }
 }
 
+/*
+// remove in import
 pub fn get_message_part(raw_message: &[u8], part_id: u32) -> Option<Cow<[u8]>> {
     let mut message = Message::parse(raw_message)?;
     let part_id = part_id as usize;
@@ -603,3 +605,4 @@ pub fn get_message_part(raw_message: &[u8], part_id: u32) -> Option<Cow<[u8]>> {
         None
     }
 }
+*/

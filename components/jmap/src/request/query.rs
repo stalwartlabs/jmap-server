@@ -10,11 +10,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct QueryRequest<O, T>
-where
-    O: QueryObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+pub struct QueryRequest<O: QueryObject> {
     #[serde(rename = "accountId")]
     pub account_id: JMAPId,
 

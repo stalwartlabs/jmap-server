@@ -1,21 +1,13 @@
-use store::Store;
-
-use crate::error::method::MethodError;
 use crate::error::set::SetError;
 use crate::id::jmap::JMAPId;
 use crate::id::state::JMAPState;
 use crate::jmap_store::set::SetObject;
-use crate::protocol::response::Response;
 use std::collections::HashMap;
 
 use super::ResultReference;
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct SetRequest<O, T>
-where
-    O: SetObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+pub struct SetRequest<O: SetObject> {
     #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
     pub account_id: Option<JMAPId>,
 
@@ -53,11 +45,7 @@ where
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct SetResponse<O, T>
-where
-    O: SetObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+pub struct SetResponse<O: SetObject> {
     #[serde(rename = "accountId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<JMAPId>,
@@ -96,7 +84,4 @@ where
 
     #[serde(skip)]
     pub next_invocation: Option<O::NextInvocation>,
-
-    #[serde(skip)]
-    pub _p: std::marker::PhantomData<T>,
 }

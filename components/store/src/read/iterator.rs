@@ -7,16 +7,16 @@ use crate::{
     DocumentId, FieldId, JMAPId, JMAPStore, Store,
 };
 
-use super::{comparator::Comparator, QueryFilterMap};
+use super::comparator::Comparator;
 
 pub struct StoreIterator<'x, T, U>
 where
     T: Store<'x>,
-    U: QueryFilterMap,
+    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
 {
     store: &'x JMAPStore<T>,
     iterators: Vec<IndexIterator<'x, T>>,
-    filter_map: Option<&'x mut U>,
+    filter_map: Option<U>,
     current: usize,
 }
 
@@ -58,7 +58,7 @@ where
 impl<'x, T, U> StoreIterator<'x, T, U>
 where
     T: Store<'x>,
-    U: QueryFilterMap,
+    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
 {
     pub fn new(
         store: &'x JMAPStore<T>,
@@ -132,7 +132,7 @@ where
         }
     }
 
-    pub fn set_filter_map(mut self, filter_map: &'x mut U) -> Self {
+    pub fn set_filter_map(mut self, filter_map: U) -> Self {
         self.filter_map = Some(filter_map);
         self
     }
@@ -149,7 +149,7 @@ where
 impl<'x, T, U> Iterator for StoreIterator<'x, T, U>
 where
     T: Store<'x>,
-    U: QueryFilterMap,
+    U: FnMut(DocumentId) -> crate::Result<Option<JMAPId>>,
 {
     type Item = JMAPId;
 
@@ -353,7 +353,7 @@ where
             }
 
             if let Some(filter_map) = &mut self.filter_map {
-                if let Some(jmap_id) = filter_map.filter_map_id(doc_id).ok()? {
+                if let Some(jmap_id) = filter_map(doc_id).ok()? {
                     return Some(jmap_id);
                 } else {
                     continue 'outer;

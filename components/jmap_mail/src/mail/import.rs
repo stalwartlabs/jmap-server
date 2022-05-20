@@ -24,7 +24,7 @@ use store::core::JMAPIdPrefix;
 use store::nlp::Language;
 use store::read::comparator::Comparator;
 use store::read::filter::{FieldValue, Filter};
-use store::read::DefaultIdMapper;
+use store::read::{default_filter_mapper, FilterMapper};
 use store::serialize::leb128::Leb128;
 use store::serialize::StoreSerialize;
 
@@ -95,116 +95,6 @@ pub struct EmailImportResponse {
     pub not_created: Option<HashMap<String, SetError<Property>>>,
 }
 
-/*
-impl<'y, T> ImportObject<'y, T> for ImportMail<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    type Item = ImportItem;
-
-    fn new(store: &'y JMAPStore<T>, request: &mut ImportRequest) -> jmap::Result<Self> {
-        Ok(ImportMail {
-            store,
-            account_id: account_id,
-            mailbox_ids: store
-                .get_document_ids(account_id, Collection::Mailbox)?
-                .unwrap_or_default(),
-        })
-    }
-
-    fn parse_items(
-        &self,
-        request: &mut ImportRequest,
-    ) -> jmap::Result<HashMap<String, Self::Item>> {
-        let arguments = request
-            .arguments
-            .remove("emails")
-            .ok_or_else(|| MethodError::InvalidArguments("Missing emails property.".to_string()))?
-            .unwrap_object()
-            .ok_or_else(|| MethodError::InvalidArguments("Expected email object.".to_string()))?;
-
-        if self.store.config.mail_import_max_items > 0
-            && arguments.len() > self.store.config.mail_import_max_items
-        {
-            return Err(MethodError::RequestTooLarge);
-        }
-
-        let mut emails = HashMap::with_capacity(arguments.len());
-        for (id, item_value) in arguments {
-            let mut item_value = item_value.unwrap_object().ok_or_else(|| {
-                MethodError::InvalidArguments(format!("Expected mailImport object for {}.", id))
-            })?;
-            let item = ImportItem {
-                blob_id: item_value
-                    .remove("blobId")
-                    .ok_or_else(|| {
-                        MethodError::InvalidArguments(format!("Missing blobId for {}.", id))
-                    })?
-                    .parse_blob(false)?
-                    .unwrap(),
-                mailbox_ids: item_value
-                    .remove("mailboxIds")
-                    .ok_or_else(|| {
-                        MethodError::InvalidArguments(format!("Missing mailboxIds for {}.", id))
-                    })?
-                    .unwrap_object()
-                    .ok_or_else(|| {
-                        MethodError::InvalidArguments(format!(
-                            "Expected mailboxIds object for {}.",
-                            id
-                        ))
-                    })?
-                    .into_iter()
-                    .filter_map(|(k, v)| {
-                        if v.to_bool()? {
-                            JMAPId::from_jmap_string(&k).map(|id| id as DocumentId)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-                keywords: if let Some(keywords) = item_value.remove("keywords") {
-                    keywords
-                        .unwrap_object()
-                        .ok_or_else(|| {
-                            MethodError::InvalidArguments(format!(
-                                "Expected keywords object for {}.",
-                                id
-                            ))
-                        })?
-                        .into_iter()
-                        .filter_map(|(k, v)| {
-                            if v.to_bool()? {
-                                Keyword::from_jmap(k).into()
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    vec![]
-                },
-                received_at: if let Some(received_at) = item_value.remove("receivedAt") {
-                    received_at.parse_utc_date(true)?
-                } else {
-                    None
-                },
-            };
-            emails.insert(id, item);
-        }
-
-        Ok(emails)
-    }
-
-    fn import_item(&self, item: Self::Item) -> jmap::error::set::Result<JSONValue> {
-
-    }
-
-    fn collection() -> Collection {
-        Collection::Mail
-    }
-}*/
-
 pub trait JMAPMailImport {
     fn mail_import(&self, request: EmailImportRequest) -> jmap::Result<EmailImportResponse>;
 
@@ -239,11 +129,8 @@ pub trait JMAPMailImport {
     ) -> store::Result<ThreadId>;
 }
 
-pub struct MailImportResult {
-    pub id: JMAPId,
-    pub blob_id: JMAPBlob,
-    pub thread_id: DocumentId,
-    pub size: usize,
+pub fn get_message_part(raw_message: &[u8], part_id: u32) -> Option<Cow<[u8]>> {
+    None
 }
 
 impl<T> JMAPMailImport for JMAPStore<T>
@@ -778,7 +665,7 @@ where
                 .get_multi_document_value(
                     batch.account_id,
                     Collection::Mail,
-                    self.query_store::<DefaultIdMapper>(
+                    self.query_store::<FilterMapper>(
                         batch.account_id,
                         Collection::Mail,
                         Filter::and(vec![

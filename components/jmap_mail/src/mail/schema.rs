@@ -6,13 +6,14 @@ use std::{
 use jmap::{
     id::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::Object,
+    protocol::json_pointer::JSONPointer,
     request::ResultReference,
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     RfcHeader,
 };
-use serde::{Deserialize, Serialize};
+use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::{
     chrono::{DateTime, Utc},
     core::{collection::Collection, tag::Tag},
@@ -126,14 +127,10 @@ pub struct Email {
     #[serde(rename = "preview")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
-    /*#[serde(flatten)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub headers: HashMap<Header, Option<HeaderValue>>,
 
     #[serde(flatten)]
-    #[serde(skip_deserializing)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub patch: HashMap<String, bool>,*/
+    #[serde(skip_serializing_if = "SetParameters::is_empty")]
+    pub params: SetParameters,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -185,9 +182,10 @@ pub struct EmailBodyPart {
     #[serde(rename = "subParts")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_parts: Option<Vec<EmailBodyPart>>,
-    /*#[serde(flatten)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub header: Option<HashMap<Header, HeaderValue>>,*/
+
+    #[serde(flatten)]
+    #[serde(skip_serializing_if = "SetParameters::is_empty")]
+    pub params: SetParameters,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -577,6 +575,288 @@ impl Display for HeaderForm {
             HeaderForm::Date => write!(f, ":asDate"),
             HeaderForm::URLs => write!(f, ":asURLs"),
         }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SetParameters {
+    pub patch_mailbox: HashMap<JMAPId, bool>,
+    pub patch_keyword: HashMap<Keyword, bool>,
+    pub headers: Vec<HeaderValue>,
+}
+
+impl SetParameters {
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum HeaderValue {
+    AsRaw {
+        name: HeaderName,
+        value: String,
+    },
+    AsRawAll {
+        name: HeaderName,
+        value: Vec<String>,
+    },
+    AsDate {
+        name: HeaderName,
+        value: DateTime<Utc>,
+    },
+    AsDateAll {
+        name: HeaderName,
+        value: Vec<DateTime<Utc>>,
+    },
+    AsText {
+        name: HeaderName,
+        value: String,
+    },
+    AsTextAll {
+        name: HeaderName,
+        value: Vec<String>,
+    },
+    AsURLs {
+        name: HeaderName,
+        value: Vec<String>,
+    },
+    AsURLsAll {
+        name: HeaderName,
+        value: Vec<Vec<String>>,
+    },
+    AsMessageIds {
+        name: HeaderName,
+        value: Vec<String>,
+    },
+    AsMessageIdsAll {
+        name: HeaderName,
+        value: Vec<Vec<String>>,
+    },
+    AsAddresses {
+        name: HeaderName,
+        value: Vec<EmailAddress>,
+    },
+    AsAddressesAll {
+        name: HeaderName,
+        value: Vec<Vec<EmailAddress>>,
+    },
+    AsGroupedAddresses {
+        name: HeaderName,
+        value: Vec<EmailAddressGroup>,
+    },
+    AsGroupedAddressesAll {
+        name: HeaderName,
+        value: Vec<Vec<EmailAddressGroup>>,
+    },
+}
+
+// SetParameters de/serialization
+impl Serialize for SetParameters {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.headers.len()))?;
+
+        for header in &self.headers {
+            match header {
+                HeaderValue::AsRaw { name, value } => {
+                    map.serialize_entry(&format!("header:{}", name), &value)?
+                }
+                HeaderValue::AsRawAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:all", name), &value)?
+                }
+                HeaderValue::AsDate { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asDate", name), &value)?
+                }
+                HeaderValue::AsDateAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asDate:all", name), &value)?
+                }
+                HeaderValue::AsText { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asText", name), &value)?
+                }
+                HeaderValue::AsTextAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asText:all", name), &value)?
+                }
+                HeaderValue::AsURLs { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asURLs", name), &value)?
+                }
+                HeaderValue::AsURLsAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asURLs:all", name), &value)?
+                }
+                HeaderValue::AsMessageIds { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asMessageIds", name), &value)?
+                }
+                HeaderValue::AsMessageIdsAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asMessageIds:all", name), &value)?
+                }
+                HeaderValue::AsAddresses { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asAddresses", name), &value)?
+                }
+                HeaderValue::AsAddressesAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asAddresses:all", name), &value)?
+                }
+                HeaderValue::AsGroupedAddresses { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asGroupedAddresses", name), &value)?
+                }
+                HeaderValue::AsGroupedAddressesAll { name, value } => {
+                    map.serialize_entry(&format!("header:{}:asGroupedAddresses:all", name), &value)?
+                }
+            }
+        }
+        map.end()
+    }
+}
+struct SetParametersVisitor;
+
+impl<'de> serde::de::Visitor<'de> for SetParametersVisitor {
+    type Value = SetParameters;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP e-mail property")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut params = SetParameters::default();
+        while let Some(key) = map.next_key::<&str>()? {
+            if key.starts_with("header:") {
+                if let Some(header) = HeaderProperty::parse(key) {
+                    let header_value = match header.form {
+                        HeaderForm::Raw => {
+                            if header.all {
+                                HeaderValue::AsRawAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsRaw {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                        HeaderForm::Text => {
+                            if header.all {
+                                HeaderValue::AsTextAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsText {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                        HeaderForm::Addresses => {
+                            if header.all {
+                                HeaderValue::AsAddressesAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsAddresses {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                        HeaderForm::GroupedAddresses => {
+                            if header.all {
+                                HeaderValue::AsGroupedAddressesAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsGroupedAddresses {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                        HeaderForm::MessageIds => {
+                            if header.all {
+                                HeaderValue::AsMessageIdsAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsMessageIds {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                        HeaderForm::Date => {
+                            if header.all {
+                                HeaderValue::AsDateAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsDate {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                        HeaderForm::URLs => {
+                            if header.all {
+                                HeaderValue::AsURLsAll {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            } else {
+                                HeaderValue::AsURLs {
+                                    name: header.header,
+                                    value: map.next_value()?,
+                                }
+                            }
+                        }
+                    };
+                    params.headers.push(header_value);
+                }
+            } else if let Some(pointer) = JSONPointer::parse(key) {
+                match pointer {
+                    JSONPointer::Path(path) if path.len() == 2 => {
+                        if let (
+                            Some(JSONPointer::String(property)),
+                            Some(JSONPointer::String(id)),
+                        ) = (path.get(0), path.get(1))
+                        {
+                            let value = map.next_value::<Option<bool>>()?.unwrap_or(false);
+                            match Property::parse(property) {
+                                Some(Property::MailboxIds) => {
+                                    if let Some(id) = JMAPId::parse(id) {
+                                        params.patch_mailbox.insert(id, value);
+                                    }
+                                }
+                                Some(Property::Keywords) => {
+                                    params.patch_keyword.insert(Keyword::parse(id), value);
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+            }
+        }
+
+        Ok(params)
+    }
+}
+
+impl<'de> Deserialize<'de> for SetParameters {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(SetParametersVisitor)
     }
 }
 

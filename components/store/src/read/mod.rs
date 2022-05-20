@@ -6,14 +6,12 @@ pub mod get;
 pub mod iterator;
 pub mod query;
 
-pub struct DefaultIdMapper {}
+pub type FilterMapper = fn(DocumentId) -> crate::Result<Option<JMAPId>>;
 
-pub trait QueryFilterMap {
-    fn filter_map_id(&mut self, document_id: DocumentId) -> crate::Result<Option<JMAPId>>;
+pub fn default_filter_mapper(document_id: DocumentId) -> crate::Result<Option<JMAPId>> {
+    Ok(Some(document_id as JMAPId))
 }
 
-impl QueryFilterMap for DefaultIdMapper {
-    fn filter_map_id(&mut self, document_id: DocumentId) -> crate::Result<Option<JMAPId>> {
-        Ok(Some(document_id as JMAPId))
-    }
+pub fn default_mapper(document_ids: Vec<DocumentId>) -> crate::Result<Vec<JMAPId>> {
+    Ok(document_ids.into_iter().map(|id| id as JMAPId).collect())
 }

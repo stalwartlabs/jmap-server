@@ -4,12 +4,12 @@ pub mod import;
 //pub mod parse;
 //pub mod query;
 //pub mod raft;
-//pub mod set;
 pub mod conv;
 pub mod schema;
+pub mod set;
 
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use mail_parser::{HeaderOffset, MessagePartId, MessageStructure, RfcHeader};
 
@@ -108,6 +108,12 @@ impl HeaderName {
             HeaderName::Rfc(rfc) => rfc.as_str().to_owned(),
             HeaderName::Other(other) => other,
         }
+    }
+}
+
+impl From<HeaderName> for Cow<'_, str> {
+    fn from(header: HeaderName) -> Self {
+        header.to_string().into()
     }
 }
 

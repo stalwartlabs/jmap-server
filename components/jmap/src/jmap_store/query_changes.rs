@@ -6,7 +6,7 @@ use crate::{
     id::{state::JMAPState, JMAPIdSerialize},
     protocol::json::JSONValue,
     request::{
-        changes::ChangesRequest,
+        changes::{ChangesRequest, ChangesResponse},
         query::{QueryRequest, QueryResponse},
         query_changes::{AddedItem, QueryChangesRequest, QueryChangesResponse},
     },
@@ -14,19 +14,109 @@ use crate::{
 
 use super::{
     changes::{ChangesObject, JMAPChanges},
-    query::{JMAPQuery, QueryObject},
+    query::QueryObject,
 };
 
+pub struct QueryChangesHelper<'y, O, T>
+where
+    T: for<'x> Store<'x> + 'static,
+    O: QueryObject + ChangesObject,
+{
+    pub store: &'y JMAPStore<T>,
+    pub changes: ChangesResponse<O>,
+    pub request: QueryChangesRequest<O>,
+}
+
+impl<'y, O, T> QueryChangesHelper<'y, O, T>
+where
+    T: for<'x> Store<'x> + 'static,
+    O: QueryObject + ChangesObject,
+{
+    pub fn new(store: &'y JMAPStore<T>, request: QueryChangesRequest<O>) -> crate::Result<Self> {
+        Ok(QueryChangesHelper {
+            store,
+            changes: store.changes::<O>(ChangesRequest {
+                account_id: request.account_id,
+                since_state: request.since_query_state.clone(),
+                max_changes: request.max_changes,
+            })?,
+            request,
+        })
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.changes.total_changes > 0 || self.request.calculate_total.unwrap_or(false)
+    }
+
+    pub fn query_changes(
+        self,
+        query_response: Option<QueryResponse>,
+    ) -> crate::Result<QueryChangesResponse> {
+        if let Some(query_response) = query_response {
+            let mut removed = Vec::with_capacity(self.changes.total_changes);
+            let mut added = Vec::with_capacity(self.changes.total_changes);
+
+            if self.changes.total_changes > 0 {
+                if !query_response.is_immutable {
+                    for (index, id) in query_response.ids.into_iter().enumerate() {
+                        if matches!(self.request.up_to_id, Some(up_to_id) if up_to_id == id) {
+                            break;
+                        } else if self.changes.created.contains(&id)
+                            || self.changes.updated.contains(&id)
+                        {
+                            added.push(AddedItem::new(id, index));
+                        }
+                    }
+
+                    removed = self.changes.updated;
+                } else {
+                    for (index, id) in query_response.ids.into_iter().enumerate() {
+                        //TODO test up to id properly
+                        if matches!(self.request.up_to_id, Some(up_to_id) if up_to_id == id) {
+                            break;
+                        } else if self.changes.created.contains(&id) {
+                            added.push(AddedItem::new(id, index));
+                        }
+                    }
+                }
+
+                if !self.changes.destroyed.is_empty() {
+                    removed.extend(self.changes.destroyed);
+                }
+            }
+
+            Ok(QueryChangesResponse {
+                account_id: self.request.account_id,
+                old_query_state: self.changes.old_state,
+                new_query_state: self.changes.new_state,
+                total: query_response.total,
+                removed,
+                added,
+            })
+        } else {
+            Ok(QueryChangesResponse {
+                account_id: self.request.account_id,
+                old_query_state: self.changes.old_state,
+                new_query_state: self.changes.new_state,
+                total: None,
+                removed: Vec::with_capacity(0),
+                added: Vec::with_capacity(0),
+            })
+        }
+    }
+}
+
+/*
 pub trait JMAPQueryChanges<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
     fn query_changes<'y, 'z: 'y, O>(
         &'z self,
-        request: QueryChangesRequest<O, T>,
+        request: QueryChangesRequest<O>,
     ) -> crate::Result<QueryChangesResponse>
     where
-        O: QueryObject<T> + ChangesObject;
+        O: QueryObject + ChangesObject;
 }
 
 impl<T> JMAPQueryChanges<T> for JMAPStore<T>
@@ -35,18 +125,12 @@ where
 {
     fn query_changes<'y, 'z: 'y, O>(
         &'z self,
-        request: QueryChangesRequest<O, T>,
+        request: QueryChangesRequest<O>,
     ) -> crate::Result<QueryChangesResponse>
     where
-        O: QueryObject<T> + ChangesObject,
+        O: QueryObject + ChangesObject,
     {
-        let changes = self.changes::<O>(ChangesRequest {
-            account_id: request.account_id,
-            since_state: request.since_query_state,
-            max_changes: request.max_changes,
-        })?;
-
-        let query_result = if changes.total_changes > 0 || request.calculate_total.unwrap_or(false)
+        let query_response = if changes.total_changes > 0 || request.calculate_total.unwrap_or(false)
         {
             JMAPQuery::query::<O>(
                 self,
@@ -74,44 +158,6 @@ where
                 can_calculate_changes: true.into(),
             }
         };
-
-        let mut removed = Vec::with_capacity(changes.total_changes);
-        let mut added = Vec::with_capacity(changes.total_changes);
-
-        if changes.total_changes > 0 {
-            if !query_result.is_immutable {
-                for (index, id) in query_result.ids.into_iter().enumerate() {
-                    if matches!(request.up_to_id, Some(up_to_id) if up_to_id == id) {
-                        break;
-                    } else if changes.created.contains(&id) || changes.updated.contains(&id) {
-                        added.push(AddedItem::new(id, index));
-                    }
-                }
-
-                removed = changes.updated;
-            } else {
-                for (index, id) in query_result.ids.into_iter().enumerate() {
-                    //TODO test up to id properly
-                    if matches!(request.up_to_id, Some(up_to_id) if up_to_id == id) {
-                        break;
-                    } else if changes.created.contains(&id) {
-                        added.push(AddedItem::new(id, index));
-                    }
-                }
-            }
-
-            if !changes.destroyed.is_empty() {
-                removed.extend(changes.destroyed);
-            }
-        }
-
-        Ok(QueryChangesResponse {
-            account_id: request.account_id,
-            old_query_state: changes.old_state,
-            new_query_state: changes.new_state,
-            total: query_result.total,
-            removed,
-            added,
-        })
     }
 }
+*/

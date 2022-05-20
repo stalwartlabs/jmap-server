@@ -11,11 +11,7 @@ use crate::{
 use super::{MaybeResultReference, ResultReference};
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct GetRequest<O, T>
-where
-    O: GetObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+pub struct GetRequest<O: GetObject> {
     #[serde(rename = "accountId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<JMAPId>,
@@ -36,11 +32,7 @@ where
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct GetResponse<O, T>
-where
-    O: GetObject<T>,
-    T: for<'x> Store<'x> + 'static,
-{
+pub struct GetResponse<O: GetObject> {
     #[serde(rename = "accountId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<JMAPId>,
@@ -51,7 +43,4 @@ where
 
     #[serde(rename = "notFound")]
     pub not_found: Vec<JMAPId>,
-
-    #[serde(skip)]
-    pub _p: std::marker::PhantomData<T>,
 }
