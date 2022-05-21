@@ -280,13 +280,14 @@ where
         batch.insert_document(document);
         self.write(batch)?;
 
-        Ok(Email {
-            id: id.into(),
-            blob_id: raw_blob.into(),
-            thread_id: JMAPId::from(thread_id).into(),
-            size: size.into(),
-            ..Default::default()
-        })
+        // Build email result
+        let mut email = Email::default();
+        email.insert(Property::Id, id);
+        email.insert(Property::BlobId, raw_blob);
+        email.insert(Property::ThreadId, JMAPId::from(thread_id));
+        email.insert(Property::Size, size);
+
+        Ok(email)
     }
 
     fn mail_parse(

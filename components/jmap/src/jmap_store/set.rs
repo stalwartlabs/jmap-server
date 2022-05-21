@@ -219,14 +219,14 @@ pub trait JMAPSetXYZ<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>>;
+    fn xyz_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>>;
 }
 
 impl<T> JMAPSetXYZ<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn mail_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>> {
+    fn xyz_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>> {
         let mut helper = SetHelper::new(self, request)?;
         helper.create(|create_id, item, batch, document| {
             Ok((XYZ::default(), None::<MutexGuard<'_, ()>>))

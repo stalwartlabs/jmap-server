@@ -1,11 +1,12 @@
 //pub mod changes;
-//pub mod get;
+pub mod get;
 pub mod import;
 //pub mod parse;
 //pub mod query;
 //pub mod raft;
 pub mod conv;
 pub mod schema;
+pub mod serialize;
 pub mod set;
 
 use serde::{Deserialize, Serialize};
@@ -108,6 +109,12 @@ impl HeaderName {
             HeaderName::Rfc(rfc) => rfc.as_str().to_owned(),
             HeaderName::Other(other) => other,
         }
+    }
+}
+
+impl From<RfcHeader> for HeaderName {
+    fn from(header: RfcHeader) -> Self {
+        HeaderName::Rfc(header)
     }
 }
 
@@ -221,8 +228,7 @@ impl MessageData {
 pub enum HeaderValue {
     Timestamp(i64),
     Text(String),
-    Keywords(Vec<String>),
-    Urls(Vec<String>),
+    TextList(Vec<String>),
     Addresses(Vec<EmailAddress>),
     GroupedAddresses(Vec<EmailAddressGroup>),
 }
@@ -238,7 +244,7 @@ impl HeaderValue {
     pub fn unwrap_text(self) -> Option<String> {
         match self {
             HeaderValue::Text(text) => Some(text),
-            HeaderValue::Keywords(mut textlist) | HeaderValue::Urls(mut textlist) => textlist.pop(),
+            HeaderValue::TextList(mut textlist) => textlist.pop(),
             _ => None,
         }
     }
@@ -246,7 +252,7 @@ impl HeaderValue {
     pub fn unwrap_textlist(self) -> Option<Vec<String>> {
         match self {
             HeaderValue::Text(text) => Some(vec![text]),
-            HeaderValue::Keywords(mut textlist) | HeaderValue::Urls(mut textlist) => Some(textlist),
+            HeaderValue::TextList(mut textlist) => Some(textlist),
             _ => None,
         }
     }

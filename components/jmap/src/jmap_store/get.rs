@@ -1,11 +1,8 @@
-use std::collections::HashMap;
-
-use store::{core::JMAPIdPrefix, roaring::RoaringBitmap, AccountId, DocumentId, JMAPStore, Store};
+use store::{roaring::RoaringBitmap, AccountId, DocumentId, JMAPStore, Store};
 
 use crate::{
     error::method::MethodError,
-    id::{jmap::JMAPId, state::JMAPState, JMAPIdSerialize},
-    protocol::json::JSONValue,
+    id::jmap::JMAPId,
     request::get::{GetRequest, GetResponse},
 };
 
@@ -37,7 +34,7 @@ where
     T: for<'x> Store<'x> + 'static,
     O: GetObject,
 {
-    pub fn new<X, W>(
+    pub fn new(
         store: &'y JMAPStore<T>,
         mut request: GetRequest<O>,
         id_mapper: Option<impl FnMut(Vec<DocumentId>) -> crate::Result<Vec<JMAPId>>>,
@@ -96,7 +93,7 @@ where
         })
     }
 
-    pub fn update(
+    pub fn get(
         mut self,
         mut get_fnc: impl FnMut(JMAPId, &[O::Property]) -> crate::Result<Option<O>>,
     ) -> crate::Result<GetResponse<O>> {
@@ -107,33 +104,48 @@ where
                     continue;
                 }
             }
-            self.response.not_found.push(id.into());
+            self.response.not_found.push(id);
         }
         Ok(self.response)
     }
 }
 
 /*
-pub trait JMAPGet<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn get<'y, 'z: 'y, O>(&'z self, request: GetRequest<O>) -> crate::Result<GetResponse<O>>
-    where
-        O: GetObject<T>;
-}
 
-impl<T> JMAPGet<T> for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn get<'y, 'z: 'y, O>(&'z self, mut request: GetRequest<O>) -> crate::Result<GetResponse<O>>
-    where
-        O: GetObject<T>,
-    {
-        O::init_get(&mut helper)?;
+impl GetObject for XYZ {
+    type GetArguments = GetArguments;
 
-        Ok(helper.response)
+    fn default_properties() -> Vec<Self::Property> {
+        vec![
+        ]
     }
 }
+
+pub trait JMAPGetXYZ<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn xyz_get(&self, request: GetRequest<XYZ>) -> jmap::Result<GetResponse<XYZ>>;
+}
+
+impl<T> JMAPGetXYZ<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn xyz_get(&self, request: GetRequest<XYZ>) -> jmap::Result<GetResponse<XYZ>> {
+        let account_id = request.account_id.as_ref().unwrap().get_document_id();
+        let mut helper = GetHelper::new(
+            self,
+            request,
+            None,
+        )?;
+        let response = helper.get(|item, properties| {
+            //coco
+            Ok(Some(XYZ::default()))
+        })?;
+
+        Ok(response)
+    }
+}
+
 */

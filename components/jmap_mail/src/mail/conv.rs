@@ -1,6 +1,21 @@
-use mail_parser::{Addr, HeaderValue, RfcHeader, RfcHeaders};
+use std::ops::Deref;
 
-use super::MimeHeaders;
+use mail_parser::{
+    parsers::{
+        fields::{
+            address::parse_address, date::parse_date, id::parse_id,
+            unstructured::parse_unstructured,
+        },
+        message::MessageStream,
+    },
+    Addr, HeaderOffset, HeaderValue, RfcHeader, RfcHeaders,
+};
+use store::chrono::{DateTime, NaiveDateTime, Utc};
+
+use super::{
+    schema::{Email, EmailValue, HeaderForm},
+    MessageData, MimeHeaders,
+};
 
 impl TryFrom<mail_parser::Addr<'_>> for super::EmailAddress {
     type Error = ();
@@ -11,7 +26,7 @@ impl TryFrom<mail_parser::Addr<'_>> for super::EmailAddress {
             email: value
                 .address
                 .and_then(|addr| if addr.contains('@') { Some(addr) } else { None })
-                .ok_or_else(|| ())?
+                .ok_or(())?
                 .into_owned(),
         })
     }
@@ -59,6 +74,43 @@ impl TryFrom<Vec<mail_parser::Addr<'_>>> for super::EmailAddressGroup {
         } else {
             Err(())
         }
+    }
+}
+
+impl From<super::EmailAddress> for mail_builder::headers::address::Address<'_> {
+    fn from(addr: super::EmailAddress) -> Self {
+        mail_builder::headers::address::Address::Address(
+            mail_builder::headers::address::EmailAddress {
+                name: addr.name.map(|name| name.into()),
+                email: addr.email.into(),
+            },
+        )
+    }
+}
+
+impl From<super::EmailAddressGroup> for mail_builder::headers::address::Address<'_> {
+    fn from(addr: super::EmailAddressGroup) -> Self {
+        mail_builder::headers::address::Address::Group(
+            mail_builder::headers::address::GroupedAddresses {
+                name: addr.name.map(|name| name.into()),
+                addresses: addr.addresses.into_iter().map(Into::into).collect(),
+            },
+        )
+    }
+}
+
+impl From<Vec<super::EmailAddress>> for super::EmailAddressGroup {
+    fn from(addresses: Vec<super::EmailAddress>) -> Self {
+        super::EmailAddressGroup {
+            name: None,
+            addresses,
+        }
+    }
+}
+
+impl From<super::EmailAddressGroup> for Vec<super::EmailAddress> {
+    fn from(group: super::EmailAddressGroup) -> Self {
+        group.addresses
     }
 }
 
@@ -117,8 +169,8 @@ impl HeaderValueInto for mail_parser::HeaderValue<'_> {
 
     fn into_keyword(self) -> Vec<super::HeaderValue> {
         match self {
-            HeaderValue::Text(text) => vec![super::HeaderValue::Keywords(vec![text.into_owned()])],
-            HeaderValue::TextList(textlist) => vec![super::HeaderValue::Keywords(
+            HeaderValue::Text(text) => vec![super::HeaderValue::TextList(vec![text.into_owned()])],
+            HeaderValue::TextList(textlist) => vec![super::HeaderValue::TextList(
                 textlist.into_iter().map(|s| s.into_owned()).collect(),
             )],
             HeaderValue::Collection(list) => {
@@ -126,10 +178,10 @@ impl HeaderValueInto for mail_parser::HeaderValue<'_> {
                 for item in list {
                     match item {
                         HeaderValue::Text(text) => {
-                            result.push(super::HeaderValue::Keywords(vec![text.into_owned()]))
+                            result.push(super::HeaderValue::TextList(vec![text.into_owned()]))
                         }
                         HeaderValue::TextList(textlist) => {
-                            result.push(super::HeaderValue::Keywords(
+                            result.push(super::HeaderValue::TextList(
                                 textlist.into_iter().map(|s| s.into_owned()).collect(),
                             ))
                         }
@@ -147,9 +199,9 @@ impl HeaderValueInto for mail_parser::HeaderValue<'_> {
             HeaderValue::Address(Addr {
                 address: Some(addr),
                 ..
-            }) if addr.contains(':') => vec![super::HeaderValue::Urls(vec![addr.into_owned()])],
+            }) if addr.contains(':') => vec![super::HeaderValue::TextList(vec![addr.into_owned()])],
             HeaderValue::AddressList(addrlist) => {
-                vec![super::HeaderValue::Urls(
+                vec![super::HeaderValue::TextList(
                     addrlist
                         .into_iter()
                         .filter_map(|addr| match addr {
@@ -170,10 +222,10 @@ impl HeaderValueInto for mail_parser::HeaderValue<'_> {
                             address: Some(addr),
                             ..
                         }) if addr.contains(':') => {
-                            result.push(super::HeaderValue::Urls(vec![addr.into_owned()]))
+                            result.push(super::HeaderValue::TextList(vec![addr.into_owned()]))
                         }
                         HeaderValue::AddressList(addrlist) => {
-                            result.push(super::HeaderValue::Urls(
+                            result.push(super::HeaderValue::TextList(
                                 addrlist
                                     .into_iter()
                                     .filter_map(|addr| match addr {
@@ -391,24 +443,198 @@ impl MimeHeaders {
     }
 }
 
-impl From<super::EmailAddress> for mail_builder::headers::address::Address<'_> {
-    fn from(addr: super::EmailAddress) -> Self {
-        mail_builder::headers::address::Address::Address(
-            mail_builder::headers::address::EmailAddress {
-                name: addr.name.map(|name| name.into()),
-                email: addr.email.into(),
-            },
-        )
+impl super::HeaderValue {
+    pub fn into_timestamp(self) -> Option<i64> {
+        match self {
+            super::HeaderValue::Timestamp(ts) => Some(ts),
+            _ => None,
+        }
+    }
+
+    pub fn into_text(self) -> Option<String> {
+        match self {
+            super::HeaderValue::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    pub fn into_text_list(self) -> Option<Vec<String>> {
+        match self {
+            super::HeaderValue::TextList(textlist) => Some(textlist),
+            _ => None,
+        }
+    }
+
+    pub fn into_addresses(self) -> Option<Vec<super::EmailAddress>> {
+        match self {
+            super::HeaderValue::Addresses(addrs) => Some(addrs),
+            super::HeaderValue::GroupedAddresses(group) => {
+                Some(group.into_iter().flat_map(|g| g.addresses).collect())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn into_grouped_addresses(self) -> Option<Vec<super::EmailAddressGroup>> {
+        match self {
+            super::HeaderValue::GroupedAddresses(addrs) => Some(addrs),
+            super::HeaderValue::Addresses(addrs) => Some(vec![addrs.into()]),
+            _ => None,
+        }
     }
 }
 
-impl From<super::EmailAddressGroup> for mail_builder::headers::address::Address<'_> {
-    fn from(addr: super::EmailAddressGroup) -> Self {
-        mail_builder::headers::address::Address::Group(
-            mail_builder::headers::address::GroupedAddresses {
-                name: addr.name.map(|name| name.into()),
-                addresses: addr.addresses.into_iter().map(Into::into).collect(),
-            },
-        )
+pub trait IntoForm {
+    fn into_form(self, form: &HeaderForm, all: bool) -> Option<EmailValue>;
+}
+
+impl IntoForm for mail_parser::HeaderValue<'_> {
+    fn into_form(self, form: &HeaderForm, all: bool) -> Option<EmailValue> {
+        match form {
+            HeaderForm::Raw | HeaderForm::Text => self.into_text(),
+            HeaderForm::URLs => self.into_url(),
+            HeaderForm::MessageIds => self.into_keyword(),
+            HeaderForm::Addresses | HeaderForm::GroupedAddresses => self.into_address(),
+            HeaderForm::Date => self.into_date(),
+        }
+        .into_form(form, all)
+    }
+}
+
+impl IntoForm for super::HeaderValue {
+    fn into_form(self, form: &HeaderForm, _all: bool) -> Option<EmailValue> {
+        match (form, self) {
+            (HeaderForm::Raw | HeaderForm::Text, super::HeaderValue::Text(value)) => {
+                EmailValue::Text { value }.into()
+            }
+            (HeaderForm::MessageIds | HeaderForm::URLs, super::HeaderValue::TextList(value)) => {
+                EmailValue::TextList { value }.into()
+            }
+            (HeaderForm::Date, super::HeaderValue::Timestamp(ts)) => EmailValue::Date {
+                value: from_timestamp(ts),
+            }
+            .into(),
+            (HeaderForm::Addresses, super::HeaderValue::Addresses(value)) => {
+                EmailValue::Addresses { value }.into()
+            }
+            (HeaderForm::Addresses, super::HeaderValue::GroupedAddresses(value)) => {
+                EmailValue::Addresses {
+                    value: value.into_iter().flat_map(|g| g.addresses).collect(),
+                }
+                .into()
+            }
+            (HeaderForm::GroupedAddresses, super::HeaderValue::GroupedAddresses(value)) => {
+                EmailValue::GroupedAddresses { value }.into()
+            }
+            (HeaderForm::GroupedAddresses, super::HeaderValue::Addresses(value)) => {
+                EmailValue::GroupedAddresses {
+                    value: vec![value.into()],
+                }
+                .into()
+            }
+            _ => None,
+        }
+    }
+}
+
+impl IntoForm for Vec<super::HeaderValue> {
+    fn into_form(mut self, form: &HeaderForm, all: bool) -> Option<EmailValue> {
+        if !all {
+            return self.pop()?.into_form(form, false);
+        }
+
+        match form {
+            HeaderForm::Raw | HeaderForm::Text => EmailValue::TextList {
+                value: self.into_iter().filter_map(|v| v.into_text()).collect(),
+            }
+            .into(),
+            HeaderForm::MessageIds | HeaderForm::URLs => EmailValue::TextListMany {
+                value: self
+                    .into_iter()
+                    .filter_map(|v| v.into_text_list())
+                    .collect(),
+            }
+            .into(),
+            HeaderForm::Date => EmailValue::DateList {
+                value: self
+                    .into_iter()
+                    .filter_map(|v| v.into_timestamp().map(from_timestamp))
+                    .collect(),
+            }
+            .into(),
+            HeaderForm::Addresses => EmailValue::AddressesList {
+                value: self
+                    .into_iter()
+                    .filter_map(|v| v.into_addresses())
+                    .collect(),
+            }
+            .into(),
+            HeaderForm::GroupedAddresses => EmailValue::GroupedAddressesList {
+                value: self
+                    .into_iter()
+                    .filter_map(|v| v.into_grouped_addresses())
+                    .collect(),
+            }
+            .into(),
+        }
+    }
+}
+
+pub fn from_timestamp(timestamp: i64) -> DateTime<Utc> {
+    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc)
+}
+
+impl MessageData {
+    pub fn header(
+        &mut self,
+        header: &RfcHeader,
+        form: &HeaderForm,
+        all: bool,
+    ) -> Option<EmailValue> {
+        self.headers.remove(header)?.into_form(form, all)
+    }
+}
+
+impl HeaderForm {
+    pub fn parse_offsets<'x>(
+        &self,
+        offsets: &[HeaderOffset],
+        raw_message: &'x [u8],
+        all: bool,
+    ) -> HeaderValue<'x> {
+        let mut header_values: Vec<HeaderValue> = offsets
+            .iter()
+            .skip(if !all && offsets.len() > 1 {
+                offsets.len() - 1
+            } else {
+                0
+            })
+            .map(|offset| {
+                (raw_message
+                    .get(offset.start..offset.end)
+                    .map_or(HeaderValue::Empty, |bytes| match self {
+                        HeaderForm::Raw => {
+                            HeaderValue::Text(std::str::from_utf8(bytes).map_or_else(
+                                |_| String::from_utf8_lossy(bytes).trim().to_string().into(),
+                                |str| str.trim().to_string().into(),
+                            ))
+                        }
+                        HeaderForm::Text => parse_unstructured(&mut MessageStream::new(bytes)),
+                        HeaderForm::Addresses => parse_address(&mut MessageStream::new(bytes)),
+                        HeaderForm::GroupedAddresses => {
+                            parse_address(&mut MessageStream::new(bytes))
+                        }
+                        HeaderForm::MessageIds => parse_id(&mut MessageStream::new(bytes)),
+                        HeaderForm::Date => parse_date(&mut MessageStream::new(bytes)),
+                        HeaderForm::URLs => parse_address(&mut MessageStream::new(bytes)),
+                    }))
+                .into_owned()
+            })
+            .collect();
+        if all {
+            HeaderValue::Collection(header_values)
+        } else {
+            header_values.pop().unwrap_or_default()
+        }
     }
 }

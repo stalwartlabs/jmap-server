@@ -13,7 +13,7 @@ use crate::{
     MethodError,
 };
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ResultReference {
     #[serde(rename = "resultOf")]
     pub result_of: String,
@@ -26,12 +26,35 @@ pub struct ResultReference {
 pub enum MaybeResultReference<T> {
     Value(T),
     Reference(ResultReference),
+    None,
 }
 
-#[derive(Debug, Clone)]
+impl<T> Default for MaybeResultReference<T> {
+    fn default() -> Self {
+        MaybeResultReference::None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum MaybeIdReference {
     Value(JMAPId),
     Reference(String),
+}
+
+impl MaybeIdReference {
+    pub fn unwrap_id(self) -> JMAPId {
+        match self {
+            MaybeIdReference::Value(id) => id,
+            _ => u64::MAX.into(),
+        }
+    }
+
+    pub fn as_id(&self) -> JMAPId {
+        match self {
+            MaybeIdReference::Value(id) => *id,
+            _ => u64::MAX.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]

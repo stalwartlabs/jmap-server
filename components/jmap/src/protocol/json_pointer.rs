@@ -10,7 +10,7 @@ use crate::{
 
 use super::json::JSONValue;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum JSONPointer {
     Root,
     Wildcard,

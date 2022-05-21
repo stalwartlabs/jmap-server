@@ -7,13 +7,13 @@ use jmap::{
     id::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::Object,
     protocol::json_pointer::JSONPointer,
-    request::ResultReference,
+    request::{MaybeIdReference, MaybeResultReference, ResultReference},
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
     RfcHeader,
 };
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+
 use store::{
     chrono::{DateTime, Utc},
     core::{collection::Collection, tag::Tag},
@@ -22,170 +22,36 @@ use store::{
 
 use super::{HeaderName, MessageField};
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct Email {
-    #[serde(rename = "id")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<JMAPId>,
-
-    #[serde(rename = "blobId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blob_id: Option<JMAPBlob>,
-
-    #[serde(rename = "threadId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thread_id: Option<JMAPId>,
-
-    #[serde(rename = "mailboxIds")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mailbox_ids: Option<HashMap<JMAPId, bool>>,
-
-    #[serde(rename = "#mailboxIds")]
-    #[serde(skip_serializing)]
-    pub mailbox_ids_ref: Option<ResultReference>,
-
-    #[serde(rename = "keywords")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keywords: Option<HashMap<Keyword, bool>>,
-
-    #[serde(rename = "size")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<usize>,
-
-    #[serde(rename = "receivedAt")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub received_at: Option<DateTime<Utc>>,
-
-    #[serde(rename = "messageId", alias = "header:Message-ID:asMessageIds")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message_id: Option<Vec<String>>,
-
-    #[serde(rename = "inReplyTo", alias = "header:In-Reply-To:asMessageIds")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub in_reply_to: Option<Vec<String>>,
-
-    #[serde(rename = "references", alias = "header:References:asMessageIds")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub references: Option<Vec<String>>,
-
-    #[serde(rename = "sender", alias = "header:Sender:asAddresses")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sender: Option<Vec<EmailAddress>>,
-
-    #[serde(rename = "from", alias = "header:From:asAddresses")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from: Option<Vec<EmailAddress>>,
-
-    #[serde(rename = "to", alias = "header:To:asAddresses")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<Vec<EmailAddress>>,
-
-    #[serde(rename = "cc", alias = "header:Cc:asAddresses")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cc: Option<Vec<EmailAddress>>,
-
-    #[serde(rename = "bcc", alias = "header:Bcc:asAddresses")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub bcc: Option<Vec<EmailAddress>>,
-
-    #[serde(rename = "replyTo", alias = "header:Reply-To:asAddresses")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reply_to: Option<Vec<EmailAddress>>,
-
-    #[serde(rename = "subject", alias = "header:Subject:asText")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject: Option<String>,
-
-    #[serde(rename = "sentAt", alias = "header:Date:asDate")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sent_at: Option<DateTime<Utc>>,
-
-    #[serde(rename = "bodyStructure")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body_structure: Option<Box<EmailBodyPart>>,
-
-    #[serde(rename = "bodyValues")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body_values: Option<HashMap<String, EmailBodyValue>>,
-
-    #[serde(rename = "textBody")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_body: Option<Vec<EmailBodyPart>>,
-
-    #[serde(rename = "htmlBody")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub html_body: Option<Vec<EmailBodyPart>>,
-
-    #[serde(rename = "attachments")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attachments: Option<Vec<EmailBodyPart>>,
-
-    #[serde(rename = "hasAttachment")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub has_attachment: Option<bool>,
-
-    #[serde(rename = "preview")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<String>,
-
-    #[serde(flatten)]
-    #[serde(skip_serializing_if = "SetParameters::is_empty")]
-    pub params: SetParameters,
+    pub properties: HashMap<Property, EmailValue>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+impl Email {
+    pub fn insert(&mut self, property: Property, value: impl Into<EmailValue>) {
+        self.properties.insert(property, value.into());
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct EmailBodyPart {
-    #[serde(rename = "partId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub part_id: Option<String>,
+    pub properties: HashMap<BodyProperty, EmailValue>,
+}
 
-    #[serde(rename = "blobId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub blob_id: Option<JMAPBlob>,
+impl EmailBodyPart {
+    pub fn get_text(&self, property: BodyProperty) -> Option<&str> {
+        self.properties.get(&property).and_then(|v| match v {
+            EmailValue::Text { value } => Some(value.as_str()),
+            _ => None,
+        })
+    }
 
-    #[serde(rename = "size")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub size: Option<usize>,
-
-    #[serde(rename = "headers")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub headers: Option<Vec<EmailHeader>>,
-
-    #[serde(rename = "name")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    #[serde(rename = "type")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub type_: Option<String>,
-
-    #[serde(rename = "charset")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub charset: Option<String>,
-
-    #[serde(rename = "disposition")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disposition: Option<String>,
-
-    #[serde(rename = "cid")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cid: Option<String>,
-
-    #[serde(rename = "language")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<Vec<String>>,
-
-    #[serde(rename = "location")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub location: Option<String>,
-
-    #[serde(rename = "subParts")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sub_parts: Option<Vec<EmailBodyPart>>,
-
-    #[serde(flatten)]
-    #[serde(skip_serializing_if = "SetParameters::is_empty")]
-    pub params: SetParameters,
+    pub fn get_blob(&self, property: BodyProperty) -> Option<&JMAPBlob> {
+        self.properties.get(&property).and_then(|v| match v {
+            EmailValue::Blob { value } => Some(value),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -409,7 +275,7 @@ impl Default for Property {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum BodyProperty {
     PartId,
     BlobId,
@@ -578,425 +444,115 @@ impl Display for HeaderForm {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct SetParameters {
-    pub patch_mailbox: HashMap<JMAPId, bool>,
-    pub patch_keyword: HashMap<Keyword, bool>,
-    pub headers: Vec<HeaderValue>,
-}
-
-impl SetParameters {
-    pub fn is_empty(&self) -> bool {
-        self.headers.is_empty()
-    }
-}
-
 #[derive(Debug, Clone)]
-pub enum HeaderValue {
-    AsRaw {
-        name: HeaderName,
+pub enum EmailValue {
+    Id {
+        value: JMAPId,
+    },
+    Blob {
+        value: JMAPBlob,
+    },
+    Size {
+        value: usize,
+    },
+    Bool {
+        value: bool,
+    },
+    Keywords {
+        value: HashMap<Keyword, bool>,
+        set: bool,
+    },
+    MailboxIds {
+        value: HashMap<MaybeIdReference, bool>,
+        set: bool,
+    },
+    ResultReference {
+        value: ResultReference,
+    },
+    BodyPart {
+        value: EmailBodyPart,
+    },
+    BodyPartList {
+        value: Vec<EmailBodyPart>,
+    },
+    BodyValues {
+        value: HashMap<String, EmailBodyValue>,
+    },
+    Text {
         value: String,
     },
-    AsRawAll {
-        name: HeaderName,
+    TextList {
         value: Vec<String>,
     },
-    AsDate {
-        name: HeaderName,
+    TextListMany {
+        value: Vec<Vec<String>>,
+    },
+    Date {
         value: DateTime<Utc>,
     },
-    AsDateAll {
-        name: HeaderName,
+    DateList {
         value: Vec<DateTime<Utc>>,
     },
-    AsText {
-        name: HeaderName,
-        value: String,
-    },
-    AsTextAll {
-        name: HeaderName,
-        value: Vec<String>,
-    },
-    AsURLs {
-        name: HeaderName,
-        value: Vec<String>,
-    },
-    AsURLsAll {
-        name: HeaderName,
-        value: Vec<Vec<String>>,
-    },
-    AsMessageIds {
-        name: HeaderName,
-        value: Vec<String>,
-    },
-    AsMessageIdsAll {
-        name: HeaderName,
-        value: Vec<Vec<String>>,
-    },
-    AsAddresses {
-        name: HeaderName,
+    Addresses {
         value: Vec<EmailAddress>,
     },
-    AsAddressesAll {
-        name: HeaderName,
+    AddressesList {
         value: Vec<Vec<EmailAddress>>,
     },
-    AsGroupedAddresses {
-        name: HeaderName,
+    GroupedAddresses {
         value: Vec<EmailAddressGroup>,
     },
-    AsGroupedAddressesAll {
-        name: HeaderName,
+    GroupedAddressesList {
         value: Vec<Vec<EmailAddressGroup>>,
+    },
+    Headers {
+        value: Vec<EmailHeader>,
     },
 }
 
-// SetParameters de/serialization
-impl Serialize for SetParameters {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(self.headers.len()))?;
+impl From<JMAPId> for EmailValue {
+    fn from(value: JMAPId) -> Self {
+        EmailValue::Id { value }
+    }
+}
 
-        for header in &self.headers {
-            match header {
-                HeaderValue::AsRaw { name, value } => {
-                    map.serialize_entry(&format!("header:{}", name), &value)?
-                }
-                HeaderValue::AsRawAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:all", name), &value)?
-                }
-                HeaderValue::AsDate { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asDate", name), &value)?
-                }
-                HeaderValue::AsDateAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asDate:all", name), &value)?
-                }
-                HeaderValue::AsText { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asText", name), &value)?
-                }
-                HeaderValue::AsTextAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asText:all", name), &value)?
-                }
-                HeaderValue::AsURLs { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asURLs", name), &value)?
-                }
-                HeaderValue::AsURLsAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asURLs:all", name), &value)?
-                }
-                HeaderValue::AsMessageIds { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asMessageIds", name), &value)?
-                }
-                HeaderValue::AsMessageIdsAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asMessageIds:all", name), &value)?
-                }
-                HeaderValue::AsAddresses { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asAddresses", name), &value)?
-                }
-                HeaderValue::AsAddressesAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asAddresses:all", name), &value)?
-                }
-                HeaderValue::AsGroupedAddresses { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asGroupedAddresses", name), &value)?
-                }
-                HeaderValue::AsGroupedAddressesAll { name, value } => {
-                    map.serialize_entry(&format!("header:{}:asGroupedAddresses:all", name), &value)?
-                }
-            }
+impl From<JMAPBlob> for EmailValue {
+    fn from(value: JMAPBlob) -> Self {
+        EmailValue::Blob { value }
+    }
+}
+
+impl From<String> for EmailValue {
+    fn from(value: String) -> Self {
+        EmailValue::Text { value }
+    }
+}
+
+impl From<Vec<String>> for EmailValue {
+    fn from(value: Vec<String>) -> Self {
+        EmailValue::TextList { value }
+    }
+}
+
+impl From<usize> for EmailValue {
+    fn from(value: usize) -> Self {
+        EmailValue::Size { value }
+    }
+}
+
+impl EmailValue {
+    pub fn get_mailbox_ids(&mut self) -> Option<&mut HashMap<MaybeIdReference, bool>> {
+        match self {
+            EmailValue::MailboxIds { value, .. } => Some(value),
+            _ => None,
         }
-        map.end()
-    }
-}
-struct SetParametersVisitor;
-
-impl<'de> serde::de::Visitor<'de> for SetParametersVisitor {
-    type Value = SetParameters;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail property")
     }
 
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        let mut params = SetParameters::default();
-        while let Some(key) = map.next_key::<&str>()? {
-            if key.starts_with("header:") {
-                if let Some(header) = HeaderProperty::parse(key) {
-                    let header_value = match header.form {
-                        HeaderForm::Raw => {
-                            if header.all {
-                                HeaderValue::AsRawAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsRaw {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                        HeaderForm::Text => {
-                            if header.all {
-                                HeaderValue::AsTextAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsText {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                        HeaderForm::Addresses => {
-                            if header.all {
-                                HeaderValue::AsAddressesAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsAddresses {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                        HeaderForm::GroupedAddresses => {
-                            if header.all {
-                                HeaderValue::AsGroupedAddressesAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsGroupedAddresses {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                        HeaderForm::MessageIds => {
-                            if header.all {
-                                HeaderValue::AsMessageIdsAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsMessageIds {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                        HeaderForm::Date => {
-                            if header.all {
-                                HeaderValue::AsDateAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsDate {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                        HeaderForm::URLs => {
-                            if header.all {
-                                HeaderValue::AsURLsAll {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            } else {
-                                HeaderValue::AsURLs {
-                                    name: header.header,
-                                    value: map.next_value()?,
-                                }
-                            }
-                        }
-                    };
-                    params.headers.push(header_value);
-                }
-            } else if let Some(pointer) = JSONPointer::parse(key) {
-                match pointer {
-                    JSONPointer::Path(path) if path.len() == 2 => {
-                        if let (
-                            Some(JSONPointer::String(property)),
-                            Some(JSONPointer::String(id)),
-                        ) = (path.get(0), path.get(1))
-                        {
-                            let value = map.next_value::<Option<bool>>()?.unwrap_or(false);
-                            match Property::parse(property) {
-                                Some(Property::MailboxIds) => {
-                                    if let Some(id) = JMAPId::parse(id) {
-                                        params.patch_mailbox.insert(id, value);
-                                    }
-                                }
-                                Some(Property::Keywords) => {
-                                    params.patch_keyword.insert(Keyword::parse(id), value);
-                                }
-                                _ => (),
-                            }
-                        }
-                    }
-                    _ => (),
-                }
-            }
+    pub fn get_keywords(&mut self) -> Option<&mut HashMap<Keyword, bool>> {
+        match self {
+            EmailValue::Keywords { value, .. } => Some(value),
+            _ => None,
         }
-
-        Ok(params)
-    }
-}
-
-impl<'de> Deserialize<'de> for SetParameters {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(SetParametersVisitor)
-    }
-}
-
-// Property de/serialization
-impl Serialize for Property {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-struct PropertyVisitor;
-
-impl<'de> serde::de::Visitor<'de> for PropertyVisitor {
-    type Value = Property;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail property")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Property::parse(v).ok_or_else(|| E::custom(format!("Invalid property: {}", v)))
-    }
-}
-
-impl<'de> Deserialize<'de> for Property {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(PropertyVisitor)
-    }
-}
-
-// BodyProperty de/serialization
-impl Serialize for BodyProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-struct BodyPropertyVisitor;
-
-impl<'de> serde::de::Visitor<'de> for BodyPropertyVisitor {
-    type Value = BodyProperty;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP body property")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        BodyProperty::parse(v).ok_or_else(|| E::custom(format!("Invalid body property: {}", v)))
-    }
-}
-
-impl<'de> Deserialize<'de> for BodyProperty {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(BodyPropertyVisitor)
-    }
-}
-
-// HeaderProperty de/serialization
-impl Serialize for HeaderProperty {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-struct HeaderPropertyVisitor;
-
-impl<'de> serde::de::Visitor<'de> for HeaderPropertyVisitor {
-    type Value = HeaderProperty;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP header property")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        HeaderProperty::parse(v).ok_or_else(|| E::custom(format!("Invalid property: {}", v)))
-    }
-}
-
-impl<'de> Deserialize<'de> for HeaderProperty {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(HeaderPropertyVisitor)
-    }
-}
-
-// Keyword de/serialization
-impl Serialize for Keyword {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-struct KeywordVisitor;
-
-impl<'de> serde::de::Visitor<'de> for KeywordVisitor {
-    type Value = Keyword;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP keyword")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(Keyword::parse(v))
-    }
-}
-
-impl<'de> Deserialize<'de> for Keyword {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(KeywordVisitor)
     }
 }
 
@@ -1017,7 +573,10 @@ impl Object for Email {
     type Value = ();
 
     fn id(&self) -> Option<&JMAPId> {
-        self.id.as_ref()
+        self.properties.get(&Property::Id).and_then(|id| match id {
+            EmailValue::Id { value } => Some(value),
+            _ => None,
+        })
     }
 
     fn required() -> &'static [Self::Property] {
