@@ -80,7 +80,7 @@ where
                 O::default_properties()
             },
             response: GetResponse {
-                account_id: request.account_id.clone(),
+                account_id: request.account_id,
                 state: store.get_state(account_id, collection)?,
                 list: Vec::with_capacity(request_ids.len()),
                 not_found: Vec::new(),

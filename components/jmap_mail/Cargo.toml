@@ -12,3 +12,4 @@ store = { path = "../store" }
 mail-parser = { path = "/home/vagrant/code/mail-parser" }
 mail-builder = { path = "/home/vagrant/code/mail-builder" }
 serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0"

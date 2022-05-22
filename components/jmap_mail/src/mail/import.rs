@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
@@ -24,19 +23,20 @@ use store::core::JMAPIdPrefix;
 use store::nlp::Language;
 use store::read::comparator::Comparator;
 use store::read::filter::{FieldValue, Filter};
-use store::read::{default_filter_mapper, FilterMapper};
+use store::read::FilterMapper;
 use store::serialize::leb128::Leb128;
 use store::serialize::StoreSerialize;
 
 use store::tracing::log::error;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
-use store::{roaring::RoaringBitmap, AccountId, JMAPStore, Store, ThreadId};
+use store::{AccountId, JMAPStore, Store, ThreadId};
 use store::{DocumentId, Integer, LongInteger};
 
 use crate::mail::MessageField;
 
 use super::conv::HeaderValueInto;
+use super::parse::get_message_part;
 use super::schema::{Email, Keyword, Property};
 use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PARTS};
 
@@ -127,10 +127,6 @@ pub trait JMAPMailImport {
         documents: &mut WriteBatch,
         thread_ids: Vec<ThreadId>,
     ) -> store::Result<ThreadId>;
-}
-
-pub fn get_message_part(raw_message: &[u8], part_id: u32) -> Option<Cow<[u8]>> {
-    None
 }
 
 impl<T> JMAPMailImport for JMAPStore<T>

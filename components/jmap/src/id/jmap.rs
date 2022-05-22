@@ -2,8 +2,6 @@ use std::ops::Deref;
 
 use store::DocumentId;
 
-use crate::{error::method::MethodError, protocol::json::JSONValue};
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct JMAPId {
     id: u64,
@@ -130,27 +128,5 @@ impl<'de> serde::Deserialize<'de> for JMAPId {
 impl std::fmt::Display for JMAPId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "i{:02x}", self.id)
-    }
-}
-
-impl JSONValue {
-    pub fn to_jmap_id(&self) -> Option<u64> {
-        match self {
-            //JSONValue::String(string) => JMAPId::from_jmap_string(string),
-            _ => None,
-        }
-    }
-
-    pub fn parse_jmap_id(self, optional: bool) -> crate::Result<Option<u64>> {
-        /*match self {
-            JSONValue::String(string) => Ok(Some(JMAPId::from_jmap_string(&string).ok_or_else(
-                || MethodError::InvalidArguments("Failed to parse JMAP Id.".to_string()),
-            )?)),
-            JSONValue::Null if optional => Ok(None),
-            _ => Err(MethodError::InvalidArguments(
-                "Expected string.".to_string(),
-            )),
-        }*/
-        Ok(None)
     }
 }

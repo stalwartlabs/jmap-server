@@ -16,9 +16,9 @@ use mail_builder::headers::text::Text;
 use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
-use mail_parser::RfcHeader;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::core::collection::Collection;
+use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::write::options::{IndexOptions, Options};
@@ -26,7 +26,7 @@ use store::write::options::{IndexOptions, Options};
 use store::blob::BlobId;
 use store::{AccountId, DocumentId, JMAPStore, Store};
 
-use super::import::get_message_part;
+use super::parse::get_message_part;
 use super::schema::{
     BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailValue, HeaderForm, Keyword, Property,
 };
@@ -37,7 +37,7 @@ impl SetObject for Email {
 
     type NextInvocation = ();
 
-    fn map_references(&self, fnc: impl FnMut(&str) -> Option<jmap::id::jmap::JMAPId>) {
+    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<jmap::id::jmap::JMAPId>) {
         todo!()
     }
 }
@@ -47,6 +47,11 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mail_set(&self, request: SetRequest<Email>) -> jmap::Result<SetResponse<Email>>;
+    fn mail_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<Option<DocumentId>>;
 }
 
 impl<T> JMAPSetMail<T> for JMAPStore<T>
@@ -60,7 +65,7 @@ where
             .unwrap_or_default();
         let account_id = helper.account_id;
 
-        helper.create(|_create_id, item, batch, document| {
+        helper.create(|_create_id, item, helper, document| {
             let mut builder = MessageBuilder::new();
             let mut fields = TinyORM::<Email>::new();
 
@@ -315,7 +320,9 @@ where
 
             // Add mailbox tags
             for mailbox_tag in fields.get_tags(&Property::MailboxIds).unwrap() {
-                batch.log_child_update(Collection::Mailbox, mailbox_tag.as_id() as store::JMAPId);
+                helper
+                    .changes
+                    .log_child_update(Collection::Mailbox, mailbox_tag.as_id() as store::JMAPId);
             }
 
             // Parse message
@@ -328,7 +335,7 @@ where
             let lock = self.lock_account(account_id, Collection::Mail);
 
             // Obtain thread Id
-            let thread_id = self.mail_set_thread(batch, document)?;
+            let thread_id = self.mail_set_thread(&mut helper.changes, document)?;
 
             // Build email result
             let mut email = Email::default();
@@ -343,7 +350,7 @@ where
             Ok((email, lock.into()))
         })?;
 
-        helper.update(|id, item, batch, document| {
+        helper.update(|id, item, helper, document| {
             let current_fields = self
                 .get_orm::<Email>(account_id, id.get_document_id())?
                 .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
@@ -446,7 +453,9 @@ where
             // Log mailbox changes
             if !changed_mailboxes.is_empty() {
                 for changed_mailbox_id in changed_mailboxes {
-                    batch.log_child_update(Collection::Mailbox, changed_mailbox_id);
+                    helper
+                        .changes
+                        .log_child_update(Collection::Mailbox, changed_mailbox_id);
                 }
             }
 
@@ -456,67 +465,75 @@ where
             Ok(None)
         })?;
 
-        helper.destroy(|id, _batch, document| {
-            let document_id = id.get_document_id();
-            let metadata_blob_id = if let Some(metadata_blob_id) = self
-                .get_document_value::<BlobId>(
-                    account_id,
-                    Collection::Mail,
-                    document_id,
-                    MessageField::Metadata.into(),
-                )? {
-                metadata_blob_id
-            } else {
-                return Ok(());
-            };
-
-            // Remove index entries
-            MessageData::from_metadata(
-                &self
-                    .blob_get(&metadata_blob_id)?
-                    .ok_or(StoreError::DataCorruption)?,
-            )
-            .ok_or(StoreError::DataCorruption)?
-            .build_index(document, false)?;
-
-            // Remove thread related data
-            let thread_id = self
-                .get_document_value::<DocumentId>(
-                    account_id,
-                    Collection::Mail,
-                    document_id,
-                    MessageField::ThreadId.into(),
-                )?
-                .ok_or(StoreError::DataCorruption)?;
-            document.tag(
-                MessageField::ThreadId,
-                Tag::Id(thread_id),
-                IndexOptions::new().clear(),
-            );
-            document.number(
-                MessageField::ThreadId,
-                thread_id,
-                IndexOptions::new().store().clear(),
-            );
-
-            // Unlink metadata
-            document.blob(metadata_blob_id, IndexOptions::new().clear());
-            document.binary(
-                MessageField::Metadata,
-                Vec::with_capacity(0),
-                IndexOptions::new().clear(),
-            );
-
-            // Delete ORM
-            let fields = self
-                .get_orm::<Email>(account_id, document_id)?
-                .ok_or(StoreError::DataCorruption)?;
-            fields.delete(document);
-
+        helper.destroy(|id, _helper, document| {
+            self.mail_delete(account_id, document)?;
             Ok(())
         })?;
 
         helper.into_response()
+    }
+
+    fn mail_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<Option<DocumentId>> {
+        let document_id = document.document_id;
+        let metadata_blob_id = if let Some(metadata_blob_id) = self.get_document_value::<BlobId>(
+            account_id,
+            Collection::Mail,
+            document_id,
+            MessageField::Metadata.into(),
+        )? {
+            metadata_blob_id
+        } else {
+            return Ok(None);
+        };
+
+        // Remove index entries
+        MessageData::from_metadata(
+            &self
+                .blob_get(&metadata_blob_id)?
+                .ok_or(StoreError::DataCorruption)?,
+        )
+        .ok_or(StoreError::DataCorruption)?
+        .build_index(document, false)?;
+
+        // Remove thread related data
+        let thread_id = self
+            .get_document_value::<DocumentId>(
+                account_id,
+                Collection::Mail,
+                document_id,
+                MessageField::ThreadId.into(),
+            )?
+            .ok_or(StoreError::DataCorruption)?;
+        document.tag(
+            MessageField::ThreadId,
+            Tag::Id(thread_id),
+            IndexOptions::new().clear(),
+        );
+        document.number(
+            MessageField::ThreadId,
+            thread_id,
+            IndexOptions::new().store().clear(),
+        );
+
+        // Unlink metadata
+        document.blob(metadata_blob_id, IndexOptions::new().clear());
+        document.binary(
+            MessageField::Metadata,
+            Vec::with_capacity(0),
+            IndexOptions::new().clear(),
+        );
+
+        // Delete ORM
+        let fields = self
+            .get_orm::<Email>(account_id, document_id)?
+            .ok_or(StoreError::DataCorruption)?;
+        fields.delete(document);
+
+        Ok(thread_id.into())
     }
 }
 

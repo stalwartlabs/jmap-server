@@ -496,3 +496,437 @@ mod tests {
     }
 }
 */
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use jmap::protocol::json::JSONValue;
+
+    #[test]
+    fn test_json_transform() {
+        for (value, expected_result, expected_result_all) in [
+            (
+                JSONValue::String("hello".into()),
+                JSONValue::String("hello".into()),
+                JSONValue::Array(vec![JSONValue::String("hello".into())]),
+            ),
+            (
+                JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+                JSONValue::String("world".into()),
+                JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+            ),
+        ] {
+            assert_eq!(
+                super::transform_json_string(value.clone(), false),
+                expected_result
+            );
+            assert_eq!(
+                super::transform_json_string(value, true),
+                expected_result_all
+            );
+        }
+
+        for (value, is_collection, expected_result, expected_result_all) in [
+            (
+                JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+                false,
+                JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ]),
+                JSONValue::Array(vec![JSONValue::Array(vec![
+                    JSONValue::String("hello".into()),
+                    JSONValue::String("world".into()),
+                ])]),
+            ),
+            (
+                JSONValue::Array(vec![
+                    JSONValue::Array(vec![
+                        JSONValue::String("hello".into()),
+                        JSONValue::String("world".into()),
+                    ]),
+                    JSONValue::Array(vec![
+                        JSONValue::String("hola".into()),
+                        JSONValue::String("mundo".into()),
+                    ]),
+                ]),
+                true,
+                JSONValue::Array(vec![
+                    JSONValue::String("hola".into()),
+                    JSONValue::String("mundo".into()),
+                ]),
+                JSONValue::Array(vec![
+                    JSONValue::Array(vec![
+                        JSONValue::String("hello".into()),
+                        JSONValue::String("world".into()),
+                    ]),
+                    JSONValue::Array(vec![
+                        JSONValue::String("hola".into()),
+                        JSONValue::String("mundo".into()),
+                    ]),
+                ]),
+            ),
+        ] {
+            assert_eq!(
+                super::transform_json_stringlist(value.clone(), is_collection, false),
+                expected_result
+            );
+            assert_eq!(
+                super::transform_json_stringlist(value, is_collection, true),
+                expected_result_all
+            );
+        }
+
+        fn make_email(name: &str, addr: &str) -> JSONValue {
+            let mut email = HashMap::new();
+            email.insert("name".to_string(), JSONValue::String(name.to_string()));
+            email.insert("email".to_string(), JSONValue::String(addr.to_string()));
+            JSONValue::Object(email)
+        }
+
+        fn make_group(name: Option<&str>, addresses: JSONValue) -> JSONValue {
+            let mut email = HashMap::new();
+            email.insert(
+                "name".to_string(),
+                name.map_or(JSONValue::Null, |name| JSONValue::String(name.to_string())),
+            );
+            email.insert("addresses".to_string(), addresses);
+            JSONValue::Object(email)
+        }
+
+        fn make_list(value1: JSONValue, value2: JSONValue) -> JSONValue {
+            JSONValue::Array(vec![value1, value2])
+        }
+
+        fn make_list_many(
+            value1: JSONValue,
+            value2: JSONValue,
+            value3: JSONValue,
+            value4: JSONValue,
+        ) -> JSONValue {
+            JSONValue::Array(vec![value1, value2, value3, value4])
+        }
+
+        fn make_list_single(value: JSONValue) -> JSONValue {
+            JSONValue::Array(vec![value])
+        }
+
+        for (
+            value,
+            is_grouped,
+            is_collection,
+            expected_result_single_addr,
+            expected_result_all_addr,
+            expected_result_single_group,
+            expected_result_all_group,
+        ) in [
+            (
+                make_list(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                ),
+                false,
+                false,
+                make_list(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                ),
+                make_list_single(make_list(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                )),
+                make_list_single(make_group(
+                    None,
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                )),
+                make_list_single(make_list_single(make_group(
+                    None,
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                ))),
+            ),
+            (
+                make_list(
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                    make_list(
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                ),
+                false,
+                true,
+                make_list(
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                ),
+                make_list(
+                    make_list(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                    ),
+                    make_list(
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                ),
+                make_list_single(make_group(
+                    None,
+                    make_list(
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                )),
+                make_list(
+                    make_list_single(make_group(
+                        None,
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    )),
+                    make_list_single(make_group(
+                        None,
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    )),
+                ),
+            ),
+            (
+                make_list(
+                    make_group(
+                        "Group 1".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 2".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                ),
+                true,
+                false,
+                make_list_many(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                ),
+                make_list_single(make_list_many(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                )),
+                make_list(
+                    make_group(
+                        "Group 1".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 2".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                ),
+                make_list_single(make_list(
+                    make_group(
+                        "Group 1".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 2".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                )),
+            ),
+            (
+                make_list(
+                    make_list(
+                        make_group(
+                            "Group 1".into(),
+                            make_list(
+                                make_email("Tim Hortons", "tim@hortos.com"),
+                                make_email("Ronald McDowell", "ronnie@mac.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 2".into(),
+                            make_list(
+                                make_email("Wendy D", "wendy@d.com"),
+                                make_email("Kentucky Frango", "kentucky@frango.com"),
+                            ),
+                        ),
+                    ),
+                    make_list(
+                        make_group(
+                            "Group 3".into(),
+                            make_list(
+                                make_email("John Doe", "jdoe@domain.com"),
+                                make_email("Jane Smith", "jsmith@test.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 4".into(),
+                            make_list(
+                                make_email("Juan Gomez", "jgomez@dominio.com"),
+                                make_email("Juanita Perez", "jperez@prueba.com"),
+                            ),
+                        ),
+                    ),
+                ),
+                true,
+                true,
+                make_list_many(
+                    make_email("John Doe", "jdoe@domain.com"),
+                    make_email("Jane Smith", "jsmith@test.com"),
+                    make_email("Juan Gomez", "jgomez@dominio.com"),
+                    make_email("Juanita Perez", "jperez@prueba.com"),
+                ),
+                make_list(
+                    make_list_many(
+                        make_email("Tim Hortons", "tim@hortos.com"),
+                        make_email("Ronald McDowell", "ronnie@mac.com"),
+                        make_email("Wendy D", "wendy@d.com"),
+                        make_email("Kentucky Frango", "kentucky@frango.com"),
+                    ),
+                    make_list_many(
+                        make_email("John Doe", "jdoe@domain.com"),
+                        make_email("Jane Smith", "jsmith@test.com"),
+                        make_email("Juan Gomez", "jgomez@dominio.com"),
+                        make_email("Juanita Perez", "jperez@prueba.com"),
+                    ),
+                ),
+                make_list(
+                    make_group(
+                        "Group 3".into(),
+                        make_list(
+                            make_email("John Doe", "jdoe@domain.com"),
+                            make_email("Jane Smith", "jsmith@test.com"),
+                        ),
+                    ),
+                    make_group(
+                        "Group 4".into(),
+                        make_list(
+                            make_email("Juan Gomez", "jgomez@dominio.com"),
+                            make_email("Juanita Perez", "jperez@prueba.com"),
+                        ),
+                    ),
+                ),
+                make_list(
+                    make_list(
+                        make_group(
+                            "Group 1".into(),
+                            make_list(
+                                make_email("Tim Hortons", "tim@hortos.com"),
+                                make_email("Ronald McDowell", "ronnie@mac.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 2".into(),
+                            make_list(
+                                make_email("Wendy D", "wendy@d.com"),
+                                make_email("Kentucky Frango", "kentucky@frango.com"),
+                            ),
+                        ),
+                    ),
+                    make_list(
+                        make_group(
+                            "Group 3".into(),
+                            make_list(
+                                make_email("John Doe", "jdoe@domain.com"),
+                                make_email("Jane Smith", "jsmith@test.com"),
+                            ),
+                        ),
+                        make_group(
+                            "Group 4".into(),
+                            make_list(
+                                make_email("Juan Gomez", "jgomez@dominio.com"),
+                                make_email("Juanita Perez", "jperez@prueba.com"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ] {
+            assert_eq!(
+                super::transform_json_emailaddress(
+                    value.clone(),
+                    is_grouped,
+                    is_collection,
+                    false,
+                    false
+                ),
+                expected_result_single_addr,
+                "single+address"
+            );
+            assert_eq!(
+                super::transform_json_emailaddress(
+                    value.clone(),
+                    is_grouped,
+                    is_collection,
+                    false,
+                    true
+                ),
+                expected_result_all_addr,
+                "all+address"
+            );
+            assert_eq!(
+                super::transform_json_emailaddress(
+                    value.clone(),
+                    is_grouped,
+                    is_collection,
+                    true,
+                    false
+                ),
+                expected_result_single_group,
+                "single+group"
+            );
+            assert_eq!(
+                super::transform_json_emailaddress(
+                    value.clone(),
+                    is_grouped,
+                    is_collection,
+                    true,
+                    true
+                ),
+                expected_result_all_group,
+                "all+group"
+            );
+        }
+    }
+}

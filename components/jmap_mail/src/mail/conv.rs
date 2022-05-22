@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use mail_parser::{
     parsers::{
         fields::{
@@ -13,7 +11,7 @@ use mail_parser::{
 use store::chrono::{DateTime, NaiveDateTime, Utc};
 
 use super::{
-    schema::{Email, EmailValue, HeaderForm},
+    schema::{EmailValue, HeaderForm},
     MessageData, MimeHeaders,
 };
 
@@ -154,11 +152,8 @@ impl HeaderValueInto for mail_parser::HeaderValue<'_> {
             HeaderValue::Collection(list) => {
                 let mut result = Vec::with_capacity(list.len());
                 for item in list {
-                    match item {
-                        HeaderValue::DateTime(datetime) => {
-                            result.push(super::HeaderValue::Timestamp(datetime.to_timestamp()));
-                        }
-                        _ => (),
+                    if let HeaderValue::DateTime(datetime) = item {
+                        result.push(super::HeaderValue::Timestamp(datetime.to_timestamp()));
                     }
                 }
                 result

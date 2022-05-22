@@ -1,13 +1,9 @@
-use std::{
-    collections::HashMap,
-    fmt::{self, Display},
-};
+use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
     id::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::Object,
-    protocol::json_pointer::JSONPointer,
-    request::{MaybeIdReference, MaybeResultReference, ResultReference},
+    request::{MaybeIdReference, ResultReference},
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
@@ -15,6 +11,7 @@ use mail_parser::{
 };
 
 use store::{
+    blob::BlobId,
     chrono::{DateTime, Utc},
     core::{collection::Collection, tag::Tag},
     FieldId,
@@ -128,6 +125,18 @@ impl Keyword {
     }
 }
 
+impl From<&Tag> for Keyword {
+    fn from(tag: &Tag) -> Self {
+        Keyword { tag: tag.clone() }
+    }
+}
+
+impl From<Tag> for Keyword {
+    fn from(tag: Tag) -> Self {
+        Keyword { tag }
+    }
+}
+
 impl Display for Keyword {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.tag {
@@ -177,40 +186,45 @@ pub enum Property {
     Attachments,
     BodyStructure,
     Header(HeaderProperty),
+    Invalid(String),
 }
 
 impl Property {
-    pub fn parse(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Self {
         match value {
-            "id" => Some(Property::Id),
-            "blobId" => Some(Property::BlobId),
-            "threadId" => Some(Property::ThreadId),
-            "mailboxIds" => Some(Property::MailboxIds),
-            "keywords" => Some(Property::Keywords),
-            "size" => Some(Property::Size),
-            "receivedAt" => Some(Property::ReceivedAt),
-            "messageId" => Some(Property::MessageId),
-            "inReplyTo" => Some(Property::InReplyTo),
-            "references" => Some(Property::References),
-            "sender" => Some(Property::Sender),
-            "from" => Some(Property::From),
-            "to" => Some(Property::To),
-            "cc" => Some(Property::Cc),
-            "bcc" => Some(Property::Bcc),
-            "replyTo" => Some(Property::ReplyTo),
-            "subject" => Some(Property::Subject),
-            "sentAt" => Some(Property::SentAt),
-            "hasAttachment" => Some(Property::HasAttachment),
-            "preview" => Some(Property::Preview),
-            "bodyValues" => Some(Property::BodyValues),
-            "textBody" => Some(Property::TextBody),
-            "htmlBody" => Some(Property::HtmlBody),
-            "attachments" => Some(Property::Attachments),
-            "bodyStructure" => Some(Property::BodyStructure),
+            "id" => Property::Id,
+            "blobId" => Property::BlobId,
+            "threadId" => Property::ThreadId,
+            "mailboxIds" => Property::MailboxIds,
+            "keywords" => Property::Keywords,
+            "size" => Property::Size,
+            "receivedAt" => Property::ReceivedAt,
+            "messageId" => Property::MessageId,
+            "inReplyTo" => Property::InReplyTo,
+            "references" => Property::References,
+            "sender" => Property::Sender,
+            "from" => Property::From,
+            "to" => Property::To,
+            "cc" => Property::Cc,
+            "bcc" => Property::Bcc,
+            "replyTo" => Property::ReplyTo,
+            "subject" => Property::Subject,
+            "sentAt" => Property::SentAt,
+            "hasAttachment" => Property::HasAttachment,
+            "preview" => Property::Preview,
+            "bodyValues" => Property::BodyValues,
+            "textBody" => Property::TextBody,
+            "htmlBody" => Property::HtmlBody,
+            "attachments" => Property::Attachments,
+            "bodyStructure" => Property::BodyStructure,
             _ if value.starts_with("header:") => {
-                Some(Property::Header(HeaderProperty::parse(value)?))
+                if let Some(header) = HeaderProperty::parse(value) {
+                    Property::Header(header)
+                } else {
+                    Property::Invalid(value.to_string())
+                }
             }
-            _ => None,
+            _ => Property::Invalid(value.to_string()),
         }
     }
 
@@ -265,6 +279,7 @@ impl Display for Property {
             Property::Attachments => write!(f, "attachments"),
             Property::BodyStructure => write!(f, "bodyStructure"),
             Property::Header(header) => header.fmt(f),
+            Property::Invalid(value) => write!(f, "{}", value),
         }
     }
 }
@@ -522,6 +537,28 @@ impl From<JMAPBlob> for EmailValue {
     }
 }
 
+impl From<&JMAPBlob> for EmailValue {
+    fn from(value: &JMAPBlob) -> Self {
+        EmailValue::Blob {
+            value: value.clone(),
+        }
+    }
+}
+
+impl From<&BlobId> for EmailValue {
+    fn from(value: &BlobId) -> Self {
+        EmailValue::Blob {
+            value: JMAPBlob::new(value.clone()),
+        }
+    }
+}
+
+impl From<bool> for EmailValue {
+    fn from(value: bool) -> Self {
+        EmailValue::Bool { value }
+    }
+}
+
 impl From<String> for EmailValue {
     fn from(value: String) -> Self {
         EmailValue::Text { value }
@@ -531,6 +568,18 @@ impl From<String> for EmailValue {
 impl From<Vec<String>> for EmailValue {
     fn from(value: Vec<String>) -> Self {
         EmailValue::TextList { value }
+    }
+}
+
+impl From<Vec<EmailBodyPart>> for EmailValue {
+    fn from(value: Vec<EmailBodyPart>) -> Self {
+        EmailValue::BodyPartList { value }
+    }
+}
+
+impl From<EmailBodyPart> for EmailValue {
+    fn from(value: EmailBodyPart) -> Self {
+        EmailValue::BodyPart { value }
     }
 }
 
@@ -567,6 +616,114 @@ impl From<Property> for FieldId {
     }
 }
 
+#[derive(serde::Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum Filter {
+    InMailbox {
+        #[serde(rename = "inMailbox")]
+        value: JMAPId,
+    },
+    InMailboxOtherThan {
+        #[serde(rename = "inMailboxOtherThan")]
+        value: Vec<JMAPId>,
+    },
+    Before {
+        #[serde(rename = "before")]
+        value: DateTime<Utc>,
+    },
+    After {
+        #[serde(rename = "after")]
+        value: DateTime<Utc>,
+    },
+    MinSize {
+        #[serde(rename = "minSize")]
+        value: u32,
+    },
+    MaxSize {
+        #[serde(rename = "maxSize")]
+        value: u32,
+    },
+    AllInThreadHaveKeyword {
+        #[serde(rename = "allInThreadHaveKeyword")]
+        value: Keyword,
+    },
+    SomeInThreadHaveKeyword {
+        #[serde(rename = "someInThreadHaveKeyword")]
+        value: Keyword,
+    },
+    NoneInThreadHaveKeyword {
+        #[serde(rename = "noneInThreadHaveKeyword")]
+        value: Keyword,
+    },
+    HasKeyword {
+        #[serde(rename = "hasKeyword")]
+        value: Keyword,
+    },
+    NotKeyword {
+        #[serde(rename = "notKeyword")]
+        value: Keyword,
+    },
+    HasAttachment {
+        #[serde(rename = "hasAttachment")]
+        value: bool,
+    },
+    Text {
+        #[serde(rename = "text")]
+        value: String,
+    },
+    From {
+        #[serde(rename = "from")]
+        value: String,
+    },
+    To {
+        #[serde(rename = "to")]
+        value: String,
+    },
+    Cc {
+        #[serde(rename = "cc")]
+        value: String,
+    },
+    Bcc {
+        #[serde(rename = "bcc")]
+        value: String,
+    },
+    Subject {
+        #[serde(rename = "subject")]
+        value: String,
+    },
+    Body {
+        #[serde(rename = "body")]
+        value: String,
+    },
+    Header {
+        #[serde(rename = "header")]
+        value: Vec<String>,
+    },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(tag = "property")]
+pub enum Comparator {
+    #[serde(rename = "receivedAt")]
+    ReceivedAt,
+    #[serde(rename = "size")]
+    Size,
+    #[serde(rename = "from")]
+    From,
+    #[serde(rename = "to")]
+    To,
+    #[serde(rename = "subject")]
+    Subject,
+    #[serde(rename = "sentAt")]
+    SentAt,
+    #[serde(rename = "hasKeyword")]
+    HasKeyword { keyword: Keyword },
+    #[serde(rename = "allInThreadHaveKeyword")]
+    AllInThreadHaveKeyword { keyword: Keyword },
+    #[serde(rename = "someInThreadHaveKeyword")]
+    SomeInThreadHaveKeyword { keyword: Keyword },
+}
+
 impl Object for Email {
     type Property = Property;
 
@@ -593,5 +750,13 @@ impl Object for Email {
 
     fn hide_account() -> bool {
         false
+    }
+
+    fn new(id: JMAPId) -> Self {
+        let mut email = Email::default();
+        email
+            .properties
+            .insert(Property::Id, EmailValue::Id { value: id });
+        email
     }
 }

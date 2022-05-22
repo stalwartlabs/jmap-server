@@ -31,6 +31,7 @@ pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
         + PartialEq
         + Debug;
 
+    fn new(id: JMAPId) -> Self;
     fn id(&self) -> Option<&JMAPId>;
     fn required() -> &'static [Self::Property];
     fn indexed() -> &'static [(Self::Property, u64)];

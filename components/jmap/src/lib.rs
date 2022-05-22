@@ -7,10 +7,7 @@ pub mod request;
 
 pub use base64;
 
-use std::fmt::Display;
-
 use error::method::MethodError;
-use store::core::collection::Collection;
 
 #[derive(Debug, Clone, serde::Serialize, Hash, PartialEq, Eq)]
 pub enum URI {

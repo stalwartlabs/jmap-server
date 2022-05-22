@@ -1,14 +1,9 @@
-use std::collections::HashMap;
-
-use store::{AccountId, Store};
-
 use crate::{
     id::{jmap::JMAPId, state::JMAPState},
-    jmap_store::{get::GetObject, Object},
-    protocol::{json::JSONValue, response::Response},
+    jmap_store::get::GetObject,
 };
 
-use super::{MaybeResultReference, ResultReference};
+use super::ResultReference;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct GetRequest<O: GetObject> {

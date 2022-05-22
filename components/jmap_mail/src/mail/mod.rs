@@ -1,10 +1,10 @@
-//pub mod changes;
+pub mod changes;
+pub mod conv;
 pub mod get;
 pub mod import;
-//pub mod parse;
-//pub mod query;
-//pub mod raft;
-pub mod conv;
+pub mod parse;
+pub mod query;
+pub mod raft;
 pub mod schema;
 pub mod serialize;
 pub mod set;
@@ -252,7 +252,7 @@ impl HeaderValue {
     pub fn unwrap_textlist(self) -> Option<Vec<String>> {
         match self {
             HeaderValue::Text(text) => Some(vec![text]),
-            HeaderValue::TextList(mut textlist) => Some(textlist),
+            HeaderValue::TextList(textlist) => Some(textlist),
             _ => None,
         }
     }

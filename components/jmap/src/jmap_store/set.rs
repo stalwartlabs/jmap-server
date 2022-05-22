@@ -1,20 +1,19 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::changes::JMAPChanges;
 use super::Object;
 use crate::error::set::SetError;
 use crate::id::jmap::JMAPId;
 use crate::id::state::JMAPState;
-use crate::id::JMAPIdSerialize;
 use crate::request::set::SetResponse;
+use crate::request::ResultReference;
 use crate::{
     error::{method::MethodError, set::SetErrorType},
-    protocol::{json::JSONValue, json_pointer::JSONPointer},
     request::set::SetRequest,
 };
 use store::core::collection::Collection;
 use store::core::document::Document;
-use store::core::JMAPIdPrefix;
+
 use store::log::changes::ChangeId;
 use store::parking_lot::MutexGuard;
 use store::write::batch::WriteBatch;
@@ -25,7 +24,7 @@ pub trait SetObject: Object {
     type SetArguments;
     type NextInvocation;
 
-    fn map_references(&self, fnc: impl FnMut(&str) -> Option<JMAPId>);
+    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>);
 }
 
 pub struct SetHelper<'y, O, T>
@@ -84,26 +83,36 @@ where
         })
     }
 
+    pub fn map_references(&self, create_id: &str) -> Option<JMAPId> {
+        self.response
+            .created
+            .get(create_id)
+            .and_then(|o| o.id())
+            .cloned()
+    }
+
     pub fn create(
         &mut self,
         mut create_fnc: impl FnMut(
             &str,
             O,
-            &mut WriteBatch,
+            &mut Self,
             &mut Document,
         ) -> crate::error::set::Result<
             (O, Option<MutexGuard<'y, ()>>),
             O::Property,
         >,
     ) -> crate::Result<()> {
-        for (create_id, item) in self.request.create.take().unwrap_or_default() {
+        for (create_id, mut item) in self.request.create.take().unwrap_or_default() {
             let mut document = Document::new(
                 self.collection,
                 self.store
                     .assign_document_id(self.account_id, self.collection)?,
             );
 
-            match create_fnc(&create_id, item, &mut self.changes, &mut document) {
+            item.map_references(|create_id| self.map_references(create_id));
+
+            match create_fnc(&create_id, item, self, &mut document) {
                 Ok((result, lock)) => {
                     self.document_ids.insert(document.document_id);
                     self.changes.insert_document(document);
@@ -127,11 +136,11 @@ where
         mut update_fnc: impl FnMut(
             JMAPId,
             O,
-            &mut WriteBatch,
+            &mut Self,
             &mut Document,
         ) -> crate::error::set::Result<Option<O>, O::Property>,
     ) -> crate::Result<()> {
-        for (id, item) in self.request.update.take().unwrap_or_default() {
+        for (id, mut item) in self.request.update.take().unwrap_or_default() {
             let document_id = id.get_document_id();
             if !self.document_ids.contains(document_id) {
                 self.response
@@ -152,7 +161,9 @@ where
             }
 
             let mut document = Document::new(self.collection, document_id);
-            match update_fnc(id, item, &mut self.changes, &mut document) {
+            item.map_references(|create_id| self.map_references(create_id));
+
+            match update_fnc(id, item, self, &mut document) {
                 Ok(result) => {
                     if !document.is_empty() {
                         self.changes.update_document(document);
@@ -172,7 +183,7 @@ where
         &mut self,
         mut destroy_fnc: impl FnMut(
             JMAPId,
-            &mut WriteBatch,
+            &mut Self,
             &mut Document,
         ) -> crate::error::set::Result<(), O::Property>,
     ) -> crate::Result<()> {
@@ -180,7 +191,7 @@ where
             let document_id = id.get_document_id();
             if self.document_ids.contains(document_id) {
                 let mut document = Document::new(self.collection, document_id);
-                match destroy_fnc(id, &mut self.changes, &mut document) {
+                match destroy_fnc(id, self, &mut document) {
                     Ok(_) => {
                         if !self.store.tombstone_deletions() {
                             self.changes.delete_document(document);
@@ -215,6 +226,17 @@ where
     }
 }
 /*
+
+impl SetObject for XYX {
+    type SetArguments = SetArguments;
+
+    type NextInvocation = ();
+
+    fn map_references(&self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
+        todo!()
+    }
+}
+
 pub trait JMAPSetXYZ<T>
 where
     T: for<'x> Store<'x> + 'static,

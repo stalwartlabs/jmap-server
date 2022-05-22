@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-
 use store::{
-    core::collection::Collection,
     read::{
         comparator::Comparator,
         filter::{Filter, FilterOperator, LogicalOperator},
@@ -11,12 +8,11 @@ use store::{
 
 use crate::{
     error::method::MethodError,
-    id::{jmap::JMAPId, state::JMAPState, JMAPIdSerialize},
-    protocol::json::JSONValue,
+    id::jmap::JMAPId,
     request::query::{self, QueryRequest, QueryResponse},
 };
 
-use super::{changes::JMAPChanges, get::GetObject, Object};
+use super::{changes::JMAPChanges, Object};
 
 pub struct QueryHelper<'y, O, T>
 where
@@ -35,6 +31,8 @@ pub trait QueryObject: Object {
     type Filter: for<'de> serde::Deserialize<'de>;
     type Comparator: for<'de> serde::Deserialize<'de>;
 }
+
+pub type ExtraFilterFnc = fn(Vec<JMAPId>) -> crate::Result<Vec<JMAPId>>;
 
 struct QueryState<O: QueryObject> {
     op: LogicalOperator,
@@ -151,7 +149,7 @@ where
 
         let mut result = QueryResponse {
             account_id: self.request.account_id,
-            position: 0.into(),
+            position: 0,
             query_state: self.store.get_state(self.account_id, collection)?,
             total: None,
             limit: None,
@@ -209,26 +207,34 @@ where
     }
 }
 
-/*pub trait JMAPQuery<T>
+/*
+
+pub trait JMAPXYZQuery<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn query<'y, 'z: 'y, O>(&'z self, request: QueryRequest<O>) -> crate::Result<QueryResponse>
-    where
-        O: QueryObject<T>;
+    fn xyz_query(&self, request: QueryRequest<XYZ>) -> jmap::Result<QueryResponse>;
 }
 
-impl<T> JMAPQuery<T> for JMAPStore<T>
+impl<T> JMAPXYZQuery<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn query<'y, 'z: 'y, O>(&'z self, mut request: QueryRequest<O>) -> crate::Result<QueryResponse>
-    where
-        O: QueryObject<T>,
-    {
+    fn xyz_query(&self, request: QueryRequest<XYZ>) -> jmap::Result<QueryResponse> {
+        let mut helper = QueryHelper::new(self, request)?;
 
+        helper.parse_filter(|filter| {
+            Ok(filter)
+        })?;
+        helper.parse_comparator(|comparator| {
+            Ok(comparator)
+        })?;
+
+        helper.query(None, None)
     }
-}*/
+}
+
+*/
 
 impl QueryResponse {
     pub fn paginate<W>(

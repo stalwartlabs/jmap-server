@@ -1,12 +1,6 @@
-use std::collections::HashMap;
-
-use store::{AccountId, Store};
-
 use crate::{
     id::{jmap::JMAPId, state::JMAPState},
     jmap_store::query::QueryObject,
-    protocol::{json::JSONValue, response::Response},
-    MethodError,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -78,7 +72,7 @@ pub struct Comparator<A> {
     pub collation: Option<String>,
 
     #[serde(flatten)]
-    pub arguments: A,
+    pub property: A,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

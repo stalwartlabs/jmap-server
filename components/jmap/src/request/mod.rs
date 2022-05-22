@@ -5,13 +5,7 @@ pub mod query;
 pub mod query_changes;
 pub mod set;
 
-use store::{chrono::DateTime, DocumentId};
-
-use crate::{
-    id::{blob::JMAPBlob, jmap::JMAPId},
-    protocol::{json::JSONValue, json_pointer::JSONPointer, response::Response},
-    MethodError,
-};
+use crate::{id::jmap::JMAPId, protocol::json_pointer::JSONPointer};
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ResultReference {
@@ -35,7 +29,7 @@ impl<T> Default for MaybeResultReference<T> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MaybeIdReference {
     Value(JMAPId),
     Reference(String),
@@ -121,6 +115,19 @@ pub enum Method {
     SetVacationResponse,
     #[serde(rename = "error")]
     Error,
+}
+
+// MaybeIdReference de/serialization
+impl serde::Serialize for MaybeIdReference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            MaybeIdReference::Value(id) => id.serialize(serializer),
+            MaybeIdReference::Reference(str) => serializer.serialize_str(&format!("#{}", str)),
+        }
+    }
 }
 
 struct MaybeIdReferenceVisitor;

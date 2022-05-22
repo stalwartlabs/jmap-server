@@ -1,14 +1,11 @@
-use std::collections::HashMap;
-
 use store::{
     core::{collection::Collection, error::StoreError},
     log::changes::{Change, Query},
-    AccountId, JMAPId, JMAPStore, Store,
+    AccountId, JMAPStore, Store,
 };
 
 use crate::{
-    id::{state::JMAPState, JMAPIdSerialize},
-    protocol::json::JSONValue,
+    id::state::JMAPState,
     request::changes::{ChangesRequest, ChangesResponse},
 };
 
@@ -16,8 +13,6 @@ use super::Object;
 
 pub trait ChangesObject: Object {
     type ChangesResponse: Default;
-
-    fn update_response(response: &mut ChangesResponse<Self>);
 }
 
 pub trait JMAPChanges {
@@ -140,7 +135,8 @@ where
                 };
             }
         }
-        let mut result = ChangesResponse {
+
+        Ok(ChangesResponse {
             account_id: request.account_id,
             total_changes,
             has_children_changes: !updated.is_empty() && !items_changed,
@@ -159,10 +155,6 @@ where
             updated,
             destroyed,
             arguments: O::ChangesResponse::default(),
-        };
-
-        O::update_response(&mut result);
-
-        Ok(result)
+        })
     }
 }

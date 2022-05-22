@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-use crate::protocol::json::JSONValue;
 use store::core::error::StoreError;
 use store::tracing::error;
 

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use store::Store;
 
 use crate::{
     error::method::MethodError,

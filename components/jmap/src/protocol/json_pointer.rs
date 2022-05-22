@@ -1,14 +1,6 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use serde::Deserialize;
-use store::JMAPId;
-
-use crate::{
-    error::method::MethodError,
-    id::{blob::JMAPBlob, state::JMAPState},
-};
-
-use super::json::JSONValue;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum JSONPointer {

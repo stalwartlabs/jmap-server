@@ -1,29 +1,9 @@
 use std::io::Write;
 
-use crate::{error::method::MethodError, protocol::json::JSONValue};
+use store::blob::{BlobId, BLOB_HASH_LEN};
 use store::serialize::leb128::Leb128;
-use store::{
-    blob::{BlobId, BLOB_HASH_LEN},
-    core::collection::Collection,
-    AccountId, DocumentId,
-};
 
-use super::{hex_reader, HexWriter, JMAPIdSerialize};
-
-#[derive(Clone, Debug)]
-pub struct OwnedBlob {
-    pub account_id: AccountId,
-    pub collection: Collection,
-    pub document: DocumentId,
-    pub blob_index: u32,
-}
-
-#[derive(Clone, Debug)]
-pub struct TemporaryBlob {
-    pub account_id: AccountId,
-    pub timestamp: u64,
-    pub hash: u64,
-}
+use super::{hex_reader, HexWriter};
 
 #[derive(Clone, Debug)]
 pub struct InnerBlob<T> {
@@ -31,7 +11,7 @@ pub struct InnerBlob<T> {
     pub blob_index: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JMAPBlob {
     pub id: BlobId,
     pub inner_id: Option<u32>,
@@ -139,39 +119,5 @@ impl std::fmt::Display for JMAPBlob {
             self.id.size.to_leb128_writer(&mut writer).unwrap();
         }
         write!(f, "{}", writer.result)
-    }
-}
-
-impl JMAPIdSerialize for JMAPBlob {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        None
-    }
-
-    fn to_jmap_string(&self) -> String {
-        String::default()
-    }
-}
-
-impl JSONValue {
-    pub fn to_blob(&self) -> Option<JMAPBlob> {
-        match self {
-            JSONValue::String(string) => JMAPBlob::from_jmap_string(string),
-            _ => None,
-        }
-    }
-
-    pub fn parse_blob(self, optional: bool) -> crate::Result<Option<JMAPBlob>> {
-        match self {
-            JSONValue::String(string) => Ok(Some(JMAPBlob::from_jmap_string(&string).ok_or_else(
-                || MethodError::InvalidArguments("Failed to parse blobId.".to_string()),
-            )?)),
-            JSONValue::Null if optional => Ok(None),
-            _ => Err(MethodError::InvalidArguments(
-                "Expected string.".to_string(),
-            )),
-        }
     }
 }

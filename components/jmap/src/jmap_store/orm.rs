@@ -8,7 +8,6 @@ use store::{AccountId, DocumentId, JMAPStore, Store};
 
 use crate::error::set::SetError;
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 
 use super::Object;
 
@@ -38,7 +37,6 @@ where
     Number(Number),
     Bool(bool),
     Object(T),
-    List(Vec<Value<T>>),
     Null,
 }
 
@@ -47,6 +45,72 @@ pub enum Number {
     PosInt(u64),
     NegInt(i64),
     Float(f64),
+}
+
+impl<T> From<String> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn from(s: String) -> Self {
+        Value::String(s)
+    }
+}
+
+impl<T> From<u64> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn from(s: u64) -> Self {
+        Value::Number(Number::PosInt(s))
+    }
+}
+
+impl<T> From<u32> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn from(s: u32) -> Self {
+        Value::Number(Number::PosInt(s as u64))
+    }
+}
+
+impl<T> From<i64> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn from(s: i64) -> Self {
+        Value::Number(Number::NegInt(s))
+    }
+}
+
+impl<T> From<f64> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn from(s: f64) -> Self {
+        Value::Number(Number::Float(s))
+    }
+}
+
+impl<T> From<bool> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn from(s: bool) -> Self {
+        Value::Bool(s)
+    }
+}
+
+impl<T> From<Option<T>> for Value<T>
+where
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Into<Value<T>>,
+{
+    fn from(s: Option<T>) -> Self {
+        match s {
+            Some(value) => value.into(),
+            None => Value::Null,
+        }
+    }
 }
 
 impl Eq for Number {}
@@ -417,7 +481,6 @@ where
         match self {
             Value::String(string) => string.is_empty(),
             Value::Number(_) | Value::Bool(_) | Value::Object(_) => false,
-            Value::List(list) => list.is_empty(),
             Value::Null => true,
         }
     }

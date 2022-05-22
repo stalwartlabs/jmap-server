@@ -1247,6 +1247,7 @@ dependencies = [
  "mail-builder",
  "mail-parser",
  "serde",
+ "serde_json",
  "store",
 ]
 

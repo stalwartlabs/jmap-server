@@ -15,7 +15,7 @@ use store::roaring::RoaringBitmap;
 use store::{AccountId, JMAPId, JMAPStore};
 use store::{DocumentId, Store};
 
-use crate::mail::{Keyword, MessageField};
+use crate::mail::MessageField;
 
 use super::{MailboxProperty, MailboxRights};
 

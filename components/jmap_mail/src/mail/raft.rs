@@ -11,15 +11,14 @@ use store::{
     JMAPStore, Store,
 };
 
+use super::schema::Email;
 use super::MessageData;
-use super::{set::SetMail, MessageField};
+use super::MessageField;
 
-impl<T> RaftObject<T> for SetMail
+impl<T> RaftObject<T> for Email
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property = MessageField;
-
     fn on_raft_update(
         store: &JMAPStore<T>,
         write_batch: &mut WriteBatch,

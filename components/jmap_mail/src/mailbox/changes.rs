@@ -1,4 +1,4 @@
-use jmap::jmap_store::changes::{ChangesObject, ChangesResult};
+use jmap::jmap_store::changes::ChangesObject;
 use store::core::collection::Collection;
 
 use super::MailboxProperty;

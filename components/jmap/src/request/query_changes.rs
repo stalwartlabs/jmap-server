@@ -1,11 +1,6 @@
-use std::collections::HashMap;
-
-use store::{AccountId, Store};
-
 use crate::{
     id::{jmap::JMAPId, state::JMAPState},
     jmap_store::query::QueryObject,
-    protocol::{json::JSONValue, response::Response},
 };
 
 use super::query::{Comparator, Filter};

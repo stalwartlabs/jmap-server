@@ -295,7 +295,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                 {
                                     let value = map.next_value::<Option<bool>>()?.unwrap_or(false);
                                     match Property::parse(property) {
-                                        Some(Property::MailboxIds) => {
+                                        Property::MailboxIds => {
                                             if let Some(id) = JMAPId::parse(id) {
                                                 properties
                                                     .entry(Property::MailboxIds)
@@ -308,7 +308,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                                     .insert(MaybeIdReference::Value(id), value);
                                             }
                                         }
-                                        Some(Property::Keywords) => {
+                                        Property::Keywords => {
                                             properties
                                                 .entry(Property::MailboxIds)
                                                 .or_insert_with(|| EmailValue::Keywords {
@@ -553,7 +553,7 @@ impl<'de> serde::de::Visitor<'de> for PropertyVisitor {
     where
         E: serde::de::Error,
     {
-        Property::parse(v).ok_or_else(|| E::custom(format!("Invalid property: {}", v)))
+        Ok(Property::parse(v))
     }
 }
 
