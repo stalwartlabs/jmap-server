@@ -193,11 +193,7 @@ where
                 let mut document = Document::new(self.collection, document_id);
                 match destroy_fnc(id, self, &mut document) {
                     Ok(_) => {
-                        if !self.store.tombstone_deletions() {
-                            self.changes.delete_document(document);
-                        } else {
-                            self.changes.tombstone_document(document);
-                        }
+                        self.changes.delete_document(document);
                         self.changes.log_delete(self.collection, id);
                         self.response.destroyed.push(id);
                     }
@@ -232,7 +228,7 @@ impl SetObject for XYX {
 
     type NextInvocation = ();
 
-    fn map_references(&self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
+    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
         todo!()
     }
 }
@@ -250,12 +246,26 @@ where
 {
     fn xyz_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>> {
         let mut helper = SetHelper::new(self, request)?;
-        helper.create(|create_id, item, batch, document| {
-            Ok((XYZ::default(), None::<MutexGuard<'_, ()>>))
+        helper.create(|create_id, item, helper, document| {
+            let mut fields = TinyORM::<XYZ>::new();
+
+            for (property, value) in item.properties {
+                let value = match(field, value) {
+
+                };
+                fields.set(property, value);
+            }
+
+            fields.insert_validate(document)?;
+
+            Ok((
+                XYZ::new(document.document_id.into()),
+                None::<MutexGuard<'_, ()>>,
+            ))
         })?;
-        helper.update(|id, item, batch, document| {
+        helper.update(|id, item, helper, document| {
             let current_fields = self
-                .get_orm::<XYZ>(account_id, id.get_document_id())?
+                .get_orm::<XYZ>(helper.account_id, id.get_document_id())?
                 .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
             let fields = TinyORM::track_changes(&current_fields);
 
@@ -268,7 +278,7 @@ where
                 Ok(None)
             }
         })?;
-        helper.destroy(|id, batch, document| Ok(()))?;
+        helper.destroy(|id, helper, document| Ok(()))?;
         helper.into_response()
     }
 }

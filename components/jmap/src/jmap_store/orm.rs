@@ -31,13 +31,29 @@ where
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
 pub enum Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     String(String),
     Number(Number),
     Bool(bool),
     Object(T),
     Null,
+}
+
+pub trait Indexable
+where
+    Self: Sized + Sync + Send + Eq + PartialEq + std::fmt::Debug,
+{
+    fn index_as(&self) -> Value<Self>;
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+pub struct EmptyValue {}
+
+impl Indexable for EmptyValue {
+    fn index_as(&self) -> Value<Self> {
+        Value::Null
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
@@ -49,7 +65,7 @@ pub enum Number {
 
 impl<T> From<String> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     fn from(s: String) -> Self {
         Value::String(s)
@@ -58,7 +74,7 @@ where
 
 impl<T> From<u64> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     fn from(s: u64) -> Self {
         Value::Number(Number::PosInt(s))
@@ -67,7 +83,7 @@ where
 
 impl<T> From<u32> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     fn from(s: u32) -> Self {
         Value::Number(Number::PosInt(s as u64))
@@ -76,7 +92,7 @@ where
 
 impl<T> From<i64> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     fn from(s: i64) -> Self {
         Value::Number(Number::NegInt(s))
@@ -85,7 +101,7 @@ where
 
 impl<T> From<f64> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     fn from(s: f64) -> Self {
         Value::Number(Number::Float(s))
@@ -94,7 +110,7 @@ where
 
 impl<T> From<bool> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     fn from(s: bool) -> Self {
         Value::Bool(s)
@@ -103,7 +119,7 @@ where
 
 impl<T> From<Option<T>> for Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Into<Value<T>>,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Into<Value<T>> + Indexable,
 {
     fn from(s: Option<T>) -> Self {
         match s {
@@ -304,6 +320,22 @@ where
                         Value::Number(number) => {
                             document.number(property.clone(), number, (*index_options).clear());
                         }
+                        Value::Object(object) => match object.index_as() {
+                            Value::String(text) => document.text(
+                                property.clone(),
+                                text,
+                                Language::Unknown,
+                                (*index_options).clear(),
+                            ),
+                            Value::Number(number) => {
+                                document.number(
+                                    property.clone(),
+                                    &number,
+                                    (*index_options).clear(),
+                                );
+                            }
+                            _ => (),
+                        },
                         value => {
                             debug_assert!(false, "ORM unsupported type: {:?}", value);
                         }
@@ -327,6 +359,23 @@ where
                 Value::Number(number) => {
                     if is_indexed {
                         document.number(property.clone(), number, *index_options);
+                    }
+                    self.properties.insert(property, value);
+                }
+                Value::Object(object) => {
+                    if is_indexed {
+                        match object.index_as() {
+                            Value::String(text) => document.text(
+                                property.clone(),
+                                text,
+                                Language::Unknown,
+                                *index_options,
+                            ),
+                            Value::Number(number) => {
+                                document.number(property.clone(), &number, *index_options);
+                            }
+                            _ => (),
+                        }
                     }
                     self.properties.insert(property, value);
                 }
@@ -425,6 +474,7 @@ where
                 })
                 .next()
                 .unwrap_or((false, 0));
+
             if is_indexed {
                 match value {
                     Value::String(text) => {
@@ -433,6 +483,15 @@ where
                     Value::Number(number) => {
                         document.number(property, &number, index_options);
                     }
+                    Value::Object(object) => match object.index_as() {
+                        Value::String(text) => {
+                            document.text(property, text, Language::Unknown, index_options)
+                        }
+                        Value::Number(number) => {
+                            document.number(property, &number, index_options);
+                        }
+                        _ => (),
+                    },
                     Value::Null => (),
                     value => {
                         debug_assert!(false, "ORM unsupported type: {:?}", value);
@@ -475,7 +534,7 @@ where
 
 impl<T> Value<T>
 where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug,
+    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
 {
     pub fn is_empty(&self) -> bool {
         match self {

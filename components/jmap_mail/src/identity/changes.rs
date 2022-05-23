@@ -1,12 +1,24 @@
-use jmap::jmap_store::changes::{ChangesObject, ChangesResult};
-use store::core::collection::Collection;
+use jmap::{
+    jmap_store::changes::{ChangesObject, JMAPChanges},
+    request::changes::{ChangesRequest, ChangesResponse},
+};
+use store::{JMAPStore, Store};
 
-pub struct ChangesIdentity {}
+use super::schema::Identity;
 
-impl ChangesObject for ChangesIdentity {
-    fn collection() -> Collection {
-        Collection::Identity
+impl ChangesObject for Identity {
+    type ChangesResponse = ();
+}
+
+pub trait JMAPIdentityChanges {
+    fn identity_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResponse<Identity>>;
+}
+
+impl<T> JMAPIdentityChanges for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn identity_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResponse<Identity>> {
+        self.changes(request)
     }
-
-    fn handle_result(_result: &mut ChangesResult) {}
 }

@@ -1,9 +1,11 @@
 use std::{collections::HashMap, fmt};
 
-use jmap::request::MaybeIdReference;
 use serde::{ser::SerializeMap, Deserialize, Serialize};
+use store::chrono::{DateTime, Utc};
 
-use super::schema::{Mailbox, Property, Value};
+use crate::protocol::TypeState;
+
+use super::schema::{Keys, Property, PushSubscription, Value};
 
 // Property de/serialization
 impl Serialize for Property {
@@ -20,7 +22,7 @@ impl<'de> serde::de::Visitor<'de> for PropertyVisitor {
     type Value = Property;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP Mailbox property")
+        formatter.write_str("a valid JMAP PushSubscription property")
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -40,8 +42,8 @@ impl<'de> Deserialize<'de> for Property {
     }
 }
 
-// Mailbox de/serialization
-impl Serialize for Mailbox {
+// PushSubscription de/serialization
+impl Serialize for PushSubscription {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -52,14 +54,10 @@ impl Serialize for Mailbox {
             match value {
                 Value::Id { value } => map.serialize_entry(name, value)?,
                 Value::Text { value } => map.serialize_entry(name, value)?,
-                Value::Bool { value } => map.serialize_entry(name, value)?,
-                Value::Number { value } => map.serialize_entry(name, value)?,
-                Value::MailboxRights { value } => map.serialize_entry(name, value)?,
-                Value::Null => map.serialize_entry(name, &None::<&str>)?,
-                Value::ResultReference { value } => map.serialize_entry(name, value)?,
-                Value::IdReference { value } => {
-                    map.serialize_entry(name, &format!("#{}", value))?
-                }
+                Value::DateTime { value } => map.serialize_entry(name, value)?,
+                Value::Types { value } => map.serialize_entry(name, value)?,
+                Value::Keys { value } => map.serialize_entry(name, value)?,
+                Value::Null => map.serialize_entry(name, &())?,
             }
         }
 
@@ -67,13 +65,13 @@ impl Serialize for Mailbox {
     }
 }
 
-struct MailboxVisitor;
+struct PushSubscriptionVisitor;
 
-impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
-    type Value = Mailbox;
+impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
+    type Value = PushSubscription;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail object")
+        formatter.write_str("a valid JMAP PushSubscription object")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -84,9 +82,9 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
 
         while let Some(key) = map.next_key::<&str>()? {
             match key {
-                "name" => {
+                "deviceClientId" => {
                     properties.insert(
-                        Property::Name,
+                        Property::DeviceClientId,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
                         } else {
@@ -94,22 +92,9 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         },
                     );
                 }
-                "parentId" => {
+                "url" => {
                     properties.insert(
-                        Property::ParentId,
-                        if let Some(value) = map.next_value::<Option<MaybeIdReference>>()? {
-                            match value {
-                                MaybeIdReference::Value(value) => Value::Id { value },
-                                MaybeIdReference::Reference(value) => Value::IdReference { value },
-                            }
-                        } else {
-                            Value::Null
-                        },
-                    );
-                }
-                "role" => {
-                    properties.insert(
-                        Property::Role,
+                        Property::Url,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
                         } else {
@@ -117,39 +102,59 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         },
                     );
                 }
-                "sortOrder" => {
+                "verificationCode" => {
                     properties.insert(
-                        Property::SortOrder,
-                        if let Some(value) = map.next_value::<Option<u32>>()? {
-                            Value::Number { value }
+                        Property::VerificationCode,
+                        if let Some(value) = map.next_value::<Option<String>>()? {
+                            Value::Text { value }
                         } else {
                             Value::Null
                         },
                     );
                 }
-                _ if key.starts_with('#') => {
-                    if let Some(property) = key.get(1..) {
-                        properties.insert(
-                            Property::parse(property),
-                            Value::ResultReference {
-                                value: map.next_value()?,
-                            },
-                        );
-                    }
+                "keys" => {
+                    properties.insert(
+                        Property::Keys,
+                        if let Some(value) = map.next_value::<Option<Keys>>()? {
+                            Value::Keys { value }
+                        } else {
+                            Value::Null
+                        },
+                    );
+                }
+                "expires" => {
+                    properties.insert(
+                        Property::Expires,
+                        if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
+                            Value::DateTime { value }
+                        } else {
+                            Value::Null
+                        },
+                    );
+                }
+                "types" => {
+                    properties.insert(
+                        Property::Types,
+                        if let Some(value) = map.next_value::<Option<Vec<TypeState>>>()? {
+                            Value::Types { value }
+                        } else {
+                            Value::Null
+                        },
+                    );
                 }
                 _ => (),
             }
         }
 
-        Ok(Mailbox { properties })
+        Ok(PushSubscription { properties })
     }
 }
 
-impl<'de> Deserialize<'de> for Mailbox {
+impl<'de> Deserialize<'de> for PushSubscription {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_map(MailboxVisitor)
+        deserializer.deserialize_map(PushSubscriptionVisitor)
     }
 }

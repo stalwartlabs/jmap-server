@@ -1,140 +1,110 @@
-use std::collections::HashMap;
+use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
+use jmap::request::query::{QueryRequest, QueryResponse};
 
-use jmap::error::method::MethodError;
+use store::read::comparator::{self, FieldComparator};
+use store::read::default_filter_mapper;
+use store::read::filter::{self, FieldValue};
+use store::JMAPStore;
+use store::Store;
 
-use jmap::jmap_store::query::QueryObject;
-use jmap::protocol::json::JSONValue;
-use jmap::request::query::QueryRequest;
+use super::schema::{Comparator, EmailSubmission, Filter, Property, UndoStatus};
 
-use store::core::collection::Collection;
-use store::read::comparator::{Comparator, FieldComparator};
-use store::read::filter::{FieldValue, Filter};
-use store::read::QueryFilterMap;
-use store::{DocumentId, Store};
-use store::{JMAPId, JMAPStore};
+impl QueryObject for EmailSubmission {
+    type QueryArguments = ();
 
-use super::EmailSubmissionProperty;
+    type Filter = Filter;
 
-pub struct QueryEmailSubmission {}
-
-impl QueryFilterMap for QueryEmailSubmission {
-    fn filter_map_id(&mut self, document_id: DocumentId) -> store::Result<Option<JMAPId>> {
-        Ok(Some(document_id as JMAPId))
-    }
+    type Comparator = Comparator;
 }
 
-impl<'y, T> QueryObject<'y, T> for QueryEmailSubmission
+pub trait JMAPEmailSubmissionQuery<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn new(_store: &'y JMAPStore<T>, _request: &QueryRequest) -> jmap::Result<Self> {
-        Ok(QueryEmailSubmission {})
-    }
+    fn email_submission_query(
+        &self,
+        request: QueryRequest<EmailSubmission>,
+    ) -> jmap::Result<QueryResponse>;
+}
 
-    fn parse_filter(&mut self, cond: HashMap<String, JSONValue>) -> jmap::Result<Filter> {
-        if let Some((cond_name, cond_value)) = cond.into_iter().next() {
-            Ok(match cond_name.as_str() {
-                "identityIds" => Filter::or(
-                    cond_value
-                        .parse_array_items(false)?
-                        .unwrap()
-                        .into_iter()
-                        .map(|id| {
-                            Filter::eq(
-                                EmailSubmissionProperty::IdentityId.into(),
-                                FieldValue::LongInteger(id),
-                            )
-                        })
-                        .collect(),
-                ),
-                "emailIds" => Filter::or(
-                    cond_value
-                        .parse_array_items(false)?
-                        .unwrap()
-                        .into_iter()
-                        .map(|id| {
-                            Filter::eq(
-                                EmailSubmissionProperty::EmailId.into(),
-                                FieldValue::LongInteger(id),
-                            )
-                        })
-                        .collect(),
-                ),
-                "threadIds" => Filter::or(
-                    cond_value
-                        .parse_array_items(false)?
-                        .unwrap()
-                        .into_iter()
-                        .map(|id| {
-                            Filter::eq(
-                                EmailSubmissionProperty::ThreadId.into(),
-                                FieldValue::LongInteger(id),
-                            )
-                        })
-                        .collect(),
-                ),
-                "undoStatus" => Filter::eq(
-                    EmailSubmissionProperty::UndoStatus.into(),
-                    FieldValue::Text(cond_value.parse_string()?),
-                ),
-                "before" => Filter::lt(
-                    EmailSubmissionProperty::SendAt.into(),
-                    FieldValue::LongInteger(cond_value.parse_utc_date(false)?.unwrap() as u64),
-                ),
-                "after" => Filter::gt(
-                    EmailSubmissionProperty::SendAt.into(),
-                    FieldValue::LongInteger(cond_value.parse_utc_date(false)?.unwrap() as u64),
-                ),
+impl<T> JMAPEmailSubmissionQuery<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn email_submission_query(
+        &self,
+        request: QueryRequest<EmailSubmission>,
+    ) -> jmap::Result<QueryResponse> {
+        let mut helper = QueryHelper::new(self, request)?;
 
-                _ => {
-                    return Err(MethodError::UnsupportedFilter(format!(
-                        "Unsupported filter '{}'.",
-                        cond_name
-                    )))
-                }
+        helper.parse_filter(|filter| {
+            Ok(match filter {
+                Filter::IdentityIds { value } => filter::Filter::or(
+                    value
+                        .into_iter()
+                        .map(|id| {
+                            filter::Filter::eq(
+                                Property::IdentityId.into(),
+                                FieldValue::LongInteger(id.into()),
+                            )
+                        })
+                        .collect(),
+                ),
+                Filter::EmailIds { value } => filter::Filter::or(
+                    value
+                        .into_iter()
+                        .map(|id| {
+                            filter::Filter::eq(
+                                Property::EmailId.into(),
+                                FieldValue::LongInteger(id.into()),
+                            )
+                        })
+                        .collect(),
+                ),
+                Filter::ThreadIds { value } => filter::Filter::or(
+                    value
+                        .into_iter()
+                        .map(|id| {
+                            filter::Filter::eq(
+                                Property::ThreadId.into(),
+                                FieldValue::LongInteger(id.into()),
+                            )
+                        })
+                        .collect(),
+                ),
+                Filter::UndoStatus { value } => filter::Filter::eq(
+                    Property::UndoStatus.into(),
+                    FieldValue::Text(match value {
+                        UndoStatus::Pending => "p".to_string(),
+                        UndoStatus::Final => "f".to_string(),
+                        UndoStatus::Canceled => "c".to_string(),
+                    }),
+                ),
+                Filter::Before { value } => filter::Filter::lt(
+                    Property::SendAt.into(),
+                    FieldValue::LongInteger(value.timestamp() as u64),
+                ),
+                Filter::After { value } => filter::Filter::gt(
+                    Property::SendAt.into(),
+                    FieldValue::LongInteger(value.timestamp() as u64),
+                ),
             })
-        } else {
-            Ok(Filter::None)
-        }
-    }
+        })?;
 
-    fn parse_comparator(
-        &mut self,
-        property: String,
-        is_ascending: bool,
-        _collation: Option<String>,
-        _arguments: HashMap<String, JSONValue>,
-    ) -> jmap::Result<Comparator> {
-        Ok(Comparator::Field(FieldComparator {
-            field: match property.as_ref() {
-                "emailId" => EmailSubmissionProperty::EmailId,
-                "threadId" => EmailSubmissionProperty::ThreadId,
-                "sentAt" => EmailSubmissionProperty::SendAt,
-                _ => {
-                    return Err(MethodError::UnsupportedSort(format!(
-                        "Unsupported sort property '{}'.",
-                        property
-                    )))
+        helper.parse_comparator(|comparator| {
+            Ok(comparator::Comparator::Field(FieldComparator {
+                field: {
+                    match comparator.property {
+                        Comparator::EmailId => Property::EmailId,
+                        Comparator::ThreadId => Property::ThreadId,
+                        Comparator::SentAt => Property::SendAt,
+                    }
                 }
-            }
-            .into(),
-            ascending: is_ascending,
-        }))
-    }
+                .into(),
+                ascending: comparator.is_ascending,
+            }))
+        })?;
 
-    fn has_more_filters(&self) -> bool {
-        false
-    }
-
-    fn apply_filters(&mut self, _results: Vec<JMAPId>) -> jmap::Result<Vec<JMAPId>> {
-        Ok(vec![])
-    }
-
-    fn is_immutable(&self) -> bool {
-        false
-    }
-
-    fn collection() -> Collection {
-        Collection::EmailSubmission
+        helper.query(default_filter_mapper, None::<ExtraFilterFnc>)
     }
 }

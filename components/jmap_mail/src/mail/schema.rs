@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
     id::{blob::JMAPBlob, jmap::JMAPId},
-    jmap_store::Object,
+    jmap_store::{orm::EmptyValue, Object},
     request::{MaybeIdReference, ResultReference},
 };
 use mail_parser::{
@@ -21,31 +21,31 @@ use super::{HeaderName, MessageField};
 
 #[derive(Debug, Clone, Default)]
 pub struct Email {
-    pub properties: HashMap<Property, EmailValue>,
+    pub properties: HashMap<Property, Value>,
 }
 
 impl Email {
-    pub fn insert(&mut self, property: Property, value: impl Into<EmailValue>) {
+    pub fn insert(&mut self, property: Property, value: impl Into<Value>) {
         self.properties.insert(property, value.into());
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct EmailBodyPart {
-    pub properties: HashMap<BodyProperty, EmailValue>,
+    pub properties: HashMap<BodyProperty, Value>,
 }
 
 impl EmailBodyPart {
     pub fn get_text(&self, property: BodyProperty) -> Option<&str> {
         self.properties.get(&property).and_then(|v| match v {
-            EmailValue::Text { value } => Some(value.as_str()),
+            Value::Text { value } => Some(value.as_str()),
             _ => None,
         })
     }
 
     pub fn get_blob(&self, property: BodyProperty) -> Option<&JMAPBlob> {
         self.properties.get(&property).and_then(|v| match v {
-            EmailValue::Blob { value } => Some(value),
+            Value::Blob { value } => Some(value),
             _ => None,
         })
     }
@@ -460,7 +460,7 @@ impl Display for HeaderForm {
 }
 
 #[derive(Debug, Clone)]
-pub enum EmailValue {
+pub enum Value {
     Id {
         value: JMAPId,
     },
@@ -523,83 +523,90 @@ pub enum EmailValue {
     Headers {
         value: Vec<EmailHeader>,
     },
+    Null,
 }
 
-impl From<JMAPId> for EmailValue {
+impl Default for Value {
+    fn default() -> Self {
+        Value::Null
+    }
+}
+
+impl From<JMAPId> for Value {
     fn from(value: JMAPId) -> Self {
-        EmailValue::Id { value }
+        Value::Id { value }
     }
 }
 
-impl From<JMAPBlob> for EmailValue {
+impl From<JMAPBlob> for Value {
     fn from(value: JMAPBlob) -> Self {
-        EmailValue::Blob { value }
+        Value::Blob { value }
     }
 }
 
-impl From<&JMAPBlob> for EmailValue {
+impl From<&JMAPBlob> for Value {
     fn from(value: &JMAPBlob) -> Self {
-        EmailValue::Blob {
+        Value::Blob {
             value: value.clone(),
         }
     }
 }
 
-impl From<&BlobId> for EmailValue {
+impl From<&BlobId> for Value {
     fn from(value: &BlobId) -> Self {
-        EmailValue::Blob {
+        Value::Blob {
             value: JMAPBlob::new(value.clone()),
         }
     }
 }
 
-impl From<bool> for EmailValue {
+impl From<bool> for Value {
     fn from(value: bool) -> Self {
-        EmailValue::Bool { value }
+        Value::Bool { value }
     }
 }
 
-impl From<String> for EmailValue {
+impl From<String> for Value {
     fn from(value: String) -> Self {
-        EmailValue::Text { value }
+        Value::Text { value }
     }
 }
 
-impl From<Vec<String>> for EmailValue {
+impl From<Vec<String>> for Value {
     fn from(value: Vec<String>) -> Self {
-        EmailValue::TextList { value }
+        Value::TextList { value }
     }
 }
 
-impl From<Vec<EmailBodyPart>> for EmailValue {
+impl From<Vec<EmailBodyPart>> for Value {
     fn from(value: Vec<EmailBodyPart>) -> Self {
-        EmailValue::BodyPartList { value }
+        Value::BodyPartList { value }
     }
 }
 
-impl From<EmailBodyPart> for EmailValue {
+impl From<EmailBodyPart> for Value {
     fn from(value: EmailBodyPart) -> Self {
-        EmailValue::BodyPart { value }
+        Value::BodyPart { value }
     }
 }
 
-impl From<usize> for EmailValue {
+impl From<usize> for Value {
     fn from(value: usize) -> Self {
-        EmailValue::Size { value }
+        Value::Size { value }
     }
 }
 
-impl EmailValue {
+impl Value {
     pub fn get_mailbox_ids(&mut self) -> Option<&mut HashMap<MaybeIdReference, bool>> {
         match self {
-            EmailValue::MailboxIds { value, .. } => Some(value),
+            Value::MailboxIds { value, .. } => Some(value),
             _ => None,
         }
     }
 
     pub fn get_keywords(&mut self) -> Option<&mut HashMap<Keyword, bool>> {
         match self {
-            EmailValue::Keywords { value, .. } => Some(value),
+            Value::Keywords { value, .. } => Some(value),
             _ => None,
         }
     }
@@ -727,11 +734,11 @@ pub enum Comparator {
 impl Object for Email {
     type Property = Property;
 
-    type Value = ();
+    type Value = EmptyValue;
 
     fn id(&self) -> Option<&JMAPId> {
         self.properties.get(&Property::Id).and_then(|id| match id {
-            EmailValue::Id { value } => Some(value),
+            Value::Id { value } => Some(value),
             _ => None,
         })
     }
@@ -756,7 +763,7 @@ impl Object for Email {
         let mut email = Email::default();
         email
             .properties
-            .insert(Property::Id, EmailValue::Id { value: id });
+            .insert(Property::Id, Value::Id { value: id });
         email
     }
 }

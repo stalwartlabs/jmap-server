@@ -8,7 +8,6 @@ pub enum WriteAction {
     Insert(Document),
     Update(Document),
     Delete(Document),
-    Tombstone(Document),
 }
 
 pub struct WriteBatch {
@@ -64,10 +63,6 @@ impl WriteBatch {
 
     pub fn delete_document(&mut self, document: Document) {
         self.documents.push(WriteAction::Delete(document));
-    }
-
-    pub fn tombstone_document(&mut self, document: Document) {
-        self.documents.push(WriteAction::Tombstone(document));
     }
 
     pub fn log_insert(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {

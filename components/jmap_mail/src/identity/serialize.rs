@@ -1,9 +1,10 @@
 use std::{collections::HashMap, fmt};
 
-use jmap::request::MaybeIdReference;
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 
-use super::schema::{Mailbox, Property, Value};
+use crate::mail::schema::EmailAddress;
+
+use super::schema::{Identity, Property, Value};
 
 // Property de/serialization
 impl Serialize for Property {
@@ -20,7 +21,7 @@ impl<'de> serde::de::Visitor<'de> for PropertyVisitor {
     type Value = Property;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP Mailbox property")
+        formatter.write_str("a valid JMAP Identity property")
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -40,8 +41,8 @@ impl<'de> Deserialize<'de> for Property {
     }
 }
 
-// Mailbox de/serialization
-impl Serialize for Mailbox {
+// Identity de/serialization
+impl Serialize for Identity {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -53,13 +54,8 @@ impl Serialize for Mailbox {
                 Value::Id { value } => map.serialize_entry(name, value)?,
                 Value::Text { value } => map.serialize_entry(name, value)?,
                 Value::Bool { value } => map.serialize_entry(name, value)?,
-                Value::Number { value } => map.serialize_entry(name, value)?,
-                Value::MailboxRights { value } => map.serialize_entry(name, value)?,
-                Value::Null => map.serialize_entry(name, &None::<&str>)?,
-                Value::ResultReference { value } => map.serialize_entry(name, value)?,
-                Value::IdReference { value } => {
-                    map.serialize_entry(name, &format!("#{}", value))?
-                }
+                Value::Addresses { value } => map.serialize_entry(name, value)?,
+                Value::Null => map.serialize_entry(name, &())?,
             }
         }
 
@@ -67,13 +63,13 @@ impl Serialize for Mailbox {
     }
 }
 
-struct MailboxVisitor;
+struct IdentityVisitor;
 
-impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
-    type Value = Mailbox;
+impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
+    type Value = Identity;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail object")
+        formatter.write_str("a valid JMAP Identity object")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -94,22 +90,9 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         },
                     );
                 }
-                "parentId" => {
+                "email" => {
                     properties.insert(
-                        Property::ParentId,
-                        if let Some(value) = map.next_value::<Option<MaybeIdReference>>()? {
-                            match value {
-                                MaybeIdReference::Value(value) => Value::Id { value },
-                                MaybeIdReference::Reference(value) => Value::IdReference { value },
-                            }
-                        } else {
-                            Value::Null
-                        },
-                    );
-                }
-                "role" => {
-                    properties.insert(
-                        Property::Role,
+                        Property::Email,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
                         } else {
@@ -117,39 +100,59 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         },
                     );
                 }
-                "sortOrder" => {
+                "textSignature" => {
                     properties.insert(
-                        Property::SortOrder,
-                        if let Some(value) = map.next_value::<Option<u32>>()? {
-                            Value::Number { value }
+                        Property::TextSignature,
+                        if let Some(value) = map.next_value::<Option<String>>()? {
+                            Value::Text { value }
                         } else {
                             Value::Null
                         },
                     );
                 }
-                _ if key.starts_with('#') => {
-                    if let Some(property) = key.get(1..) {
-                        properties.insert(
-                            Property::parse(property),
-                            Value::ResultReference {
-                                value: map.next_value()?,
-                            },
-                        );
-                    }
+                "htmlSignature" => {
+                    properties.insert(
+                        Property::HtmlSignature,
+                        if let Some(value) = map.next_value::<Option<String>>()? {
+                            Value::Text { value }
+                        } else {
+                            Value::Null
+                        },
+                    );
+                }
+                "replyTo" => {
+                    properties.insert(
+                        Property::ReplyTo,
+                        if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
+                            Value::Addresses { value }
+                        } else {
+                            Value::Null
+                        },
+                    );
+                }
+                "bcc" => {
+                    properties.insert(
+                        Property::Bcc,
+                        if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
+                            Value::Addresses { value }
+                        } else {
+                            Value::Null
+                        },
+                    );
                 }
                 _ => (),
             }
         }
 
-        Ok(Mailbox { properties })
+        Ok(Identity { properties })
     }
 }
 
-impl<'de> Deserialize<'de> for Mailbox {
+impl<'de> Deserialize<'de> for Identity {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_map(MailboxVisitor)
+        deserializer.deserialize_map(IdentityVisitor)
     }
 }

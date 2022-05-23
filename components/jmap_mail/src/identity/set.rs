@@ -1,192 +1,133 @@
-use std::collections::HashMap;
-
-use super::IdentityProperty;
+use crate::identity::schema::Identity;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
-use jmap::jmap_store::set::{DefaultCreateItem, DefaultUpdateItem};
-use jmap::protocol::invocation::Invocation;
-use jmap::{
-    jmap_store::set::{SetObject, SetObjectData, SetObjectHelper},
-    protocol::json::JSONValue,
-    request::set::SetRequest,
-};
-use store::core::document::Document;
-use store::core::JMAPIdPrefix;
-use store::{AccountId, JMAPId, JMAPStore, Store};
+use jmap::id::jmap::JMAPId;
+use jmap::jmap_store::orm::{self, JMAPOrm, TinyORM};
+use jmap::jmap_store::set::SetHelper;
+use jmap::jmap_store::Object;
+use jmap::request::set::SetResponse;
+use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
+use store::parking_lot::MutexGuard;
+use store::{JMAPStore, Store};
 
-#[derive(Default)]
-pub struct SetIdentity {
-    pub current_identity: Option<TinyORM<IdentityProperty>>,
-    pub identity: TinyORM<IdentityProperty>,
-}
+use super::schema::{Property, Value};
 
-pub struct SetIdentityHelper {}
+impl SetObject for Identity {
+    type SetArguments = ();
 
-impl<T> SetObjectData<T> for SetIdentityHelper
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn new(_store: &JMAPStore<T>, _request: &mut SetRequest) -> jmap::Result<Self> {
-        Ok(SetIdentityHelper {})
-    }
+    type NextInvocation = ();
 
-    fn unwrap_invocation(self) -> Option<Invocation> {
-        None
+    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
+        todo!()
     }
 }
 
-impl<'y, T> SetObject<'y, T> for SetIdentity
+pub trait JMAPSetIdentity<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property = IdentityProperty;
-    type Helper = SetIdentityHelper;
-    type CreateItemResult = DefaultCreateItem;
-    type UpdateItemResult = DefaultUpdateItem;
+    fn identity_set(&self, request: SetRequest<Identity>) -> jmap::Result<SetResponse<Identity>>;
+}
 
-    fn new(
-        helper: &mut SetObjectHelper<T, Self::Helper>,
-        _fields: &mut HashMap<String, JSONValue>,
-        jmap_id: Option<JMAPId>,
-    ) -> jmap::error::set::Result<Self> {
-        Ok(SetIdentity {
-            current_identity: if let Some(jmap_id) = jmap_id {
-                helper
-                    .store
-                    .get_orm::<IdentityProperty>(helper.account_id, jmap_id.get_document_id())?
-                    .ok_or_else(|| {
-                        SetError::new(SetErrorType::NotFound, "Identity not found.".to_string())
-                    })?
-                    .into()
-            } else {
-                None
-            },
-            ..Default::default()
-        })
-    }
+impl<T> JMAPSetIdentity<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn identity_set(&self, request: SetRequest<Identity>) -> jmap::Result<SetResponse<Identity>> {
+        let mut helper = SetHelper::new(self, request)?;
 
-    fn set_field(
-        &mut self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        field: Self::Property,
-        value: JSONValue,
-    ) -> jmap::error::set::Result<()> {
-        match (field, &value) {
-            (IdentityProperty::Name, JSONValue::String(name)) if name.len() < 255 => {
-                self.identity.set(field, value);
-            }
-            (IdentityProperty::Email, JSONValue::String(email))
-                if email.contains('@') && email.len() < 255 && self.current_identity.is_none() =>
-            {
-                self.identity.set(field, value);
-            }
-            (IdentityProperty::ReplyTo | IdentityProperty::Bcc, JSONValue::Array(addresses)) => {
-                for address in addresses {
-                    if !validate_email_address(address) {
-                        return Err(SetError::invalid_property(
-                            field.to_string(),
-                            "Invalid EmailAddress.".to_string(),
-                        ));
-                    }
-                }
-                self.identity.set(field, value);
-            }
-            (
-                IdentityProperty::TextSignature | IdentityProperty::HtmlSignature,
-                JSONValue::String(signature),
-            ) if signature.len() < 1024 => {
-                self.identity.set(field, value);
-            }
-            (_, JSONValue::Null) => {
-                self.identity.set(field, value);
-            }
-            (field, _) => {
-                return Err(SetError::invalid_property(
-                    field.to_string(),
-                    "Field cannot be set.",
-                ));
-            }
-        }
-        Ok(())
-    }
+        helper.create(|_create_id, item, _helper, document| {
+            let mut fields = TinyORM::<Identity>::new();
 
-    fn patch_field(
-        &mut self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        field: Self::Property,
-        _property: String,
-        _value: JSONValue,
-    ) -> jmap::error::set::Result<()> {
-        Err(SetError::invalid_property(
-            field.to_string(),
-            "Patch operations not supported on this field.",
-        ))
-    }
+            for (property, value) in item.properties {
+                fields.set(
+                    property,
+                    match (property, value) {
+                        (
+                            Property::Name
+                            | Property::Email
+                            | Property::TextSignature
+                            | Property::HtmlSignature,
+                            value @ Value::Text { .. },
+                        ) => orm::Value::Object(value),
 
-    fn create(
-        self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _create_id: &str,
-        document: &mut Document,
-    ) -> jmap::error::set::Result<Self::CreateItemResult> {
-        self.identity.insert_validate(document)?;
-        Ok(DefaultCreateItem::new(document.document_id as JMAPId))
-    }
+                        (Property::ReplyTo | Property::Bcc, value @ Value::Addresses { .. }) => {
+                            orm::Value::Object(value)
+                        }
+                        (
+                            Property::Name
+                            | Property::TextSignature
+                            | Property::HtmlSignature
+                            | Property::ReplyTo
+                            | Property::Bcc,
+                            Value::Null,
+                        ) => orm::Value::Null,
+                        (property, _) => {
+                            return Err(SetError::invalid_property(
+                                property,
+                                "Field could not be set.",
+                            ));
+                        }
+                    },
+                );
+            }
 
-    fn update(
-        self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        document: &mut Document,
-    ) -> jmap::error::set::Result<Option<Self::UpdateItemResult>> {
-        if self
-            .current_identity
-            .unwrap()
-            .merge_validate(document, self.identity)?
-        {
-            Ok(Some(DefaultUpdateItem::default()))
-        } else {
+            // Validate fields
+            fields.insert_validate(document)?;
+
+            Ok((
+                Identity::new(document.document_id.into()),
+                None::<MutexGuard<'_, ()>>,
+            ))
+        })?;
+
+        helper.update(|id, item, helper, document| {
+            let current_fields = self
+                .get_orm::<Identity>(helper.account_id, id.get_document_id())?
+                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+            let mut fields = TinyORM::track_changes(&current_fields);
+
+            for (property, value) in item.properties {
+                fields.set(
+                    property,
+                    match (property, value) {
+                        (
+                            Property::Name | Property::TextSignature | Property::HtmlSignature,
+                            value @ Value::Text { .. },
+                        ) => orm::Value::Object(value),
+
+                        (Property::ReplyTo | Property::Bcc, value @ Value::Addresses { .. }) => {
+                            orm::Value::Object(value)
+                        }
+                        (
+                            Property::Name
+                            | Property::TextSignature
+                            | Property::HtmlSignature
+                            | Property::ReplyTo
+                            | Property::Bcc,
+                            Value::Null,
+                        ) => orm::Value::Null,
+                        (property, _) => {
+                            return Err(SetError::invalid_property(
+                                property,
+                                "Field could not be set.",
+                            ));
+                        }
+                    },
+                );
+            }
+
+            // Merge changes
+            current_fields.merge_validate(document, fields)?;
             Ok(None)
-        }
-    }
+        })?;
 
-    fn validate_delete(
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _jmap_id: JMAPId,
-    ) -> jmap::error::set::Result<()> {
-        Ok(())
-    }
-
-    fn delete(
-        store: &JMAPStore<T>,
-        account_id: AccountId,
-        document: &mut Document,
-    ) -> store::Result<()> {
-        if let Some(orm) = store.get_orm::<IdentityProperty>(account_id, document.document_id)? {
-            orm.delete(document);
-        }
-        Ok(())
-    }
-}
-
-fn validate_email_address(argument: &JSONValue) -> bool {
-    let mut has_email = false;
-    if let Some(address) = argument.to_object() {
-        for (key, value) in address {
-            if key == "email" {
-                has_email = value
-                    .to_string()
-                    .map(|v| v.contains('@') && v.len() <= 255)
-                    .unwrap_or(false);
-            } else if key == "name" {
-                match value {
-                    JSONValue::Null => (),
-                    JSONValue::String(name) if name.len() <= 255 => (),
-                    _ => return false,
-                }
-            } else {
-                return false;
+        helper.destroy(|_id, helper, document| {
+            if let Some(orm) = self.get_orm::<Identity>(helper.account_id, document.document_id)? {
+                orm.delete(document);
             }
-        }
+            Ok(())
+        })?;
+
+        helper.into_response()
     }
-    has_email
 }

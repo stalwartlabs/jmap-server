@@ -32,8 +32,12 @@ where
     pub fn write(&self, batch: WriteBatch) -> crate::Result<Option<ChangeId>> {
         let mut write_batch = Vec::with_capacity(batch.documents.len());
         let mut bitmap_list = HashMap::new();
-        let mut tombstones = Vec::new();
         let mut change_id = None;
+
+        let tombstone_deletions = self
+            .tombstone_deletions
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let mut tombstones = Vec::new();
 
         for document in batch.documents {
             let mut document = match document {
@@ -51,35 +55,36 @@ where
                 }
                 WriteAction::Update(document) => document,
                 WriteAction::Delete(mut document) => {
-                    // Remove document id from collection
-                    bitmap_list
-                        .entry(BitmapKey::serialize_document_ids(
+                    if !tombstone_deletions {
+                        // Remove document id from collection
+                        bitmap_list
+                            .entry(BitmapKey::serialize_document_ids(
+                                batch.account_id,
+                                document.collection,
+                            ))
+                            .or_insert_with(HashMap::new)
+                            .insert(document.document_id, false);
+
+                        // Delete term index
+                        let term_index_key = ValueKey::serialize_term_index(
                             batch.account_id,
                             document.collection,
-                        ))
-                        .or_insert_with(HashMap::new)
-                        .insert(document.document_id, false);
+                            document.document_id,
+                        );
+                        if let Some(blob_id) = self
+                            .db
+                            .get::<BlobId>(ColumnFamily::Values, &term_index_key)?
+                        {
+                            document.term_index = Some((blob_id, IndexOptions::new().clear()));
+                        }
 
-                    // Delete term index
-                    let term_index_key = ValueKey::serialize_term_index(
-                        batch.account_id,
-                        document.collection,
-                        document.document_id,
-                    );
-                    if let Some(blob_id) = self
-                        .db
-                        .get::<BlobId>(ColumnFamily::Values, &term_index_key)?
-                    {
-                        document.term_index = Some((blob_id, IndexOptions::new().clear()));
+                        document
+                    } else {
+                        debug_assert!(!batch.changes.is_empty());
+                        // Add to tombstones
+                        tombstones.push(document);
+                        continue;
                     }
-
-                    document
-                }
-                WriteAction::Tombstone(document) => {
-                    debug_assert!(!batch.changes.is_empty());
-                    // Add to tombstones
-                    tombstones.push(document);
-                    continue;
                 }
             };
 

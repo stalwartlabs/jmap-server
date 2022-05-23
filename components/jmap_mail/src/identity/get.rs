@@ -1,100 +1,73 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use jmap::id::JMAPIdSerialize;
-use jmap::jmap_store::get::GetObject;
-use jmap::jmap_store::orm::JMAPOrm;
-use jmap::protocol::json::JSONValue;
-use jmap::request::get::GetRequest;
+use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
+use jmap::jmap_store::orm::{self, JMAPOrm};
+use jmap::request::get::{GetRequest, GetResponse};
 
 use store::core::error::StoreError;
-use store::core::JMAPIdPrefix;
-use store::{AccountId, JMAPId, JMAPStore};
-use store::{DocumentId, Store};
+use store::JMAPStore;
+use store::Store;
 
-use super::IdentityProperty;
+use super::schema::{Identity, Property, Value};
 
-pub struct GetIdentity<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    store: &'y JMAPStore<T>,
-    account_id: AccountId,
-}
-
-impl<'y, T> GetObject<'y, T> for GetIdentity<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    type Property = IdentityProperty;
-
-    fn new(
-        store: &'y JMAPStore<T>,
-        request: &mut GetRequest,
-        _properties: &[Self::Property],
-    ) -> jmap::Result<Self> {
-        Ok(GetIdentity {
-            store,
-            account_id: request.account_id,
-        })
-    }
-
-    fn get_item(
-        &self,
-        jmap_id: JMAPId,
-        properties: &[Self::Property],
-    ) -> jmap::Result<Option<JSONValue>> {
-        let document_id = jmap_id.get_document_id();
-        let mut identity = self
-            .store
-            .get_orm::<IdentityProperty>(self.account_id, document_id)?
-            .ok_or_else(|| StoreError::InternalError("Identity data not found".to_string()))?;
-
-        let mut result: HashMap<String, JSONValue> = HashMap::new();
-
-        for property in properties {
-            if let Entry::Vacant(entry) = result.entry(property.to_string()) {
-                let value = match property {
-                    IdentityProperty::Id => jmap_id.to_jmap_string().into(),
-                    IdentityProperty::Name
-                    | IdentityProperty::Email
-                    | IdentityProperty::ReplyTo
-                    | IdentityProperty::Bcc
-                    | IdentityProperty::TextSignature
-                    | IdentityProperty::HtmlSignature => {
-                        identity.remove(property).unwrap_or_default()
-                    }
-                    IdentityProperty::MayDelete => true.into(),
-                };
-
-                entry.insert(value);
-            }
-        }
-
-        Ok(Some(result.into()))
-    }
-
-    fn map_ids<W>(&self, document_ids: W) -> jmap::Result<Vec<JMAPId>>
-    where
-        W: Iterator<Item = DocumentId>,
-    {
-        Ok(document_ids.map(|id| id as JMAPId).collect())
-    }
-
-    fn is_virtual() -> bool {
-        false
-    }
+impl GetObject for Identity {
+    type GetArguments = ();
 
     fn default_properties() -> Vec<Self::Property> {
         vec![
-            IdentityProperty::Id,
-            IdentityProperty::Name,
-            IdentityProperty::Email,
-            IdentityProperty::ReplyTo,
-            IdentityProperty::Bcc,
-            IdentityProperty::TextSignature,
-            IdentityProperty::HtmlSignature,
-            IdentityProperty::MayDelete,
+            Property::Id,
+            Property::Name,
+            Property::Email,
+            Property::ReplyTo,
+            Property::Bcc,
+            Property::TextSignature,
+            Property::HtmlSignature,
+            Property::MayDelete,
         ]
+    }
+}
+
+pub trait JMAPGetIdentity<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn identity_get(&self, request: GetRequest<Identity>) -> jmap::Result<GetResponse<Identity>>;
+}
+
+impl<T> JMAPGetIdentity<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn identity_get(&self, request: GetRequest<Identity>) -> jmap::Result<GetResponse<Identity>> {
+        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let account_id = helper.account_id;
+
+        helper.get(|id, properties| {
+            let document_id = id.get_document_id();
+            let mut fields = self
+                .get_orm::<Identity>(account_id, document_id)?
+                .ok_or_else(|| StoreError::InternalError("Identity data not found".to_string()))?;
+            let mut identity = HashMap::with_capacity(properties.len());
+
+            for property in properties {
+                identity.insert(
+                    *property,
+                    match property {
+                        Property::Id => Value::Id { value: id },
+                        Property::MayDelete => Value::Bool { value: true },
+                        _ => {
+                            if let Some(orm::Value::Object(value)) = fields.remove(property) {
+                                value
+                            } else {
+                                Value::Null
+                            }
+                        }
+                    },
+                );
+            }
+            Ok(Some(Identity {
+                properties: identity,
+            }))
+        })
     }
 }

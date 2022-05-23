@@ -21,6 +21,7 @@ use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
 
 use store::blob::BlobId;
@@ -28,7 +29,7 @@ use store::{AccountId, DocumentId, JMAPStore, Store};
 
 use super::parse::get_message_part;
 use super::schema::{
-    BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailValue, HeaderForm, Keyword, Property,
+    BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
 };
 use super::{MessageData, MessageField};
 
@@ -50,8 +51,9 @@ where
     fn mail_delete(
         &self,
         account_id: AccountId,
+        batch: Option<&mut WriteBatch>,
         document: &mut Document,
-    ) -> store::Result<Option<DocumentId>>;
+    ) -> store::Result<Option<JMAPId>>;
 }
 
 impl<T> JMAPSetMail<T> for JMAPStore<T>
@@ -74,13 +76,13 @@ where
                 .properties
                 .get(&Property::BodyValues)
                 .and_then(|b| match b {
-                    EmailValue::BodyValues { value } => Some(value),
+                    Value::BodyValues { value } => Some(value),
                     _ => None,
                 });
 
             for (property, value) in &item.properties {
                 match (property, value) {
-                    (Property::MailboxIds, EmailValue::MailboxIds { value, set }) => {
+                    (Property::MailboxIds, Value::MailboxIds { value, set }) => {
                         if *set {
                             fields.untag_all(&Property::MailboxIds);
 
@@ -117,7 +119,7 @@ where
                             }
                         }
                     }
-                    (Property::Keywords, EmailValue::Keywords { value, set }) => {
+                    (Property::Keywords, Value::Keywords { value, set }) => {
                         if *set {
                             fields.untag_all(&Property::Keywords);
 
@@ -134,12 +136,12 @@ where
                             }
                         }
                     }
-                    (Property::ReceivedAt, EmailValue::Date { value }) => {
+                    (Property::ReceivedAt, Value::Date { value }) => {
                         received_at = value.timestamp().into();
                     }
                     (
                         Property::MessageId | Property::InReplyTo | Property::References,
-                        EmailValue::TextList { value },
+                        Value::TextList { value },
                     ) => {
                         builder = builder
                             .header(property.as_rfc_header(), MessageId::from(value.as_slice()));
@@ -151,18 +153,18 @@ where
                         | Property::Cc
                         | Property::Bcc
                         | Property::ReplyTo,
-                        EmailValue::Addresses { value },
+                        Value::Addresses { value },
                     ) => {
                         builder = builder
                             .header(property.as_rfc_header(), Address::from(value.as_slice()));
                     }
-                    (Property::Subject, EmailValue::Text { value }) => {
+                    (Property::Subject, Value::Text { value }) => {
                         builder = builder.subject(value);
                     }
-                    (Property::SentAt, EmailValue::Date { value }) => {
+                    (Property::SentAt, Value::Date { value }) => {
                         builder = builder.date(value);
                     }
-                    (Property::TextBody, EmailValue::BodyPartList { value }) => {
+                    (Property::TextBody, Value::BodyPartList { value }) => {
                         if let Some(body_part) = value.first() {
                             builder.html_body = body_part
                                 .parse(self, account_id, body_values, "text/plain".into())?
@@ -170,7 +172,7 @@ where
                                 .into();
                         }
                     }
-                    (Property::HtmlBody, EmailValue::BodyPartList { value }) => {
+                    (Property::HtmlBody, Value::BodyPartList { value }) => {
                         if let Some(body_part) = value.first() {
                             builder.html_body = body_part
                                 .parse(self, account_id, body_values, "text/html".into())?
@@ -178,7 +180,7 @@ where
                                 .into();
                         }
                     }
-                    (Property::Attachments, EmailValue::BodyPartList { value }) => {
+                    (Property::Attachments, Value::BodyPartList { value }) => {
                         let mut attachments = Vec::with_capacity(value.len());
                         for attachment in value {
                             attachments
@@ -186,7 +188,7 @@ where
                         }
                         builder.attachments = attachments.into();
                     }
-                    (Property::BodyStructure, EmailValue::BodyPart { value }) => {
+                    (Property::BodyStructure, Value::BodyPart { value }) => {
                         let (mut mime_part, sub_parts) =
                             value.parse(self, account_id, body_values, None)?;
 
@@ -219,65 +221,62 @@ where
                         builder.body = mime_part.into();
                     }
                     (Property::Header(header), value) => match (header.form, value) {
-                        (HeaderForm::Raw, EmailValue::Text { value }) => {
+                        (HeaderForm::Raw, Value::Text { value }) => {
                             builder = builder.header(header.header.as_str(), Raw::from(value));
                         }
-                        (HeaderForm::Raw, EmailValue::TextList { value }) => {
+                        (HeaderForm::Raw, Value::TextList { value }) => {
                             builder = builder
                                 .headers(header.header.as_str(), value.iter().map(Raw::from));
                         }
-                        (HeaderForm::Date, EmailValue::Date { value }) => {
+                        (HeaderForm::Date, Value::Date { value }) => {
                             builder = builder.header(header.header.as_str(), Date::from(value));
                         }
-                        (HeaderForm::Date, EmailValue::DateList { value }) => {
+                        (HeaderForm::Date, Value::DateList { value }) => {
                             builder = builder
                                 .headers(header.header.as_str(), value.iter().map(Date::from));
                         }
-                        (HeaderForm::Text, EmailValue::Text { value }) => {
+                        (HeaderForm::Text, Value::Text { value }) => {
                             builder = builder.header(header.header.as_str(), Text::from(value));
                         }
-                        (HeaderForm::Text, EmailValue::TextList { value }) => {
+                        (HeaderForm::Text, Value::TextList { value }) => {
                             builder = builder
                                 .headers(header.header.as_str(), value.iter().map(Text::from));
                         }
-                        (HeaderForm::URLs, EmailValue::TextList { value }) => {
+                        (HeaderForm::URLs, Value::TextList { value }) => {
                             builder =
                                 builder.header(header.header.as_str(), URL::from(value.as_slice()));
                         }
-                        (HeaderForm::URLs, EmailValue::TextListMany { value }) => {
+                        (HeaderForm::URLs, Value::TextListMany { value }) => {
                             builder = builder.headers(
                                 header.header.as_str(),
                                 value.iter().map(|u| URL::from(u.as_slice())),
                             );
                         }
-                        (HeaderForm::MessageIds, EmailValue::TextList { value }) => {
+                        (HeaderForm::MessageIds, Value::TextList { value }) => {
                             builder = builder
                                 .header(header.header.as_str(), MessageId::from(value.as_slice()));
                         }
-                        (HeaderForm::MessageIds, EmailValue::TextListMany { value }) => {
+                        (HeaderForm::MessageIds, Value::TextListMany { value }) => {
                             builder = builder.headers(
                                 header.header.as_str(),
                                 value.iter().map(|m| MessageId::from(m.as_slice())),
                             );
                         }
-                        (HeaderForm::Addresses, EmailValue::Addresses { value }) => {
+                        (HeaderForm::Addresses, Value::Addresses { value }) => {
                             builder = builder
                                 .header(header.header.as_str(), Address::from(value.as_slice()));
                         }
-                        (HeaderForm::Addresses, EmailValue::AddressesList { value }) => {
+                        (HeaderForm::Addresses, Value::AddressesList { value }) => {
                             builder = builder.headers(
                                 header.header.as_str(),
                                 value.iter().map(|v| Address::from(v.as_slice())),
                             );
                         }
-                        (HeaderForm::GroupedAddresses, EmailValue::GroupedAddresses { value }) => {
+                        (HeaderForm::GroupedAddresses, Value::GroupedAddresses { value }) => {
                             builder = builder
                                 .header(header.header.as_str(), Address::from(value.as_slice()));
                         }
-                        (
-                            HeaderForm::GroupedAddresses,
-                            EmailValue::GroupedAddressesList { value },
-                        ) => {
+                        (HeaderForm::GroupedAddresses, Value::GroupedAddressesList { value }) => {
                             builder = builder.headers(
                                 header.header.as_str(),
                                 value.iter().map(|v| Address::from(v.as_slice())),
@@ -358,7 +357,7 @@ where
 
             for (property, value) in item.properties {
                 match (property, value) {
-                    (Property::MailboxIds, EmailValue::MailboxIds { value, set }) => {
+                    (Property::MailboxIds, Value::MailboxIds { value, set }) => {
                         if set {
                             fields.untag_all(&Property::MailboxIds);
 
@@ -400,7 +399,7 @@ where
                             }
                         }
                     }
-                    (Property::Keywords, EmailValue::Keywords { value, set }) => {
+                    (Property::Keywords, Value::Keywords { value, set }) => {
                         if set {
                             fields.untag_all(&Property::Keywords);
 
@@ -465,8 +464,8 @@ where
             Ok(None)
         })?;
 
-        helper.destroy(|id, _helper, document| {
-            self.mail_delete(account_id, document)?;
+        helper.destroy(|_id, helper, document| {
+            self.mail_delete(account_id, Some(&mut helper.changes), document)?;
             Ok(())
         })?;
 
@@ -476,8 +475,9 @@ where
     fn mail_delete(
         &self,
         account_id: AccountId,
+        batch: Option<&mut WriteBatch>,
         document: &mut Document,
-    ) -> store::Result<Option<DocumentId>> {
+    ) -> store::Result<Option<JMAPId>> {
         let document_id = document.document_id;
         let metadata_blob_id = if let Some(metadata_blob_id) = self.get_document_value::<BlobId>(
             account_id,
@@ -527,13 +527,25 @@ where
             IndexOptions::new().clear(),
         );
 
-        // Delete ORM
+        // Fetch ORM
         let fields = self
             .get_orm::<Email>(account_id, document_id)?
             .ok_or(StoreError::DataCorruption)?;
+
+        // Log thread and mailbox changes
+        if let Some(batch) = batch {
+            batch.log_child_update(Collection::Thread, thread_id);
+            if let Some(mailbox_ids) = fields.get_tags(&Property::MailboxIds) {
+                for mailbox_id in mailbox_ids {
+                    batch.log_child_update(Collection::Mailbox, mailbox_id.as_id());
+                }
+            }
+        }
+
+        // Delete ORM
         fields.delete(document);
 
-        Ok(thread_id.into())
+        Ok(JMAPId::from_parts(thread_id, document_id).into())
     }
 }
 
@@ -661,23 +673,23 @@ impl EmailBodyPart {
 
         for (property, value) in self.properties.iter() {
             match (property, value) {
-                (BodyProperty::Language, EmailValue::TextList { value }) if !is_multipart => {
+                (BodyProperty::Language, Value::TextList { value }) if !is_multipart => {
                     mime_part.headers.insert(
                         "Content-Language".into(),
                         Text::new(value.join(", ")).into(),
                     );
                 }
-                (BodyProperty::Cid, EmailValue::Text { value }) if !is_multipart => {
+                (BodyProperty::Cid, Value::Text { value }) if !is_multipart => {
                     mime_part
                         .headers
                         .insert("Content-ID".into(), MessageId::new(value).into());
                 }
-                (BodyProperty::Location, EmailValue::Text { value }) if !is_multipart => {
+                (BodyProperty::Location, Value::Text { value }) if !is_multipart => {
                     mime_part
                         .headers
                         .insert("Content-Location".into(), Text::new(value).into());
                 }
-                (BodyProperty::Headers, EmailValue::Headers { value }) => {
+                (BodyProperty::Headers, Value::Headers { value }) => {
                     for header in value {
                         mime_part
                             .headers
@@ -685,12 +697,12 @@ impl EmailBodyPart {
                     }
                 }
                 (BodyProperty::Header(header), value) => match value {
-                    EmailValue::Text { value } => {
+                    Value::Text { value } => {
                         mime_part
                             .headers
                             .insert(header.header.as_str().into(), Raw::from(value).into());
                     }
-                    EmailValue::TextList { value } => {
+                    Value::TextList { value } => {
                         for value in value {
                             mime_part
                                 .headers
@@ -699,7 +711,7 @@ impl EmailBodyPart {
                     }
                     _ => (),
                 },
-                (BodyProperty::Subparts, EmailValue::BodyPartList { value }) => {
+                (BodyProperty::Subparts, Value::BodyPartList { value }) => {
                     sub_parts = Some(value);
                 }
                 _ => (),

@@ -1,7 +1,7 @@
 use super::{
     conv::IntoForm,
     get::AsBodyParts,
-    schema::{BodyProperty, Email, EmailValue, HeaderForm, Property},
+    schema::{BodyProperty, Email, HeaderForm, Property, Value},
 };
 use crate::mail::{HeaderName, MessageOutline, MimeHeaders, MimePart, MimePartType};
 use jmap::{
@@ -390,7 +390,7 @@ impl IntoParsedEmail for Message<'_> {
                         } else {
                             (&html_body, preview_html)
                         };
-                        EmailValue::Text {
+                        Value::Text {
                             value: preview_fnc(
                                 String::from_utf8_lossy(
                                     &blobs[body
@@ -434,7 +434,7 @@ impl IntoParsedEmail for Message<'_> {
                         }
                     }
                     if !body_values.is_empty() {
-                        EmailValue::BodyValues { value: body_values }.into()
+                        Value::BodyValues { value: body_values }.into()
                     } else {
                         None
                     }

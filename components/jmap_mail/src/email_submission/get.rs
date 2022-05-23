@@ -1,109 +1,79 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use jmap::id::JMAPIdSerialize;
-use jmap::jmap_store::get::GetObject;
-use jmap::jmap_store::orm::JMAPOrm;
-use jmap::protocol::json::JSONValue;
-use jmap::request::get::GetRequest;
+use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
+use jmap::jmap_store::orm::{self, JMAPOrm};
+use jmap::request::get::{GetRequest, GetResponse};
 
 use store::core::error::StoreError;
-use store::core::JMAPIdPrefix;
-use store::{AccountId, JMAPId, JMAPStore};
-use store::{DocumentId, Store};
+use store::JMAPStore;
+use store::Store;
 
-use super::EmailSubmissionProperty;
+use super::schema::{EmailSubmission, Property, Value};
 
-pub struct GetEmailSubmission<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    store: &'y JMAPStore<T>,
-    account_id: AccountId,
-}
-
-impl<'y, T> GetObject<'y, T> for GetEmailSubmission<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    type Property = EmailSubmissionProperty;
-
-    fn new(
-        store: &'y JMAPStore<T>,
-        request: &mut GetRequest,
-        _properties: &[Self::Property],
-    ) -> jmap::Result<Self> {
-        Ok(GetEmailSubmission {
-            store,
-            account_id: request.account_id,
-        })
-    }
-
-    fn get_item(
-        &self,
-        jmap_id: JMAPId,
-        properties: &[Self::Property],
-    ) -> jmap::Result<Option<JSONValue>> {
-        let document_id = jmap_id.get_document_id();
-        let mut email_submission = self
-            .store
-            .get_orm::<EmailSubmissionProperty>(self.account_id, document_id)?
-            .ok_or_else(|| {
-                StoreError::InternalError("EmailSubmission data not found".to_string())
-            })?;
-
-        let mut result: HashMap<String, JSONValue> = HashMap::new();
-
-        for property in properties {
-            if let Entry::Vacant(entry) = result.entry(property.to_string()) {
-                let value = match property {
-                    EmailSubmissionProperty::Id => jmap_id.to_jmap_string().into(),
-                    EmailSubmissionProperty::EmailId
-                    | EmailSubmissionProperty::IdentityId
-                    | EmailSubmissionProperty::ThreadId
-                    | EmailSubmissionProperty::Envelope
-                    | EmailSubmissionProperty::UndoStatus
-                    | EmailSubmissionProperty::DeliveryStatus
-                    | EmailSubmissionProperty::DsnBlobIds
-                    | EmailSubmissionProperty::MdnBlobIds => {
-                        email_submission.remove(property).unwrap_or_default()
-                    }
-                    EmailSubmissionProperty::SendAt => email_submission
-                        .remove(property)
-                        .map(|utc_date| utc_date.into_utc_date())
-                        .unwrap_or_default(),
-                };
-
-                entry.insert(value);
-            }
-        }
-
-        Ok(Some(result.into()))
-    }
-
-    fn map_ids<W>(&self, document_ids: W) -> jmap::Result<Vec<JMAPId>>
-    where
-        W: Iterator<Item = DocumentId>,
-    {
-        Ok(document_ids.map(|id| id as JMAPId).collect())
-    }
-
-    fn is_virtual() -> bool {
-        false
-    }
+impl GetObject for EmailSubmission {
+    type GetArguments = ();
 
     fn default_properties() -> Vec<Self::Property> {
         vec![
-            EmailSubmissionProperty::Id,
-            EmailSubmissionProperty::EmailId,
-            EmailSubmissionProperty::IdentityId,
-            EmailSubmissionProperty::ThreadId,
-            EmailSubmissionProperty::Envelope,
-            EmailSubmissionProperty::SendAt,
-            EmailSubmissionProperty::UndoStatus,
-            EmailSubmissionProperty::DeliveryStatus,
-            EmailSubmissionProperty::DsnBlobIds,
-            EmailSubmissionProperty::MdnBlobIds,
+            Property::Id,
+            Property::EmailId,
+            Property::IdentityId,
+            Property::ThreadId,
+            Property::Envelope,
+            Property::SendAt,
+            Property::UndoStatus,
+            Property::DeliveryStatus,
+            Property::DsnBlobIds,
+            Property::MdnBlobIds,
         ]
+    }
+}
+
+pub trait JMAPGetEmailSubmission<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn email_submission_get(
+        &self,
+        request: GetRequest<EmailSubmission>,
+    ) -> jmap::Result<GetResponse<EmailSubmission>>;
+}
+
+impl<T> JMAPGetEmailSubmission<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn email_submission_get(
+        &self,
+        request: GetRequest<EmailSubmission>,
+    ) -> jmap::Result<GetResponse<EmailSubmission>> {
+        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let account_id = helper.account_id;
+
+        helper.get(|id, properties| {
+            let document_id = id.get_document_id();
+            let mut fields = self
+                .get_orm::<EmailSubmission>(account_id, document_id)?
+                .ok_or_else(|| {
+                    StoreError::InternalError("EmailSubmission data not found".to_string())
+                })?;
+            let mut email_submission = HashMap::with_capacity(properties.len());
+
+            for property in properties {
+                email_submission.insert(
+                    *property,
+                    if let Property::Id = property {
+                        Value::Id { value: id }
+                    } else if let Some(orm::Value::Object(value)) = fields.remove(property) {
+                        value
+                    } else {
+                        Value::Null
+                    },
+                );
+            }
+            Ok(Some(EmailSubmission {
+                properties: email_submission,
+            }))
+        })
     }
 }

@@ -7,7 +7,7 @@ pub mod set;
 
 use crate::{id::jmap::JMAPId, protocol::json_pointer::JSONPointer};
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ResultReference {
     #[serde(rename = "resultOf")]
     pub result_of: String,
@@ -51,7 +51,7 @@ impl MaybeIdReference {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Method {
     #[serde(rename = "Core/echo")]
     Echo,

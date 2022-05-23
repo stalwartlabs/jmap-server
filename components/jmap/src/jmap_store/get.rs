@@ -29,6 +29,10 @@ pub trait GetObject: Object {
     fn default_properties() -> Vec<Self::Property>;
 }
 
+pub fn default_mapper(document_ids: Vec<DocumentId>) -> crate::Result<Vec<JMAPId>> {
+    Ok(document_ids.into_iter().map(|id| id.into()).collect())
+}
+
 impl<'y, O, T> GetHelper<'y, O, T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -44,6 +48,7 @@ where
         let properties: Vec<O::Property> = request
             .properties
             .take()
+            .and_then(|p| if !p.is_empty() { Some(p) } else { None })
             .unwrap_or_else(|| O::default_properties());
 
         let account_id = request.account_id.as_ref().unwrap().get_document_id();

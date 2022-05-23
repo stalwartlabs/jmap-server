@@ -1,206 +1,220 @@
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
-use jmap::id::JMAPIdSerialize;
-use jmap::jmap_store::get::GetObject;
+use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use jmap::jmap_store::orm::JMAPOrm;
-use jmap::protocol::json::JSONValue;
-use jmap::request::get::GetRequest;
+use jmap::request::get::{GetRequest, GetResponse};
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
-use store::core::JMAPIdPrefix;
 use store::roaring::RoaringBitmap;
 
-use store::{AccountId, JMAPId, JMAPStore};
+use store::{AccountId, JMAPStore};
 use store::{DocumentId, Store};
 
+use crate::mail::schema::Keyword;
 use crate::mail::MessageField;
 
-use super::{MailboxProperty, MailboxRights};
+use super::schema::{Mailbox, MailboxRights, Property, Value};
 
-pub struct GetMailbox<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    store: &'y JMAPStore<T>,
-    account_id: AccountId,
-    mail_document_ids: Option<RoaringBitmap>,
-    fetch_mailbox: bool,
-}
-
-impl<'y, T> GetObject<'y, T> for GetMailbox<'y, T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    type Property = MailboxProperty;
-
-    fn new(
-        store: &'y JMAPStore<T>,
-        request: &mut GetRequest,
-        properties: &[Self::Property],
-    ) -> jmap::Result<Self> {
-        Ok(GetMailbox {
-            store,
-            account_id: request.account_id,
-            mail_document_ids: store.get_document_ids(request.account_id, Collection::Mail)?,
-            fetch_mailbox: properties.iter().any(|p| {
-                matches!(
-                    p,
-                    MailboxProperty::Name
-                        | MailboxProperty::ParentId
-                        | MailboxProperty::Role
-                        | MailboxProperty::SortOrder
-                )
-            }),
-        })
-    }
-
-    fn get_item(
-        &self,
-        jmap_id: JMAPId,
-        properties: &[Self::Property],
-    ) -> jmap::Result<Option<JSONValue>> {
-        let document_id = jmap_id.get_document_id();
-        let mut mailbox = if self.fetch_mailbox {
-            Some(
-                self.store
-                    .get_orm::<MailboxProperty>(self.account_id, document_id)?
-                    .ok_or_else(|| {
-                        StoreError::InternalError("Mailbox data not found".to_string())
-                    })?,
-            )
-        } else {
-            None
-        };
-
-        let mut result: HashMap<String, JSONValue> = HashMap::new();
-
-        for property in properties {
-            if let Entry::Vacant(entry) = result.entry(property.to_string()) {
-                let value = match property {
-                    MailboxProperty::Id => jmap_id.to_jmap_string().into(),
-                    MailboxProperty::Name | MailboxProperty::Role | MailboxProperty::SortOrder => {
-                        mailbox
-                            .as_mut()
-                            .unwrap()
-                            .remove(property)
-                            .unwrap_or_default()
-                    }
-                    MailboxProperty::ParentId => {
-                        if let Some(parent_id) =
-                            mailbox.as_ref().unwrap().get_unsigned_int(property)
-                        {
-                            if parent_id > 0 {
-                                (parent_id - 1).to_jmap_string().into()
-                            } else {
-                                JSONValue::Null
-                            }
-                        } else {
-                            JSONValue::Null
-                        }
-                    }
-                    MailboxProperty::IsSubscribed => true.into(), //TODO implement
-                    MailboxProperty::MyRights => MailboxRights::default().into(), //TODO implement
-                    MailboxProperty::TotalEmails => self
-                        .get_mailbox_tag(document_id)?
-                        .map(|v| v.len())
-                        .unwrap_or(0)
-                        .into(),
-                    MailboxProperty::UnreadEmails => {
-                        self //TODO check unread counts everywhere
-                            .get_mailbox_unread_tag(document_id)?
-                            .map(|v| v.len())
-                            .unwrap_or(0)
-                            .into()
-                    }
-                    MailboxProperty::TotalThreads => self
-                        .count_threads(self.get_mailbox_tag(document_id)?)?
-                        .into(),
-                    MailboxProperty::UnreadThreads => self
-                        .count_threads(self.get_mailbox_unread_tag(document_id)?)?
-                        .into(),
-                };
-
-                entry.insert(value);
-            }
-        }
-
-        Ok(Some(result.into()))
-    }
-
-    fn map_ids<W>(&self, document_ids: W) -> jmap::Result<Vec<JMAPId>>
-    where
-        W: Iterator<Item = DocumentId>,
-    {
-        Ok(document_ids.map(|id| id as JMAPId).collect())
-    }
-
-    fn is_virtual() -> bool {
-        false
-    }
+impl GetObject for Mailbox {
+    type GetArguments = ();
 
     fn default_properties() -> Vec<Self::Property> {
         vec![
-            MailboxProperty::Id,
-            MailboxProperty::Name,
-            MailboxProperty::ParentId,
-            MailboxProperty::Role,
-            MailboxProperty::SortOrder,
-            MailboxProperty::IsSubscribed,
-            MailboxProperty::TotalEmails,
-            MailboxProperty::UnreadEmails,
-            MailboxProperty::TotalThreads,
-            MailboxProperty::UnreadThreads,
-            MailboxProperty::MyRights,
+            Property::Id,
+            Property::Name,
+            Property::ParentId,
+            Property::Role,
+            Property::SortOrder,
+            Property::IsSubscribed,
+            Property::TotalEmails,
+            Property::UnreadEmails,
+            Property::TotalThreads,
+            Property::UnreadThreads,
+            Property::MyRights,
         ]
     }
 }
 
-impl<'y, T> GetMailbox<'y, T>
+pub trait JMAPGetMailbox<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn count_threads(&self, document_ids: Option<RoaringBitmap>) -> store::Result<usize> {
-        Ok(if let Some(document_ids) = document_ids {
-            let mut thread_ids = HashSet::new();
-            self.store
-                .get_multi_document_value(
-                    self.account_id,
-                    Collection::Mail,
-                    document_ids.into_iter(),
-                    MessageField::ThreadId.into(),
-                )?
-                .into_iter()
-                .for_each(|thread_id: Option<DocumentId>| {
-                    if let Some(thread_id) = thread_id {
-                        thread_ids.insert(thread_id);
-                    }
-                });
-            thread_ids.len()
-        } else {
-            0
+    fn mailbox_get(&self, request: GetRequest<Mailbox>) -> jmap::Result<GetResponse<Mailbox>>;
+    fn mailbox_count_threads(
+        &self,
+        account_id: AccountId,
+        document_ids: Option<RoaringBitmap>,
+    ) -> store::Result<usize>;
+    fn mailbox_tags(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<RoaringBitmap>>;
+    fn mailbox_unread_tags(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+        mail_document_ids: Option<&RoaringBitmap>,
+    ) -> store::Result<Option<RoaringBitmap>>;
+}
+
+impl<T> JMAPGetMailbox<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn mailbox_get(&self, request: GetRequest<Mailbox>) -> jmap::Result<GetResponse<Mailbox>> {
+        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let fetch_fields = helper.properties.iter().any(|p| {
+            matches!(
+                p,
+                Property::Name | Property::ParentId | Property::Role | Property::SortOrder
+            )
+        });
+        let account_id = helper.account_id;
+        let mail_document_ids = self.get_document_ids(account_id, Collection::Mail)?;
+
+        helper.get(|id, properties| {
+            let document_id = id.get_document_id();
+            let mut fields = if fetch_fields {
+                Some(
+                    self.get_orm::<Mailbox>(account_id, document_id)?
+                        .ok_or_else(|| {
+                            StoreError::InternalError("Mailbox data not found".to_string())
+                        })?,
+                )
+            } else {
+                None
+            };
+            let mut mailbox = HashMap::with_capacity(properties.len());
+
+            for property in properties {
+                let value = match property {
+                    Property::Id => Value::Id { value: id },
+                    Property::Name | Property::Role => fields
+                        .as_mut()
+                        .unwrap()
+                        .remove_string(property)
+                        .map(|v| Value::Text { value: v })
+                        .unwrap_or_default(),
+                    Property::ParentId => fields
+                        .as_ref()
+                        .unwrap()
+                        .get_unsigned_int(property)
+                        .map(|parent_id| {
+                            if parent_id > 0 {
+                                Value::Id {
+                                    value: (parent_id - 1).into(),
+                                }
+                            } else {
+                                Value::Null
+                            }
+                        })
+                        .unwrap_or_default(),
+                    Property::SortOrder => fields
+                        .as_ref()
+                        .unwrap()
+                        .get_unsigned_int(property)
+                        .map(|sort_order| Value::Number {
+                            value: sort_order as u32,
+                        })
+                        .unwrap_or_default(),
+                    Property::TotalEmails => Value::Number {
+                        value: self
+                            .mailbox_tags(account_id, document_id)?
+                            .map(|v| v.len() as u32)
+                            .unwrap_or(0),
+                    },
+                    Property::UnreadEmails => Value::Number {
+                        value: self //TODO check unread counts everywhere
+                            .mailbox_unread_tags(
+                                account_id,
+                                document_id,
+                                mail_document_ids.as_ref(),
+                            )?
+                            .map(|v| v.len() as u32)
+                            .unwrap_or(0),
+                    },
+                    Property::TotalThreads => Value::Number {
+                        value: self.mailbox_count_threads(
+                            account_id,
+                            self.mailbox_tags(account_id, document_id)?,
+                        )? as u32,
+                    },
+                    Property::UnreadThreads => Value::Number {
+                        value: self.mailbox_count_threads(
+                            account_id,
+                            self.mailbox_unread_tags(
+                                account_id,
+                                document_id,
+                                mail_document_ids.as_ref(),
+                            )?,
+                        )? as u32,
+                    },
+                    Property::MyRights => Value::MailboxRights {
+                        value: MailboxRights::default(),
+                    },
+                    Property::IsSubscribed => Value::Bool { value: true }, //TODO implement
+                    _ => Value::Null,
+                };
+
+                mailbox.insert(*property, value);
+            }
+            Ok(Some(Mailbox {
+                properties: mailbox,
+            }))
         })
     }
 
-    fn get_mailbox_tag(&self, document_id: DocumentId) -> store::Result<Option<RoaringBitmap>> {
-        self.store.get_tag(
-            self.account_id,
+    fn mailbox_count_threads(
+        &self,
+        account_id: AccountId,
+        document_ids: Option<RoaringBitmap>,
+    ) -> store::Result<usize> {
+        if let Some(document_ids) = document_ids {
+            let mut thread_ids = HashSet::new();
+            self.get_multi_document_value(
+                account_id,
+                Collection::Mail,
+                document_ids.into_iter(),
+                MessageField::ThreadId.into(),
+            )?
+            .into_iter()
+            .for_each(|thread_id: Option<DocumentId>| {
+                if let Some(thread_id) = thread_id {
+                    thread_ids.insert(thread_id);
+                }
+            });
+            Ok(thread_ids.len())
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn mailbox_tags(
+        &self,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<RoaringBitmap>> {
+        self.get_tag(
+            account_id,
             Collection::Mail,
             MessageField::Mailbox.into(),
             Tag::Id(document_id),
         )
     }
 
-    fn get_mailbox_unread_tag(
+    fn mailbox_unread_tags(
         &self,
+        account_id: AccountId,
         document_id: DocumentId,
+        mail_document_ids: Option<&RoaringBitmap>,
     ) -> store::Result<Option<RoaringBitmap>> {
-        if let Some(mail_document_ids) = &self.mail_document_ids {
-            match self.get_mailbox_tag(document_id) {
+        if let Some(mail_document_ids) = mail_document_ids {
+            match self.mailbox_tags(account_id, document_id) {
                 Ok(Some(mailbox)) => {
-                    match self.store.get_tag(
-                        self.account_id,
+                    match self.get_tag(
+                        account_id,
                         Collection::Mail,
                         MessageField::Keyword.into(),
                         Tag::Static(Keyword::SEEN),

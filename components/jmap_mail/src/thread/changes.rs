@@ -1,28 +1,24 @@
 use jmap::{
-    jmap_store::changes::{ChangesObject, ChangesResult, JMAPChanges},
-    request::changes::ChangesRequest,
+    jmap_store::changes::{ChangesObject, JMAPChanges},
+    request::changes::{ChangesRequest, ChangesResponse},
 };
-use store::{core::collection::Collection, JMAPStore, Store};
+use store::{JMAPStore, Store};
 
-pub struct ChangesThread {}
+use super::schema::Thread;
 
-impl ChangesObject for ChangesThread {
-    fn collection() -> Collection {
-        Collection::Thread
-    }
-
-    fn handle_result(_result: &mut ChangesResult) {}
+impl ChangesObject for Thread {
+    type ChangesResponse = ();
 }
 
 pub trait JMAPThreadChanges {
-    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResult>;
+    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResponse<Thread>>;
 }
 
 impl<T> JMAPThreadChanges for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResult> {
-        self.changes::<ChangesThread>(request)
+    fn thread_changes(&self, request: ChangesRequest) -> jmap::Result<ChangesResponse<Thread>> {
+        self.changes(request)
     }
 }

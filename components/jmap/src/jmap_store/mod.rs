@@ -3,6 +3,8 @@ use core::hash::Hash;
 use std::fmt::Debug;
 use store::core::collection::Collection;
 
+use self::orm::Indexable;
+
 pub mod blob;
 pub mod changes;
 pub mod get;
@@ -29,7 +31,8 @@ pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
         + Send
         + Eq
         + PartialEq
-        + Debug;
+        + Debug
+        + Indexable;
 
     fn new(id: JMAPId) -> Self;
     fn id(&self) -> Option<&JMAPId>;

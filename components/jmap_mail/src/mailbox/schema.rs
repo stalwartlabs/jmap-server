@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
 pub struct Mailbox {
-    pub properties: HashMap<Property, MailboxValue>,
+    pub properties: HashMap<Property, Value>,
 }
 
 #[derive(Debug, Clone)]
-pub enum MailboxValue {
+pub enum Value {
     Id { value: JMAPId },
     Text { value: String },
     Bool { value: bool },
@@ -20,7 +20,13 @@ pub enum MailboxValue {
     Null,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Default for Value {
+    fn default() -> Self {
+        Value::Null
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MailboxRights {
     #[serde(rename = "mayReadItems")]
     may_read_items: bool,
@@ -103,4 +109,40 @@ impl Property {
             _ => Property::Invalid,
         }
     }
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum Filter {
+    ParentId {
+        #[serde(rename = "parentId")]
+        value: Option<JMAPId>,
+    },
+    Name {
+        #[serde(rename = "name")]
+        value: String,
+    },
+    Role {
+        #[serde(rename = "role")]
+        value: Option<String>,
+    },
+    HasAnyRole {
+        #[serde(rename = "hasAnyRole")]
+        value: bool,
+    },
+    IsSubscribed {
+        #[serde(rename = "isSubscribed")]
+        value: bool,
+    },
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(tag = "property")]
+pub enum Comparator {
+    #[serde(rename = "name")]
+    Name,
+    #[serde(rename = "sortOrder")]
+    SortOrder,
+    #[serde(rename = "parentId")]
+    ParentId,
 }

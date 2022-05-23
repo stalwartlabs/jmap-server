@@ -3,14 +3,12 @@ use store::{
     blob::BlobId, write::batch::WriteBatch, AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };
 
-use super::{set::SetMailbox, MailboxProperty};
+use super::schema::Mailbox;
 
-impl<T> RaftObject<T> for SetMailbox
+impl<T> RaftObject<T> for Mailbox
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property = MailboxProperty;
-
     fn on_raft_update(
         _store: &JMAPStore<T>,
         _write_batch: &mut WriteBatch,

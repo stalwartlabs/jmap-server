@@ -8,6 +8,7 @@ pub mod request;
 pub use base64;
 
 use error::method::MethodError;
+use store::chrono::{DateTime, NaiveDateTime, Utc};
 
 #[derive(Debug, Clone, serde::Serialize, Hash, PartialEq, Eq)]
 pub enum URI {
@@ -28,3 +29,7 @@ pub enum URI {
 }
 
 pub type Result<T> = std::result::Result<T, MethodError>;
+
+pub fn from_timestamp(timestamp: i64) -> DateTime<Utc> {
+    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc)
+}

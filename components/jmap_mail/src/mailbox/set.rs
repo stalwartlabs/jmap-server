@@ -2,7 +2,7 @@ use crate::mail::set::JMAPSetMail;
 use crate::mail::MessageField;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::jmap::JMAPId;
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM, Value};
+use jmap::jmap_store::orm::{self, JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
 use jmap::request::set::{SetRequest, SetResponse};
@@ -19,7 +19,7 @@ use store::read::FilterMapper;
 use store::Store;
 use store::{DocumentId, JMAPStore, LongInteger};
 
-use super::schema::{Mailbox, MailboxValue, Property};
+use super::schema::{Mailbox, Property, Value};
 
 //TODO mailbox id 0 is inbox and cannot be deleted
 
@@ -127,19 +127,13 @@ where
                     // Fetch results
                     for document_id in message_doc_ids {
                         let mut document = Document::new(Collection::Mail, document_id);
-                        if let Some(thread_id) =
-                            self.mail_delete(helper.account_id, &mut document)?
-                        {
-                            if !self.tombstone_deletions() {
-                                helper.changes.delete_document(document);
-                            } else {
-                                helper.changes.tombstone_document(document);
-                            }
-
-                            helper.changes.log_delete(
-                                Collection::Mail,
-                                JMAPId::from_parts(thread_id, document_id),
-                            );
+                        if let Some(id) = self.mail_delete(
+                            helper.account_id,
+                            Some(&mut helper.changes),
+                            &mut document,
+                        )? {
+                            helper.changes.delete_document(document);
+                            helper.changes.log_delete(Collection::Mail, id);
                         }
                     }
                 } else {
@@ -297,7 +291,7 @@ where
         //TODO implement isSubscribed
         for (property, value) in mailbox.properties {
             let value = match (property, value) {
-                (Property::Name, MailboxValue::Text { value }) => {
+                (Property::Name, Value::Text { value }) => {
                     if value.len() < 255 {
                         Ok(value.into())
                     } else {
@@ -307,7 +301,7 @@ where
                         ))
                     }
                 }
-                (Property::ParentId, MailboxValue::Id { value }) => {
+                (Property::ParentId, Value::Id { value }) => {
                     let parent_id = value.get_document_id();
                     if helper
                         .request
@@ -328,8 +322,8 @@ where
 
                     Ok((parent_id + 1).into())
                 }
-                (Property::ParentId, MailboxValue::Null) => Ok(0u64.into()),
-                (Property::Role, MailboxValue::Text { value }) => {
+                (Property::ParentId, Value::Null) => Ok(0u64.into()),
+                (Property::Role, Value::Text { value }) => {
                     let role = value.to_lowercase();
                     if [
                         "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
@@ -345,11 +339,11 @@ where
                         ))
                     }
                 }
-                (Property::Role, MailboxValue::Null) => {
+                (Property::Role, Value::Null) => {
                     self.untag(&property, &Tag::Default);
-                    Ok(Value::Null)
+                    Ok(orm::Value::Null)
                 }
-                (Property::SortOrder, MailboxValue::Number { value }) => Ok(value.into()),
+                (Property::SortOrder, Value::Number { value }) => Ok(value.into()),
                 (_, _) => Err(SetError::invalid_property(
                     property,
                     "Unexpected value.".to_string(),

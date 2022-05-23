@@ -1,3 +1,4 @@
+use jmap::from_timestamp;
 use mail_parser::{
     parsers::{
         fields::{
@@ -11,7 +12,7 @@ use mail_parser::{
 use store::chrono::{DateTime, NaiveDateTime, Utc};
 
 use super::{
-    schema::{EmailValue, HeaderForm},
+    schema::{HeaderForm, Value},
     MessageData, MimeHeaders,
 };
 
@@ -480,11 +481,11 @@ impl super::HeaderValue {
 }
 
 pub trait IntoForm {
-    fn into_form(self, form: &HeaderForm, all: bool) -> Option<EmailValue>;
+    fn into_form(self, form: &HeaderForm, all: bool) -> Option<Value>;
 }
 
 impl IntoForm for mail_parser::HeaderValue<'_> {
-    fn into_form(self, form: &HeaderForm, all: bool) -> Option<EmailValue> {
+    fn into_form(self, form: &HeaderForm, all: bool) -> Option<Value> {
         match form {
             HeaderForm::Raw | HeaderForm::Text => self.into_text(),
             HeaderForm::URLs => self.into_url(),
@@ -497,32 +498,32 @@ impl IntoForm for mail_parser::HeaderValue<'_> {
 }
 
 impl IntoForm for super::HeaderValue {
-    fn into_form(self, form: &HeaderForm, _all: bool) -> Option<EmailValue> {
+    fn into_form(self, form: &HeaderForm, _all: bool) -> Option<Value> {
         match (form, self) {
             (HeaderForm::Raw | HeaderForm::Text, super::HeaderValue::Text(value)) => {
-                EmailValue::Text { value }.into()
+                Value::Text { value }.into()
             }
             (HeaderForm::MessageIds | HeaderForm::URLs, super::HeaderValue::TextList(value)) => {
-                EmailValue::TextList { value }.into()
+                Value::TextList { value }.into()
             }
-            (HeaderForm::Date, super::HeaderValue::Timestamp(ts)) => EmailValue::Date {
+            (HeaderForm::Date, super::HeaderValue::Timestamp(ts)) => Value::Date {
                 value: from_timestamp(ts),
             }
             .into(),
             (HeaderForm::Addresses, super::HeaderValue::Addresses(value)) => {
-                EmailValue::Addresses { value }.into()
+                Value::Addresses { value }.into()
             }
             (HeaderForm::Addresses, super::HeaderValue::GroupedAddresses(value)) => {
-                EmailValue::Addresses {
+                Value::Addresses {
                     value: value.into_iter().flat_map(|g| g.addresses).collect(),
                 }
                 .into()
             }
             (HeaderForm::GroupedAddresses, super::HeaderValue::GroupedAddresses(value)) => {
-                EmailValue::GroupedAddresses { value }.into()
+                Value::GroupedAddresses { value }.into()
             }
             (HeaderForm::GroupedAddresses, super::HeaderValue::Addresses(value)) => {
-                EmailValue::GroupedAddresses {
+                Value::GroupedAddresses {
                     value: vec![value.into()],
                 }
                 .into()
@@ -533,38 +534,38 @@ impl IntoForm for super::HeaderValue {
 }
 
 impl IntoForm for Vec<super::HeaderValue> {
-    fn into_form(mut self, form: &HeaderForm, all: bool) -> Option<EmailValue> {
+    fn into_form(mut self, form: &HeaderForm, all: bool) -> Option<Value> {
         if !all {
             return self.pop()?.into_form(form, false);
         }
 
         match form {
-            HeaderForm::Raw | HeaderForm::Text => EmailValue::TextList {
+            HeaderForm::Raw | HeaderForm::Text => Value::TextList {
                 value: self.into_iter().filter_map(|v| v.into_text()).collect(),
             }
             .into(),
-            HeaderForm::MessageIds | HeaderForm::URLs => EmailValue::TextListMany {
+            HeaderForm::MessageIds | HeaderForm::URLs => Value::TextListMany {
                 value: self
                     .into_iter()
                     .filter_map(|v| v.into_text_list())
                     .collect(),
             }
             .into(),
-            HeaderForm::Date => EmailValue::DateList {
+            HeaderForm::Date => Value::DateList {
                 value: self
                     .into_iter()
                     .filter_map(|v| v.into_timestamp().map(from_timestamp))
                     .collect(),
             }
             .into(),
-            HeaderForm::Addresses => EmailValue::AddressesList {
+            HeaderForm::Addresses => Value::AddressesList {
                 value: self
                     .into_iter()
                     .filter_map(|v| v.into_addresses())
                     .collect(),
             }
             .into(),
-            HeaderForm::GroupedAddresses => EmailValue::GroupedAddressesList {
+            HeaderForm::GroupedAddresses => Value::GroupedAddressesList {
                 value: self
                     .into_iter()
                     .filter_map(|v| v.into_grouped_addresses())
@@ -575,17 +576,8 @@ impl IntoForm for Vec<super::HeaderValue> {
     }
 }
 
-pub fn from_timestamp(timestamp: i64) -> DateTime<Utc> {
-    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc)
-}
-
 impl MessageData {
-    pub fn header(
-        &mut self,
-        header: &RfcHeader,
-        form: &HeaderForm,
-        all: bool,
-    ) -> Option<EmailValue> {
+    pub fn header(&mut self, header: &RfcHeader, form: &HeaderForm, all: bool) -> Option<Value> {
         self.headers.remove(header)?.into_form(form, all)
     }
 }

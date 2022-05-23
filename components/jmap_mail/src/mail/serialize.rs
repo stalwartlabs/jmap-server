@@ -9,8 +9,8 @@ use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
 
 use super::schema::{
-    BodyProperty, Email, EmailAddress, EmailBodyPart, EmailHeader, EmailValue, HeaderForm,
-    HeaderProperty, Keyword, Property,
+    BodyProperty, Email, EmailAddress, EmailBodyPart, EmailHeader, HeaderForm, HeaderProperty,
+    Keyword, Property, Value,
 };
 
 // Email de/serialization
@@ -23,26 +23,27 @@ impl Serialize for Email {
 
         for (name, value) in &self.properties {
             match value {
-                EmailValue::Id { value } => map.serialize_entry(name, value)?,
-                EmailValue::Blob { value } => map.serialize_entry(name, value)?,
-                EmailValue::Size { value } => map.serialize_entry(name, value)?,
-                EmailValue::Bool { value } => map.serialize_entry(name, value)?,
-                EmailValue::Keywords { value, .. } => map.serialize_entry(name, value)?,
-                EmailValue::MailboxIds { value, .. } => map.serialize_entry(name, value)?,
-                EmailValue::ResultReference { value } => map.serialize_entry(name, value)?,
-                EmailValue::BodyPart { value } => map.serialize_entry(name, value)?,
-                EmailValue::BodyPartList { value } => map.serialize_entry(name, value)?,
-                EmailValue::BodyValues { value } => map.serialize_entry(name, value)?,
-                EmailValue::Text { value } => map.serialize_entry(name, value)?,
-                EmailValue::TextList { value } => map.serialize_entry(name, value)?,
-                EmailValue::TextListMany { value } => map.serialize_entry(name, value)?,
-                EmailValue::Date { value } => map.serialize_entry(name, value)?,
-                EmailValue::DateList { value } => map.serialize_entry(name, value)?,
-                EmailValue::Addresses { value } => map.serialize_entry(name, value)?,
-                EmailValue::AddressesList { value } => map.serialize_entry(name, value)?,
-                EmailValue::GroupedAddresses { value } => map.serialize_entry(name, value)?,
-                EmailValue::GroupedAddressesList { value } => map.serialize_entry(name, value)?,
-                EmailValue::Headers { value } => map.serialize_entry(name, value)?,
+                Value::Id { value } => map.serialize_entry(name, value)?,
+                Value::Blob { value } => map.serialize_entry(name, value)?,
+                Value::Size { value } => map.serialize_entry(name, value)?,
+                Value::Bool { value } => map.serialize_entry(name, value)?,
+                Value::Keywords { value, .. } => map.serialize_entry(name, value)?,
+                Value::MailboxIds { value, .. } => map.serialize_entry(name, value)?,
+                Value::ResultReference { value } => map.serialize_entry(name, value)?,
+                Value::BodyPart { value } => map.serialize_entry(name, value)?,
+                Value::BodyPartList { value } => map.serialize_entry(name, value)?,
+                Value::BodyValues { value } => map.serialize_entry(name, value)?,
+                Value::Text { value } => map.serialize_entry(name, value)?,
+                Value::TextList { value } => map.serialize_entry(name, value)?,
+                Value::TextListMany { value } => map.serialize_entry(name, value)?,
+                Value::Date { value } => map.serialize_entry(name, value)?,
+                Value::DateList { value } => map.serialize_entry(name, value)?,
+                Value::Addresses { value } => map.serialize_entry(name, value)?,
+                Value::AddressesList { value } => map.serialize_entry(name, value)?,
+                Value::GroupedAddresses { value } => map.serialize_entry(name, value)?,
+                Value::GroupedAddressesList { value } => map.serialize_entry(name, value)?,
+                Value::Headers { value } => map.serialize_entry(name, value)?,
+                Value::Null => map.serialize_entry(name, &None::<&str>)?,
             }
         }
 
@@ -62,105 +63,92 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, EmailValue> = HashMap::new();
+        let mut properties: HashMap<Property, Value> = HashMap::new();
 
         while let Some(key) = map.next_key::<&str>()? {
             match key {
                 "keywords" => {
                     if let Some(value) = map.next_value::<Option<HashMap<Keyword, bool>>>()? {
-                        properties.insert(
-                            Property::Keywords,
-                            EmailValue::Keywords { value, set: true },
-                        );
+                        properties.insert(Property::Keywords, Value::Keywords { value, set: true });
                     }
                 }
                 "mailboxIds" => {
                     if let Some(value) =
                         map.next_value::<Option<HashMap<MaybeIdReference, bool>>>()?
                     {
-                        properties.insert(
-                            Property::MailboxIds,
-                            EmailValue::MailboxIds { value, set: true },
-                        );
+                        properties
+                            .insert(Property::MailboxIds, Value::MailboxIds { value, set: true });
                     }
-                }
-                "#mailboxIds" => {
-                    properties.insert(
-                        Property::MailboxIds,
-                        EmailValue::ResultReference {
-                            value: map.next_value()?,
-                        },
-                    );
                 }
                 "messageId" => {
                     if let Some(value) = map.next_value::<Option<Vec<String>>>()? {
-                        properties.insert(Property::MessageId, EmailValue::TextList { value });
+                        properties.insert(Property::MessageId, Value::TextList { value });
                     }
                 }
                 "inReplyTo" => {
                     if let Some(value) = map.next_value::<Option<Vec<String>>>()? {
-                        properties.insert(Property::InReplyTo, EmailValue::TextList { value });
+                        properties.insert(Property::InReplyTo, Value::TextList { value });
                     }
                 }
                 "references" => {
                     if let Some(value) = map.next_value::<Option<Vec<String>>>()? {
-                        properties.insert(Property::References, EmailValue::TextList { value });
+                        properties.insert(Property::References, Value::TextList { value });
                     }
                 }
                 "sender" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
-                        properties.insert(Property::Sender, EmailValue::Addresses { value });
+                        properties.insert(Property::Sender, Value::Addresses { value });
                     }
                 }
                 "from" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
-                        properties.insert(Property::From, EmailValue::Addresses { value });
+                        properties.insert(Property::From, Value::Addresses { value });
                     }
                 }
                 "to" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
-                        properties.insert(Property::To, EmailValue::Addresses { value });
+                        properties.insert(Property::To, Value::Addresses { value });
                     }
                 }
                 "cc" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
-                        properties.insert(Property::Cc, EmailValue::Addresses { value });
+                        properties.insert(Property::Cc, Value::Addresses { value });
                     }
                 }
                 "bcc" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
-                        properties.insert(Property::Bcc, EmailValue::Addresses { value });
+                        properties.insert(Property::Bcc, Value::Addresses { value });
                     }
                 }
                 "replyTo" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
-                        properties.insert(Property::ReplyTo, EmailValue::Addresses { value });
+                        properties.insert(Property::ReplyTo, Value::Addresses { value });
                     }
                 }
                 "subject" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(Property::Subject, EmailValue::Text { value });
+                        properties.insert(Property::Subject, Value::Text { value });
                     }
                 }
                 "sentAt" => {
                     if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
-                        properties.insert(Property::SentAt, EmailValue::Date { value });
+                        properties.insert(Property::SentAt, Value::Date { value });
                     }
                 }
                 "receivedAt" => {
                     if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
-                        properties.insert(Property::ReceivedAt, EmailValue::Date { value });
+                        properties.insert(Property::ReceivedAt, Value::Date { value });
                     }
                 }
                 "preview" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(Property::Preview, EmailValue::Text { value });
+                        properties.insert(Property::Preview, Value::Text { value });
                     }
                 }
                 "textBody" => {
                     properties.insert(
                         Property::TextBody,
-                        EmailValue::BodyPartList {
+                        Value::BodyPartList {
                             value: map.next_value()?,
                         },
                     );
@@ -168,7 +156,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                 "htmlBody" => {
                     properties.insert(
                         Property::HtmlBody,
-                        EmailValue::BodyPartList {
+                        Value::BodyPartList {
                             value: map.next_value()?,
                         },
                     );
@@ -176,40 +164,40 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                 "attachments" => {
                     properties.insert(
                         Property::Attachments,
-                        EmailValue::BodyPartList {
+                        Value::BodyPartList {
                             value: map.next_value()?,
                         },
                     );
                 }
                 "hasAttachment" => {
                     if let Some(value) = map.next_value::<Option<bool>>()? {
-                        properties.insert(Property::HasAttachment, EmailValue::Bool { value });
+                        properties.insert(Property::HasAttachment, Value::Bool { value });
                     }
                 }
                 "id" => {
                     if let Some(value) = map.next_value::<Option<JMAPId>>()? {
-                        properties.insert(Property::Id, EmailValue::Id { value });
+                        properties.insert(Property::Id, Value::Id { value });
                     }
                 }
                 "blobId" => {
                     if let Some(value) = map.next_value::<Option<JMAPBlob>>()? {
-                        properties.insert(Property::BlobId, EmailValue::Blob { value });
+                        properties.insert(Property::BlobId, Value::Blob { value });
                     }
                 }
                 "threadId" => {
                     if let Some(value) = map.next_value::<Option<JMAPId>>()? {
-                        properties.insert(Property::ThreadId, EmailValue::Id { value });
+                        properties.insert(Property::ThreadId, Value::Id { value });
                     }
                 }
                 "size" => {
                     if let Some(value) = map.next_value::<Option<usize>>()? {
-                        properties.insert(Property::Size, EmailValue::Size { value });
+                        properties.insert(Property::Size, Value::Size { value });
                     }
                 }
                 "bodyValues" => {
                     properties.insert(
                         Property::BodyValues,
-                        EmailValue::BodyValues {
+                        Value::BodyValues {
                             value: map.next_value()?,
                         },
                     );
@@ -217,65 +205,75 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                 "bodyStructure" => {
                     properties.insert(
                         Property::BodyStructure,
-                        EmailValue::BodyPart {
+                        Value::BodyPart {
                             value: map.next_value()?,
                         },
                     );
+                }
+                _ if key.starts_with('#') => {
+                    if let Some(property) = key.get(1..) {
+                        properties.insert(
+                            Property::parse(property),
+                            Value::ResultReference {
+                                value: map.next_value()?,
+                            },
+                        );
+                    }
                 }
                 _ if key.starts_with("header:") => {
                     if let Some(header) = HeaderProperty::parse(key) {
                         let header_value = match header.form {
                             HeaderForm::Raw | HeaderForm::Text => {
                                 if header.all {
-                                    EmailValue::TextList {
+                                    Value::TextList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::Text {
+                                    Value::Text {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::Addresses => {
                                 if header.all {
-                                    EmailValue::AddressesList {
+                                    Value::AddressesList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::Addresses {
+                                    Value::Addresses {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::GroupedAddresses => {
                                 if header.all {
-                                    EmailValue::GroupedAddressesList {
+                                    Value::GroupedAddressesList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::GroupedAddresses {
+                                    Value::GroupedAddresses {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::MessageIds | HeaderForm::URLs => {
                                 if header.all {
-                                    EmailValue::TextListMany {
+                                    Value::TextListMany {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::TextList {
+                                    Value::TextList {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::Date => {
                                 if header.all {
-                                    EmailValue::DateList {
+                                    Value::DateList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::Date {
+                                    Value::Date {
                                         value: map.next_value()?,
                                     }
                                 }
@@ -299,7 +297,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                             if let Some(id) = JMAPId::parse(id) {
                                                 properties
                                                     .entry(Property::MailboxIds)
-                                                    .or_insert_with(|| EmailValue::MailboxIds {
+                                                    .or_insert_with(|| Value::MailboxIds {
                                                         value: HashMap::new(),
                                                         set: false,
                                                     })
@@ -311,7 +309,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                         Property::Keywords => {
                                             properties
                                                 .entry(Property::MailboxIds)
-                                                .or_insert_with(|| EmailValue::Keywords {
+                                                .or_insert_with(|| Value::Keywords {
                                                     value: HashMap::new(),
                                                     set: false,
                                                 })
@@ -353,26 +351,27 @@ impl Serialize for EmailBodyPart {
 
         for (name, value) in &self.properties {
             match value {
-                EmailValue::Id { value } => map.serialize_entry(name, value)?,
-                EmailValue::Blob { value } => map.serialize_entry(name, value)?,
-                EmailValue::Size { value } => map.serialize_entry(name, value)?,
-                EmailValue::Bool { value } => map.serialize_entry(name, value)?,
-                EmailValue::Keywords { value, .. } => map.serialize_entry(name, value)?,
-                EmailValue::MailboxIds { value, .. } => map.serialize_entry(name, value)?,
-                EmailValue::ResultReference { value } => map.serialize_entry(name, value)?,
-                EmailValue::BodyPart { value } => map.serialize_entry(name, value)?,
-                EmailValue::BodyPartList { value } => map.serialize_entry(name, value)?,
-                EmailValue::BodyValues { value } => map.serialize_entry(name, value)?,
-                EmailValue::Text { value } => map.serialize_entry(name, value)?,
-                EmailValue::TextList { value } => map.serialize_entry(name, value)?,
-                EmailValue::TextListMany { value } => map.serialize_entry(name, value)?,
-                EmailValue::Date { value } => map.serialize_entry(name, value)?,
-                EmailValue::DateList { value } => map.serialize_entry(name, value)?,
-                EmailValue::Addresses { value } => map.serialize_entry(name, value)?,
-                EmailValue::AddressesList { value } => map.serialize_entry(name, value)?,
-                EmailValue::GroupedAddresses { value } => map.serialize_entry(name, value)?,
-                EmailValue::GroupedAddressesList { value } => map.serialize_entry(name, value)?,
-                EmailValue::Headers { value } => map.serialize_entry(name, value)?,
+                Value::Id { value } => map.serialize_entry(name, value)?,
+                Value::Blob { value } => map.serialize_entry(name, value)?,
+                Value::Size { value } => map.serialize_entry(name, value)?,
+                Value::Bool { value } => map.serialize_entry(name, value)?,
+                Value::Keywords { value, .. } => map.serialize_entry(name, value)?,
+                Value::MailboxIds { value, .. } => map.serialize_entry(name, value)?,
+                Value::ResultReference { value } => map.serialize_entry(name, value)?,
+                Value::BodyPart { value } => map.serialize_entry(name, value)?,
+                Value::BodyPartList { value } => map.serialize_entry(name, value)?,
+                Value::BodyValues { value } => map.serialize_entry(name, value)?,
+                Value::Text { value } => map.serialize_entry(name, value)?,
+                Value::TextList { value } => map.serialize_entry(name, value)?,
+                Value::TextListMany { value } => map.serialize_entry(name, value)?,
+                Value::Date { value } => map.serialize_entry(name, value)?,
+                Value::DateList { value } => map.serialize_entry(name, value)?,
+                Value::Addresses { value } => map.serialize_entry(name, value)?,
+                Value::AddressesList { value } => map.serialize_entry(name, value)?,
+                Value::GroupedAddresses { value } => map.serialize_entry(name, value)?,
+                Value::GroupedAddressesList { value } => map.serialize_entry(name, value)?,
+                Value::Headers { value } => map.serialize_entry(name, value)?,
+                Value::Null => map.serialize_entry(name, &None::<&str>)?,
             }
         }
 
@@ -392,64 +391,63 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<BodyProperty, EmailValue> = HashMap::new();
+        let mut properties: HashMap<BodyProperty, Value> = HashMap::new();
 
         while let Some(key) = map.next_key::<&str>()? {
             match key {
                 "partId" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(BodyProperty::PartId, EmailValue::Text { value });
+                        properties.insert(BodyProperty::PartId, Value::Text { value });
                     }
                 }
                 "blobId" => {
                     if let Some(value) = map.next_value::<Option<JMAPBlob>>()? {
-                        properties.insert(BodyProperty::BlobId, EmailValue::Blob { value });
+                        properties.insert(BodyProperty::BlobId, Value::Blob { value });
                     }
                 }
                 "size" => {
                     if let Some(value) = map.next_value::<Option<usize>>()? {
-                        properties.insert(BodyProperty::Size, EmailValue::Size { value });
+                        properties.insert(BodyProperty::Size, Value::Size { value });
                     }
                 }
                 "name" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailHeader>>>()? {
-                        properties.insert(BodyProperty::Headers, EmailValue::Headers { value });
+                        properties.insert(BodyProperty::Headers, Value::Headers { value });
                     }
                 }
                 "type" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(BodyProperty::Type, EmailValue::Text { value });
+                        properties.insert(BodyProperty::Type, Value::Text { value });
                     }
                 }
                 "charset" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(BodyProperty::Charset, EmailValue::Text { value });
+                        properties.insert(BodyProperty::Charset, Value::Text { value });
                     }
                 }
                 "disposition" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(BodyProperty::Disposition, EmailValue::Text { value });
+                        properties.insert(BodyProperty::Disposition, Value::Text { value });
                     }
                 }
                 "cid" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(BodyProperty::Cid, EmailValue::Text { value });
+                        properties.insert(BodyProperty::Cid, Value::Text { value });
                     }
                 }
                 "language" => {
                     if let Some(value) = map.next_value::<Option<Vec<String>>>()? {
-                        properties.insert(BodyProperty::Language, EmailValue::TextList { value });
+                        properties.insert(BodyProperty::Language, Value::TextList { value });
                     }
                 }
                 "location" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
-                        properties.insert(BodyProperty::Location, EmailValue::Text { value });
+                        properties.insert(BodyProperty::Location, Value::Text { value });
                     }
                 }
                 "subParts" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailBodyPart>>>()? {
-                        properties
-                            .insert(BodyProperty::Subparts, EmailValue::BodyPartList { value });
+                        properties.insert(BodyProperty::Subparts, Value::BodyPartList { value });
                     }
                 }
                 _ if key.starts_with("header:") => {
@@ -457,55 +455,55 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
                         let header_value = match header.form {
                             HeaderForm::Raw | HeaderForm::Text => {
                                 if header.all {
-                                    EmailValue::TextList {
+                                    Value::TextList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::Text {
+                                    Value::Text {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::Addresses => {
                                 if header.all {
-                                    EmailValue::AddressesList {
+                                    Value::AddressesList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::Addresses {
+                                    Value::Addresses {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::GroupedAddresses => {
                                 if header.all {
-                                    EmailValue::GroupedAddressesList {
+                                    Value::GroupedAddressesList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::GroupedAddresses {
+                                    Value::GroupedAddresses {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::MessageIds | HeaderForm::URLs => {
                                 if header.all {
-                                    EmailValue::TextListMany {
+                                    Value::TextListMany {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::TextList {
+                                    Value::TextList {
                                         value: map.next_value()?,
                                     }
                                 }
                             }
                             HeaderForm::Date => {
                                 if header.all {
-                                    EmailValue::DateList {
+                                    Value::DateList {
                                         value: map.next_value()?,
                                     }
                                 } else {
-                                    EmailValue::Date {
+                                    Value::Date {
                                         value: map.next_value()?,
                                     }
                                 }

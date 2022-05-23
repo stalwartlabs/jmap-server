@@ -2,6 +2,7 @@ use std::{borrow::Cow, collections::HashMap};
 
 use crate::mail::{HeaderName, MessageData, MessageField, MessageOutline, MimePart, MimePartType};
 use jmap::{
+    from_timestamp,
     id::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::{
         get::{GetHelper, GetObject},
@@ -25,10 +26,10 @@ use store::{
 use store::{DocumentId, Store};
 
 use super::{
-    conv::{from_timestamp, IntoForm},
+    conv::IntoForm,
     schema::{
-        BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, EmailValue, HeaderForm,
-        HeaderProperty, Property,
+        BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
+        HeaderProperty, Property, Value,
     },
 };
 
@@ -189,7 +190,7 @@ where
         };
 
         // Get items
-        let response = helper.get(|id, properties| {
+        helper.get(|id, properties| {
             let document_id = id.get_document_id();
 
             // Fetch message metadat
@@ -254,22 +255,22 @@ where
                 .ok_or_else(|| StoreError::InternalError("ORM not found for Email.".to_string()))?;
 
             // Add requested properties to result
-            let mut result = HashMap::with_capacity(properties.len());
+            let mut email = HashMap::with_capacity(properties.len());
             for property in properties {
                 let value = match property {
-                    Property::Id => EmailValue::Id { value: id }.into(),
-                    Property::BlobId => EmailValue::Blob {
+                    Property::Id => Value::Id { value: id }.into(),
+                    Property::BlobId => Value::Blob {
                         value: JMAPBlob::from(&message_data.raw_message),
                     }
                     .into(),
-                    Property::ThreadId => EmailValue::Id {
+                    Property::ThreadId => Value::Id {
                         value: id.get_prefix_id().into(),
                     }
                     .into(),
                     Property::MailboxIds => {
                         fields
                             .get_tags(&Property::MailboxIds)
-                            .map(|tags| EmailValue::MailboxIds {
+                            .map(|tags| Value::MailboxIds {
                                 value: tags
                                     .iter()
                                     .map(|tag| (MaybeIdReference::Value(tag.as_id().into()), true))
@@ -280,16 +281,16 @@ where
                     Property::Keywords => {
                         fields
                             .get_tags(&Property::Keywords)
-                            .map(|tags| EmailValue::Keywords {
+                            .map(|tags| Value::Keywords {
                                 value: tags.iter().map(|tag| (tag.into(), true)).collect(),
                                 set: true,
                             })
                     }
-                    Property::Size => EmailValue::Size {
+                    Property::Size => Value::Size {
                         value: message_data.size,
                     }
                     .into(),
-                    Property::ReceivedAt => EmailValue::Date {
+                    Property::ReceivedAt => Value::Date {
                         value: from_timestamp(message_data.received_at),
                     }
                     .into(),
@@ -316,7 +317,7 @@ where
                     Property::SentAt => {
                         message_data.header(&RfcHeader::Date, &HeaderForm::MessageIds, false)
                     }
-                    Property::HasAttachment => EmailValue::Bool {
+                    Property::HasAttachment => Value::Bool {
                         value: message_data.has_attachments,
                     }
                     .into(),
@@ -365,7 +366,7 @@ where
                                 (&message_data.html_body, preview_html)
                             };
 
-                            EmailValue::Text {
+                            Value::Text {
                                 value: preview_fnc(
                                     String::from_utf8(
                                         self.blob_get(
@@ -429,7 +430,7 @@ where
                             }
                         }
                         if !body_values.is_empty() {
-                            EmailValue::BodyValues { value: body_values }.into()
+                            Value::BodyValues { value: body_values }.into()
                         } else {
                             None
                         }
@@ -483,15 +484,11 @@ where
                     Property::Invalid(_) => None,
                 };
 
-                if let Some(value) = value {
-                    result.insert(property.clone(), value);
-                }
+                email.insert(property.clone(), value.unwrap_or_default());
             }
 
-            Ok(Some(Email { properties: result }))
-        })?;
-
-        Ok(response)
+            Ok(Some(Email { properties: email }))
+        })
     }
 }
 
@@ -512,7 +509,7 @@ impl MimePart {
                     if let Some(part_id) = part_id {
                         body_part.insert(
                             BodyProperty::PartId,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: part_id.to_string(),
                             },
                         );
@@ -522,7 +519,7 @@ impl MimePart {
                     if let Some(blob_id) = &self.blob_id {
                         body_part.insert(
                             BodyProperty::BlobId,
-                            EmailValue::Blob {
+                            Value::Blob {
                                 value: if let Some(base_blob_id) = base_blob_id {
                                     JMAPBlob::new_inner(
                                         base_blob_id.clone(),
@@ -538,7 +535,7 @@ impl MimePart {
                 BodyProperty::Size => {
                     body_part.insert(
                         BodyProperty::Size,
-                        EmailValue::Size {
+                        Value::Size {
                             value: self.headers.size,
                         },
                     );
@@ -547,7 +544,7 @@ impl MimePart {
                     if let Some(name) = &self.headers.name {
                         body_part.insert(
                             BodyProperty::Name,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: name.to_string(),
                             },
                         );
@@ -557,7 +554,7 @@ impl MimePart {
                     if let Some(mime_type) = &self.headers.type_ {
                         body_part.insert(
                             BodyProperty::Type,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: mime_type.to_string(),
                             },
                         );
@@ -567,7 +564,7 @@ impl MimePart {
                     if let Some(charset) = &self.headers.charset {
                         body_part.insert(
                             BodyProperty::Charset,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: charset.to_string(),
                             },
                         );
@@ -577,7 +574,7 @@ impl MimePart {
                     if let Some(disposition) = &self.headers.disposition {
                         body_part.insert(
                             BodyProperty::Disposition,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: disposition.to_string(),
                             },
                         );
@@ -587,7 +584,7 @@ impl MimePart {
                     if let Some(cid) = &self.headers.cid {
                         body_part.insert(
                             BodyProperty::Cid,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: cid.to_string(),
                             },
                         );
@@ -597,7 +594,7 @@ impl MimePart {
                     if let Some(language) = &self.headers.language {
                         body_part.insert(
                             BodyProperty::Language,
-                            EmailValue::TextList {
+                            Value::TextList {
                                 value: language.to_vec(),
                             },
                         );
@@ -607,7 +604,7 @@ impl MimePart {
                     if let Some(location) = &self.headers.location {
                         body_part.insert(
                             BodyProperty::Location,
-                            EmailValue::Text {
+                            Value::Text {
                                 value: location.to_string(),
                             },
                         );
@@ -637,10 +634,7 @@ impl MimePart {
                             });
                         }
                     }
-                    body_part.insert(
-                        BodyProperty::Headers,
-                        EmailValue::Headers { value: headers },
-                    );
+                    body_part.insert(BodyProperty::Headers, Value::Headers { value: headers });
                 }
                 _ => (),
             }
@@ -789,7 +783,7 @@ impl MessageOutline {
                 let mut prev_part = parts_stack.pop().unwrap();
                 prev_part.properties.insert(
                     BodyProperty::Subparts,
-                    EmailValue::BodyPartList { value: subparts },
+                    Value::BodyPartList { value: subparts },
                 );
                 prev_subparts.push(prev_part);
                 part_list_iter = prev_part_list_iter;
@@ -802,7 +796,7 @@ impl MessageOutline {
         let mut root_part = parts_stack.pop().unwrap();
         root_part.properties.insert(
             BodyProperty::Subparts,
-            EmailValue::BodyPartList { value: subparts },
+            Value::BodyPartList { value: subparts },
         );
 
         root_part.into()

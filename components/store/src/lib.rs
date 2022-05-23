@@ -141,11 +141,6 @@ where
         store
     }
 
-    pub fn tombstone_deletions(&self) -> bool {
-        self.tombstone_deletions
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     pub fn lock_account(&self, account: AccountId, collection: Collection) -> MutexGuard<'_, ()> {
         self.account_lock.lock_hash((account, collection))
     }

@@ -1,170 +1,144 @@
-use std::collections::HashMap;
+use crate::vacation_response::schema::VacationResponse;
+use jmap::error::set::{SetError, SetErrorType};
+use jmap::id::jmap::JMAPId;
+use jmap::jmap_store::orm::{self, JMAPOrm, TinyORM};
+use jmap::jmap_store::set::SetHelper;
+use jmap::jmap_store::Object;
+use jmap::request::set::SetResponse;
+use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
+use store::parking_lot::MutexGuard;
+use store::{JMAPStore, Store};
 
-use super::VacationResponseProperty;
-use jmap::error::set::SetError;
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
-use jmap::jmap_store::set::{DefaultCreateItem, DefaultUpdateItem};
-use jmap::protocol::invocation::Invocation;
-use jmap::request::parse_utc_date;
-use jmap::{
-    jmap_store::set::{SetObject, SetObjectData, SetObjectHelper},
-    protocol::json::JSONValue,
-    request::set::SetRequest,
-};
-use store::core::document::Document;
-use store::{AccountId, JMAPId, JMAPStore, Store};
+use super::schema::{Property, Value};
 
-#[derive(Default)]
-pub struct SetVacationResponse {
-    pub current_vacation_response: Option<TinyORM<VacationResponseProperty>>,
-    pub vacation_response: TinyORM<VacationResponseProperty>,
-}
+impl SetObject for VacationResponse {
+    type SetArguments = ();
 
-pub struct SetVacationResponseHelper {}
+    type NextInvocation = ();
 
-impl<T> SetObjectData<T> for SetVacationResponseHelper
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn new(_store: &JMAPStore<T>, _request: &mut SetRequest) -> jmap::Result<Self> {
-        Ok(SetVacationResponseHelper {})
-    }
-
-    fn unwrap_invocation(self) -> Option<Invocation> {
-        None
+    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
+        todo!()
     }
 }
 
-impl<'y, T> SetObject<'y, T> for SetVacationResponse
+pub trait JMAPSetVacationResponse<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    type Property = VacationResponseProperty;
-    type Helper = SetVacationResponseHelper;
-    type CreateItemResult = DefaultCreateItem;
-    type UpdateItemResult = DefaultUpdateItem;
+    fn vacation_response_set(
+        &self,
+        request: SetRequest<VacationResponse>,
+    ) -> jmap::Result<SetResponse<VacationResponse>>;
+}
 
-    fn new(
-        helper: &mut SetObjectHelper<T, Self::Helper>,
-        _fields: &mut HashMap<String, JSONValue>,
-        jmap_id: Option<JMAPId>,
-    ) -> jmap::error::set::Result<Self> {
-        Ok(SetVacationResponse {
-            current_vacation_response: if jmap_id.is_some() {
-                helper
-                    .store
-                    .get_orm::<VacationResponseProperty>(helper.account_id, 0)?
-                    .unwrap_or_default()
-                    .into()
-            } else {
-                None
-            },
-            ..Default::default()
-        })
-    }
+impl<T> JMAPSetVacationResponse<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn vacation_response_set(
+        &self,
+        request: SetRequest<VacationResponse>,
+    ) -> jmap::Result<SetResponse<VacationResponse>> {
+        let mut helper = SetHelper::new(self, request)?;
 
-    fn set_field(
-        &mut self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        field: Self::Property,
-        value: JSONValue,
-    ) -> jmap::error::set::Result<()> {
-        match (field, &value) {
-            (
-                VacationResponseProperty::Subject
-                | VacationResponseProperty::TextBody
-                | VacationResponseProperty::HtmlBody,
-                JSONValue::String(text),
-            ) if text.len() < 255 => {
-                self.vacation_response.set(field, value);
-            }
-            (
-                VacationResponseProperty::FromDate | VacationResponseProperty::ToDate,
-                JSONValue::String(date_time),
-            ) => {
-                self.vacation_response.set(
-                    field,
-                    parse_utc_date(date_time)
-                        .ok_or_else(|| {
-                            SetError::invalid_property(
-                                field.to_string(),
-                                format!("Invalid date: {}", date_time),
-                            )
-                        })?
-                        .into(),
+        helper.create(|_create_id, item, _helper, document| {
+            let mut fields = TinyORM::<VacationResponse>::new();
+
+            for (property, value) in item.properties {
+                fields.set(
+                    property,
+                    match (property, value) {
+                        (
+                            Property::Subject | Property::HtmlBody | Property::TextBody,
+                            value @ Value::Text { .. },
+                        ) => orm::Value::Object(value),
+
+                        (Property::ToDate | Property::FromDate, value @ Value::DateTime { .. }) => {
+                            orm::Value::Object(value)
+                        }
+                        (Property::IsEnabled, value @ Value::Bool { .. }) => {
+                            orm::Value::Object(value)
+                        }
+                        (
+                            Property::Subject
+                            | Property::HtmlBody
+                            | Property::TextBody
+                            | Property::ToDate
+                            | Property::FromDate,
+                            Value::Null,
+                        ) => orm::Value::Null,
+                        (property, _) => {
+                            return Err(SetError::invalid_property(
+                                property,
+                                "Field could not be set.",
+                            ));
+                        }
+                    },
                 );
             }
-            (VacationResponseProperty::IsEnabled, JSONValue::Bool(_)) => {
-                self.vacation_response.set(field, value);
-            }
-            (VacationResponseProperty::IsEnabled, JSONValue::Null) => {
-                self.vacation_response.set(field, false.into());
-            }
-            (_, JSONValue::Null) => {
-                self.vacation_response.set(field, value);
-            }
-            (field, _) => {
-                return Err(SetError::invalid_property(
-                    field.to_string(),
-                    "Field cannot be set.",
-                ));
-            }
-        }
-        Ok(())
-    }
 
-    fn patch_field(
-        &mut self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        field: Self::Property,
-        _property: String,
-        _value: JSONValue,
-    ) -> jmap::error::set::Result<()> {
-        Err(SetError::invalid_property(
-            field.to_string(),
-            "Patch operations not supported on this field.",
-        ))
-    }
+            // Validate fields
+            fields.insert_validate(document)?;
 
-    fn create(
-        self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _create_id: &str,
-        document: &mut Document,
-    ) -> jmap::error::set::Result<Self::CreateItemResult> {
-        self.vacation_response.insert_validate(document)?;
-        Ok(DefaultCreateItem::new(document.document_id as JMAPId))
-    }
+            Ok((
+                VacationResponse::new(document.document_id.into()),
+                None::<MutexGuard<'_, ()>>,
+            ))
+        })?;
 
-    fn update(
-        self,
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        document: &mut Document,
-    ) -> jmap::error::set::Result<Option<Self::UpdateItemResult>> {
-        if self
-            .current_vacation_response
-            .unwrap()
-            .merge_validate(document, self.vacation_response)?
-        {
-            Ok(Some(DefaultUpdateItem::default()))
-        } else {
+        helper.update(|id, item, helper, document| {
+            let current_fields = self
+                .get_orm::<VacationResponse>(helper.account_id, id.get_document_id())?
+                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+            let mut fields = TinyORM::track_changes(&current_fields);
+
+            for (property, value) in item.properties {
+                fields.set(
+                    property,
+                    match (property, value) {
+                        (
+                            Property::Subject | Property::HtmlBody | Property::TextBody,
+                            value @ Value::Text { .. },
+                        ) => orm::Value::Object(value),
+
+                        (Property::ToDate | Property::FromDate, value @ Value::DateTime { .. }) => {
+                            orm::Value::Object(value)
+                        }
+                        (Property::IsEnabled, value @ Value::Bool { .. }) => {
+                            orm::Value::Object(value)
+                        }
+                        (
+                            Property::Subject
+                            | Property::HtmlBody
+                            | Property::TextBody
+                            | Property::ToDate
+                            | Property::FromDate,
+                            Value::Null,
+                        ) => orm::Value::Null,
+                        (property, _) => {
+                            return Err(SetError::invalid_property(
+                                property,
+                                "Field could not be set.",
+                            ));
+                        }
+                    },
+                );
+            }
+
+            // Merge changes
+            current_fields.merge_validate(document, fields)?;
             Ok(None)
-        }
-    }
+        })?;
 
-    fn validate_delete(
-        _helper: &mut SetObjectHelper<T, Self::Helper>,
-        _jmap_id: JMAPId,
-    ) -> jmap::error::set::Result<()> {
-        Ok(())
-    }
+        helper.destroy(|_id, helper, document| {
+            if let Some(orm) =
+                self.get_orm::<VacationResponse>(helper.account_id, document.document_id)?
+            {
+                orm.delete(document);
+            }
+            Ok(())
+        })?;
 
-    fn delete(
-        _store: &JMAPStore<T>,
-        _account_id: AccountId,
-        document: &mut Document,
-    ) -> store::Result<()> {
-        TinyORM::<Self::Property>::delete_orm(document);
-        Ok(())
+        helper.into_response()
     }
 }
