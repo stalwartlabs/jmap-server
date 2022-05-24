@@ -1,9 +1,10 @@
+use jmap::protocol::type_state::TypeState;
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant, SystemTime},
 };
 use store::{
-    core::collection::{Collection, Collections},
+    core::bitmap::Bitmap,
     tracing::{debug, error},
     AccountId, JMAPId, Store,
 };
@@ -16,7 +17,7 @@ use super::{push::spawn_push_manager, Event, StateChange, UpdateSubscription};
 
 #[derive(Debug)]
 struct Subscriber {
-    collections: Collections,
+    types: Bitmap<TypeState>,
     subscription: SubscriberType,
 }
 
@@ -105,7 +106,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                 Event::Subscribe {
                     id,
                     account_id,
-                    collections,
+                    types,
                     tx,
                 } if started => {
                     subscribers
@@ -114,13 +115,14 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                         .insert(
                             DocumentId::MAX - id,
                             Subscriber {
-                                collections,
+                                types,
                                 subscription: SubscriberType::Ipc { tx },
                             },
                         );
                 }
                 Event::Publish { state_change } if started => {
                     //println!("{:?}\n{:?}", shared_accounts_map, subscribers);
+
                     if let Some(shared_accounts) = shared_accounts_map.get(&state_change.account_id)
                     {
                         let current_time = SystemTime::now()
@@ -132,7 +134,14 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                         for owner_account_id in shared_accounts {
                             if let Some(subscribers) = subscribers.get(owner_account_id) {
                                 for (subscriber_id, subscriber) in subscribers {
-                                    if subscriber.collections.contains(state_change.collection) {
+                                    let mut types =
+                                        HashMap::with_capacity(state_change.types.len());
+                                    for (state_type, change_id) in &state_change.types {
+                                        if subscriber.types.contains(state_type.clone()) {
+                                            types.insert(state_type.clone(), *change_id);
+                                        }
+                                    }
+                                    if !types.is_empty() {
                                         match &subscriber.subscription {
                                             SubscriberType::Ipc { tx } if !tx.is_closed() => {
                                                 let subscriber_tx = tx.clone();
@@ -142,7 +151,10 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                                                     // Timeout after 500ms in case there is a blocked client
                                                     if let Err(err) = subscriber_tx
                                                         .send_timeout(
-                                                            state_change,
+                                                            StateChange {
+                                                                account_id: state_change.account_id,
+                                                                types,
+                                                            },
                                                             Duration::from_millis(SEND_TIMEOUT_MS),
                                                         )
                                                         .await
@@ -241,7 +253,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                                     .insert(
                                         verified.id,
                                         Subscriber {
-                                            collections: verified.collections,
+                                            types: verified.types,
                                             subscription: SubscriberType::Push {
                                                 expires: verified.expires,
                                             },
@@ -317,7 +329,7 @@ where
         &self,
         id: DocumentId,
         owner_account_id: DocumentId,
-        collections: Collections,
+        types: Bitmap<TypeState>,
     ) -> Option<mpsc::Receiver<StateChange>> {
         let (change_tx, change_rx) = mpsc::channel::<StateChange>(IPC_CHANNEL_BUFFER);
         let state_tx = self.state_change.clone();
@@ -330,7 +342,7 @@ where
             Event::Subscribe {
                 id,
                 account_id: owner_account_id,
-                collections,
+                types,
                 tx: change_tx,
             },
         ] {
@@ -346,28 +358,26 @@ where
         change_rx.into()
     }
 
-    pub async fn publish_state_change(
-        &self,
-        account_id: AccountId,
-        state_change: StateChange,
-    ) -> jmap::Result<()> {
+    pub async fn publish_state_change(&self, state_change: StateChange) -> jmap::Result<()> {
         let state_tx = self.state_change.clone();
-        if state_change.collection != Collection::PushSubscription {
-            if let Err(err) = state_tx.clone().send(Event::Publish { state_change }).await {
+        if let Err(err) = state_tx.clone().send(Event::Publish { state_change }).await {
+            error!("Channel failure while publishing state change: {}", err);
+        }
+        Ok(())
+    }
+
+    pub async fn update_push_subscriptions(&self, account_id: AccountId) -> jmap::Result<()> {
+        let state_tx = self.state_change.clone();
+        for event in [
+            Event::UpdateSharedAccounts {
+                owner_account_id: account_id,
+                shared_account_ids: vec![], //TODO: shared accounts
+            },
+            self.fetch_push_subscriptions(account_id).await?,
+        ] {
+            if let Err(err) = state_tx.send(event).await {
                 error!("Channel failure while publishing state change: {}", err);
-            }
-        } else {
-            for event in [
-                Event::UpdateSharedAccounts {
-                    owner_account_id: account_id,
-                    shared_account_ids: vec![], //TODO: shared accounts
-                },
-                self.fetch_push_subscriptions(account_id).await?,
-            ] {
-                if let Err(err) = state_tx.send(event).await {
-                    error!("Channel failure while publishing state change: {}", err);
-                    break;
-                }
+                break;
             }
         }
 

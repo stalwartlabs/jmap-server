@@ -1,10 +1,11 @@
 use futures::poll;
 use jmap::jmap_store::raft::JMAPRaftStore;
-use jmap_mail::mail::set::SetMail;
-use jmap_mail::mailbox::set::SetMailbox;
+use jmap_mail::mail::schema::Email;
+use jmap_mail::mailbox::schema::Mailbox;
 use std::task::Poll;
 use store::blob::BlobId;
-use store::core::collection::{Collection, Collections};
+use store::core::bitmap::Bitmap;
+use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::log::raft::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
@@ -32,7 +33,7 @@ enum State {
         matched_log: RaftId,
     },
     AppendLogs {
-        pending_changes: Vec<(Collections, Vec<AccountId>)>,
+        pending_changes: Vec<(Bitmap<Collection>, Vec<AccountId>)>,
     },
     AppendChanges {
         account_id: AccountId,
@@ -679,10 +680,10 @@ where
             let item = self
                 .spawn_worker(move || match collection {
                     Collection::Mail => {
-                        store.raft_prepare_update::<SetMail>(account_id, document_id, is_insert)
+                        store.raft_prepare_update::<Email>(account_id, document_id, is_insert)
                     }
                     Collection::Mailbox => {
-                        store.raft_prepare_update::<SetMailbox>(account_id, document_id, is_insert)
+                        store.raft_prepare_update::<Mailbox>(account_id, document_id, is_insert)
                     }
                     _ => Err(StoreError::InternalError(
                         "Unsupported collection for changes".into(),

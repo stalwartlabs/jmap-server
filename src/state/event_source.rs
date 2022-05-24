@@ -1,19 +1,11 @@
 use actix_web::{http::StatusCode, web, HttpResponse};
 use async_stream::stream;
-use jmap::{
-    error::problem_details::ProblemDetails,
-    id::{state::JMAPState, JMAPIdSerialize},
-    protocol::invocation::Object,
-};
+use jmap::{error::problem_details::ProblemDetails, protocol::type_state::TypeState};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use store::{
-    core::collection::{Collection, Collections},
-    tracing::debug,
-    JMAPId, Store,
-};
+use store::{core::bitmap::Bitmap, tracing::debug, Store};
 use tokio::time::{self};
 
 use crate::JMAPServer;
@@ -50,24 +42,20 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     // Parse parameters
-    let mut collections = Collections::default();
-    for object_type in params.types.split(',') {
-        if object_type == "*" {
-            collections = Collections::all();
+    let mut types = Bitmap::default();
+    for type_state in params.types.split(',') {
+        if type_state == "*" {
+            types = Bitmap::all();
             break;
-        } else if let Some(object) = Object::parse(object_type).and_then(|o| {
-            let c: Collection = o.into();
-            if c != Collection::None {
-                Some(c)
-            } else {
-                None
-            }
-        }) {
-            collections.insert(object);
         } else {
-            return HttpResponse::build(StatusCode::BAD_REQUEST)
-                .insert_header(("Content-Type", "application/problem+json"))
-                .body(ProblemDetails::invalid_parameters().to_json());
+            let t = TypeState::parse(type_state);
+            if !matches!(t, TypeState::None) {
+                types.insert(t);
+            } else {
+                return HttpResponse::build(StatusCode::BAD_REQUEST)
+                    .insert_header(("Content-Type", "application/problem+json"))
+                    .body(ProblemDetails::invalid_parameters().to_json());
+            }
         }
     }
     let mut ping = if params.ping > 0 {
@@ -94,7 +82,7 @@ where
 
     // Register with state manager
     let mut change_rx = if let Some(change_rx) = core
-        .subscribe_state_manager(_account_id, _account_id, collections)
+        .subscribe_state_manager(_account_id, _account_id, types)
         .await
     {
         change_rx
@@ -114,14 +102,13 @@ where
             loop {
                 match time::timeout(timeout, change_rx.recv()).await {
                     Ok(Some(state_change)) => {
-                        response
-                            .changed
-                            .entry((state_change.account_id as JMAPId).to_jmap_string())
-                            .or_insert_with(HashMap::new)
-                            .insert(
-                                state_change.collection.into(),
-                                JMAPState::from(state_change.id).to_jmap_string(),
-                            );
+                        for (type_state, change_id) in state_change.types {
+                            response
+                                .changed
+                                .entry(state_change.account_id.into())
+                                .or_insert_with(HashMap::new)
+                                .insert(type_state, change_id.into());
+                        }
                     }
                     Ok(None) => {
                         debug!("Broadcast channel was closed.");

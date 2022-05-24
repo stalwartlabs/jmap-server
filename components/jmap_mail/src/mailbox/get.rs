@@ -91,32 +91,20 @@ where
             for property in properties {
                 let value = match property {
                     Property::Id => Value::Id { value: id },
-                    Property::Name | Property::Role => fields
+                    Property::Name | Property::Role | Property::SortOrder => fields
                         .as_mut()
                         .unwrap()
-                        .remove_string(property)
-                        .map(|v| Value::Text { value: v })
+                        .remove(property)
                         .unwrap_or_default(),
                     Property::ParentId => fields
                         .as_ref()
                         .unwrap()
-                        .get_unsigned_int(property)
-                        .map(|parent_id| {
-                            if parent_id > 0 {
-                                Value::Id {
-                                    value: (parent_id - 1).into(),
-                                }
-                            } else {
-                                Value::Null
-                            }
-                        })
-                        .unwrap_or_default(),
-                    Property::SortOrder => fields
-                        .as_ref()
-                        .unwrap()
-                        .get_unsigned_int(property)
-                        .map(|sort_order| Value::Number {
-                            value: sort_order as u32,
+                        .get(property)
+                        .map(|parent_id| match parent_id {
+                            Value::Id { value } if value.get_document_id() > 0 => Value::Id {
+                                value: (value.get_document_id() - 1).into(),
+                            },
+                            _ => Value::Null,
                         })
                         .unwrap_or_default(),
                     Property::TotalEmails => Value::Number {

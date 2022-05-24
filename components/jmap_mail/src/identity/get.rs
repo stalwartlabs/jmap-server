@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
-use jmap::jmap_store::orm::{self, JMAPOrm};
+use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 
 use store::core::error::StoreError;
@@ -55,13 +55,7 @@ where
                     match property {
                         Property::Id => Value::Id { value: id },
                         Property::MayDelete => Value::Bool { value: true },
-                        _ => {
-                            if let Some(orm::Value::Object(value)) = fields.remove(property) {
-                                value
-                            } else {
-                                Value::Null
-                            }
-                        }
+                        _ => fields.remove(property).unwrap_or_default(),
                     },
                 );
             }

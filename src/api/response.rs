@@ -2,17 +2,19 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::{
+use jmap::{
     error::method::MethodError,
     id::jmap::JMAPId,
     jmap_store::set::SetObject,
     request::{set::SetRequest, Method},
 };
 
+use super::method;
+
 #[derive(Debug, serde::Serialize)]
-pub struct Response<T: serde::Serialize> {
+pub struct Response {
     #[serde(rename = "methodResponses")]
-    pub method_responses: Vec<(Method, T, String)>,
+    pub method_responses: Vec<method::Call<method::Response>>,
 
     #[serde(rename = "sessionState")]
     #[serde(serialize_with = "serialize_hex")]
@@ -23,7 +25,7 @@ pub struct Response<T: serde::Serialize> {
     pub created_ids: HashMap<String, JMAPId>,
 }
 
-impl<U: serde::Serialize> Response<U> {
+impl Response {
     pub fn new(session_state: u64, created_ids: HashMap<String, JMAPId>, capacity: usize) -> Self {
         Response {
             session_state,
@@ -32,19 +34,22 @@ impl<U: serde::Serialize> Response<U> {
         }
     }
 
-    pub fn push_response(&mut self, method: Method, call_id: String, response: U) {
-        self.method_responses.push((method, response, call_id));
+    pub fn push_response(&mut self, id: String, method: method::Response) {
+        self.method_responses.push(method::Call { id, method });
     }
 
     pub fn push_created_id(&mut self, create_id: String, id: JMAPId) {
         self.created_ids.insert(create_id, id);
     }
 
-    pub fn push_error(&mut self, call_id: String, error: U) {
-        self.method_responses.push((Method::Error, error, call_id));
+    pub fn push_error(&mut self, id: String, error: MethodError) {
+        self.method_responses.push(method::Call {
+            id,
+            method: method::Response::Error(error),
+        });
     }
 
-    pub fn sort_map_references<O>(&mut self, request: &mut SetRequest<O>) -> crate::Result<()>
+    pub fn sort_map_references<O>(&mut self, request: &mut SetRequest<O>) -> jmap::Result<()>
     where
         O: SetObject,
     {

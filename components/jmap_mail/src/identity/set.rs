@@ -1,7 +1,7 @@
 use crate::identity::schema::Identity;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::jmap::JMAPId;
-use jmap::jmap_store::orm::{self, JMAPOrm, TinyORM};
+use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::request::set::SetResponse;
@@ -14,7 +14,7 @@ use super::schema::{Property, Value};
 impl SetObject for Identity {
     type SetArguments = ();
 
-    type NextInvocation = ();
+    type NextCall = ();
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
         todo!()
@@ -48,10 +48,10 @@ where
                             | Property::TextSignature
                             | Property::HtmlSignature,
                             value @ Value::Text { .. },
-                        ) => orm::Value::Object(value),
+                        ) => value,
 
                         (Property::ReplyTo | Property::Bcc, value @ Value::Addresses { .. }) => {
-                            orm::Value::Object(value)
+                            value
                         }
                         (
                             Property::Name
@@ -60,7 +60,7 @@ where
                             | Property::ReplyTo
                             | Property::Bcc,
                             Value::Null,
-                        ) => orm::Value::Null,
+                        ) => Value::Null,
                         (property, _) => {
                             return Err(SetError::invalid_property(
                                 property,
@@ -93,10 +93,10 @@ where
                         (
                             Property::Name | Property::TextSignature | Property::HtmlSignature,
                             value @ Value::Text { .. },
-                        ) => orm::Value::Object(value),
+                        ) => value,
 
                         (Property::ReplyTo | Property::Bcc, value @ Value::Addresses { .. }) => {
-                            orm::Value::Object(value)
+                            value
                         }
                         (
                             Property::Name
@@ -105,7 +105,7 @@ where
                             | Property::ReplyTo
                             | Property::Bcc,
                             Value::Null,
-                        ) => orm::Value::Null,
+                        ) => Value::Null,
                         (property, _) => {
                             return Err(SetError::invalid_property(
                                 property,

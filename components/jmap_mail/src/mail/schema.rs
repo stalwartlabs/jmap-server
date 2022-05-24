@@ -755,10 +755,6 @@ impl Object for Email {
         Collection::Mail
     }
 
-    fn hide_account() -> bool {
-        false
-    }
-
     fn new(id: JMAPId) -> Self {
         let mut email = Email::default();
         email

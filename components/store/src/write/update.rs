@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     blob::BlobId,
-    core::{collection::Collections, document::MAX_TOKEN_LENGTH, error::StoreError},
+    core::{bitmap::Bitmap, collection::Collection, document::MAX_TOKEN_LENGTH, error::StoreError},
     log::changes::ChangeId,
     nlp::{
         lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
@@ -25,14 +25,19 @@ use super::{
     options::{IndexOptions, Options},
 };
 
+pub struct Changes {
+    pub collections: Bitmap<Collection>,
+    pub change_id: ChangeId,
+}
+
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn write(&self, batch: WriteBatch) -> crate::Result<Option<ChangeId>> {
+    pub fn write(&self, batch: WriteBatch) -> crate::Result<Option<Changes>> {
         let mut write_batch = Vec::with_capacity(batch.documents.len());
         let mut bitmap_list = HashMap::new();
-        let mut change_id = None;
+        let mut changes = None;
 
         let tombstone_deletions = self
             .tombstone_deletions
@@ -402,7 +407,7 @@ where
         // Serialize Raft and change log
         if !batch.changes.is_empty() {
             let raft_id = self.assign_raft_id();
-            let mut collections = Collections::default();
+            let mut collections = Bitmap::default();
 
             for (collection, log_entry) in batch.changes {
                 collections.insert(collection);
@@ -426,7 +431,11 @@ where
                 LogKey::serialize_raft(&raft_id),
                 bytes,
             ));
-            change_id = raft_id.index.into();
+            changes = Changes {
+                collections,
+                change_id: raft_id.index,
+            }
+            .into();
 
             // Serialize raft tombstones
             if !tombstones.is_empty() {
@@ -452,6 +461,6 @@ where
         // Submit write batch
         self.db.write(write_batch)?;
 
-        Ok(change_id)
+        Ok(changes)
     }
 }

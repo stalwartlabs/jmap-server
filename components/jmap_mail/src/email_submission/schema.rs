@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
     id::{blob::JMAPBlob, jmap::JMAPId},
-    jmap_store::orm::{self, Indexable},
+    jmap_store::orm::{self},
     request::ResultReference,
 };
 use serde::{Deserialize, Serialize};
@@ -215,8 +215,8 @@ pub enum Comparator {
     SentAt,
 }
 
-impl Indexable for Value {
-    fn index_as(&self) -> orm::Value<Self> {
+impl orm::Value for Value {
+    fn index_as(&self) -> orm::IndexableValue {
         match self {
             Value::Id { value } => u64::from(value).into(),
             Value::DateTime { value } => (value.timestamp() as u64).into(),
@@ -225,7 +225,21 @@ impl Indexable for Value {
                 UndoStatus::Final => "f".to_string().into(),
                 UndoStatus::Canceled => "c".to_string().into(),
             },
-            _ => orm::Value::Null,
+            _ => orm::IndexableValue::Null,
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Value::Text { value } => value.is_empty(),
+            Value::Null => true,
+            _ => false,
+        }
+    }
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Value::Null
     }
 }

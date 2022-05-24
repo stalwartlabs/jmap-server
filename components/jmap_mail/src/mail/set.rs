@@ -36,7 +36,7 @@ use super::{MessageData, MessageField};
 impl SetObject for Email {
     type SetArguments = ();
 
-    type NextInvocation = ();
+    type NextCall = ();
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<jmap::id::jmap::JMAPId>) {
         todo!()
@@ -327,7 +327,7 @@ where
             // Parse message
             // TODO: write parsed message directly to store, avoid parsing it again.
             let size = blob.len();
-            self.mail_parse(document, blob_id, &blob, received_at)?;
+            self.mail_parse_item(document, blob_id, &blob, received_at)?;
             fields.insert(document)?;
 
             // Lock collection

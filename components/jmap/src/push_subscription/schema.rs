@@ -6,7 +6,7 @@ use store::{
     FieldId,
 };
 
-use crate::{id::jmap::JMAPId, jmap_store::orm::Indexable, protocol::TypeState};
+use crate::{id::jmap::JMAPId, protocol::type_state::TypeState};
 
 #[derive(Debug, Clone, Default)]
 pub struct PushSubscription {
@@ -15,8 +15,8 @@ pub struct PushSubscription {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Keys {
-    p256dh: String,
-    auth: String,
+    pub p256dh: String,
+    pub auth: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,9 +29,46 @@ pub enum Value {
     Null,
 }
 
-impl Indexable for Value {
-    fn index_as(&self) -> crate::jmap_store::orm::Value<Self> {
-        crate::jmap_store::orm::Value::Null
+impl Value {
+    pub fn unwrap_text(self) -> Option<String> {
+        match self {
+            Value::Text { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Value::Text { value } => Some(&value),
+            _ => None,
+        }
+    }
+
+    pub fn as_timestamp(&self) -> Option<i64> {
+        match self {
+            Value::DateTime { value } => Some(value.timestamp()),
+            _ => None,
+        }
+    }
+}
+
+impl crate::jmap_store::orm::Value for Value {
+    fn index_as(&self) -> crate::jmap_store::orm::IndexableValue {
+        crate::jmap_store::orm::IndexableValue::Null
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Value::Text { value } => value.is_empty(),
+            Value::Null => true,
+            _ => false,
+        }
+    }
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Value::Null
     }
 }
 

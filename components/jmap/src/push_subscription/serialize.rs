@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
 
-use crate::protocol::TypeState;
+use crate::protocol::type_state::TypeState;
 
 use super::schema::{Keys, Property, PushSubscription, Value};
 

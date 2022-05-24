@@ -5,8 +5,8 @@ use super::Object;
 use crate::error::set::SetError;
 use crate::id::jmap::JMAPId;
 use crate::id::state::JMAPState;
+use crate::protocol::type_state::TypeState;
 use crate::request::set::SetResponse;
-use crate::request::ResultReference;
 use crate::{
     error::{method::MethodError, set::SetErrorType},
     request::set::SetRequest,
@@ -22,7 +22,7 @@ use store::{roaring::RoaringBitmap, JMAPStore, Store};
 
 pub trait SetObject: Object {
     type SetArguments;
-    type NextInvocation;
+    type NextCall;
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>);
 }
@@ -37,7 +37,9 @@ where
     pub document_ids: RoaringBitmap,
     pub account_id: AccountId,
     pub collection: Collection,
-    pub change_id: Option<ChangeId>,
+
+    pub change_id: ChangeId,
+    pub state_changes: HashMap<TypeState, ChangeId>,
 
     pub request: SetRequest<O>,
     pub response: SetResponse<O>,
@@ -66,7 +68,8 @@ where
                 .unwrap_or_else(RoaringBitmap::new),
             account_id,
             collection,
-            change_id: None,
+            change_id: ChangeId::MAX,
+            state_changes: HashMap::new(),
             response: SetResponse {
                 account_id: request.account_id.take(),
                 new_state: old_state.clone().into(),
@@ -77,7 +80,9 @@ where
                 not_updated: HashMap::new(),
                 destroyed: Vec::with_capacity(request.destroy.as_ref().map_or(0, |v| v.len())),
                 not_destroyed: HashMap::new(),
-                next_invocation: None,
+                next_call: None,
+                change_id: None,
+                state_changes: None,
             },
             request,
         })
@@ -119,7 +124,7 @@ where
                     self.changes
                         .log_insert(self.collection, result.id().unwrap());
                     if lock.is_some() {
-                        self.change_id = self.store.write(self.changes.take())?;
+                        self.write()?;
                     }
                     self.response.created.insert(create_id, result);
                 }
@@ -210,76 +215,30 @@ where
         Ok(())
     }
 
+    fn write(&mut self) -> crate::Result<()> {
+        if let Some(changes) = self.store.write(self.changes.take())? {
+            self.change_id = changes.change_id;
+            for collection in changes.collections {
+                if let Ok(type_state) = TypeState::try_from(collection) {
+                    self.state_changes.insert(type_state, changes.change_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn into_response(mut self) -> crate::Result<SetResponse<O>> {
         if !self.changes.is_empty() {
-            self.change_id = self.store.write(self.changes)?;
+            self.write()?;
         }
-        if let Some(change_id) = self.change_id {
-            self.response.new_state = JMAPState::from(change_id).into()
+        if self.change_id != ChangeId::MAX {
+            self.response.new_state = JMAPState::from(self.change_id).into();
+            self.response.change_id = self.change_id.into();
+            if !self.state_changes.is_empty() {
+                self.response.state_changes = self.state_changes.into();
+            }
         }
 
         Ok(self.response)
     }
 }
-/*
-
-impl SetObject for XYX {
-    type SetArguments = SetArguments;
-
-    type NextInvocation = ();
-
-    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
-        todo!()
-    }
-}
-
-pub trait JMAPSetXYZ<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn xyz_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>>;
-}
-
-impl<T> JMAPSetXYZ<T> for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn xyz_set(&self, request: SetRequest<XYZ>) -> jmap::Result<SetResponse<XYZ>> {
-        let mut helper = SetHelper::new(self, request)?;
-        helper.create(|create_id, item, helper, document| {
-            let mut fields = TinyORM::<XYZ>::new();
-
-            for (property, value) in item.properties {
-                let value = match(field, value) {
-
-                };
-                fields.set(property, value);
-            }
-
-            fields.insert_validate(document)?;
-
-            Ok((
-                XYZ::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
-        })?;
-        helper.update(|id, item, helper, document| {
-            let current_fields = self
-                .get_orm::<XYZ>(helper.account_id, id.get_document_id())?
-                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
-            let fields = TinyORM::track_changes(&current_fields);
-
-            // Merge changes
-            current_fields.merge_validate(document, fields)?;
-
-            if !document.is_empty() {
-                Ok(Some(XYZ::default()))
-            } else {
-                Ok(None)
-            }
-        })?;
-        helper.destroy(|id, helper, document| Ok(()))?;
-        helper.into_response()
-    }
-}
-*/

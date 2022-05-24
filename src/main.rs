@@ -1,11 +1,11 @@
-/*pub mod api;
+pub mod api;
 pub mod blob;
 pub mod cluster;
 pub mod server;
 pub mod state;
 
-#[cfg(test)]
-pub mod tests;
+//#[cfg(test)]
+//pub mod tests;
 
 use std::sync::Arc;
 
@@ -64,10 +64,4 @@ async fn main() -> std::io::Result<()> {
         settings,
     )
     .await
-}
-*/
-
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    Ok(())
 }

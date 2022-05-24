@@ -40,8 +40,4 @@ impl Object for Identity {
     fn collection() -> Collection {
         Collection::Identity
     }
-
-    fn hide_account() -> bool {
-        false
-    }
 }

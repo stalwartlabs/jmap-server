@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
-use jmap::jmap_store::orm::{self, JMAPOrm};
+use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 
 use store::core::error::StoreError;
@@ -61,7 +61,7 @@ where
                     *property,
                     if let Property::Id = property {
                         Value::Id { value: id }
-                    } else if let Some(orm::Value::Object(value)) = fields.remove(property) {
+                    } else if let Some(value) = fields.remove(property) {
                         value
                     } else {
                         Value::Null

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::{
     error::set::SetError,
     id::{jmap::JMAPId, state::JMAPState},
+    jmap_store::Object,
 };
 
 //TODO implement + searchsnippet
@@ -34,7 +35,7 @@ pub struct CopyRequest<T> {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct CopyResponse<T, U> {
+pub struct CopyResponse<T: Object> {
     #[serde(rename = "fromAccountId")]
     pub from_account_id: JMAPId,
 
@@ -51,5 +52,5 @@ pub struct CopyResponse<T, U> {
     pub created: Option<HashMap<String, T>>,
 
     #[serde(rename = "notCreated")]
-    pub not_created: Option<HashMap<String, SetError<U>>>,
+    pub not_created: Option<HashMap<String, SetError<T::Property>>>,
 }

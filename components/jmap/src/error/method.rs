@@ -1,6 +1,7 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
-use crate::protocol::json::JSONValue;
+use serde::ser::SerializeMap;
+use serde::Serialize;
 use store::core::error::StoreError;
 use store::tracing::error;
 
@@ -59,63 +60,66 @@ impl Display for MethodError {
     }
 }
 
-impl From<MethodError> for JSONValue {
-    fn from(error: MethodError) -> Self {
-        let (error_type, description) = match error {
-            MethodError::InvalidArguments(description) => ("invalidArguments", description),
+impl Serialize for MethodError {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(2.into())?;
+
+        let (error_type, description) = match self {
+            MethodError::InvalidArguments(description) => {
+                ("invalidArguments", description.as_str())
+            }
             MethodError::RequestTooLarge => (
                 "requestTooLarge",
                 concat!(
                     "The number of ids requested by the client exceeds the maximum number ",
                     "the server is willing to process in a single method call."
-                )
-                .to_string(),
+                ),
             ),
             MethodError::StateMismatch => (
                 "stateMismatch",
                 concat!(
                     "An \"ifInState\" argument was supplied, but ",
                     "it does not match the current state."
-                )
-                .to_string(),
+                ),
             ),
             MethodError::AnchorNotFound => (
                 "anchorNotFound",
                 concat!(
                     "An anchor argument was supplied, but it ",
                     "cannot be found in the results of the query."
-                )
-                .to_string(),
+                ),
             ),
-            MethodError::UnsupportedFilter(description) => ("unsupportedFilter", description),
-            MethodError::UnsupportedSort(description) => ("unsupportedSort", description),
+            MethodError::UnsupportedFilter(description) => {
+                ("unsupportedFilter", description.as_str())
+            }
+            MethodError::UnsupportedSort(description) => ("unsupportedSort", description.as_str()),
             MethodError::ServerFail(e) => ("serverFail", {
                 error!("JMAP request failed: {:?}", e);
                 concat!(
                     "An unexpected error occurred while processing ",
                     "this call, please contact the system administrator."
                 )
-                .to_string()
             }),
-            MethodError::UnknownMethod(description) => ("unknownMethod", description),
+            MethodError::UnknownMethod(description) => ("unknownMethod", description.as_str()),
             MethodError::ServerUnavailable => (
                 "serverUnavailable",
                 concat!(
                     "This server is temporarily unavailable. ",
                     "Attempting this same operation later may succeed."
-                )
-                .to_string(),
+                ),
             ),
             MethodError::ServerPartialFail => (
                 "serverPartialFail",
                 concat!(
                     "Some, but not all, expected changes described by the method ",
                     "occurred.  Please resynchronise to determine server state."
-                )
-                .to_string(),
+                ),
             ),
             MethodError::InvalidResultReference(description) => {
-                ("invalidResultReference", description)
+                ("invalidResultReference", description.as_str())
             }
             MethodError::Forbidden => (
                 "forbidden",
@@ -123,30 +127,27 @@ impl From<MethodError> for JSONValue {
                     "The method and arguments are valid, but executing the ",
                     "method would violate an Access Control List (ACL) or ",
                     "other permissions policy."
-                )
-                .to_string(),
+                ),
             ),
             MethodError::AccountNotFound => (
                 "accountNotFound",
-                "The accountId does not correspond to a valid account".to_string(),
+                "The accountId does not correspond to a valid account",
             ),
             MethodError::AccountNotSupportedByMethod => (
                 "accountNotSupportedByMethod",
                 concat!(
                     "The accountId given corresponds to a valid account, ",
                     "but the account does not support this method or data type."
-                )
-                .to_string(),
+                ),
             ),
             MethodError::AccountReadOnly => (
                 "accountReadOnly",
-                "This method modifies state, but the account is read-only.".to_string(),
+                "This method modifies state, but the account is read-only.",
             ),
         };
 
-        let mut o = HashMap::with_capacity(2);
-        o.insert("type".to_string(), error_type.to_string().into());
-        o.insert("description".to_string(), description.into());
-        o.into()
+        map.serialize_entry("type", error_type)?;
+        map.serialize_entry("description", description)?;
+        map.end()
     }
 }

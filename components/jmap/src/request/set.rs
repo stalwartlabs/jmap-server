@@ -1,7 +1,11 @@
+use store::log::changes::ChangeId;
+use store::AccountId;
+
 use crate::error::set::SetError;
 use crate::id::jmap::JMAPId;
 use crate::id::state::JMAPState;
 use crate::jmap_store::set::SetObject;
+use crate::protocol::type_state::TypeState;
 use std::collections::HashMap;
 
 use super::ResultReference;
@@ -83,5 +87,41 @@ pub struct SetResponse<O: SetObject> {
     pub not_destroyed: HashMap<JMAPId, SetError<O::Property>>,
 
     #[serde(skip)]
-    pub next_invocation: Option<O::NextInvocation>,
+    pub change_id: Option<ChangeId>,
+
+    #[serde(skip)]
+    pub state_changes: Option<HashMap<TypeState, ChangeId>>,
+
+    #[serde(skip)]
+    pub next_call: Option<O::NextCall>,
+}
+
+impl<O: SetObject> SetResponse<O> {
+    pub fn created_ids(&self) -> Option<HashMap<String, JMAPId>> {
+        if !self.created.is_empty() {
+            let mut created_ids = HashMap::with_capacity(self.created.len());
+            for (create_id, item) in &self.created {
+                created_ids.insert(create_id.to_string(), *item.id().unwrap());
+            }
+            created_ids.into()
+        } else {
+            None
+        }
+    }
+
+    pub fn account_id(&self) -> AccountId {
+        self.account_id.as_ref().unwrap().get_document_id()
+    }
+
+    pub fn has_changes(&self) -> Option<ChangeId> {
+        self.change_id
+    }
+
+    pub fn state_changes(&mut self) -> Option<HashMap<TypeState, ChangeId>> {
+        self.state_changes.take()
+    }
+
+    pub fn next_call(&mut self) -> Option<O::NextCall> {
+        self.next_call.take()
+    }
 }

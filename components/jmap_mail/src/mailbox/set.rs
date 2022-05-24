@@ -2,7 +2,7 @@ use crate::mail::set::JMAPSetMail;
 use crate::mail::MessageField;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::id::jmap::JMAPId;
-use jmap::jmap_store::orm::{self, JMAPOrm, TinyORM};
+use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
 use jmap::request::set::{SetRequest, SetResponse};
@@ -33,7 +33,7 @@ pub struct SetArguments {
 impl SetObject for Mailbox {
     type SetArguments = SetArguments;
 
-    type NextInvocation = ();
+    type NextCall = ();
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
         todo!()
@@ -65,7 +65,7 @@ where
 
             // Set parentId if the field is missing
             if !mailbox.has_property(&Property::ParentId) {
-                mailbox.set(Property::ParentId, 0u64);
+                mailbox.set(Property::ParentId, Value::Id { value: 0u64.into() });
             }
             mailbox.insert_validate(document)?;
 
@@ -183,9 +183,10 @@ where
         mailbox_id: Option<DocumentId>,
         current_fields: Option<&TinyORM<Mailbox>>,
     ) -> jmap::error::set::Result<Self, Property> {
-        if let (Some(mailbox_id), Some(mut mailbox_parent_id)) =
-            (mailbox_id, self.get_unsigned_int(&Property::ParentId))
-        {
+        if let (Some(mailbox_id), Some(mut mailbox_parent_id)) = (
+            mailbox_id,
+            self.get(&Property::ParentId).and_then(|v| v.as_id()),
+        ) {
             // Validate circular parent-child relationship
             let mut success = false;
             for _ in 0..helper.store.config.mailbox_max_depth {
@@ -206,7 +207,8 @@ where
                         (mailbox_parent_id - 1).get_document_id(),
                     )?
                     .ok_or_else(|| StoreError::InternalError("Mailbox data not found".to_string()))?
-                    .get_unsigned_int(&Property::ParentId)
+                    .get(&Property::ParentId)
+                    .and_then(|v| v.as_id())
                     .unwrap_or(0);
             }
 
@@ -219,7 +221,10 @@ where
         }
 
         // Verify that the mailbox role is unique.
-        if let Some(mailbox_role) = self.get_string(&Property::Role) {
+        if let Some(Value::Text {
+            value: mailbox_role,
+        }) = self.get(&Property::Role)
+        {
             if !helper
                 .store
                 .query_store::<FilterMapper>(
@@ -242,24 +247,32 @@ where
         }
 
         // Verify that the mailbox name is unique.
-        if let Some(mailbox_name) = self.get_string(&Property::Name) {
+        if let Some(Value::Text {
+            value: mailbox_name,
+        }) = self.get(&Property::Name)
+        {
             // Obtain parent mailbox id
-            if let Some(parent_mailbox_id) =
-                if let Some(mailbox_parent_id) = &self.get_unsigned_int(&Property::ParentId) {
-                    (*mailbox_parent_id).into()
-                } else if let Some(current_fields) = current_fields {
-                    if current_fields.get_string(&Property::Name) != Some(mailbox_name) {
-                        current_fields
-                            .get_unsigned_int(&Property::ParentId)
-                            .unwrap_or_default()
-                            .into()
-                    } else {
-                        None
-                    }
-                } else {
-                    0.into()
-                }
+            if let Some(parent_mailbox_id) = if let Some(mailbox_parent_id) =
+                &self.get(&Property::ParentId).and_then(|id| id.as_id())
             {
+                (*mailbox_parent_id).into()
+            } else if let Some(current_fields) = current_fields {
+                if current_fields
+                    .get(&Property::Name)
+                    .and_then(|n| n.as_text())
+                    != Some(mailbox_name)
+                {
+                    current_fields
+                        .get(&Property::ParentId)
+                        .and_then(|id| id.as_id())
+                        .unwrap_or_default()
+                        .into()
+                } else {
+                    None
+                }
+            } else {
+                0.into()
+            } {
                 for jmap_id in helper.store.query_store::<FilterMapper>(
                     helper.account_id,
                     Collection::Mailbox,
@@ -276,7 +289,8 @@ where
                         .ok_or_else(|| {
                             StoreError::InternalError("Mailbox data not found".to_string())
                         })?
-                        .get_string(&Property::Name)
+                        .get(&Property::Name)
+                        .and_then(|n| n.as_text())
                         == Some(mailbox_name)
                     {
                         return Err(SetError::new(
@@ -293,12 +307,12 @@ where
             let value = match (property, value) {
                 (Property::Name, Value::Text { value }) => {
                     if value.len() < 255 {
-                        Ok(value.into())
+                        Value::Text { value }
                     } else {
-                        Err(SetError::invalid_property(
+                        return Err(SetError::invalid_property(
                             property,
                             "Mailbox name is too long.".to_string(),
-                        ))
+                        ));
                     }
                 }
                 (Property::ParentId, Value::Id { value }) => {
@@ -320,9 +334,11 @@ where
                         ));
                     }
 
-                    Ok((parent_id + 1).into())
+                    Value::Id {
+                        value: (parent_id + 1).into(),
+                    }
                 }
-                (Property::ParentId, Value::Null) => Ok(0u64.into()),
+                (Property::ParentId, Value::Null) => Value::Id { value: 0u64.into() },
                 (Property::Role, Value::Text { value }) => {
                     let role = value.to_lowercase();
                     if [
@@ -331,24 +347,26 @@ where
                     .contains(&role.as_str())
                     {
                         self.tag(property, Tag::Default);
-                        Ok(role.into())
+                        Value::Text { value: role }
                     } else {
-                        Err(SetError::invalid_property(
+                        return Err(SetError::invalid_property(
                             property,
                             "Invalid role.".to_string(),
-                        ))
+                        ));
                     }
                 }
                 (Property::Role, Value::Null) => {
                     self.untag(&property, &Tag::Default);
-                    Ok(orm::Value::Null)
+                    Value::Null
                 }
-                (Property::SortOrder, Value::Number { value }) => Ok(value.into()),
-                (_, _) => Err(SetError::invalid_property(
-                    property,
-                    "Unexpected value.".to_string(),
-                )),
-            }?;
+                (Property::SortOrder, value @ Value::Number { .. }) => value,
+                (_, _) => {
+                    return Err(SetError::invalid_property(
+                        property,
+                        "Unexpected value.".to_string(),
+                    ));
+                }
+            };
 
             self.set(property, value);
         }

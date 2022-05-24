@@ -39,7 +39,7 @@ pub struct SetArguments {
 impl SetObject for EmailSubmission {
     type SetArguments = SetArguments;
 
-    type NextInvocation = ();
+    type NextCall = SetRequest<Email>;
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
         todo!()
@@ -90,6 +90,7 @@ where
         } else {
             None
         };
+        let mut call_on_success = false;
 
         helper.create(|create_id, item, helper, document| {
             let mut fields = TinyORM::<EmailSubmission>::new();
@@ -102,16 +103,16 @@ where
                     (Property::EmailId, Value::Id { value }) => {
                         fields.set(
                             Property::ThreadId,
-                            orm::Value::Object(Value::Id {
+                            Value::Id {
                                 value: value.get_prefix_id().into(),
-                            }),
+                            },
                         );
                         email_id = value;
-                        orm::Value::Object(Value::Id { value })
+                        Value::Id { value }
                     }
                     (Property::IdentityId, Value::Id { value }) => {
                         identity_id = value.get_document_id();
-                        orm::Value::Object(Value::Id { value })
+                        Value::Id { value }
                     }
                     (Property::Envelope, Value::Envelope { value }) => {
                         envelope = Some(value);
@@ -120,9 +121,7 @@ where
                     (Property::Envelope, Value::Null) => {
                         continue;
                     }
-                    (Property::UndoStatus, value @ Value::UndoStatus { .. }) => {
-                        orm::Value::Object(value)
-                    }
+                    (Property::UndoStatus, value @ Value::UndoStatus { .. }) => value,
                     (property, _) => {
                         return Err(SetError::invalid_property(
                             property,
@@ -140,7 +139,14 @@ where
                 .ok_or_else(|| {
                     SetError::invalid_property(Property::IdentityId, "Identity not found.")
                 })?
-                .remove_string(&identity::schema::Property::Email)
+                .remove(&identity::schema::Property::Email)
+                .and_then(|v| {
+                    if let identity::schema::Value::Text { value } = v {
+                        Some(value)
+                    } else {
+                        None
+                    }
+                })
                 .ok_or_else(|| {
                     SetError::invalid_property(
                         Property::IdentityId,
@@ -174,10 +180,7 @@ where
 
             // Set the sentAt property
             // TODO parse FUTURERELEASE
-            fields.set(
-                Property::SendAt,
-                orm::Value::Object(Value::DateTime { value: Utc::now() }),
-            );
+            fields.set(Property::SendAt, Value::DateTime { value: Utc::now() });
 
             // Fetch message data
             let mut message_data = MessageData::from_metadata(
@@ -234,10 +237,7 @@ where
             document.blob(message_data.raw_message, IndexOptions::new());
 
             // Insert envelope
-            fields.set(
-                Property::Envelope,
-                orm::Value::Object(Value::Envelope { value: envelope }),
-            );
+            fields.set(Property::Envelope, Value::Envelope { value: envelope });
 
             // Validate fields
             fields.insert_validate(document)?;
@@ -256,6 +256,7 @@ where
                         .update
                         .get_or_insert_with(HashMap::new)
                         .insert(email_id, update);
+                    call_on_success = true;
                 }
                 if helper
                     .request
@@ -268,6 +269,7 @@ where
                         .destroy
                         .get_or_insert_with(Vec::new)
                         .push(email_id);
+                    call_on_success = true;
                 }
             }
 
@@ -286,10 +288,7 @@ where
                     .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
                 let mut fields = TinyORM::track_changes(&current_fields);
 
-                fields.set(
-                    Property::UndoStatus,
-                    orm::Value::Object(Value::UndoStatus { value }),
-                );
+                fields.set(Property::UndoStatus, Value::UndoStatus { value });
 
                 // Merge changes
                 current_fields.merge_validate(document, fields)?;
@@ -304,7 +303,11 @@ where
                 "update its status to 'canceled' insted."
             )))
         })?;
-
-        helper.into_response()
+        helper.into_response().map(|mut r| {
+            if call_on_success {
+                r.next_call = on_success;
+            }
+            r
+        })
     }
 }

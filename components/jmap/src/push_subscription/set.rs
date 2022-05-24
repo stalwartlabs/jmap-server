@@ -21,7 +21,7 @@ const VERIFICATION_CODE_LEN: usize = 32;
 impl SetObject for PushSubscription {
     type SetArguments = ();
 
-    type NextInvocation = ();
+    type NextCall = ();
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
         todo!()
@@ -65,27 +65,25 @@ where
                 fields.set(
                     property,
                     match (property, value) {
-                        (Property::DeviceClientId, value @ Value::Text { .. }) => {
-                            orm::Value::Object(value)
-                        }
+                        (Property::DeviceClientId, value @ Value::Text { .. }) => value,
                         (Property::Url, Value::Text { value })
                             if value.starts_with("https://") && value.len() < 512 =>
                         {
-                            orm::Value::Object(Value::Text { value })
+                            Value::Text { value }
                         }
-                        (Property::Keys, value @ Value::Keys { .. }) => orm::Value::Object(value),
+                        (Property::Keys, value @ Value::Keys { .. }) => value,
                         (Property::Expires, Value::DateTime { value }) => {
                             expires = value.into();
                             continue;
                         }
-                        (Property::Types, value @ Value::Types { .. }) => orm::Value::Object(value),
+                        (Property::Types, value @ Value::Types { .. }) => value,
                         (
                             Property::Keys
                             | Property::Expires
                             | Property::Types
                             | Property::VerificationCode,
                             Value::Null,
-                        ) => orm::Value::Null,
+                        ) => Value::Null,
                         (property, _) => {
                             return Err(SetError::invalid_property(
                                 property,
@@ -103,7 +101,7 @@ where
                 .unwrap_or_else(|| current_time + EXPIRES_MAX);
             fields.set(
                 Property::Expires,
-                orm::Value::Object(Value::DateTime {
+                Value::DateTime {
                     value: from_timestamp(
                         if expires > current_time && (expires - current_time) > EXPIRES_MAX {
                             current_time + EXPIRES_MAX
@@ -111,19 +109,19 @@ where
                             expires
                         },
                     ),
-                }),
+                },
             );
 
             // Generate random verification code
             fields.set(
                 Property::VerificationCode_,
-                orm::Value::Object(Value::Text {
+                Value::Text {
                     value: thread_rng()
                         .sample_iter(Alphanumeric)
                         .take(VERIFICATION_CODE_LEN)
                         .map(char::from)
                         .collect::<String>(),
-                }),
+                },
             );
 
             // Validate fields
@@ -150,13 +148,13 @@ where
                             expires = value.timestamp().into();
                             continue;
                         }
-                        (Property::Types, value @ Value::Types { .. }) => orm::Value::Object(value),
+                        (Property::Types, value @ Value::Types { .. }) => value,
                         (Property::VerificationCode, Value::Text { value }) => {
-                            if current_fields
-                                .get_string(&Property::VerificationCode_)
-                                .map_or(false, |v| v == value)
-                            {
-                                orm::Value::Object(Value::Text { value })
+                            if current_fields.get(&Property::VerificationCode_).map_or(
+                                false,
+                                |v| matches!(v, Value::Text { value: v } if v == &value),
+                            ) {
+                                Value::Text { value }
                             } else {
                                 return Err(SetError::invalid_property(
                                     property,
@@ -168,7 +166,7 @@ where
                             expires = (Utc::now().timestamp() + EXPIRES_MAX).into();
                             continue;
                         }
-                        (Property::Types, Value::Null) => orm::Value::Null,
+                        (Property::Types, Value::Null) => Value::Null,
                         (property, _) => {
                             return Err(SetError::invalid_property(
                                 property,
@@ -184,7 +182,7 @@ where
                 let current_time = Utc::now().timestamp();
                 fields.set(
                     Property::Expires,
-                    orm::Value::Object(Value::DateTime {
+                    Value::DateTime {
                         value: from_timestamp(
                             if expires > current_time && (expires - current_time) > EXPIRES_MAX {
                                 current_time + EXPIRES_MAX
@@ -192,7 +190,7 @@ where
                                 expires
                             },
                         ),
-                    }),
+                    },
                 );
             }
 

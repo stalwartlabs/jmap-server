@@ -3,8 +3,6 @@ use core::hash::Hash;
 use std::fmt::Debug;
 use store::core::collection::Collection;
 
-use self::orm::Indexable;
-
 pub mod blob;
 pub mod changes;
 pub mod get;
@@ -25,19 +23,11 @@ pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
         + Into<u8>
         + Sync
         + Send;
-    type Value: for<'de> serde::Deserialize<'de>
-        + serde::Serialize
-        + Sync
-        + Send
-        + Eq
-        + PartialEq
-        + Debug
-        + Indexable;
+    type Value: orm::Value;
 
     fn new(id: JMAPId) -> Self;
     fn id(&self) -> Option<&JMAPId>;
     fn required() -> &'static [Self::Property];
     fn indexed() -> &'static [(Self::Property, u64)];
     fn collection() -> Collection;
-    fn hide_account() -> bool;
 }

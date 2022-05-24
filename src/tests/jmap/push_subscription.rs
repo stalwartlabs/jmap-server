@@ -6,8 +6,8 @@ use std::{
 
 use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use ece::EcKeyComponents;
-use jmap::{base64, id::JMAPIdSerialize, protocol::invocation::Object};
-use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys, TypeState};
+use jmap::{base64, id::JMAPIdSerialize, protocol::type_state::TypeState};
+use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys};
 use reqwest::header::CONTENT_ENCODING;
 use store::Store;
 use tokio::sync::mpsc;
@@ -84,11 +84,11 @@ where
         .unwrap()
         .unwrap_id();
 
-    assert_state(&mut event_rx, Object::Mailbox).await;
+    assert_state(&mut event_rx, TypeState::Mailbox).await;
 
     // Receive states just for the requested types
     client
-        .push_subscription_update_types(&push_id, [TypeState::Email].into())
+        .push_subscription_update_types(&push_id, [jmap_client::TypeState::Email].into())
         .await
         .unwrap();
     client
@@ -138,14 +138,14 @@ where
         .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     push_server.fail_requests.store(false, Ordering::Relaxed);
-    assert_state(&mut event_rx, Object::Mailbox).await;
+    assert_state(&mut event_rx, TypeState::Mailbox).await;
 
     // Make a mailbox change and expect state change
     client
         .mailbox_rename(&mailbox_id, "My Mailbox")
         .await
         .unwrap();
-    assert_state(&mut event_rx, Object::Mailbox).await;
+    assert_state(&mut event_rx, TypeState::Mailbox).await;
 
     // Multiple change updates should be grouped and pushed in intervals
     for num in 0..50 {
@@ -154,7 +154,7 @@ where
             .await
             .unwrap();
     }
-    assert_state(&mut event_rx, Object::Mailbox).await;
+    assert_state(&mut event_rx, TypeState::Mailbox).await;
     expect_nothing(&mut event_rx).await;
 
     // Destroy mailbox
@@ -260,7 +260,10 @@ async fn expect_nothing(event_rx: &mut mpsc::Receiver<PushMessage>) {
     }
 }
 
-async fn assert_state(event_rx: &mut mpsc::Receiver<PushMessage>, state: Object) {
+async fn assert_state(
+    event_rx: &mut mpsc::Receiver<PushMessage>,
+    state: jmap::protocol::type_state::TypeState,
+) {
     assert_eq!(
         expect_push(event_rx)
             .await

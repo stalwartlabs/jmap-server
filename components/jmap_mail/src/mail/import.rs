@@ -9,6 +9,7 @@ use jmap::id::state::JMAPState;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::orm::TinyORM;
+use jmap::jmap_store::Object;
 use jmap::request::ResultReference;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
@@ -20,6 +21,7 @@ use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::core::JMAPIdPrefix;
+use store::log::changes::ChangeId;
 use store::nlp::Language;
 use store::read::comparator::Comparator;
 use store::read::filter::{FieldValue, Filter};
@@ -108,7 +110,7 @@ pub trait JMAPMailImport {
         received_at: Option<i64>,
     ) -> jmap::Result<Email>;
 
-    fn mail_parse(
+    fn mail_parse_item(
         &self,
         document: &mut Document,
         blob_id: BlobId,
@@ -247,7 +249,7 @@ where
 
         // Parse message
         let raw_blob: JMAPBlob = (&blob_id).into();
-        self.mail_parse(&mut document, blob_id, blob, received_at)?;
+        self.mail_parse_item(&mut document, blob_id, blob, received_at)?;
 
         // Add keyword tags
         let mut orm = TinyORM::<Email>::new();
@@ -286,7 +288,7 @@ where
         Ok(email)
     }
 
-    fn mail_parse(
+    fn mail_parse_item(
         &self,
         document: &mut Document,
         blob_id: BlobId,
@@ -1029,5 +1031,31 @@ impl MessageData {
         }
 
         Ok(())
+    }
+}
+
+impl EmailImportResponse {
+    pub fn account_id(&self) -> AccountId {
+        self.account_id.get_document_id()
+    }
+
+    pub fn has_changes(&self) -> Option<ChangeId> {
+        if self.old_state.as_ref().unwrap_or(&JMAPState::Initial) != &self.new_state {
+            self.new_state.get_change_id().into()
+        } else {
+            None
+        }
+    }
+
+    pub fn created_ids(&self) -> Option<HashMap<String, JMAPId>> {
+        if let Some(created) = &self.created {
+            let mut created_ids = HashMap::with_capacity(created.len());
+            for (create_id, item) in created {
+                created_ids.insert(create_id.to_string(), *item.id().unwrap());
+            }
+            created_ids.into()
+        } else {
+            None
+        }
     }
 }

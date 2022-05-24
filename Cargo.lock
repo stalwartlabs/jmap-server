@@ -1236,6 +1236,7 @@ dependencies = [
  "store",
  "store_rocksdb",
  "tokio",
+ "tokio-util 0.7.1",
  "tracing-subscriber",
 ]
 

@@ -6,7 +6,6 @@ use jmap::{
     protocol::json::JSONValue,
     request::changes::ChangesRequest,
 };
-use jmap_mail::mail::changes::ChangesMail;
 use store::{
     core::{collection::Collection, error::StoreError},
     log::{

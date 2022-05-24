@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::jmap_store::get::{default_mapper, GetHelper, GetObject};
-use crate::jmap_store::orm::{self, JMAPOrm};
+use crate::jmap_store::orm::JMAPOrm;
 use crate::request::get::{GetRequest, GetResponse};
 
 use store::core::error::StoreError;
@@ -59,13 +59,7 @@ where
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },
-                        _ => {
-                            if let Some(orm::Value::Object(value)) = fields.remove(property) {
-                                value
-                            } else {
-                                Value::Null
-                            }
-                        }
+                        _ => fields.remove(property).unwrap_or_default(),
                     },
                 );
             }

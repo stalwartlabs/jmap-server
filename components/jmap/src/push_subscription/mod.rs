@@ -38,8 +38,4 @@ impl Object for PushSubscription {
     fn collection() -> Collection {
         Collection::PushSubscription
     }
-
-    fn hide_account() -> bool {
-        true
-    }
 }

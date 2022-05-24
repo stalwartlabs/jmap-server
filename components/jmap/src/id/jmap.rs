@@ -18,7 +18,7 @@ impl JMAPId {
             }
             .into()
         } else if id == "singleton" {
-            JMAPId { id: 0 }.into()
+            JMAPId { id: u64::MAX }.into()
         } else {
             None
         }
@@ -127,6 +127,10 @@ impl<'de> serde::Deserialize<'de> for JMAPId {
 
 impl std::fmt::Display for JMAPId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "i{:02x}", self.id)
+        if self.id != u64::MAX {
+            write!(f, "i{:02x}", self.id)
+        } else {
+            write!(f, "singleton")
+        }
     }
 }

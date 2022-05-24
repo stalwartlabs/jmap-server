@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{id::jmap::JMAPId, jmap_store::orm::Indexable};
+use jmap::{id::jmap::JMAPId, jmap_store::orm};
 use serde::{Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
 
@@ -18,9 +18,23 @@ pub enum Value {
     Null,
 }
 
-impl Indexable for Value {
-    fn index_as(&self) -> jmap::jmap_store::orm::Value<Self> {
-        jmap::jmap_store::orm::Value::Null
+impl Default for Value {
+    fn default() -> Self {
+        Value::Null
+    }
+}
+
+impl orm::Value for Value {
+    fn index_as(&self) -> orm::IndexableValue {
+        orm::IndexableValue::Null
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Value::Text { value } => value.is_empty(),
+            Value::Null => true,
+            _ => false,
+        }
     }
 }
 

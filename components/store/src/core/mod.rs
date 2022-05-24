@@ -1,5 +1,6 @@
 use crate::{DocumentId, JMAPId};
 
+pub mod bitmap;
 pub mod collection;
 pub mod document;
 pub mod error;

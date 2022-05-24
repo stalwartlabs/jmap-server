@@ -1,47 +1,53 @@
+use crate::api::request::Request;
+use crate::api::response::{serialize_hex, Response};
 use actix::{Actor, ActorContext, AsyncContext, Handler, Message, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws::{self, WsResponseBuilder};
 use jmap::error::request::{RequestError, RequestErrorType, RequestLimitError};
+use jmap::id::jmap::JMAPId;
 use jmap::id::state::JMAPState;
-use jmap::id::JMAPIdSerialize;
-use jmap::protocol::request::Request;
-use jmap::protocol::response::{serialize_hex, Response};
-use jmap::protocol::{invocation::Object, json::JSONValue};
+use jmap::protocol::type_state::TypeState;
+use jmap::request::Method;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use store::core::collection::Collections;
+use store::core::bitmap::Bitmap;
 use store::tracing::log::debug;
-use store::{JMAPId, Store};
+use store::Store;
 
 use crate::api::invocation::handle_method_calls;
+use crate::api::method;
 use crate::state::{LONG_SLUMBER_MS, THROTTLE_MS};
 use crate::JMAPServer;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct WebSocketRequest {
     #[serde(rename = "@type")]
     pub _type: WebSocketRequestType,
+
     pub id: Option<String>,
+
     pub using: Vec<String>,
+
     #[serde(rename = "methodCalls")]
-    pub method_calls: Vec<(String, JSONValue, String)>,
+    pub method_calls: Vec<method::Call<method::Request>>,
+
     #[serde(rename = "createdIds")]
-    pub created_ids: Option<HashMap<String, String>>,
+    pub created_ids: Option<HashMap<String, JMAPId>>,
 }
 
-#[derive(Message, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Message, Debug, serde::Serialize)]
 #[rtype(result = "()")]
 pub struct WebSocketResponse {
     #[serde(rename = "@type")]
     _type: WebSocketResponseType,
 
     #[serde(rename = "methodResponses")]
-    method_responses: Vec<(String, JSONValue, String)>,
+    method_responses: Vec<method::Call<method::Response>>,
 
     #[serde(rename = "sessionState")]
     #[serde(serialize_with = "serialize_hex")]
@@ -49,7 +55,7 @@ pub struct WebSocketResponse {
 
     #[serde(rename(deserialize = "createdIds"))]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    created_ids: HashMap<String, String>,
+    created_ids: HashMap<String, JMAPId>,
 
     #[serde(rename = "requestId")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -66,7 +72,7 @@ struct WebSocketPushEnable {
     #[serde(rename = "@type")]
     _type: WebSocketPushEnableType,
     #[serde(rename = "dataTypes")]
-    data_types: Option<Vec<Object>>,
+    data_types: Option<Vec<TypeState>>,
     #[serde(rename = "pushState")]
     push_state: Option<String>,
 }
@@ -92,7 +98,7 @@ enum WebSocketPushDisableType {
     WebSocketPushDisable,
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 #[serde(untagged)]
 enum WebSocketMessage {
     Request(WebSocketRequest),
@@ -109,7 +115,7 @@ pub enum WebSocketStateChangeType {
 pub struct WebSocketStateChange {
     #[serde(rename = "@type")]
     pub type_: WebSocketStateChangeType,
-    pub changed: HashMap<String, HashMap<Object, String>>,
+    pub changed: HashMap<JMAPId, HashMap<TypeState, JMAPState>>,
     #[serde(rename = "pushState")]
     #[serde(skip_serializing_if = "Option::is_none")]
     push_state: Option<String>,
@@ -260,27 +266,19 @@ where
                             WebSocketMessage::PushEnable(request) => {
                                 let core = self.core.clone();
                                 let _account_id = 1; //TODO obtain from session, plus shared accounts + device ids limit
-                                let collections = if let Some(data_types) = request.data_types {
+                                let types = if let Some(data_types) = request.data_types {
                                     if !data_types.is_empty() {
-                                        let mut collections = Collections::default();
-                                        data_types.into_iter().for_each(|data_type| {
-                                            collections.insert(data_type.into());
-                                        });
-                                        collections
+                                        data_types.into()
                                     } else {
-                                        Collections::all()
+                                        Bitmap::all()
                                     }
                                 } else {
-                                    Collections::all()
+                                    Bitmap::all()
                                 };
 
                                 self.state_handle = Some(ctx.add_stream(async_stream::stream! {
                                     let mut change_rx = if let Some(change_rx) = core
-                                        .subscribe_state_manager(
-                                            _account_id,
-                                            _account_id,
-                                            collections,
-                                        )
+                                        .subscribe_state_manager(_account_id, _account_id, types)
                                         .await
                                     {
                                         change_rx
@@ -297,18 +295,13 @@ where
                                         match tokio::time::timeout(timeout, change_rx.recv()).await
                                         {
                                             Ok(Some(state_change)) => {
-                                                response
-                                                    .changed
-                                                    .entry(
-                                                        (state_change.account_id as JMAPId)
-                                                            .to_jmap_string(),
-                                                    )
-                                                    .or_insert_with(HashMap::new)
-                                                    .insert(
-                                                        state_change.collection.into(),
-                                                        JMAPState::from(state_change.id)
-                                                            .to_jmap_string(),
-                                                    );
+                                                for (type_state, change_id) in state_change.types {
+                                                    response
+                                                        .changed
+                                                        .entry(state_change.account_id.into())
+                                                        .or_insert_with(HashMap::new)
+                                                        .insert(type_state, change_id.into());
+                                                }
                                             }
                                             Ok(None) => {
                                                 debug!("Broadcast channel was closed.");

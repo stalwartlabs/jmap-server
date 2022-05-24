@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use jmap::protocol::invocation::Object;
+use jmap::{
+    id::{jmap::JMAPId, state::JMAPState},
+    protocol::type_state::TypeState,
+};
 use store::{
-    core::collection::{Collection, Collections},
-    log::changes::ChangeId,
-    AccountId, DocumentId,
+    core::bitmap::Bitmap, log::changes::ChangeId, sha2::digest::typenum::Bit, AccountId, DocumentId,
 };
 use tokio::sync::mpsc;
 
@@ -22,8 +23,13 @@ pub const LONG_SLUMBER_MS: u64 = 60 * 60 * 24 * 1000;
 #[derive(Clone, Debug)]
 pub struct StateChange {
     pub account_id: AccountId,
-    pub collection: Collection,
-    pub id: ChangeId,
+    pub types: HashMap<TypeState, ChangeId>,
+}
+
+impl StateChange {
+    pub fn new(account_id: AccountId, types: HashMap<TypeState, ChangeId>) -> Self {
+        Self { account_id, types }
+    }
 }
 
 #[derive(Debug)]
@@ -33,7 +39,7 @@ pub enum Event {
     Subscribe {
         id: DocumentId,
         account_id: AccountId,
-        collections: Collections,
+        types: Bitmap<TypeState>,
         tx: mpsc::Sender<StateChange>,
     },
     Publish {
@@ -65,7 +71,7 @@ pub struct PushSubscription {
     pub id: DocumentId,
     pub url: String,
     pub expires: u64,
-    pub collections: Collections,
+    pub types: Bitmap<TypeState>,
     pub keys: Option<EncriptionKeys>,
 }
 
@@ -84,7 +90,7 @@ pub enum StateChangeType {
 pub struct StateChangeResponse {
     #[serde(rename = "@type")]
     pub type_: StateChangeType,
-    pub changed: HashMap<String, HashMap<Object, String>>,
+    pub changed: HashMap<JMAPId, HashMap<TypeState, JMAPState>>,
 }
 
 impl StateChangeResponse {

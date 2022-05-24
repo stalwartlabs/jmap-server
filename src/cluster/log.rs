@@ -1,10 +1,11 @@
 use jmap::jmap_store::raft::{JMAPRaftStore, RaftUpdate};
-use jmap::jmap_store::set::SetObject;
-use jmap_mail::mail::set::SetMail;
-use jmap_mail::mailbox::set::SetMailbox;
+use jmap_mail::mail::schema::Email;
+use jmap_mail::mail::set::JMAPSetMail;
+use jmap_mail::mailbox::schema::Mailbox;
 use store::bincode;
 use store::blob::BlobId;
-use store::core::collection::{Collection, Collections};
+use store::core::bitmap::Bitmap;
+use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::JMAPIdPrefix;
@@ -339,15 +340,19 @@ pub trait RaftStore {
         &self,
         last_index: LogIndex,
         to_index: LogIndex,
-        pending_changes: Vec<(Collections, Vec<AccountId>)>,
+        pending_changes: Vec<(Bitmap<Collection>, Vec<AccountId>)>,
         batch_size: usize,
-    ) -> store::Result<(Vec<Update>, Vec<(Collections, Vec<AccountId>)>, LogIndex)>;
+    ) -> store::Result<(
+        Vec<Update>,
+        Vec<(Bitmap<Collection>, Vec<AccountId>)>,
+        LogIndex,
+    )>;
 
     fn get_log_changes(
         &self,
         entries: &mut Vec<Update>,
         account_id: AccountId,
-        changed_collections: Collections,
+        changed_collections: Bitmap<Collection>,
         change_id: ChangeId,
     ) -> store::Result<usize>;
 
@@ -664,9 +669,13 @@ where
         &self,
         mut last_index: LogIndex,
         to_index: LogIndex,
-        mut pending_changes: Vec<(Collections, Vec<AccountId>)>,
+        mut pending_changes: Vec<(Bitmap<Collection>, Vec<AccountId>)>,
         batch_size: usize,
-    ) -> store::Result<(Vec<Update>, Vec<(Collections, Vec<AccountId>)>, LogIndex)> {
+    ) -> store::Result<(
+        Vec<Update>,
+        Vec<(Bitmap<Collection>, Vec<AccountId>)>,
+        LogIndex,
+    )> {
         let mut entries = Vec::new();
         let start_index = last_index;
         let key = if start_index != LogIndex::MAX {
@@ -755,7 +764,7 @@ where
         &self,
         entries: &mut Vec<Update>,
         account_id: AccountId,
-        changed_collections: Collections,
+        changed_collections: Bitmap<Collection>,
         change_id: ChangeId,
     ) -> store::Result<usize> {
         let mut entries_size = 0;
@@ -824,8 +833,8 @@ where
         update: RaftUpdate,
     ) -> store::Result<()> {
         match collection {
-            Collection::Mail => self.raft_apply_update::<SetMail>(write_batch, update),
-            Collection::Mailbox => self.raft_apply_update::<SetMailbox>(write_batch, update),
+            Collection::Mail => self.raft_apply_update::<Email>(write_batch, update),
+            Collection::Mailbox => self.raft_apply_update::<Mailbox>(write_batch, update),
             Collection::Account => todo!(),
             Collection::PushSubscription => todo!(),
             Collection::Thread => todo!(),
@@ -844,8 +853,10 @@ where
     ) -> store::Result<()> {
         let mut document = Document::new(collection, document_id);
         match collection {
-            Collection::Mail => SetMail::delete(self, write_batch.account_id, &mut document)?,
-            Collection::Mailbox => SetMailbox::delete(self, write_batch.account_id, &mut document)?,
+            Collection::Mail => {
+                self.mail_delete(write_batch.account_id, None, &mut document)?;
+            }
+            Collection::Mailbox => todo!(), //self.mailbox_delete(self, write_batch.account_id, &mut document)?,
             Collection::Account => todo!(),
             Collection::PushSubscription => todo!(),
             Collection::Thread => todo!(),

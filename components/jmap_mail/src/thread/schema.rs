@@ -54,8 +54,4 @@ impl Object for Thread {
     fn collection() -> store::core::collection::Collection {
         Collection::Thread
     }
-
-    fn hide_account() -> bool {
-        false
-    }
 }

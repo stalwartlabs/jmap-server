@@ -5,12 +5,6 @@ use store::serialize::leb128::Leb128;
 
 use super::{hex_reader, HexWriter};
 
-#[derive(Clone, Debug)]
-pub struct InnerBlob<T> {
-    pub blob_id: T,
-    pub blob_index: u32,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JMAPBlob {
     pub id: BlobId,

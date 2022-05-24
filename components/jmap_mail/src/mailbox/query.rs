@@ -115,7 +115,8 @@ where
                             .ok_or_else(|| {
                                 StoreError::InternalError("Mailbox data not found".to_string())
                             })?
-                            .get_unsigned_int(&Property::ParentId)
+                            .get(&Property::ParentId)
+                            .and_then(|v| v.as_id())
                             .unwrap_or_default();
                         hierarchy.insert((doc_id + 1) as u64, parent_id);
                         tree.entry(parent_id)

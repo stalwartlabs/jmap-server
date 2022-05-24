@@ -14,7 +14,7 @@ use super::schema::{Property, Value};
 impl SetObject for VacationResponse {
     type SetArguments = ();
 
-    type NextInvocation = ();
+    type NextCall = ();
 
     fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
         todo!()
@@ -51,14 +51,12 @@ where
                         (
                             Property::Subject | Property::HtmlBody | Property::TextBody,
                             value @ Value::Text { .. },
-                        ) => orm::Value::Object(value),
+                        ) => value,
 
                         (Property::ToDate | Property::FromDate, value @ Value::DateTime { .. }) => {
-                            orm::Value::Object(value)
+                            value
                         }
-                        (Property::IsEnabled, value @ Value::Bool { .. }) => {
-                            orm::Value::Object(value)
-                        }
+                        (Property::IsEnabled, value @ Value::Bool { .. }) => value,
                         (
                             Property::Subject
                             | Property::HtmlBody
@@ -66,7 +64,7 @@ where
                             | Property::ToDate
                             | Property::FromDate,
                             Value::Null,
-                        ) => orm::Value::Null,
+                        ) => Value::Null,
                         (property, _) => {
                             return Err(SetError::invalid_property(
                                 property,
@@ -99,14 +97,12 @@ where
                         (
                             Property::Subject | Property::HtmlBody | Property::TextBody,
                             value @ Value::Text { .. },
-                        ) => orm::Value::Object(value),
+                        ) => value,
 
                         (Property::ToDate | Property::FromDate, value @ Value::DateTime { .. }) => {
-                            orm::Value::Object(value)
+                            value
                         }
-                        (Property::IsEnabled, value @ Value::Bool { .. }) => {
-                            orm::Value::Object(value)
-                        }
+                        (Property::IsEnabled, value @ Value::Bool { .. }) => value,
                         (
                             Property::Subject
                             | Property::HtmlBody
@@ -114,7 +110,7 @@ where
                             | Property::ToDate
                             | Property::FromDate,
                             Value::Null,
-                        ) => orm::Value::Null,
+                        ) => Value::Null,
                         (property, _) => {
                             return Err(SetError::invalid_property(
                                 property,

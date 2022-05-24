@@ -1,4 +1,5 @@
-use crate::core::collection::Collections;
+use crate::core::bitmap::Bitmap;
+use crate::core::collection::Collection;
 use crate::serialize::leb128::Leb128;
 use crate::serialize::StoreDeserialize;
 use crate::write::batch;
@@ -9,15 +10,15 @@ use std::convert::TryInto;
 pub enum Entry {
     Item {
         account_id: AccountId,
-        changed_collections: Collections,
+        changed_collections: Bitmap<Collection>,
     },
     Snapshot {
-        changed_accounts: Vec<(Collections, Vec<AccountId>)>,
+        changed_accounts: Vec<(Bitmap<Collection>, Vec<AccountId>)>,
     },
 }
 
 impl Entry {
-    pub fn next_account(&mut self) -> Option<(AccountId, Collections)> {
+    pub fn next_account(&mut self) -> Option<(AccountId, Bitmap<Collection>)> {
         match self {
             Entry::Item {
                 account_id,

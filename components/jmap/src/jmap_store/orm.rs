@@ -4,7 +4,7 @@ use store::core::tag::Tag;
 use store::nlp::Language;
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::write::options::{IndexOptions, Options};
-use store::{AccountId, DocumentId, JMAPStore, Store};
+use store::{AccountId, DocumentId, Integer, JMAPStore, LongInteger, Store};
 
 use crate::error::set::SetError;
 use std::collections::{HashMap, HashSet};
@@ -17,10 +17,10 @@ where
     T: Object,
 {
     #[serde(bound(
-        serialize = "HashMap<T::Property, Value<T::Value>>: serde::Serialize",
-        deserialize = "HashMap<T::Property, Value<T::Value>>: serde::Deserialize<'de>"
+        serialize = "HashMap<T::Property, T::Value>: serde::Serialize",
+        deserialize = "HashMap<T::Property, T::Value>: serde::Deserialize<'de>"
     ))]
-    properties: HashMap<T::Property, Value<T::Value>>,
+    properties: HashMap<T::Property, T::Value>,
     #[serde(bound(
         serialize = "HashMap<T::Property, HashSet<Tag>>: serde::Serialize",
         deserialize = "HashMap<T::Property, HashSet<Tag>>: serde::Deserialize<'de>"
@@ -29,107 +29,59 @@ where
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
-pub enum Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
+pub enum IndexableValue {
     String(String),
-    Number(Number),
-    Bool(bool),
-    Object(T),
+    Integer(Integer),
+    LongInteger(LongInteger),
     Null,
 }
 
-pub trait Indexable
-where
-    Self: Sized + Sync + Send + Eq + PartialEq + std::fmt::Debug,
-{
-    fn index_as(&self) -> Value<Self>;
+impl From<String> for IndexableValue {
+    fn from(value: String) -> Self {
+        IndexableValue::String(value)
+    }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
+impl From<Integer> for IndexableValue {
+    fn from(value: Integer) -> Self {
+        IndexableValue::Integer(value)
+    }
+}
+
+impl From<LongInteger> for IndexableValue {
+    fn from(value: LongInteger) -> Self {
+        IndexableValue::LongInteger(value)
+    }
+}
+
+pub trait Value
+where
+    Self: Sized
+        + Sync
+        + Send
+        + Eq
+        + PartialEq
+        + Default
+        + std::fmt::Debug
+        + serde::Serialize
+        + for<'de> serde::Deserialize<'de>,
+{
+    fn index_as(&self) -> IndexableValue;
+    fn is_empty(&self) -> bool;
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct EmptyValue {}
 
-impl Indexable for EmptyValue {
-    fn index_as(&self) -> Value<Self> {
-        Value::Null
+impl Value for EmptyValue {
+    fn index_as(&self) -> IndexableValue {
+        IndexableValue::Null
+    }
+
+    fn is_empty(&self) -> bool {
+        true
     }
 }
-
-#[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Clone)]
-pub enum Number {
-    PosInt(u64),
-    NegInt(i64),
-    Float(f64),
-}
-
-impl<T> From<String> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    fn from(s: String) -> Self {
-        Value::String(s)
-    }
-}
-
-impl<T> From<u64> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    fn from(s: u64) -> Self {
-        Value::Number(Number::PosInt(s))
-    }
-}
-
-impl<T> From<u32> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    fn from(s: u32) -> Self {
-        Value::Number(Number::PosInt(s as u64))
-    }
-}
-
-impl<T> From<i64> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    fn from(s: i64) -> Self {
-        Value::Number(Number::NegInt(s))
-    }
-}
-
-impl<T> From<f64> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    fn from(s: f64) -> Self {
-        Value::Number(Number::Float(s))
-    }
-}
-
-impl<T> From<bool> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    fn from(s: bool) -> Self {
-        Value::Bool(s)
-    }
-}
-
-impl<T> From<Option<T>> for Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Into<Value<T>> + Indexable,
-{
-    fn from(s: Option<T>) -> Self {
-        match s {
-            Some(value) => value.into(),
-            None => Value::Null,
-        }
-    }
-}
-
-impl Eq for Number {}
 
 impl<T> Default for TinyORM<T>
 where
@@ -160,11 +112,15 @@ where
         }
     }
 
-    pub fn set(&mut self, property: T::Property, value: impl Into<Value<T::Value>>) {
+    pub fn get(&self, property: &T::Property) -> Option<&T::Value> {
+        self.properties.get(property)
+    }
+
+    pub fn set(&mut self, property: T::Property, value: impl Into<T::Value>) {
         self.properties.insert(property, value.into());
     }
 
-    pub fn remove(&mut self, property: &T::Property) -> Option<Value<T::Value>> {
+    pub fn remove(&mut self, property: &T::Property) -> Option<T::Value> {
         self.properties.remove(property)
     }
 
@@ -198,24 +154,6 @@ where
             .get(property)
             .map(|set| !set.is_empty())
             .unwrap_or(false)
-    }
-
-    pub fn get_unsigned_int(&self, property: &T::Property) -> Option<u64> {
-        self.properties
-            .get(property)
-            .and_then(|value| value.to_unsigned_int())
-    }
-
-    pub fn get_string(&self, property: &T::Property) -> Option<&str> {
-        self.properties
-            .get(property)
-            .and_then(|value| value.to_string())
-    }
-
-    pub fn remove_string(&mut self, property: &T::Property) -> Option<String> {
-        self.properties
-            .remove(property)
-            .and_then(|value| value.unwrap_string())
     }
 
     pub fn insert_validate(
@@ -308,83 +246,50 @@ where
                 if current_value == &value {
                     continue;
                 } else if is_indexed {
-                    match &current_value {
-                        Value::String(text) => {
+                    match current_value.index_as() {
+                        IndexableValue::String(value) => {
                             document.text(
                                 property.clone(),
-                                text.clone(),
+                                value,
                                 Language::Unknown,
                                 (*index_options).clear(),
                             );
                         }
-                        Value::Number(number) => {
-                            document.number(property.clone(), number, (*index_options).clear());
+                        IndexableValue::Integer(value) => {
+                            document.number(property.clone(), value, (*index_options).clear());
                         }
-                        Value::Object(object) => match object.index_as() {
-                            Value::String(text) => document.text(
-                                property.clone(),
-                                text,
-                                Language::Unknown,
-                                (*index_options).clear(),
-                            ),
-                            Value::Number(number) => {
-                                document.number(
-                                    property.clone(),
-                                    &number,
-                                    (*index_options).clear(),
-                                );
-                            }
-                            _ => (),
-                        },
-                        value => {
-                            debug_assert!(false, "ORM unsupported type: {:?}", value);
+                        IndexableValue::LongInteger(value) => {
+                            document.number(property.clone(), value, (*index_options).clear());
                         }
+                        IndexableValue::Null => (),
                     }
                 }
             }
 
-            match &value {
-                Value::String(text) => {
-                    if is_indexed {
-                        document.text(
-                            property.clone(),
-                            text.clone(),
-                            Language::Unknown,
-                            *index_options,
-                        );
+            let do_insert = if is_indexed {
+                match value.index_as() {
+                    IndexableValue::String(value) => {
+                        document.text(property.clone(), value, Language::Unknown, *index_options);
+                        true
                     }
+                    IndexableValue::Integer(value) => {
+                        document.number(property.clone(), value, *index_options);
+                        true
+                    }
+                    IndexableValue::LongInteger(value) => {
+                        document.number(property.clone(), value, *index_options);
+                        true
+                    }
+                    IndexableValue::Null => false,
+                }
+            } else {
+                !value.is_empty()
+            };
 
-                    self.properties.insert(property, value);
-                }
-                Value::Number(number) => {
-                    if is_indexed {
-                        document.number(property.clone(), number, *index_options);
-                    }
-                    self.properties.insert(property, value);
-                }
-                Value::Object(object) => {
-                    if is_indexed {
-                        match object.index_as() {
-                            Value::String(text) => document.text(
-                                property.clone(),
-                                text,
-                                Language::Unknown,
-                                *index_options,
-                            ),
-                            Value::Number(number) => {
-                                document.number(property.clone(), &number, *index_options);
-                            }
-                            _ => (),
-                        }
-                    }
-                    self.properties.insert(property, value);
-                }
-                Value::Null => {
-                    self.properties.remove(&property);
-                }
-                _ => {
-                    self.properties.insert(property, value);
-                }
+            if do_insert {
+                self.properties.insert(property, value);
+            } else {
+                self.properties.remove(&property);
             }
 
             if !has_changes {
@@ -476,26 +381,17 @@ where
                 .unwrap_or((false, 0));
 
             if is_indexed {
-                match value {
-                    Value::String(text) => {
-                        document.text(property, text, Language::Unknown, index_options);
+                match value.index_as() {
+                    IndexableValue::String(value) => {
+                        document.text(property, value, Language::Unknown, index_options);
                     }
-                    Value::Number(number) => {
-                        document.number(property, &number, index_options);
+                    IndexableValue::Integer(value) => {
+                        document.number(property, value, index_options);
                     }
-                    Value::Object(object) => match object.index_as() {
-                        Value::String(text) => {
-                            document.text(property, text, Language::Unknown, index_options)
-                        }
-                        Value::Number(number) => {
-                            document.number(property, &number, index_options);
-                        }
-                        _ => (),
-                    },
-                    Value::Null => (),
-                    value => {
-                        debug_assert!(false, "ORM unsupported type: {:?}", value);
+                    IndexableValue::LongInteger(value) => {
+                        document.number(property, value, index_options);
                     }
+                    IndexableValue::Null => (),
                 }
             }
         }
@@ -529,87 +425,6 @@ where
             Vec::with_capacity(0),
             IndexOptions::new().clear(),
         );
-    }
-}
-
-impl<T> Value<T>
-where
-    T: Sync + Send + Eq + PartialEq + std::fmt::Debug + Indexable,
-{
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Value::String(string) => string.is_empty(),
-            Value::Number(_) | Value::Bool(_) | Value::Object(_) => false,
-            Value::Null => true,
-        }
-    }
-
-    pub fn to_string(&self) -> Option<&str> {
-        match self {
-            Value::String(string) => Some(string.as_str()),
-            _ => None,
-        }
-    }
-
-    pub fn unwrap_string(self) -> Option<String> {
-        match self {
-            Value::String(string) => Some(string),
-            _ => None,
-        }
-    }
-
-    pub fn to_unsigned_int(&self) -> Option<u64> {
-        match self {
-            Value::Number(number) => number.to_unsigned_int().into(),
-            _ => None,
-        }
-    }
-
-    pub fn unwrap_object(self) -> Option<T> {
-        match self {
-            Value::Object(object) => object.into(),
-            _ => None,
-        }
-    }
-}
-
-impl Number {
-    pub fn to_unsigned_int(&self) -> u64 {
-        match self {
-            Number::PosInt(i) => *i,
-            Number::NegInt(i) => {
-                if *i > 0 {
-                    *i as u64
-                } else {
-                    0
-                }
-            }
-            Number::Float(f) => {
-                if *f > 0.0 {
-                    *f as u64
-                } else {
-                    0
-                }
-            }
-        }
-    }
-
-    pub fn to_int(&self) -> i64 {
-        match self {
-            Number::PosInt(i) => *i as i64,
-            Number::NegInt(i) => *i,
-            Number::Float(f) => *f as i64,
-        }
-    }
-}
-
-impl From<&Number> for store::core::number::Number {
-    fn from(value: &Number) -> Self {
-        match value {
-            Number::PosInt(i) => store::core::number::Number::LongInteger(*i),
-            Number::NegInt(i) => store::core::number::Number::LongInteger(*i as u64),
-            Number::Float(f) => store::core::number::Number::Float(*f),
-        }
     }
 }
 

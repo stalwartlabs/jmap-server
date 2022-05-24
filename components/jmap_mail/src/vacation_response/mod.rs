@@ -38,8 +38,4 @@ impl Object for VacationResponse {
     fn collection() -> store::core::collection::Collection {
         Collection::VacationResponse
     }
-
-    fn hide_account() -> bool {
-        false
-    }
 }

@@ -47,8 +47,4 @@ impl Object for EmailSubmission {
     fn collection() -> Collection {
         Collection::EmailSubmission
     }
-
-    fn hide_account() -> bool {
-        false
-    }
 }

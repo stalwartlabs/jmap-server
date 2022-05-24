@@ -6,8 +6,8 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
+use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::Object;
-use jmap::{id::jmap::JMAPId, jmap_store::orm::EmptyValue};
 
 use store::core::collection::Collection;
 use store::write::options::Options;
@@ -18,7 +18,7 @@ use self::schema::{Mailbox, Property, Value};
 impl Object for Mailbox {
     type Property = Property;
 
-    type Value = EmptyValue;
+    type Value = Value;
 
     fn id(&self) -> Option<&JMAPId> {
         self.properties.get(&Property::Id).and_then(|id| match id {
@@ -45,10 +45,6 @@ impl Object for Mailbox {
 
     fn collection() -> Collection {
         Collection::Mailbox
-    }
-
-    fn hide_account() -> bool {
-        false
     }
 
     fn new(id: JMAPId) -> Self {

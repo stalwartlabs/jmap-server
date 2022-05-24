@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{id::jmap::JMAPId, request::ResultReference};
+use jmap::{id::jmap::JMAPId, jmap_store::orm, request::ResultReference};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default)]
@@ -8,7 +8,7 @@ pub struct Mailbox {
     pub properties: HashMap<Property, Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Value {
     Id { value: JMAPId },
     Text { value: String },
@@ -26,7 +26,70 @@ impl Default for Value {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+impl orm::Value for Value {
+    fn index_as(&self) -> orm::IndexableValue {
+        match self {
+            Value::Id { value } => u64::from(value).into(),
+            Value::Text { value } => value.to_string().into(),
+            Value::Number { value } => (*value).into(),
+            _ => orm::IndexableValue::Null,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Value::Text { value } => value.is_empty(),
+            Value::Null => true,
+            _ => false,
+        }
+    }
+}
+
+impl Value {
+    pub fn unwrap_text(self) -> Option<String> {
+        match self {
+            Value::Text { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_number(self) -> Option<u32> {
+        match self {
+            Value::Number { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn unwrap_id(self) -> Option<JMAPId> {
+        match self {
+            Value::Id { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Value::Text { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_number(&self) -> Option<u32> {
+        match self {
+            Value::Number { value } => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn as_id(&self) -> Option<u64> {
+        match self {
+            Value::Id { value } => Some(value.into()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MailboxRights {
     #[serde(rename = "mayReadItems")]
     may_read_items: bool,

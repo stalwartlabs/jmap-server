@@ -1,42 +1,34 @@
+use std::collections::HashMap;
+
 use actix_web::web;
+
 use jmap::{
     error::method::MethodError,
-    jmap_store::{
-        changes::{ChangesResult, JMAPChanges},
-        get::{GetResult, JMAPGet},
-        import::{ImportResult, JMAPImport},
-        parse::{JMAPParse, ParseResult},
-        query::{JMAPQuery, QueryResult},
-        query_changes::{JMAPQueryChanges, QueryChangesResult},
-        set::{JMAPSet, SetResult},
-    },
-    protocol::{
-        invocation::{Invocation, Method, Object},
-        json::JSONValue,
-        request::Request,
-        response::Response,
-    },
-    push_subscription::{get::GetPushSubscription, set::SetPushSubscription},
+    protocol::type_state::TypeState,
+    push_subscription::{get::JMAPGetPushSubscription, set::JMAPSetPushSubscription},
 };
 use jmap_mail::{
-    identity::{changes::ChangesIdentity, get::GetIdentity, set::SetIdentity},
-    mail::{
-        changes::ChangesMail, get::GetMail, import::ImportMail, parse::ParseMail, query::QueryMail,
-        set::SetMail,
+    email_submission::{
+        changes::JMAPEmailSubmissionChanges, get::JMAPGetEmailSubmission,
+        query::JMAPEmailSubmissionQuery, set::JMAPSetEmailSubmission,
     },
-    mailbox::{changes::ChangesMailbox, get::GetMailbox, query::QueryMailbox, set::SetMailbox},
-    thread::{changes::ChangesThread, get::GetThread},
+    identity::{changes::JMAPIdentityChanges, get::JMAPGetIdentity, set::JMAPSetIdentity},
+    mail::{
+        changes::JMAPMailChanges, get::JMAPGetMail, import::JMAPMailImport, parse::JMAPMailParse,
+        query::JMAPMailQuery, set::JMAPSetMail,
+    },
+    mailbox::{
+        changes::JMAPMailboxChanges, get::JMAPGetMailbox, query::JMAPMailboxQuery,
+        set::JMAPSetMailbox,
+    },
+    thread::{changes::JMAPThreadChanges, get::JMAPGetThread},
+    vacation_response::{get::JMAPGetVacationResponse, set::JMAPSetVacationResponse},
 };
 use store::{tracing::error, Store};
 
 use crate::{state::StateChange, JMAPServer};
 
-#[derive(Debug)]
-pub struct InvocationResult {
-    result: JSONValue,
-    next_invocation: Option<Invocation>,
-    change: Option<StateChange>,
-}
+use super::{method, request::Request, response::Response};
 
 pub async fn handle_method_calls<T>(request: Request, core: web::Data<JMAPServer<T>>) -> Response
 where
@@ -49,89 +41,79 @@ where
         request.method_calls.len(),
     );
 
-    let total_method_calls = request.method_calls.len();
-    for (call_num, (name, arguments, call_id)) in request.method_calls.into_iter().enumerate() {
-        match Invocation::parse(&name, arguments, &response, &core.store.config) {
-            Ok(mut invocation) => {
-                let is_set = invocation.update_set_flags(core.is_in_cluster());
-                let account_id = if invocation.account_id != u32::MAX {
-                    invocation.account_id
-                } else {
-                    //TODO use session account
-                    invocation.account_id = 1;
-                    1
-                };
+    for call in request.method_calls.into_iter() {
+        let call_id = call.id;
+        let mut call_method = call.method;
 
-                match handle_method_call(invocation, &core).await {
-                    Ok(result) => {
-                        // Add result
-                        if let Some(state_change) = result.change {
+        loop {
+            match handle_method_call(call_method, &core).await {
+                Ok(mut method_response) => {
+                    let next_call_method = match method_response.changes() {
+                        method::Changes::Item {
+                            created_ids,
+                            change_id,
+                            state_change,
+                            next_call,
+                        } => {
                             // Commit change
-                            if core.is_in_cluster() && !core.commit_index(state_change.id).await {
+                            if core.is_in_cluster() && !core.commit_index(change_id).await {
                                 response.push_error(call_id, MethodError::ServerPartialFail);
-                                continue;
+                                break;
                             }
 
                             // Broadcast change to subscribers
-                            if let Err(err) =
-                                core.publish_state_change(account_id, state_change).await
-                            {
+                            if let Some(state_change) = state_change {
+                                if let Err(err) = core.publish_state_change(state_change).await {
+                                    error!("Failed to publish state change: {}", err);
+                                    response.push_error(call_id, MethodError::ServerPartialFail);
+                                    break;
+                                }
+                            }
+
+                            // Add created ids to response
+                            if let Some(created_ids) = created_ids {
+                                response.created_ids.extend(created_ids);
+                            }
+
+                            // Add response
+                            response.push_response(call_id.clone(), method_response);
+
+                            next_call
+                        }
+                        method::Changes::Subscription {
+                            account_id,
+                            change_id,
+                        } => {
+                            // Commit change
+                            if core.is_in_cluster() && !core.commit_index(change_id).await {
+                                response.push_error(call_id, MethodError::ServerPartialFail);
+                                break;
+                            }
+
+                            // Broadcast change to subscribers
+                            if let Err(err) = core.update_push_subscriptions(account_id).await {
                                 error!("Failed to publish state change: {}", err);
                                 response.push_error(call_id, MethodError::ServerPartialFail);
-                                continue;
+                                break;
                             }
-                        }
-                        response.push_response(
-                            name,
-                            call_id.clone(),
-                            result.result,
-                            is_set && (include_created_ids || call_num < total_method_calls - 1),
-                        );
 
-                        // Execute next invocation
-                        if let Some(next_invocation) = result.next_invocation {
-                            let name = next_invocation.to_string();
-                            match handle_method_call(next_invocation, &core).await {
-                                Ok(result) => {
-                                    if let Some(state_change) = result.change {
-                                        // Commit change
-                                        if core.is_in_cluster()
-                                            && !core.commit_index(state_change.id).await
-                                        {
-                                            response.push_error(
-                                                call_id,
-                                                MethodError::ServerPartialFail,
-                                            );
-                                            continue;
-                                        }
-
-                                        // Broadcast change to subscribers
-                                        if let Err(err) = core
-                                            .publish_state_change(account_id, state_change)
-                                            .await
-                                        {
-                                            error!("Failed to publish state change: {}", err);
-                                            response.push_error(
-                                                call_id,
-                                                MethodError::ServerPartialFail,
-                                            );
-                                            continue;
-                                        }
-                                    }
-                                    response.push_response(name, call_id, result.result, false);
-                                }
-                                Err(err) => {
-                                    response.push_error(call_id, err);
-                                }
-                            }
+                            None
                         }
-                    }
-                    Err(err) => {
-                        response.push_error(call_id, err);
+                        method::Changes::None => None,
+                    };
+
+                    // Process next call
+                    if let Some(next_call_method) = next_call_method {
+                        call_method = next_call_method;
+                    } else {
+                        break;
                     }
                 }
+                Err(err) => {
+                    response.push_error(call_id, err);
+                    break;
+                }
             }
-            Err(err) => response.push_error(call_id, err),
         }
     }
 
@@ -143,141 +125,101 @@ where
 }
 
 pub async fn handle_method_call<T>(
-    invocation: Invocation,
+    call: method::Request,
     core: &web::Data<JMAPServer<T>>,
-) -> jmap::Result<InvocationResult>
+) -> jmap::Result<method::Response>
 where
     T: for<'x> Store<'x> + 'static,
 {
     let store = core.store.clone();
     core.spawn_jmap_request(move || {
-        Ok(match (invocation.obj, invocation.call) {
-            (Object::Email, Method::Get(request)) => store.get::<GetMail<T>>(request)?.into(),
-            (Object::Email, Method::Set(request)) => store.set::<SetMail>(request)?.into(),
-            (Object::Email, Method::Query(request)) => store.query::<QueryMail<T>>(request)?.into(),
-            (Object::Email, Method::QueryChanges(request)) => store
-                .query_changes::<ChangesMail, QueryMail<T>>(request)?
-                .into(),
-            (Object::Email, Method::Changes(request)) => {
-                store.changes::<ChangesMail>(request)?.into()
+        Ok(match call {
+            method::Request::GetPushSubscription(request) => {
+                method::Response::GetPushSubscription(store.push_subscription_get(request)?)
             }
-            (Object::Email, Method::Import(request)) => {
-                store.import::<ImportMail<T>>(request)?.into()
+            method::Request::SetPushSubscription(request) => {
+                method::Response::SetPushSubscription(store.push_subscription_set(request)?)
             }
-            (Object::Email, Method::Parse(request)) => store.parse::<ParseMail>(request)?.into(),
-            (Object::Thread, Method::Get(request)) => store.get::<GetThread<T>>(request)?.into(),
-            (Object::Thread, Method::Changes(request)) => {
-                store.changes::<ChangesThread>(request)?.into()
+            method::Request::GetMailbox(request) => {
+                method::Response::GetMailbox(store.mailbox_get(request)?)
             }
-            (Object::Mailbox, Method::Get(request)) => store.get::<GetMailbox<T>>(request)?.into(),
-            (Object::Mailbox, Method::Set(request)) => store.set::<SetMailbox>(request)?.into(),
-            (Object::Mailbox, Method::Query(request)) => {
-                store.query::<QueryMailbox<T>>(request)?.into()
+            method::Request::ChangesMailbox(request) => {
+                method::Response::ChangesMailbox(store.mailbox_changes(request)?)
             }
-            (Object::Mailbox, Method::QueryChanges(request)) => store
-                .query_changes::<ChangesMailbox, QueryMailbox<T>>(request)?
-                .into(),
-            (Object::Mailbox, Method::Changes(request)) => {
-                store.changes::<ChangesMailbox>(request)?.into()
+            method::Request::QueryMailbox(request) => {
+                method::Response::QueryMailbox(store.mailbox_query(request)?)
             }
-            (Object::Identity, Method::Get(request)) => {
-                store.get::<GetIdentity<T>>(request)?.into()
+            method::Request::QueryChangesMailbox(request) => {
+                method::Response::QueryChangesMailbox(store.mailbox_query_changes(request)?)
             }
-            (Object::Identity, Method::Set(request)) => store.set::<SetIdentity>(request)?.into(),
-            (Object::Identity, Method::Changes(request)) => {
-                store.changes::<ChangesIdentity>(request)?.into()
+            method::Request::SetMailbox(request) => {
+                method::Response::SetMailbox(store.mailbox_set(request)?)
             }
-            (Object::PushSubscription, Method::Get(request)) => store
-                .get::<GetPushSubscription<T>>(request)?
-                .no_account_id()
-                .into(),
-            (Object::PushSubscription, Method::Set(request)) => store
-                .set::<SetPushSubscription>(request)?
-                .no_account_id()
-                .into(),
-            (Object::Core, Method::Echo(arguments)) => InvocationResult::new(arguments),
-            _ => {
-                return Err(MethodError::ServerUnavailable);
+            method::Request::GetThread(request) => {
+                method::Response::GetThread(store.thread_get(request)?)
             }
+            method::Request::ChangesThread(request) => {
+                method::Response::ChangesThread(store.thread_changes(request)?)
+            }
+            method::Request::GetEmail(request) => {
+                method::Response::GetEmail(store.mail_get(request)?)
+            }
+            method::Request::ChangesEmail(request) => {
+                method::Response::ChangesEmail(store.mail_changes(request)?)
+            }
+            method::Request::QueryEmail(request) => {
+                method::Response::QueryEmail(store.mail_query(request)?)
+            }
+            method::Request::QueryChangesEmail(request) => {
+                method::Response::QueryChangesEmail(store.mail_query_changes(request)?)
+            }
+            method::Request::SetEmail(request) => {
+                method::Response::SetEmail(store.mail_set(request)?)
+            }
+            /*method::Request::CopyEmail(request) => {
+                method::Response::CopyEmail(store.mail_copy(request)?)
+            }*/
+            method::Request::ImportEmail(request) => {
+                method::Response::ImportEmail(store.mail_import(request)?)
+            }
+            method::Request::ParseEmail(request) => {
+                method::Response::ParseEmail(store.mail_parse(request)?)
+            }
+            method::Request::GetIdentity(request) => {
+                method::Response::GetIdentity(store.identity_get(request)?)
+            }
+            method::Request::ChangesIdentity(request) => {
+                method::Response::ChangesIdentity(store.identity_changes(request)?)
+            }
+            method::Request::SetIdentity(request) => {
+                method::Response::SetIdentity(store.identity_set(request)?)
+            }
+            method::Request::GetEmailSubmission(request) => {
+                method::Response::GetEmailSubmission(store.email_submission_get(request)?)
+            }
+            method::Request::ChangesEmailSubmission(request) => {
+                method::Response::ChangesEmailSubmission(store.email_submission_changes(request)?)
+            }
+            method::Request::QueryEmailSubmission(request) => {
+                method::Response::QueryEmailSubmission(store.email_submission_query(request)?)
+            }
+            method::Request::QueryChangesEmailSubmission(request) => {
+                method::Response::QueryChangesEmailSubmission(
+                    store.email_submission_query_changes(request)?,
+                )
+            }
+            method::Request::SetEmailSubmission(request) => {
+                method::Response::SetEmailSubmission(store.email_submission_set(request)?)
+            }
+            method::Request::GetVacationResponse(request) => {
+                method::Response::GetVacationResponse(store.vacation_response_get(request)?)
+            }
+            method::Request::SetVacationResponse(request) => {
+                method::Response::SetVacationResponse(store.vacation_response_set(request)?)
+            }
+            method::Request::Echo(payload) => method::Response::Echo(payload),
+            method::Request::Error(err) => return Err(err),
         })
     })
     .await
-}
-
-impl InvocationResult {
-    pub fn new(result: JSONValue) -> Self {
-        Self {
-            result,
-            next_invocation: None,
-            change: None,
-        }
-    }
-}
-
-impl From<SetResult> for InvocationResult {
-    fn from(mut result: SetResult) -> Self {
-        InvocationResult {
-            next_invocation: Option::take(&mut result.next_invocation),
-            change: if result.new_state != result.old_state {
-                StateChange {
-                    collection: result.collection,
-                    account_id: result.account_id,
-                    id: result.new_state.get_change_id(),
-                }
-                .into()
-            } else {
-                None
-            },
-            result: result.into(),
-        }
-    }
-}
-
-impl From<GetResult> for InvocationResult {
-    fn from(result: GetResult) -> Self {
-        InvocationResult::new(result.into())
-    }
-}
-
-impl From<ChangesResult> for InvocationResult {
-    fn from(result: ChangesResult) -> Self {
-        InvocationResult::new(result.into())
-    }
-}
-
-impl From<QueryResult> for InvocationResult {
-    fn from(result: QueryResult) -> Self {
-        InvocationResult::new(result.into())
-    }
-}
-
-impl From<QueryChangesResult> for InvocationResult {
-    fn from(result: QueryChangesResult) -> Self {
-        InvocationResult::new(result.into())
-    }
-}
-
-impl From<ImportResult> for InvocationResult {
-    fn from(result: ImportResult) -> Self {
-        InvocationResult {
-            next_invocation: None,
-            change: if result.new_state != result.old_state {
-                StateChange {
-                    collection: result.collection,
-                    account_id: result.account_id,
-                    id: result.new_state.get_change_id(),
-                }
-                .into()
-            } else {
-                None
-            },
-            result: result.into(),
-        }
-    }
-}
-
-impl From<ParseResult> for InvocationResult {
-    fn from(result: ParseResult) -> Self {
-        InvocationResult::new(result.into())
-    }
 }

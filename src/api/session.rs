@@ -4,12 +4,12 @@ use std::{
     iter::FromIterator,
 };
 
+use crate::api::response::serialize_hex;
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::URI;
-use jmap::{id::JMAPIdSerialize, protocol::response::serialize_hex};
+use jmap::{id::jmap::JMAPId, URI};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     Store,
@@ -22,9 +22,9 @@ pub struct Session {
     #[serde(rename(serialize = "capabilities"))]
     capabilities: HashMap<URI, Capabilities>,
     #[serde(rename(serialize = "accounts"))]
-    accounts: HashMap<String, Account>,
+    accounts: HashMap<JMAPId, Account>,
     #[serde(rename(serialize = "primaryAccounts"))]
-    primary_accounts: HashMap<URI, String>,
+    primary_accounts: HashMap<URI, JMAPId>,
     #[serde(rename(serialize = "username"))]
     username: String,
     #[serde(rename(serialize = "apiUrl"))]
@@ -155,7 +155,7 @@ impl Session {
 
     pub fn set_primary_account(
         &mut self,
-        account_id: String,
+        account_id: JMAPId,
         name: String,
         capabilities: Option<&[URI]>,
     ) {
@@ -163,13 +163,11 @@ impl Session {
 
         if let Some(capabilities) = capabilities {
             for capability in capabilities {
-                self.primary_accounts
-                    .insert(capability.clone(), account_id.clone());
+                self.primary_accounts.insert(capability.clone(), account_id);
             }
         } else {
             for capability in self.capabilities.keys() {
-                self.primary_accounts
-                    .insert(capability.clone(), account_id.clone());
+                self.primary_accounts.insert(capability.clone(), account_id);
             }
         }
 
@@ -194,7 +192,7 @@ impl Session {
 
     pub fn add_account(
         &mut self,
-        account_id: String,
+        account_id: JMAPId,
         name: String,
         is_personal: bool,
         is_read_only: bool,
@@ -208,7 +206,7 @@ impl Session {
         self.update_state();
     }
 
-    pub fn remove_account(&mut self, account_id: &str) {
+    pub fn remove_account(&mut self, account_id: &JMAPId) {
         self.accounts.remove(account_id);
         self.update_state();
     }
@@ -310,7 +308,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let mut session = core.base_session.clone();
-    session.set_primary_account(1u64.to_jmap_string(), "hello@stalw.art".to_string(), None);
+    session.set_primary_account(1u64.into(), "hello@stalw.art".to_string(), None);
 
     HttpResponse::build(StatusCode::OK)
         .insert_header(ContentType::json())

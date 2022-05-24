@@ -1,5 +1,5 @@
 use super::changes::ChangeId;
-use crate::core::collection::Collections;
+use crate::core::bitmap::Bitmap;
 use crate::log::entry::Entry;
 use crate::log::raft::{RaftId, TermId};
 use crate::serialize::key::LogKey;
@@ -127,7 +127,7 @@ where
                     } => {
                         changed_accounts
                             .entry(account_id)
-                            .or_insert_with(Collections::default)
+                            .or_insert_with(Bitmap::default)
                             .union(&changed_collections);
                     }
                     Entry::Snapshot {
@@ -138,7 +138,7 @@ where
                             for new_changed_account_id in new_changed_accounts {
                                 changed_accounts
                                     .entry(new_changed_account_id)
-                                    .or_insert_with(Collections::default)
+                                    .or_insert_with(Bitmap::default)
                                     .union(&new_changed_collection);
                             }
                         }

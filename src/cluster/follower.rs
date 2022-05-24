@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use jmap::jmap_store::raft::RaftUpdate;
 use store::blob::BlobId;
-use store::core::collection::{Collection, Collections};
+use store::core::bitmap::Bitmap;
+use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::log::raft::{LogIndex, RaftId, TermId};
 use store::roaring::RoaringBitmap;
@@ -29,15 +30,15 @@ use super::{PeerId, IPC_CHANNEL_BUFFER};
 enum State {
     Synchronize,
     AppendEntries {
-        changed_accounts: HashMap<AccountId, Collections>,
+        changed_accounts: HashMap<AccountId, Bitmap<Collection>>,
     },
     AppendChanges {
-        changed_accounts: Vec<(AccountId, Collections)>,
+        changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
     },
     AppendBlobs {
         pending_blobs: HashSet<BlobId>,
         pending_updates: Vec<Update>,
-        changed_accounts: Vec<(AccountId, Collections)>,
+        changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
     },
     Rollback {
         account_id: AccountId,
@@ -433,7 +434,7 @@ where
     async fn handle_update_log(
         &self,
         mut indexes: &mut RaftIndexes,
-        mut changed_accounts: HashMap<AccountId, Collections>,
+        mut changed_accounts: HashMap<AccountId, Bitmap<Collection>>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
         let store = self.store.clone();
@@ -487,7 +488,7 @@ where
                             ));
                             changed_accounts
                                 .entry(account_id)
-                                .or_insert_with(Collections::default)
+                                .or_insert_with(Bitmap::default)
                                 .insert(collection);
                         }
                         Update::Log { raft_id, log } => {
@@ -626,7 +627,7 @@ where
     async fn request_updates(
         &self,
         indexes: &mut RaftIndexes,
-        mut changed_accounts: Vec<(AccountId, Collections)>,
+        mut changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
     ) -> Option<(State, Response)> {
         loop {
             let (account_id, collection) =
@@ -734,7 +735,7 @@ where
     async fn check_pending_updates(
         &self,
         indexes: &mut RaftIndexes,
-        changed_accounts: Vec<(AccountId, Collections)>,
+        changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
         // Request any missing blobs
@@ -797,7 +798,7 @@ where
     async fn handle_missing_blobs(
         &self,
         indexes: &mut RaftIndexes,
-        changed_accounts: Vec<(AccountId, Collections)>,
+        changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
         mut pending_blobs: HashSet<BlobId>,
         pending_updates: Vec<Update>,
         updates: Vec<Update>,
@@ -869,7 +870,7 @@ where
     async fn handle_pending_updates(
         &self,
         indexes: &mut RaftIndexes,
-        changed_accounts: Vec<(AccountId, Collections)>,
+        changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
         //println!("{:#?}", updates);

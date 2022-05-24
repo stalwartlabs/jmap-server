@@ -5,19 +5,15 @@ use std::{
 
 use jmap::{
     base64,
-    id::{state::JMAPState, JMAPIdSerialize},
+    id::state::JMAPState,
     jmap_store::orm::JMAPOrm,
-    protocol::{invocation::Object, json::JSONValue},
-    push_subscription::PushSubscriptionProperty,
+    push_subscription::schema::{self, Property, Value},
 };
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use store::{
-    core::{
-        collection::{Collection, Collections},
-        error::StoreError,
-    },
+    core::{bitmap::Bitmap, collection::Collection, error::StoreError},
     tracing::debug,
-    AccountId, DocumentId, JMAPId, Store,
+    AccountId, DocumentId, Store,
 };
 use tokio::{sync::mpsc, time};
 
@@ -34,14 +30,14 @@ pub enum Event {
         updates: Vec<PushUpdate>,
     },
     Push {
-        ids: Vec<JMAPId>,
+        ids: Vec<store::JMAPId>,
         state_change: StateChange,
     },
     DeliverySuccess {
-        id: JMAPId,
+        id: store::JMAPId,
     },
     DeliveryFailure {
-        id: JMAPId,
+        id: store::JMAPId,
         state_changes: Vec<StateChange>,
     },
     Reset,
@@ -57,12 +53,12 @@ pub enum PushUpdate {
         keys: Option<EncriptionKeys>,
     },
     Register {
-        id: JMAPId,
+        id: store::JMAPId,
         url: String,
         keys: Option<EncriptionKeys>,
     },
     Unregister {
-        id: JMAPId,
+        id: store::JMAPId,
     },
 }
 
@@ -141,7 +137,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                                             "\"pushSubscriptionId\":\"{}\",",
                                                             "\"verificationCode\":\"{}\"}}"
                                                         ),
-                                                        (id as JMAPId).to_jmap_string(),
+                                                        jmap::id::jmap::JMAPId::from(id),
                                                         code
                                                     ),
                                                     keys,
@@ -289,7 +285,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
 }
 
 impl PushSubscription {
-    fn send(&mut self, id: JMAPId, push_tx: mpsc::Sender<Event>) {
+    fn send(&mut self, id: store::JMAPId, push_tx: mpsc::Sender<Event>) {
         let url = self.url.clone();
         let keys = self.keys.clone();
         let state_changes = std::mem::take(&mut self.state_changes);
@@ -300,14 +296,13 @@ impl PushSubscription {
         tokio::spawn(async move {
             let mut response = StateChangeResponse::new();
             for state_change in &state_changes {
-                response
-                    .changed
-                    .entry((state_change.account_id as JMAPId).to_jmap_string())
-                    .or_insert_with(HashMap::new)
-                    .insert(
-                        state_change.collection.into(),
-                        JMAPState::from(state_change.id).to_jmap_string(),
-                    );
+                for (type_state, change_id) in &state_change.types {
+                    response
+                        .changed
+                        .entry(state_change.account_id.into())
+                        .or_insert_with(HashMap::new)
+                        .insert(type_state.clone(), (*change_id).into());
+                }
             }
 
             //println!("Posting to {}: {:?}", url, response);
@@ -386,7 +381,7 @@ where
 
             for document_id in document_ids {
                 let mut subscription = store
-                    .get_orm::<PushSubscriptionProperty>(account_id, document_id)?
+                    .get_orm::<schema::PushSubscription>(account_id, document_id)?
                     .ok_or_else(|| {
                         StoreError::InternalError(format!(
                             "Could not find ORM for push subscription {}",
@@ -394,35 +389,30 @@ where
                         ))
                     })?;
                 let expires = subscription
-                    .get_unsigned_int(&PushSubscriptionProperty::Expires)
+                    .get(&Property::Expires)
+                    .and_then(|p| p.as_timestamp())
                     .ok_or_else(|| {
                         StoreError::InternalError(format!(
                             "Missing expires property for push subscription {}",
                             document_id
                         ))
-                    })?;
+                    })? as u64;
                 if expires > current_time {
-                    let keys = if let Some(JSONValue::Object(mut keys)) =
-                        subscription.remove(&PushSubscriptionProperty::Keys)
-                    {
-                        EncriptionKeys {
-                            p256dh: keys
-                                .remove("p256dh")
-                                .and_then(|v| v.unwrap_string())
-                                .and_then(|v| base64::decode_config(v, base64::URL_SAFE).ok())
-                                .unwrap_or_default(),
-                            auth: keys
-                                .remove("auth")
-                                .and_then(|v| v.unwrap_string())
-                                .and_then(|v| base64::decode_config(v, base64::URL_SAFE).ok())
-                                .unwrap_or_default(),
-                        }
-                        .into()
-                    } else {
-                        None
-                    };
+                    let keys =
+                        if let Some(Value::Keys { value }) = subscription.remove(&Property::Keys) {
+                            EncriptionKeys {
+                                p256dh: base64::decode_config(&value.p256dh, base64::URL_SAFE)
+                                    .unwrap_or_default(),
+                                auth: base64::decode_config(&value.auth, base64::URL_SAFE)
+                                    .unwrap_or_default(),
+                            }
+                            .into()
+                        } else {
+                            None
+                        };
                     let verification_code = subscription
-                        .remove_string(&PushSubscriptionProperty::VerificationCode_)
+                        .remove(&Property::VerificationCode_)
+                        .and_then(|p| p.unwrap_text())
                         .ok_or_else(|| {
                             StoreError::InternalError(format!(
                                 "Missing verificationCode property for push subscription {}",
@@ -430,7 +420,8 @@ where
                             ))
                         })?;
                     let url = subscription
-                        .remove_string(&PushSubscriptionProperty::Url)
+                        .remove(&Property::Url)
+                        .and_then(|p| p.unwrap_text())
                         .ok_or_else(|| {
                             StoreError::InternalError(format!(
                                 "Missing Url property for push subscription {}",
@@ -439,30 +430,28 @@ where
                         })?;
 
                     if subscription
-                        .get_string(&PushSubscriptionProperty::VerificationCode)
+                        .get(&Property::VerificationCode)
+                        .and_then(|p| p.as_text())
                         .map_or(false, |v| v == verification_code)
                     {
-                        let mut collections = Collections::default();
-                        if let Some(types) =
-                            subscription.get_array(&PushSubscriptionProperty::Types)
+                        let types = if let Some(Value::Types { value }) =
+                            subscription.remove(&Property::Types)
                         {
-                            for obj_type in types {
-                                if let Some(obj_type) = obj_type.to_string().and_then(Object::parse)
-                                {
-                                    collections.insert(obj_type.into());
-                                }
+                            if !value.is_empty() {
+                                value.into()
+                            } else {
+                                Bitmap::all()
                             }
-                        }
-                        if collections.is_empty() {
-                            collections = Collections::all();
-                        }
+                        } else {
+                            Bitmap::all()
+                        };
 
                         // Add verified subscription
                         subscriptions.push(UpdateSubscription::Verified(super::PushSubscription {
                             id: document_id,
                             url,
                             expires,
-                            collections,
+                            types,
                             keys,
                         }));
                     } else {
