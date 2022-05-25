@@ -7,6 +7,7 @@ use crate::id::jmap::JMAPId;
 use crate::id::state::JMAPState;
 use crate::protocol::type_state::TypeState;
 use crate::request::set::SetResponse;
+use crate::request::{MaybeIdReference, ResultReference};
 use crate::{
     error::{method::MethodError, set::SetErrorType},
     request::set::SetRequest,
@@ -24,7 +25,8 @@ pub trait SetObject: Object {
     type SetArguments;
     type NextCall;
 
-    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>);
+    fn eval_id_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>);
+    fn eval_result_references(&mut self, fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>);
 }
 
 pub struct SetHelper<'y, O, T>
@@ -37,9 +39,10 @@ where
     pub document_ids: RoaringBitmap,
     pub account_id: AccountId,
     pub collection: Collection,
+    pub will_destroy: Vec<JMAPId>,
 
     pub change_id: ChangeId,
-    pub state_changes: HashMap<TypeState, ChangeId>,
+    pub state_changes: Vec<(TypeState, ChangeId)>,
 
     pub request: SetRequest<O>,
     pub response: SetResponse<O>,
@@ -60,6 +63,11 @@ where
                 return Err(MethodError::StateMismatch);
             }
         }
+        let will_destroy = request
+            .destroy
+            .take()
+            .and_then(|d| d.unwrap_value())
+            .unwrap_or_default();
         Ok(SetHelper {
             store,
             changes: WriteBatch::new(account_id),
@@ -69,7 +77,7 @@ where
             account_id,
             collection,
             change_id: ChangeId::MAX,
-            state_changes: HashMap::new(),
+            state_changes: Vec::new(),
             response: SetResponse {
                 account_id: request.account_id.take(),
                 new_state: old_state.clone().into(),
@@ -78,22 +86,51 @@ where
                 not_created: HashMap::new(),
                 updated: HashMap::with_capacity(request.update.as_ref().map_or(0, |v| v.len())),
                 not_updated: HashMap::new(),
-                destroyed: Vec::with_capacity(request.destroy.as_ref().map_or(0, |v| v.len())),
+                destroyed: Vec::with_capacity(will_destroy.len()),
                 not_destroyed: HashMap::new(),
                 next_call: None,
                 change_id: None,
                 state_changes: None,
             },
+            will_destroy,
             request,
         })
     }
 
-    pub fn map_references(&self, create_id: &str) -> Option<JMAPId> {
+    fn map_id_reference(&self, create_id: &str) -> Option<JMAPId> {
         self.response
             .created
             .get(create_id)
             .and_then(|o| o.id())
             .cloned()
+    }
+
+    pub fn unwrap_id_reference(
+        &self,
+        property: O::Property,
+        id: &MaybeIdReference,
+    ) -> crate::error::set::Result<JMAPId, O::Property> {
+        Ok(match id {
+            MaybeIdReference::Value(id) => *id,
+            MaybeIdReference::Reference(create_id) => {
+                self.map_id_reference(create_id).ok_or_else(|| {
+                    SetError::invalid_property(
+                        property,
+                        format!("Could not find id '{}'.", create_id),
+                    )
+                })?
+            }
+        })
+    }
+
+    pub fn get_id_reference(
+        &self,
+        property: O::Property,
+        id: &str,
+    ) -> crate::error::set::Result<JMAPId, O::Property> {
+        self.map_id_reference(id).ok_or_else(|| {
+            SetError::invalid_property(property, format!("Could not find id '{}'.", id))
+        })
     }
 
     pub fn create(
@@ -108,14 +145,12 @@ where
             O::Property,
         >,
     ) -> crate::Result<()> {
-        for (create_id, mut item) in self.request.create.take().unwrap_or_default() {
+        for (create_id, item) in self.request.create.take().unwrap_or_default() {
             let mut document = Document::new(
                 self.collection,
                 self.store
                     .assign_document_id(self.account_id, self.collection)?,
             );
-
-            item.map_references(|create_id| self.map_references(create_id));
 
             match create_fnc(&create_id, item, self, &mut document) {
                 Ok((result, lock)) => {
@@ -145,19 +180,14 @@ where
             &mut Document,
         ) -> crate::error::set::Result<Option<O>, O::Property>,
     ) -> crate::Result<()> {
-        for (id, mut item) in self.request.update.take().unwrap_or_default() {
+        for (id, item) in self.request.update.take().unwrap_or_default() {
             let document_id = id.get_document_id();
             if !self.document_ids.contains(document_id) {
                 self.response
                     .not_updated
                     .insert(id, SetError::new(SetErrorType::NotFound, "ID not found."));
                 continue;
-            } else if self
-                .request
-                .destroy
-                .as_ref()
-                .map_or(false, |l| l.contains(&id))
-            {
+            } else if self.will_destroy.contains(&id) {
                 self.response.not_updated.insert(
                     id,
                     SetError::new(SetErrorType::WillDestroy, "ID will be destroyed."),
@@ -166,8 +196,6 @@ where
             }
 
             let mut document = Document::new(self.collection, document_id);
-            item.map_references(|create_id| self.map_references(create_id));
-
             match update_fnc(id, item, self, &mut document) {
                 Ok(result) => {
                     if !document.is_empty() {
@@ -192,7 +220,7 @@ where
             &mut Document,
         ) -> crate::error::set::Result<(), O::Property>,
     ) -> crate::Result<()> {
-        for id in self.request.destroy.take().unwrap_or_default() {
+        for id in std::mem::take(&mut self.will_destroy) {
             let document_id = id.get_document_id();
             if self.document_ids.contains(document_id) {
                 let mut document = Document::new(self.collection, document_id);
@@ -220,7 +248,11 @@ where
             self.change_id = changes.change_id;
             for collection in changes.collections {
                 if let Ok(type_state) = TypeState::try_from(collection) {
-                    self.state_changes.insert(type_state, changes.change_id);
+                    if let Some(entry) = self.state_changes.iter_mut().find(|e| e.0 == type_state) {
+                        entry.1 = changes.change_id;
+                    } else {
+                        self.state_changes.push((type_state, changes.change_id));
+                    }
                 }
             }
         }

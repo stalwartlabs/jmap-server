@@ -2,7 +2,10 @@ use std::{collections::HashMap, fmt::Display};
 
 use jmap::{id::jmap::JMAPId, jmap_store::orm};
 use serde::{Deserialize, Serialize};
-use store::chrono::{DateTime, Utc};
+use store::{
+    chrono::{DateTime, Utc},
+    FieldId,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct VacationResponse {
@@ -81,8 +84,34 @@ impl Display for Property {
     }
 }
 
-impl From<Property> for u8 {
+impl From<Property> for FieldId {
     fn from(property: Property) -> Self {
-        property as u8
+        property as FieldId
+    }
+}
+
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            1 => Property::IsEnabled,
+            2 => Property::FromDate,
+            3 => Property::ToDate,
+            4 => Property::Subject,
+            5 => Property::TextBody,
+            6 => Property::HtmlBody,
+            _ => Property::Invalid,
+        }
+    }
+}
+
+impl TryFrom<&str> for Property {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match Property::parse(value) {
+            Property::Invalid => Err(()),
+            property => Ok(property),
+        }
     }
 }

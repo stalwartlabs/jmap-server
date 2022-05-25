@@ -1,6 +1,7 @@
 use crate::{
     id::{jmap::JMAPId, state::JMAPState},
     jmap_store::query::QueryObject,
+    protocol::json_pointer::{JSONPointer, JSONPointerEval},
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -102,4 +103,18 @@ pub struct QueryResponse {
 
     #[serde(skip)]
     pub is_immutable: bool,
+}
+
+impl JSONPointerEval for QueryResponse {
+    fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
+        if let JSONPointer::String(property) = ptr {
+            if property == "ids" {
+                Some(self.ids.iter().map(Into::into).collect())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }

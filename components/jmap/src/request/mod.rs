@@ -20,12 +20,21 @@ pub struct ResultReference {
 pub enum MaybeResultReference<T> {
     Value(T),
     Reference(ResultReference),
-    None,
 }
 
-impl<T> Default for MaybeResultReference<T> {
-    fn default() -> Self {
-        MaybeResultReference::None
+impl<T> MaybeResultReference<T> {
+    pub fn unwrap_value(self) -> Option<T> {
+        match self {
+            MaybeResultReference::Value(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn value(&self) -> Option<&T> {
+        match self {
+            MaybeResultReference::Value(value) => Some(value),
+            _ => None,
+        }
     }
 }
 
@@ -36,17 +45,17 @@ pub enum MaybeIdReference {
 }
 
 impl MaybeIdReference {
-    pub fn unwrap_id(self) -> JMAPId {
+    pub fn unwrap_value(self) -> Option<JMAPId> {
         match self {
-            MaybeIdReference::Value(id) => id,
-            _ => u64::MAX.into(),
+            MaybeIdReference::Value(id) => id.into(),
+            _ => None,
         }
     }
 
-    pub fn as_id(&self) -> JMAPId {
+    pub fn value(&self) -> Option<&JMAPId> {
         match self {
-            MaybeIdReference::Value(id) => *id,
-            _ => u64::MAX.into(),
+            MaybeIdReference::Value(id) => id.into(),
+            _ => None,
         }
     }
 }

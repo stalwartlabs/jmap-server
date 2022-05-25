@@ -7,6 +7,7 @@ use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 
 use jmap::request::set::{SetRequest, SetResponse};
+use jmap::request::{MaybeIdReference, ResultReference};
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
 use mail_builder::headers::date::Date;
@@ -38,8 +39,48 @@ impl SetObject for Email {
 
     type NextCall = ();
 
-    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<jmap::id::jmap::JMAPId>) {
-        todo!()
+    fn eval_id_references(&mut self, mut fnc: impl FnMut(&str) -> Option<JMAPId>) {
+        if let Some(Value::MailboxIds { value, .. }) =
+            self.properties.get_mut(&Property::MailboxIds)
+        {
+            if value
+                .keys()
+                .any(|k| matches!(k, MaybeIdReference::Reference(_)))
+            {
+                let mut new_values = HashMap::with_capacity(value.len());
+
+                for (id, value) in std::mem::take(value).into_iter() {
+                    if let MaybeIdReference::Reference(id) = &id {
+                        if let Some(id) = fnc(id) {
+                            new_values.insert(MaybeIdReference::Value(id), value);
+                            continue;
+                        }
+                    }
+                    new_values.insert(id, value);
+                }
+
+                *value = new_values;
+            }
+        }
+    }
+
+    fn eval_result_references(
+        &mut self,
+        mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
+    ) {
+        for (property, entry) in self.properties.iter_mut() {
+            if let (Property::MailboxIds, Value::ResultReference { value }) = (property, &entry) {
+                if let Some(value) = fnc(value) {
+                    *entry = Value::MailboxIds {
+                        value: value
+                            .into_iter()
+                            .map(|v| (MaybeIdReference::Value(v.into()), true))
+                            .collect(),
+                        set: true,
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -87,7 +128,8 @@ where
                             fields.untag_all(&Property::MailboxIds);
 
                             for (mailbox_id, set) in value {
-                                let mailbox_id = mailbox_id.as_id();
+                                let mailbox_id =
+                                    helper.unwrap_id_reference(Property::MailboxIds, mailbox_id)?;
 
                                 if mailbox_ids.contains(mailbox_id.into()) {
                                     if *set {
@@ -103,7 +145,8 @@ where
                             }
                         } else {
                             for (mailbox_id, set) in value {
-                                let mailbox_id = mailbox_id.as_id();
+                                let mailbox_id =
+                                    helper.unwrap_id_reference(Property::MailboxIds, mailbox_id)?;
 
                                 if mailbox_ids.contains(mailbox_id.into()) {
                                     if *set {
@@ -362,7 +405,8 @@ where
                             fields.untag_all(&Property::MailboxIds);
 
                             for (mailbox_id, set) in value {
-                                let mailbox_id = mailbox_id.as_id();
+                                let mailbox_id = helper
+                                    .unwrap_id_reference(Property::MailboxIds, &mailbox_id)?;
 
                                 if mailbox_ids.contains(mailbox_id.into()) {
                                     if set {
@@ -378,7 +422,8 @@ where
                             }
                         } else {
                             for (mailbox_id, set) in value {
-                                let mailbox_id = mailbox_id.as_id();
+                                let mailbox_id = helper
+                                    .unwrap_id_reference(Property::MailboxIds, &mailbox_id)?;
 
                                 if mailbox_ids.contains(mailbox_id.into()) {
                                     if set {

@@ -8,12 +8,12 @@ use crate::mail::{MessageData, MessageField};
 use jmap::error::set::{SetError, SetErrorType};
 
 use jmap::id::jmap::JMAPId;
-use jmap::jmap_store::orm::{self, JMAPOrm, TinyORM};
+use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::Object;
 
 use jmap::jmap_store::set::SetHelper;
 use jmap::request::set::SetResponse;
-use jmap::request::MaybeIdReference;
+use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use mail_parser::RfcHeader;
 
@@ -41,8 +41,29 @@ impl SetObject for EmailSubmission {
 
     type NextCall = SetRequest<Email>;
 
-    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
-        todo!()
+    fn eval_id_references(&mut self, mut fnc: impl FnMut(&str) -> Option<JMAPId>) {
+        for (_, entry) in self.properties.iter_mut() {
+            if let Value::IdReference { value } = entry {
+                if let Some(value) = fnc(value) {
+                    *entry = Value::Id { value };
+                }
+            }
+        }
+    }
+
+    fn eval_result_references(
+        &mut self,
+        mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
+    ) {
+        for (_, entry) in self.properties.iter_mut() {
+            if let Value::ResultReference { value } = entry {
+                if let Some(value) = fnc(value).and_then(|mut v| v.pop()) {
+                    *entry = Value::Id {
+                        value: value.into(),
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -65,7 +86,8 @@ where
         request: SetRequest<EmailSubmission>,
     ) -> jmap::Result<SetResponse<EmailSubmission>> {
         let mut helper = SetHelper::new(self, request)?;
-        let mut on_success: Option<SetRequest<Email>> = if helper
+
+        let has_on_success = helper
             .request
             .arguments
             .on_success_destroy_email
@@ -76,21 +98,9 @@ where
                 .arguments
                 .on_success_update_email
                 .as_ref()
-                .map_or(false, |p| !p.is_empty())
-        {
-            Some(SetRequest {
-                account_id: helper.request.account_id,
-                if_in_state: None,
-                create: None,
-                update: None,
-                destroy: None,
-                destroy_ref: None,
-                arguments: (),
-            })
-        } else {
-            None
-        };
-        let mut call_on_success = false;
+                .map_or(false, |p| !p.is_empty());
+        let mut update_emails: HashMap<JMAPId, Email> = HashMap::new();
+        let mut destroy_emails: Vec<JMAPId> = Vec::new();
 
         helper.create(|create_id, item, helper, document| {
             let mut fields = TinyORM::<EmailSubmission>::new();
@@ -98,7 +108,12 @@ where
             let mut identity_id = u32::MAX;
             let mut envelope = None;
 
-            for (property, value) in item.properties {
+            for (property, mut value) in item.properties {
+                if let Value::IdReference { value: id } = &value {
+                    value = Value::Id {
+                        value: helper.get_id_reference(property, id)?,
+                    };
+                }
                 let value = match (property, value) {
                     (Property::EmailId, Value::Id { value }) => {
                         fields.set(
@@ -243,7 +258,7 @@ where
             fields.insert_validate(document)?;
 
             // Update onSuccess actions
-            if let Some(on_success) = on_success.as_mut() {
+            if has_on_success {
                 let id_ref = MaybeIdReference::Reference(create_id.to_string());
                 if let Some(update) = helper
                     .request
@@ -252,12 +267,9 @@ where
                     .as_mut()
                     .and_then(|p| p.remove(&id_ref))
                 {
-                    on_success
-                        .update
-                        .get_or_insert_with(HashMap::new)
-                        .insert(email_id, update);
-                    call_on_success = true;
+                    update_emails.insert(email_id, update);
                 }
+
                 if helper
                     .request
                     .arguments
@@ -265,11 +277,7 @@ where
                     .as_ref()
                     .map_or(false, |p| p.contains(&id_ref))
                 {
-                    on_success
-                        .destroy
-                        .get_or_insert_with(Vec::new)
-                        .push(email_id);
-                    call_on_success = true;
+                    destroy_emails.push(email_id);
                 }
             }
 
@@ -303,9 +311,27 @@ where
                 "update its status to 'canceled' insted."
             )))
         })?;
+
+        let account_id = helper.request.account_id;
         helper.into_response().map(|mut r| {
-            if call_on_success {
-                r.next_call = on_success;
+            if has_on_success && (!update_emails.is_empty() || !destroy_emails.is_empty()) {
+                r.next_call = SetRequest {
+                    account_id,
+                    if_in_state: None,
+                    create: None,
+                    update: if !update_emails.is_empty() {
+                        update_emails.into()
+                    } else {
+                        None
+                    },
+                    destroy: if !destroy_emails.is_empty() {
+                        MaybeResultReference::Value(destroy_emails).into()
+                    } else {
+                        None
+                    },
+                    arguments: (),
+                }
+                .into();
             }
             r
         })

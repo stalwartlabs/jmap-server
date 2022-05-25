@@ -5,6 +5,7 @@ use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::request::set::SetResponse;
+use jmap::request::ResultReference;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::parking_lot::MutexGuard;
 use store::{JMAPStore, Store};
@@ -16,9 +17,8 @@ impl SetObject for Identity {
 
     type NextCall = ();
 
-    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
-        todo!()
-    }
+    fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
+    fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
 }
 
 pub trait JMAPSetIdentity<T>

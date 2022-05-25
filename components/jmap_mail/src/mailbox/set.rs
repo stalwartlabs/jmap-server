@@ -6,6 +6,7 @@ use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
 use jmap::request::set::{SetRequest, SetResponse};
+use jmap::request::ResultReference;
 
 use store::core::collection::Collection;
 use store::core::document::Document;
@@ -35,8 +36,29 @@ impl SetObject for Mailbox {
 
     type NextCall = ();
 
-    fn map_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>) {
-        todo!()
+    fn eval_id_references(&mut self, mut fnc: impl FnMut(&str) -> Option<JMAPId>) {
+        for (_, entry) in self.properties.iter_mut() {
+            if let Value::IdReference { value } = entry {
+                if let Some(value) = fnc(value) {
+                    *entry = Value::Id { value };
+                }
+            }
+        }
+    }
+
+    fn eval_result_references(
+        &mut self,
+        mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
+    ) {
+        for (_, entry) in self.properties.iter_mut() {
+            if let Value::ResultReference { value } = entry {
+                if let Some(value) = fnc(value).and_then(|mut v| v.pop()) {
+                    *entry = Value::Id {
+                        value: value.into(),
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -317,12 +339,7 @@ where
                 }
                 (Property::ParentId, Value::Id { value }) => {
                     let parent_id = value.get_document_id();
-                    if helper
-                        .request
-                        .destroy
-                        .as_ref()
-                        .map_or(false, |will_destroy| will_destroy.contains(&value))
-                    {
+                    if helper.will_destroy.contains(&value) {
                         return Err(SetError::new(
                             SetErrorType::WillDestroy,
                             "Parent ID will be destroyed.",
@@ -338,6 +355,10 @@ where
                         value: (parent_id + 1).into(),
                     }
                 }
+                (Property::ParentId, Value::IdReference { value }) => Value::Id {
+                    value: (u64::from(helper.get_id_reference(Property::ParentId, &value)?) + 1)
+                        .into(),
+                },
                 (Property::ParentId, Value::Null) => Value::Id { value: 0u64.into() },
                 (Property::Role, Value::Text { value }) => {
                     let role = value.to_lowercase();

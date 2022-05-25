@@ -134,11 +134,10 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                         for owner_account_id in shared_accounts {
                             if let Some(subscribers) = subscribers.get(owner_account_id) {
                                 for (subscriber_id, subscriber) in subscribers {
-                                    let mut types =
-                                        HashMap::with_capacity(state_change.types.len());
+                                    let mut types = Vec::with_capacity(state_change.types.len());
                                     for (state_type, change_id) in &state_change.types {
                                         if subscriber.types.contains(state_type.clone()) {
-                                            types.insert(state_type.clone(), *change_id);
+                                            types.push((state_type.clone(), *change_id));
                                         }
                                     }
                                     if !types.is_empty() {

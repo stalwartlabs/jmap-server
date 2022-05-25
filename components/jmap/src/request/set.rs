@@ -1,6 +1,7 @@
 use store::log::changes::ChangeId;
 use store::AccountId;
 
+use crate::error::method::MethodError;
 use crate::error::set::SetError;
 use crate::id::jmap::JMAPId;
 use crate::id::state::JMAPState;
@@ -8,7 +9,7 @@ use crate::jmap_store::set::SetObject;
 use crate::protocol::type_state::TypeState;
 use std::collections::HashMap;
 
-use super::ResultReference;
+use super::{MaybeResultReference, ResultReference};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct SetRequest<O: SetObject> {
@@ -27,13 +28,9 @@ pub struct SetRequest<O: SetObject> {
     #[serde(bound(deserialize = "Option<HashMap<JMAPId, O>>: serde::Deserialize<'de>"))]
     pub update: Option<HashMap<JMAPId, O>>,
 
+    #[serde(alias = "#destroy")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub destroy: Option<Vec<JMAPId>>,
-
-    #[serde(rename = "#destroy")]
-    #[serde(skip_deserializing)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub destroy_ref: Option<ResultReference>,
+    pub destroy: Option<MaybeResultReference<Vec<JMAPId>>>,
 
     #[serde(flatten)]
     pub arguments: O::SetArguments,
@@ -90,10 +87,106 @@ pub struct SetResponse<O: SetObject> {
     pub change_id: Option<ChangeId>,
 
     #[serde(skip)]
-    pub state_changes: Option<HashMap<TypeState, ChangeId>>,
+    pub state_changes: Option<Vec<(TypeState, ChangeId)>>,
 
     #[serde(skip)]
     pub next_call: Option<O::NextCall>,
+}
+
+impl<O: SetObject> SetRequest<O> {
+    pub fn eval_references(
+        &mut self,
+        mut result_map_fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
+        created_ids: &HashMap<String, JMAPId>,
+    ) -> crate::Result<()> {
+        if let Some(mut objects) = self.create.take() {
+            let mut create = Vec::with_capacity(objects.len());
+            let mut graph = HashMap::with_capacity(objects.len());
+
+            for (child_id, object) in objects.iter_mut() {
+                object.eval_result_references(&mut result_map_fnc);
+                object.eval_id_references(|parent_id| {
+                    if let Some(id) = created_ids.get(parent_id) {
+                        Some(*id)
+                    } else {
+                        graph
+                            .entry(child_id.to_string())
+                            .or_insert_with(Vec::new)
+                            .push(parent_id.to_string());
+                        None
+                    }
+                });
+            }
+
+            // Topological sort
+            if !graph.is_empty() {
+                let mut it_stack = Vec::new();
+                let keys = graph.keys().cloned().collect::<Vec<_>>();
+                let mut it = keys.iter();
+
+                'main: loop {
+                    while let Some(from_id) = it.next() {
+                        if let Some(to_ids) = graph.get(from_id) {
+                            it_stack.push((it, from_id));
+                            if it_stack.len() > 1000 {
+                                return Err(MethodError::InvalidArguments(
+                                    "Cyclical references are not allowed.".to_string(),
+                                ));
+                            }
+                            it = to_ids.iter();
+                            continue;
+                        } else if let Some(object_pos) =
+                            objects.iter().position(|(id, _)| id == from_id)
+                        {
+                            create.push((from_id.to_string(), objects.swap_remove(object_pos).1));
+                            if objects.is_empty() {
+                                break 'main;
+                            }
+                        }
+                    }
+
+                    if let Some((prev_it, from_id)) = it_stack.pop() {
+                        it = prev_it;
+                        if let Some(object_pos) = objects.iter().position(|(id, _)| id == from_id) {
+                            create.push((from_id.to_string(), objects.swap_remove(object_pos).1));
+                            if objects.is_empty() {
+                                break 'main;
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            for (user_id, object) in objects {
+                create.push((user_id, object));
+            }
+
+            self.create = create.into();
+        }
+
+        if let Some(objects) = self.update.as_mut() {
+            for (_, object) in objects.iter_mut() {
+                object.eval_id_references(|parent_id| created_ids.get(parent_id).copied());
+                object.eval_result_references(&mut result_map_fnc);
+            }
+        }
+
+        if let Some(items) = self.destroy.as_mut() {
+            if let MaybeResultReference::Reference(rr) = items {
+                if let Some(ids) = result_map_fnc(rr) {
+                    *items = MaybeResultReference::Value(ids.into_iter().map(Into::into).collect());
+                } else {
+                    return Err(MethodError::InvalidResultReference(
+                        "Failed to evaluate result reference.".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl<O: SetObject> SetResponse<O> {
@@ -117,7 +210,7 @@ impl<O: SetObject> SetResponse<O> {
         self.change_id
     }
 
-    pub fn state_changes(&mut self) -> Option<HashMap<TypeState, ChangeId>> {
+    pub fn state_changes(&mut self) -> Option<Vec<(TypeState, ChangeId)>> {
         self.state_changes.take()
     }
 

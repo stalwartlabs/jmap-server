@@ -175,6 +175,35 @@ impl From<Property> for FieldId {
     }
 }
 
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            1 => Property::IdentityId,
+            2 => Property::EmailId,
+            3 => Property::ThreadId,
+            4 => Property::Envelope,
+            5 => Property::SendAt,
+            6 => Property::UndoStatus,
+            7 => Property::DeliveryStatus,
+            8 => Property::DsnBlobIds,
+            9 => Property::MdnBlobIds,
+            _ => Property::Invalid,
+        }
+    }
+}
+
+impl TryFrom<&str> for Property {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match Property::parse(value) {
+            Property::Invalid => Err(()),
+            property => Ok(property),
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum Filter {

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
@@ -33,6 +34,13 @@ impl GetObject for Mailbox {
             Property::UnreadThreads,
             Property::MyRights,
         ]
+    }
+
+    fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>> {
+        match self.properties.get(property)? {
+            Value::Id { value } => Some(vec![*value]),
+            _ => None,
+        }
     }
 }
 

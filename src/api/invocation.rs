@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-
 use actix_web::web;
 
 use jmap::{
     error::method::MethodError,
-    protocol::type_state::TypeState,
     push_subscription::{get::JMAPGetPushSubscription, set::JMAPSetPushSubscription},
 };
 use jmap_mail::{
@@ -26,7 +23,7 @@ use jmap_mail::{
 };
 use store::{tracing::error, Store};
 
-use crate::{state::StateChange, JMAPServer};
+use crate::JMAPServer;
 
 use super::{method, request::Request, response::Response};
 
@@ -46,6 +43,13 @@ where
         let mut call_method = call.method;
 
         loop {
+            // Prepare request
+            if let Err(err) = call_method.prepare_request(&response) {
+                response.push_error(call_id, err);
+                break;
+            }
+
+            // Execute request
             match handle_method_call(call_method, &core).await {
                 Ok(mut method_response) => {
                     let next_call_method = match method_response.changes() {

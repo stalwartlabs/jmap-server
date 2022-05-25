@@ -5,7 +5,6 @@ use std::{
 
 use jmap::{
     base64,
-    id::state::JMAPState,
     jmap_store::orm::JMAPOrm,
     push_subscription::schema::{self, Property, Value},
 };

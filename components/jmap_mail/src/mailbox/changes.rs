@@ -3,6 +3,7 @@ use jmap::{
         changes::{ChangesObject, JMAPChanges},
         query_changes::QueryChangesHelper,
     },
+    protocol::json_pointer::{JSONPointer, JSONPointerEval},
     request::{
         changes::{ChangesRequest, ChangesResponse},
         query_changes::{QueryChangesRequest, QueryChangesResponse},
@@ -65,5 +66,23 @@ where
         } else {
             None
         })
+    }
+}
+
+impl JSONPointerEval for ChangesResponseArguments {
+    fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
+        if let JSONPointer::String(property) = ptr {
+            if property == "updatedProperties" {
+                Some(if let Some(updated_properties) = &self.updated_properties {
+                    updated_properties.iter().map(|p| *p as u64).collect()
+                } else {
+                    Vec::with_capacity(0)
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }

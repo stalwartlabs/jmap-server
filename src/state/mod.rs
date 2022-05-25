@@ -4,9 +4,7 @@ use jmap::{
     id::{jmap::JMAPId, state::JMAPState},
     protocol::type_state::TypeState,
 };
-use store::{
-    core::bitmap::Bitmap, log::changes::ChangeId, sha2::digest::typenum::Bit, AccountId, DocumentId,
-};
+use store::{core::bitmap::Bitmap, log::changes::ChangeId, AccountId, DocumentId};
 use tokio::sync::mpsc;
 
 pub mod event_source;
@@ -23,11 +21,11 @@ pub const LONG_SLUMBER_MS: u64 = 60 * 60 * 24 * 1000;
 #[derive(Clone, Debug)]
 pub struct StateChange {
     pub account_id: AccountId,
-    pub types: HashMap<TypeState, ChangeId>,
+    pub types: Vec<(TypeState, ChangeId)>,
 }
 
 impl StateChange {
-    pub fn new(account_id: AccountId, types: HashMap<TypeState, ChangeId>) -> Self {
+    pub fn new(account_id: AccountId, types: Vec<(TypeState, ChangeId)>) -> Self {
         Self { account_id, types }
     }
 }

@@ -2,7 +2,6 @@ use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
     id::{blob::JMAPBlob, jmap::JMAPId},
-    jmap_store::{orm::EmptyValue, Object},
     request::{MaybeIdReference, ResultReference},
 };
 use mail_parser::{
@@ -13,7 +12,7 @@ use mail_parser::{
 use store::{
     blob::BlobId,
     chrono::{DateTime, Utc},
-    core::{collection::Collection, tag::Tag},
+    core::tag::Tag,
     FieldId,
 };
 
@@ -618,7 +617,74 @@ impl From<Property> for FieldId {
             Property::ThreadId => MessageField::ThreadId.into(),
             Property::MailboxIds => MessageField::Mailbox.into(),
             Property::Keywords => MessageField::Keyword.into(),
-            _ => u8::MAX - 1, // Not used
+            Property::Id => 0,
+            Property::BlobId => 1,
+            Property::Size => 2,
+            Property::ReceivedAt => 3,
+            Property::MessageId => 4,
+            Property::InReplyTo => 5,
+            Property::References => 6,
+            Property::Sender => 7,
+            Property::From => 8,
+            Property::To => 9,
+            Property::Cc => 10,
+            Property::Bcc => 11,
+            Property::ReplyTo => 12,
+            Property::Subject => 13,
+            Property::SentAt => 14,
+            Property::HasAttachment => 15,
+            Property::Preview => 16,
+            Property::BodyValues => 17,
+            Property::TextBody => 18,
+            Property::HtmlBody => 19,
+            Property::Attachments => 20,
+            Property::BodyStructure => 21,
+            Property::Header(_) => 22,
+            Property::Invalid(_) => 23,
+        }
+    }
+}
+
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            1 => Property::BlobId,
+            2 => Property::Size,
+            3 => Property::ReceivedAt,
+            4 => Property::MessageId,
+            5 => Property::InReplyTo,
+            6 => Property::References,
+            7 => Property::Sender,
+            8 => Property::From,
+            9 => Property::To,
+            10 => Property::Cc,
+            11 => Property::Bcc,
+            12 => Property::ReplyTo,
+            13 => Property::Subject,
+            14 => Property::SentAt,
+            15 => Property::HasAttachment,
+            16 => Property::Preview,
+            17 => Property::BodyValues,
+            18 => Property::TextBody,
+            19 => Property::HtmlBody,
+            20 => Property::Attachments,
+            21 => Property::BodyStructure,
+            136 => Property::ThreadId,
+            137 => Property::MailboxIds,
+            132 => Property::Keywords,
+            _ => Property::Invalid("".into()),
+        }
+    }
+}
+
+impl TryFrom<&str> for Property {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match Property::parse(value) {
+            Property::Invalid(_) => Err(()),
+            property => Ok(property),
         }
     }
 }
@@ -729,37 +795,4 @@ pub enum Comparator {
     AllInThreadHaveKeyword { keyword: Keyword },
     #[serde(rename = "someInThreadHaveKeyword")]
     SomeInThreadHaveKeyword { keyword: Keyword },
-}
-
-impl Object for Email {
-    type Property = Property;
-
-    type Value = EmptyValue;
-
-    fn id(&self) -> Option<&JMAPId> {
-        self.properties.get(&Property::Id).and_then(|id| match id {
-            Value::Id { value } => Some(value),
-            _ => None,
-        })
-    }
-
-    fn required() -> &'static [Self::Property] {
-        &[]
-    }
-
-    fn indexed() -> &'static [(Self::Property, u64)] {
-        &[]
-    }
-
-    fn collection() -> Collection {
-        Collection::Mail
-    }
-
-    fn new(id: JMAPId) -> Self {
-        let mut email = Email::default();
-        email
-            .properties
-            .insert(Property::Id, Value::Id { value: id });
-        email
-    }
 }

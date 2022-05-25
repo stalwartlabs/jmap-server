@@ -39,7 +39,7 @@ impl Value {
 
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Value::Text { value } => Some(&value),
+            Value::Text { value } => Some(value),
             _ => None,
         }
     }
@@ -118,5 +118,32 @@ impl Display for Property {
 impl From<Property> for FieldId {
     fn from(field: Property) -> Self {
         field as FieldId
+    }
+}
+
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            1 => Property::DeviceClientId,
+            2 => Property::Url,
+            3 => Property::Keys,
+            4 => Property::VerificationCode,
+            5 => Property::Expires,
+            6 => Property::Types,
+            7 => Property::VerificationCode_,
+            _ => Property::VerificationCode_,
+        }
+    }
+}
+
+impl TryFrom<&str> for Property {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match Property::parse(value) {
+            Property::VerificationCode_ => Err(()),
+            property => Ok(property),
+        }
     }
 }

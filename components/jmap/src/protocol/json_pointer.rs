@@ -11,6 +11,10 @@ pub enum JSONPointer {
     Path(Vec<JSONPointer>),
 }
 
+pub trait JSONPointerEval {
+    fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>>;
+}
+
 impl JSONPointer {
     pub fn parse(value: &str) -> Option<JSONPointer> {
         let mut path = Vec::new();

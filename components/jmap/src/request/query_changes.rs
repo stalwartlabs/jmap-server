@@ -1,6 +1,7 @@
 use crate::{
     id::{jmap::JMAPId, state::JMAPState},
     jmap_store::query::QueryObject,
+    protocol::json_pointer::{JSONPointer, JSONPointerEval},
 };
 
 use super::query::{Comparator, Filter};
@@ -66,5 +67,25 @@ pub struct AddedItem {
 impl AddedItem {
     pub fn new(id: JMAPId, index: usize) -> Self {
         Self { id, index }
+    }
+}
+
+impl JSONPointerEval for QueryChangesResponse {
+    fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
+        match ptr {
+            JSONPointer::Path(path) if path.len() == 3 => {
+                match (path.get(0)?, path.get(1)?, path.get(2)?) {
+                    (
+                        JSONPointer::String(root),
+                        JSONPointer::Wildcard,
+                        JSONPointer::String(property),
+                    ) if root == "added" && property == "id" => {
+                        Some(self.added.iter().map(|item| item.id.into()).collect())
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 }

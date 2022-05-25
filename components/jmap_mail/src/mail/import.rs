@@ -10,7 +10,7 @@ use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::orm::TinyORM;
 use jmap::jmap_store::Object;
-use jmap::request::ResultReference;
+use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
@@ -59,14 +59,9 @@ pub struct EmailImport {
     #[serde(rename = "blobId")]
     pub blob_id: JMAPBlob,
 
-    #[serde(rename = "mailboxIds")]
+    #[serde(rename = "mailboxIds", alias = "#mailboxIds")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mailbox_ids: Option<HashMap<JMAPId, bool>>,
-
-    #[serde(rename = "#mailboxIds")]
-    #[serde(skip_deserializing)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mailbox_ids_ref: Option<ResultReference>,
+    pub mailbox_ids: Option<MaybeResultReference<HashMap<MaybeIdReference, bool>>>,
 
     #[serde(rename = "keywords")]
     pub keywords: HashMap<Keyword, bool>,
@@ -153,6 +148,17 @@ where
 
         'outer: for (id, item) in request.emails {
             if let Some(mailbox_ids) = item.mailbox_ids {
+                let mailbox_ids = mailbox_ids
+                    .unwrap_value()
+                    .ok_or_else(|| {
+                        MethodError::InvalidArguments(
+                            "Invalid mailboxIds result reference.".to_string(),
+                        )
+                    })?
+                    .into_iter()
+                    .filter_map(|(id, value)| (id.unwrap_value()?, value).into())
+                    .collect::<HashMap<JMAPId, bool>>();
+
                 for mailbox_id in mailbox_ids.keys() {
                     if !mailbox_document_ids.contains(mailbox_id.get_document_id()) {
                         not_created.insert(
@@ -554,7 +560,7 @@ where
 
                     let (blob_id, part_len) = match nested_message.body {
                         MessageAttachment::Parsed(mut message) => {
-                            add_attached_message(document, &mut message, part_id as u32);
+                            document.add_message(&mut message, part_id as u32);
                             (
                                 self.blob_store(message.raw_message.as_ref())?,
                                 message.raw_message.len(),
@@ -562,7 +568,7 @@ where
                         }
                         MessageAttachment::Raw(raw_message) => {
                             if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                add_attached_message(document, message, part_id as u32);
+                                document.add_message(message, part_id as u32);
                             }
 
                             (self.blob_store(raw_message.as_ref())?, raw_message.len())
@@ -805,34 +811,105 @@ where
     }
 }
 
-fn add_attached_message(document: &mut Document, message: &mut Message, part_id: u32) {
-    if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
-        document.text(
-            MessageField::Attachment,
-            subject.into_owned(),
-            Language::Unknown,
-            IndexOptions::new().full_text(part_id << 16),
-        );
+impl EmailImport {
+    fn eval_id_references(
+        &mut self,
+        mut fnc: impl FnMut(&str) -> Option<JMAPId>,
+    ) -> jmap::Result<()> {
+        if let Some(MaybeResultReference::Value(value)) = self.mailbox_ids.as_mut() {
+            if value
+                .keys()
+                .any(|k| matches!(k, MaybeIdReference::Reference(_)))
+            {
+                let mut new_values = HashMap::with_capacity(value.len());
+
+                for (id, value) in std::mem::take(value).into_iter() {
+                    if let MaybeIdReference::Reference(id) = &id {
+                        if let Some(id) = fnc(id) {
+                            new_values.insert(MaybeIdReference::Value(id), value);
+                            continue;
+                        }
+                    }
+                    new_values.insert(id, value);
+                }
+
+                *value = new_values;
+            }
+        }
+        Ok(())
     }
-    for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
-        match sub_part {
-            MessagePart::Text(text) => {
-                document.text(
-                    MessageField::Attachment,
-                    text.body.into_owned(),
-                    Language::Unknown,
-                    IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
-                );
+
+    fn eval_result_references(
+        &mut self,
+        mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
+    ) -> jmap::Result<()> {
+        if let Some(items) = self.mailbox_ids.as_mut() {
+            if let MaybeResultReference::Reference(rr) = items {
+                if let Some(ids) = fnc(rr) {
+                    *items = MaybeResultReference::Value(
+                        ids.into_iter()
+                            .map(|id| (MaybeIdReference::Value(id.into()), true))
+                            .collect(),
+                    );
+                } else {
+                    return Err(MethodError::InvalidResultReference(
+                        "Failed to evaluate result reference.".to_string(),
+                    ));
+                }
             }
-            MessagePart::Html(html) => {
-                document.text(
-                    MessageField::Attachment,
-                    html_to_text(&html.body),
-                    Language::Unknown,
-                    IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
-                );
+        }
+        Ok(())
+    }
+}
+
+impl EmailImportRequest {
+    pub fn eval_references(
+        &mut self,
+        mut result_map_fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
+        created_ids: &HashMap<String, JMAPId>,
+    ) -> jmap::Result<()> {
+        for email in self.emails.values_mut() {
+            email.eval_result_references(&mut result_map_fnc)?;
+            email.eval_id_references(|id| created_ids.get(id).copied())?;
+        }
+        Ok(())
+    }
+}
+
+trait AddMessage {
+    fn add_message(&mut self, message: &mut Message, part_id: u32);
+}
+
+impl AddMessage for Document {
+    fn add_message(&mut self, message: &mut Message, part_id: u32) {
+        if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
+            self.text(
+                MessageField::Attachment,
+                subject.into_owned(),
+                Language::Unknown,
+                IndexOptions::new().full_text(part_id << 16),
+            );
+        }
+        for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
+            match sub_part {
+                MessagePart::Text(text) => {
+                    self.text(
+                        MessageField::Attachment,
+                        text.body.into_owned(),
+                        Language::Unknown,
+                        IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
+                    );
+                }
+                MessagePart::Html(html) => {
+                    self.text(
+                        MessageField::Attachment,
+                        html_to_text(&html.body),
+                        Language::Unknown,
+                        IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
+                    );
+                }
+                _ => (),
             }
-            _ => (),
         }
     }
 }

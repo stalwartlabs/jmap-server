@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
+use jmap::id::jmap::JMAPId;
+use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper};
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 
@@ -24,6 +25,13 @@ impl GetObject for VacationResponse {
             Property::HtmlBody,
         ]
     }
+
+    fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>> {
+        match self.properties.get(property)? {
+            Value::Id { value } => Some(vec![*value]),
+            _ => None,
+        }
+    }
 }
 
 pub trait JMAPGetVacationResponse<T>
@@ -44,7 +52,7 @@ where
         &self,
         request: GetRequest<VacationResponse>,
     ) -> jmap::Result<GetResponse<VacationResponse>> {
-        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let helper = GetHelper::new(self, request, None::<IdMapper>)?;
         let account_id = helper.account_id;
 
         helper.get(|id, properties| {

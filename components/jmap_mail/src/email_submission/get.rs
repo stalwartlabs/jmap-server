@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
@@ -26,6 +27,13 @@ impl GetObject for EmailSubmission {
             Property::DsnBlobIds,
             Property::MdnBlobIds,
         ]
+    }
+
+    fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>> {
+        match self.properties.get(property)? {
+            Value::Id { value } => Some(vec![*value]),
+            _ => None,
+        }
     }
 }
 

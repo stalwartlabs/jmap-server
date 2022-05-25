@@ -6,13 +6,23 @@ use store::{
 
 use crate::{
     id::state::JMAPState,
+    protocol::json_pointer::JSONPointerEval,
     request::changes::{ChangesRequest, ChangesResponse},
 };
 
 use super::Object;
 
+impl JSONPointerEval for () {
+    fn eval_json_pointer(
+        &self,
+        _ptr: &crate::protocol::json_pointer::JSONPointer,
+    ) -> Option<Vec<u64>> {
+        None
+    }
+}
+
 pub trait ChangesObject: Object {
-    type ChangesResponse: Default;
+    type ChangesResponse: Default + JSONPointerEval;
 }
 
 pub trait JMAPChanges {

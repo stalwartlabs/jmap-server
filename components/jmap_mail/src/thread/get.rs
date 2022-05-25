@@ -23,6 +23,14 @@ impl GetObject for Thread {
     fn default_properties() -> Vec<Self::Property> {
         vec![Property::Id, Property::EmailIds]
     }
+
+    fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>> {
+        match property {
+            Property::Id => vec![self.id],
+            Property::EmailIds => self.email_ids.clone(),
+        }
+        .into()
+    }
 }
 
 pub trait JMAPGetThread<T>

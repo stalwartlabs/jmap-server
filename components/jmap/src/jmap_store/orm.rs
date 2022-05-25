@@ -70,10 +70,7 @@ where
     fn is_empty(&self) -> bool;
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq)]
-pub struct EmptyValue {}
-
-impl Value for EmptyValue {
+impl Value for () {
     fn index_as(&self) -> IndexableValue {
         IndexableValue::Null
     }

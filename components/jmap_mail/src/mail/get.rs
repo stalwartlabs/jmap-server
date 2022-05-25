@@ -88,6 +88,16 @@ impl GetObject for Email {
             Property::Attachments,
         ]
     }
+
+    fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>> {
+        match self.properties.get(property)? {
+            Value::Id { value } => Some(vec![*value]),
+            Value::MailboxIds { value, .. } => {
+                Some(value.keys().filter_map(|id| Some(*id.value()?)).collect())
+            }
+            _ => None,
+        }
+    }
 }
 
 impl Email {

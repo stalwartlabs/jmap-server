@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use jmap::{id::jmap::JMAPId, jmap_store::orm};
 use serde::{Deserialize, Serialize};
+use store::FieldId;
 
 use crate::mail::schema::EmailAddress;
 
@@ -85,8 +86,35 @@ impl Display for Property {
     }
 }
 
-impl From<Property> for u8 {
+impl From<Property> for FieldId {
     fn from(property: Property) -> Self {
-        property as u8
+        property as FieldId
+    }
+}
+
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            1 => Property::Name,
+            2 => Property::Email,
+            3 => Property::ReplyTo,
+            4 => Property::Bcc,
+            5 => Property::TextSignature,
+            6 => Property::HtmlSignature,
+            7 => Property::MayDelete,
+            _ => Property::Invalid,
+        }
+    }
+}
+
+impl TryFrom<&str> for Property {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match Property::parse(value) {
+            Property::Invalid => Err(()),
+            property => Ok(property),
+        }
     }
 }

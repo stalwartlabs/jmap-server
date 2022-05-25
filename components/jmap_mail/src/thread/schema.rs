@@ -1,9 +1,6 @@
-use jmap::{
-    id::jmap::JMAPId,
-    jmap_store::{orm::EmptyValue, Object},
-};
+use jmap::id::jmap::JMAPId;
 use serde::{Deserialize, Serialize};
-use store::{core::collection::Collection, FieldId};
+use store::FieldId;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Thread {
@@ -21,37 +18,34 @@ pub enum Property {
     EmailIds = 1,
 }
 
+impl Property {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "id" => Property::Id,
+            "emailIds" => Property::EmailIds,
+            _ => Property::Id,
+        }
+    }
+}
+
 impl From<Property> for FieldId {
     fn from(property: Property) -> Self {
         property as FieldId
     }
 }
-
-impl Object for Thread {
-    type Property = Property;
-
-    type Value = EmptyValue;
-
-    fn new(id: JMAPId) -> Self {
-        Thread {
-            id,
-            email_ids: Vec::new(),
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            _ => Property::EmailIds,
         }
     }
+}
 
-    fn id(&self) -> Option<&JMAPId> {
-        Some(&self.id)
-    }
+impl TryFrom<&str> for Property {
+    type Error = ();
 
-    fn required() -> &'static [Self::Property] {
-        &[]
-    }
-
-    fn indexed() -> &'static [(Self::Property, u64)] {
-        &[]
-    }
-
-    fn collection() -> store::core::collection::Collection {
-        Collection::Thread
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Ok(Property::parse(value))
     }
 }

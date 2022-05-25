@@ -11,7 +11,6 @@ use jmap::jmap_store::Object;
 
 use store::core::collection::Collection;
 use store::write::options::Options;
-use store::FieldId;
 
 use self::schema::{Mailbox, Property, Value};
 
@@ -52,11 +51,5 @@ impl Object for Mailbox {
         item.properties
             .insert(Property::Id, Value::Id { value: id });
         item
-    }
-}
-
-impl From<Property> for FieldId {
-    fn from(field: Property) -> Self {
-        field as FieldId
     }
 }

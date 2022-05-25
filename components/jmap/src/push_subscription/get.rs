@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::id::jmap::JMAPId;
 use crate::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use crate::jmap_store::orm::JMAPOrm;
 use crate::request::get::{GetRequest, GetResponse};
@@ -21,6 +22,10 @@ impl GetObject for PushSubscription {
             Property::Expires,
             Property::Types,
         ]
+    }
+
+    fn get_as_id(&self, _property: &Self::Property) -> Option<Vec<JMAPId>> {
+        None
     }
 }
 

@@ -3,15 +3,15 @@ use std::{collections::HashMap, fmt};
 use jmap::{
     error::method::MethodError,
     id::jmap::JMAPId,
-    protocol::type_state::TypeState,
+    protocol::{json_pointer::JSONPointerEval, type_state::TypeState},
     push_subscription::schema::PushSubscription,
     request::{
         changes::{ChangesRequest, ChangesResponse},
-        copy::{CopyRequest, CopyResponse},
         get::{GetRequest, GetResponse},
         query::{QueryRequest, QueryResponse},
         query_changes::{QueryChangesRequest, QueryChangesResponse},
         set::{SetRequest, SetResponse},
+        Method, ResultReference,
     },
 };
 
@@ -31,6 +31,8 @@ use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
 use store::{log::changes::ChangeId, AccountId};
 
 use crate::state::StateChange;
+
+use super::response;
 
 #[derive(Debug)]
 pub struct Call<T> {
@@ -124,6 +126,116 @@ pub enum Response {
     Error(MethodError),
 }
 
+impl Request {
+    pub fn prepare_request(&mut self, response: &response::Response) -> jmap::Result<()> {
+        let mut eval_result_ref = |rr: &ResultReference| -> Option<Vec<u64>> {
+            for r in &response.method_responses {
+                if r.id == rr.result_of {
+                    match (&rr.name, &r.method) {
+                        (Method::GetMailbox, Response::GetMailbox(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::ChangesMailbox, Response::ChangesMailbox(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::QueryMailbox, Response::QueryMailbox(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::QueryChangesMailbox, Response::QueryChangesMailbox(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::GetThread, Response::GetThread(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::ChangesThread, Response::ChangesThread(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::GetEmail, Response::GetEmail(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::ChangesEmail, Response::ChangesEmail(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::QueryEmail, Response::QueryEmail(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::QueryChangesEmail, Response::QueryChangesEmail(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::GetIdentity, Response::GetIdentity(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::ChangesIdentity, Response::ChangesIdentity(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::GetEmailSubmission, Response::GetEmailSubmission(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (
+                            Method::ChangesEmailSubmission,
+                            Response::ChangesEmailSubmission(response),
+                        ) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (
+                            Method::QueryEmailSubmission,
+                            Response::QueryEmailSubmission(response),
+                        ) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (
+                            Method::QueryChangesEmailSubmission,
+                            Response::QueryChangesEmailSubmission(response),
+                        ) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        _ => {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            None
+        };
+
+        match self {
+            Request::GetMailbox(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
+            }
+            Request::GetThread(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
+            }
+            Request::GetEmail(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
+            }
+            Request::GetIdentity(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
+            }
+            Request::GetEmailSubmission(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
+            }
+            Request::SetMailbox(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            Request::SetEmail(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            Request::ImportEmail(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            Request::SetIdentity(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            Request::SetEmailSubmission(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+}
+
 impl Response {
     pub fn changes(&mut self) -> Changes {
         match self {
@@ -166,7 +278,11 @@ impl Response {
                         change_id,
                         state_change: StateChange::new(
                             response.account_id(),
-                            HashMap::from_iter([(TypeState::Email, change_id)]),
+                            vec![
+                                (TypeState::Email, change_id),
+                                (TypeState::Mailbox, change_id),
+                                (TypeState::Thread, change_id),
+                            ],
                         )
                         .into(),
                         next_call: None,

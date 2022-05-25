@@ -15,12 +15,14 @@ pub mod set;
 pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
     type Property: for<'de> serde::Deserialize<'de>
         + serde::Serialize
+        + for<'x> TryFrom<&'x str>
+        + From<u8>
+        + Into<u8>
         + Eq
         + PartialEq
         + Debug
         + Hash
         + Clone
-        + Into<u8>
         + Sync
         + Send;
     type Value: orm::Value;

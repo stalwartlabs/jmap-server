@@ -1,6 +1,7 @@
 use crate::{
     id::{jmap::JMAPId, state::JMAPState},
     jmap_store::changes::ChangesObject,
+    protocol::json_pointer::{JSONPointer, JSONPointerEval},
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -58,6 +59,20 @@ impl<O: ChangesObject> ChangesResponse<O> {
             arguments: O::ChangesResponse::default(),
             total_changes: 0,
             has_children_changes: false,
+        }
+    }
+}
+
+impl<O: ChangesObject> JSONPointerEval for ChangesResponse<O> {
+    fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
+        if let JSONPointer::String(property) = ptr {
+            match property.as_str() {
+                "created" => Some(self.created.iter().map(Into::into).collect()),
+                "updated" => Some(self.updated.iter().map(Into::into).collect()),
+                _ => self.arguments.eval_json_pointer(ptr),
+            }
+        } else {
+            None
         }
     }
 }

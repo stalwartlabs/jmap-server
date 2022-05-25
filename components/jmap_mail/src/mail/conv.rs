@@ -9,7 +9,6 @@ use mail_parser::{
     },
     Addr, HeaderOffset, HeaderValue, RfcHeader, RfcHeaders,
 };
-use store::chrono::{DateTime, NaiveDateTime, Utc};
 
 use super::{
     schema::{HeaderForm, Value},

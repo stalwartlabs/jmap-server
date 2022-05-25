@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use jmap::{id::jmap::JMAPId, jmap_store::orm, request::ResultReference};
 use serde::{Deserialize, Serialize};
+use store::FieldId;
 
 #[derive(Debug, Clone, Default)]
 pub struct Mailbox {
@@ -208,4 +209,40 @@ pub enum Comparator {
     SortOrder,
     #[serde(rename = "parentId")]
     ParentId,
+}
+
+impl From<Property> for FieldId {
+    fn from(field: Property) -> Self {
+        field as FieldId
+    }
+}
+
+impl From<FieldId> for Property {
+    fn from(field: FieldId) -> Self {
+        match field {
+            0 => Property::Id,
+            1 => Property::Name,
+            2 => Property::ParentId,
+            3 => Property::Role,
+            4 => Property::SortOrder,
+            5 => Property::TotalEmails,
+            6 => Property::UnreadEmails,
+            7 => Property::TotalThreads,
+            8 => Property::UnreadThreads,
+            9 => Property::MyRights,
+            10 => Property::IsSubscribed,
+            _ => Property::Invalid,
+        }
+    }
+}
+
+impl TryFrom<&str> for Property {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match Property::parse(value) {
+            Property::Invalid => Err(()),
+            property => Ok(property),
+        }
+    }
 }

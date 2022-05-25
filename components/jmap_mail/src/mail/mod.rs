@@ -9,6 +9,7 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
+use jmap::{jmap_store::Object, id::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
@@ -18,12 +19,45 @@ use store::{
     bincode,
     blob::BlobId,
     serialize::{StoreDeserialize, StoreSerialize},
-    FieldId,
+    FieldId, core::collection::Collection,
 };
 
-use self::schema::{EmailAddress, EmailAddressGroup};
+use self::schema::{EmailAddress, EmailAddressGroup, Email, Property, Value};
 
 pub const MAX_MESSAGE_PARTS: usize = 1000;
+
+impl Object for Email {
+    type Property = Property;
+
+    type Value = ();
+
+    fn id(&self) -> Option<&JMAPId> {
+        self.properties.get(&Property::Id).and_then(|id| match id {
+            Value::Id { value } => Some(value),
+            _ => None,
+        })
+    }
+
+    fn required() -> &'static [Self::Property] {
+        &[]
+    }
+
+    fn indexed() -> &'static [(Self::Property, u64)] {
+        &[]
+    }
+
+    fn collection() -> Collection {
+        Collection::Mail
+    }
+
+    fn new(id: JMAPId) -> Self {
+        let mut email = Email::default();
+        email
+            .properties
+            .insert(Property::Id, Value::Id { value: id });
+        email
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageData {

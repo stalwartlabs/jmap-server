@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
@@ -24,6 +25,10 @@ impl GetObject for Identity {
             Property::HtmlSignature,
             Property::MayDelete,
         ]
+    }
+
+    fn get_as_id(&self, _property: &Self::Property) -> Option<Vec<JMAPId>> {
+        None
     }
 }
 

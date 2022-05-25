@@ -7,7 +7,6 @@ use jmap::error::request::{RequestError, RequestErrorType, RequestLimitError};
 use jmap::id::jmap::JMAPId;
 use jmap::id::state::JMAPState;
 use jmap::protocol::type_state::TypeState;
-use jmap::request::Method;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
