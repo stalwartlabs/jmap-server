@@ -4,7 +4,7 @@ use actix_web::{
 };
 use jmap::{
     error::problem_details::ProblemDetails,
-    id::{blob::JMAPBlob, jmap::JMAPId},
+    types::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::blob::JMAPBlobStore,
 };
 use reqwest::header::CONTENT_TYPE;

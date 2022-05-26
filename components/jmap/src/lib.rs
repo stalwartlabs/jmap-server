@@ -1,7 +1,6 @@
 pub mod error;
-pub mod id;
 pub mod jmap_store;
-pub mod protocol;
+pub mod types;
 pub mod push_subscription;
 pub mod request;
 

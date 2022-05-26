@@ -3,7 +3,7 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use crate::{id::jmap::JMAPId, jmap_store::Object};
+use crate::{types::jmap::JMAPId, jmap_store::Object};
 use store::core::collection::Collection;
 
 use self::schema::{Property, PushSubscription, Value};

@@ -54,6 +54,7 @@
         "partId": "0",
         "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
         "size": 262,
+        "headers": [],
         "type": "text/plain"
       },
       {
@@ -165,6 +166,7 @@
       "partId": "0",
       "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
       "size": 262,
+      "headers": [],
       "type": "text/plain"
     },
     {

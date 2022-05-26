@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use crate::mail::MessageField;
 use jmap::error::method::MethodError;
-use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::request::query::{QueryRequest, QueryResponse};
+use jmap::types::jmap::JMAPId;
 use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
 use mail_parser::RfcHeader;
 use store::core::collection::Collection;
@@ -53,8 +53,8 @@ where
         let mut helper = QueryHelper::new(self, request)?;
         let account_id = helper.account_id;
         let collapse_threads = helper.request.arguments.collapse_threads.unwrap_or(false);
-        let mut is_immutable_filter = false;
-        let mut is_immutable_sort = false;
+        let mut is_immutable_filter = true;
+        let mut is_immutable_sort = true;
 
         helper.parse_filter(|filter| {
             Ok(match filter {
@@ -215,6 +215,9 @@ where
                             FieldValue::Tag(Tag::Static(header.into())),
                         )
                     }
+                }
+                Filter::Unsupported { value } => {
+                    return Err(MethodError::UnsupportedFilter(value));
                 }
             })
         })?;

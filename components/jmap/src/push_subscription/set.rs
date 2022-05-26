@@ -1,11 +1,11 @@
 use crate::error::set::{SetError, SetErrorType};
 use crate::from_timestamp;
-use crate::id::jmap::JMAPId;
 use crate::jmap_store::orm::{JMAPOrm, TinyORM};
 use crate::jmap_store::set::SetHelper;
 use crate::jmap_store::Object;
 use crate::request::set::SetResponse;
 use crate::request::ResultReference;
+use crate::types::jmap::JMAPId;
 use crate::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::chrono::Utc;
 use store::parking_lot::MutexGuard;

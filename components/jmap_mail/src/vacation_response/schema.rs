@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{id::jmap::JMAPId, jmap_store::orm};
+use jmap::{types::jmap::JMAPId, jmap_store::orm};
 use serde::{Deserialize, Serialize};
 use store::{
     chrono::{DateTime, Utc},

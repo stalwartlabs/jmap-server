@@ -9,7 +9,7 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use jmap::{jmap_store::Object, id::jmap::JMAPId};
+use jmap::{jmap_store::Object, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 

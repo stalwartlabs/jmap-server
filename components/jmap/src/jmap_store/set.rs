@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use super::changes::JMAPChanges;
 use super::Object;
 use crate::error::set::SetError;
-use crate::id::jmap::JMAPId;
-use crate::id::state::JMAPState;
-use crate::protocol::type_state::TypeState;
 use crate::request::set::SetResponse;
-use crate::request::{MaybeIdReference, ResultReference};
+use crate::request::{ArgumentSerializer, MaybeIdReference, ResultReference};
+use crate::types::jmap::JMAPId;
+use crate::types::state::JMAPState;
+use crate::types::type_state::TypeState;
 use crate::{
     error::{method::MethodError, set::SetErrorType},
     request::set::SetRequest,
@@ -22,7 +22,7 @@ use store::AccountId;
 use store::{roaring::RoaringBitmap, JMAPStore, Store};
 
 pub trait SetObject: Object {
-    type SetArguments;
+    type SetArguments: Default + ArgumentSerializer;
     type NextCall;
 
     fn eval_id_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>);

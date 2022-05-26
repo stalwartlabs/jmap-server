@@ -1,3 +1,4 @@
+use jmap::error::method::MethodError;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::request::query::{QueryRequest, QueryResponse};
 
@@ -88,6 +89,9 @@ where
                     Property::SendAt.into(),
                     FieldValue::LongInteger(value.timestamp() as u64),
                 ),
+                Filter::Unsupported { value } => {
+                    return Err(MethodError::UnsupportedFilter(value));
+                }
             })
         })?;
 

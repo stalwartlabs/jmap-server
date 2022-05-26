@@ -1,4 +1,4 @@
-use crate::id::jmap::JMAPId;
+use crate::types::jmap::JMAPId;
 use core::hash::Hash;
 use std::fmt::Debug;
 use store::core::collection::Collection;

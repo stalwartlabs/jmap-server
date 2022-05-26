@@ -138,3 +138,69 @@ impl<'de> Deserialize<'de> for JSONPointer {
         deserializer.deserialize_str(JSONPointerVisitor)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::JSONPointer;
+
+    #[test]
+    fn json_pointer_parse() {
+        for (input, output) in vec![
+            ("hello", JSONPointer::String("hello".to_string())),
+            ("9a", JSONPointer::String("9a".to_string())),
+            ("a9", JSONPointer::String("a9".to_string())),
+            ("*a", JSONPointer::String("*a".to_string())),
+            (
+                "/hello/world",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::String("world".to_string()),
+                ]),
+            ),
+            ("*", JSONPointer::Wildcard),
+            (
+                "/hello/*",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::Wildcard,
+                ]),
+            ),
+            ("1234", JSONPointer::Number(1234)),
+            (
+                "/hello/1234",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::Number(1234),
+                ]),
+            ),
+            ("~0~1", JSONPointer::String("~/".to_string())),
+            (
+                "/hello/~0~1",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::String("~/".to_string()),
+                ]),
+            ),
+            (
+                "/hello/world/*/99",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("hello".to_string()),
+                    JSONPointer::String("world".to_string()),
+                    JSONPointer::Wildcard,
+                    JSONPointer::Number(99),
+                ]),
+            ),
+            ("/", JSONPointer::String("".to_string())),
+            (
+                "///",
+                JSONPointer::Path(vec![
+                    JSONPointer::String("".to_string()),
+                    JSONPointer::String("".to_string()),
+                ]),
+            ),
+            ("", JSONPointer::Root),
+        ] {
+            assert_eq!(JSONPointer::parse(input), Some(output), "{}", input);
+        }
+    }
+}

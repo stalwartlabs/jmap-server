@@ -1,27 +1,21 @@
+use std::fmt;
+
+use serde::Deserialize;
+
 use crate::{
     error::method::MethodError,
-    id::{jmap::JMAPId, state::JMAPState},
     jmap_store::get::GetObject,
-    protocol::json_pointer::{JSONPointer, JSONPointerEval},
+    types::json_pointer::{JSONPointer, JSONPointerEval},
+    types::{jmap::JMAPId, state::JMAPState},
 };
 
-use super::{MaybeResultReference, ResultReference};
+use super::{ArgumentSerializer, MaybeResultReference, ResultReference};
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct GetRequest<O: GetObject> {
-    #[serde(rename = "accountId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub account_id: Option<JMAPId>,
-
-    #[serde(alias = "#ids")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ids: Option<MaybeResultReference<Vec<JMAPId>>>,
-
-    #[serde(alias = "#properties")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub properties: Option<MaybeResultReference<Vec<O::Property>>>,
-
-    #[serde(flatten)]
     pub arguments: O::GetArguments,
 }
 
@@ -102,5 +96,74 @@ impl<O: GetObject> JSONPointerEval for GetResponse<O> {
             }
             _ => None,
         }
+    }
+}
+
+// Deserialize
+struct GetRequestVisitor<O: GetObject> {
+    phantom: std::marker::PhantomData<O>,
+}
+
+impl<'de, O: GetObject> serde::de::Visitor<'de> for GetRequestVisitor<O> {
+    type Value = GetRequest<O>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP get request")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut request = GetRequest {
+            account_id: None,
+            ids: None,
+            properties: None,
+            arguments: O::GetArguments::default(),
+        };
+
+        while let Some(key) = map.next_key::<&str>()? {
+            match key {
+                "accountId" => {
+                    request.account_id = map.next_value()?;
+                }
+                "ids" => {
+                    request.ids = map
+                        .next_value::<Option<Vec<JMAPId>>>()?
+                        .map(MaybeResultReference::Value);
+                }
+                "#ids" => {
+                    request.ids = MaybeResultReference::Reference(map.next_value()?).into();
+                }
+                "properties" => {
+                    request.properties = map
+                        .next_value::<Option<Vec<O::Property>>>()?
+                        .map(MaybeResultReference::Value);
+                }
+                "#properties" => {
+                    request.properties = MaybeResultReference::Reference(map.next_value()?).into();
+                }
+                _ => {
+                    if let Err(err) =
+                        O::GetArguments::deserialize(&mut request.arguments, key, &mut map)
+                    {
+                        return Err(serde::de::Error::custom(err));
+                    }
+                }
+            }
+        }
+
+        Ok(request)
+    }
+}
+
+impl<'de, O: GetObject> Deserialize<'de> for GetRequest<O> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(GetRequestVisitor {
+            phantom: std::marker::PhantomData,
+        })
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
-use jmap::{error::method::MethodError, id::jmap::JMAPId};
+use jmap::{error::method::MethodError, types::jmap::JMAPId};
 
 use super::method;
 

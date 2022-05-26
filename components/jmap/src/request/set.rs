@@ -1,48 +1,25 @@
+use serde::Deserialize;
 use store::log::changes::ChangeId;
 use store::AccountId;
 
 use crate::error::method::MethodError;
 use crate::error::set::SetError;
-use crate::id::jmap::JMAPId;
-use crate::id::state::JMAPState;
 use crate::jmap_store::set::SetObject;
-use crate::protocol::type_state::TypeState;
-use std::collections::HashMap;
+use crate::types::jmap::JMAPId;
+use crate::types::state::JMAPState;
+use crate::types::type_state::TypeState;
+use std::{collections::HashMap, fmt};
 
-use super::{MaybeResultReference, ResultReference};
+use super::{ArgumentSerializer, MaybeResultReference, ResultReference};
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct SetRequest<O: SetObject> {
-    #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
     pub account_id: Option<JMAPId>,
-
-    #[serde(rename = "ifInState", skip_serializing_if = "Option::is_none")]
     pub if_in_state: Option<JMAPState>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "deserialize_map_as_vec")]
-    #[serde(bound(deserialize = "Option<Vec<(String, O)>>: serde::Deserialize<'de>"))]
     pub create: Option<Vec<(String, O)>>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(bound(deserialize = "Option<HashMap<JMAPId, O>>: serde::Deserialize<'de>"))]
     pub update: Option<HashMap<JMAPId, O>>,
-
-    #[serde(alias = "#destroy")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub destroy: Option<MaybeResultReference<Vec<JMAPId>>>,
-
-    #[serde(flatten)]
     pub arguments: O::SetArguments,
-}
-
-fn deserialize_map_as_vec<'de, D, T>(deserializer: D) -> Result<Option<Vec<(String, T)>>, D::Error>
-where
-    D: serde::de::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
-{
-    let map: Option<HashMap<String, T>> = serde::de::Deserialize::deserialize(deserializer)?;
-    Ok(map.map(|m| m.into_iter().collect()))
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -216,5 +193,77 @@ impl<O: SetObject> SetResponse<O> {
 
     pub fn next_call(&mut self) -> Option<O::NextCall> {
         self.next_call.take()
+    }
+}
+
+// Deserialize
+struct SetRequestVisitor<O: SetObject> {
+    phantom: std::marker::PhantomData<O>,
+}
+
+impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
+    type Value = SetRequest<O>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP set request")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut request = SetRequest {
+            account_id: None,
+            if_in_state: None,
+            create: None,
+            update: None,
+            destroy: None,
+            arguments: O::SetArguments::default(),
+        };
+
+        while let Some(key) = map.next_key::<&str>()? {
+            match key {
+                "accountId" => {
+                    request.account_id = map.next_value()?;
+                }
+                "ifInState" => {
+                    request.if_in_state = map.next_value()?;
+                }
+                "update" => {
+                    request.update = map.next_value()?;
+                }
+                "create" => {
+                    request.create = map
+                        .next_value::<Option<HashMap<String, O>>>()?
+                        .map(|v| v.into_iter().collect());
+                }
+                "destroy" => {
+                    request.destroy = map
+                        .next_value::<Option<Vec<JMAPId>>>()?
+                        .map(MaybeResultReference::Value);
+                }
+                "#destroy" => {
+                    request.destroy = MaybeResultReference::Reference(map.next_value()?).into();
+                }
+                _ => {
+                    if let Err(err) = request.arguments.deserialize(key, &mut map) {
+                        return Err(serde::de::Error::custom(err));
+                    }
+                }
+            }
+        }
+
+        Ok(request)
+    }
+}
+
+impl<'de, O: SetObject> Deserialize<'de> for SetRequest<O> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(SetRequestVisitor {
+            phantom: std::marker::PhantomData,
+        })
     }
 }

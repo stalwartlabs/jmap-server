@@ -6,7 +6,7 @@ use actix_web::{
 };
 use jmap::{
     error::request::{RequestError, RequestLimitError},
-    id::jmap::JMAPId,
+    types::jmap::JMAPId,
 };
 use store::{tracing::debug, Store};
 
@@ -35,14 +35,18 @@ where
     let error = if request.len() < core.store.config.max_size_request {
         /*println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::from_slice::<JSONValue>(&request).unwrap())
-                .unwrap()
+            serde_json::to_string_pretty(
+                &serde_json::from_slice::<serde_json::Value>(&request).unwrap()
+            )
+            .unwrap()
         );*/
 
         match serde_json::from_slice::<Request>(&request) {
             Ok(request) => {
                 if request.method_calls.len() < core.store.config.max_calls_in_request {
                     let result = handle_method_calls(request, core).await;
+                    //println!("{}", serde_json::to_string_pretty(&result).unwrap());
+
                     return HttpResponse::build(StatusCode::OK)
                         .insert_header(ContentType::json())
                         .json(result);

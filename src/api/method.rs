@@ -2,8 +2,6 @@ use std::{collections::HashMap, fmt};
 
 use jmap::{
     error::method::MethodError,
-    id::jmap::JMAPId,
-    protocol::{json_pointer::JSONPointerEval, type_state::TypeState},
     push_subscription::schema::PushSubscription,
     request::{
         changes::{ChangesRequest, ChangesResponse},
@@ -13,6 +11,8 @@ use jmap::{
         set::{SetRequest, SetResponse},
         Method, ResultReference,
     },
+    types::jmap::JMAPId,
+    types::{json_pointer::JSONPointerEval, type_state::TypeState},
 };
 
 use jmap_mail::{
@@ -230,6 +230,12 @@ impl Request {
             Request::SetEmailSubmission(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
             }
+            Request::GetPushSubscription(request) => {
+                request.account_id = JMAPId::new(1).into(); //TODO remove
+            }
+            Request::SetPushSubscription(request) => {
+                request.account_id = JMAPId::new(1).into(); //TODO remove
+            }
             _ => (),
         }
         Ok(())
@@ -383,9 +389,10 @@ impl<'de> Visitor<'de> for CallVisitor {
         let method = match match_method(&mut seq, method_name) {
             Ok(request) => request,
             Err(err) => match err {
-                MatchError::Parse => Request::Error(MethodError::InvalidArguments(
-                    "Failed to parse method.".to_string(),
-                )),
+                MatchError::Parse(err) => Request::Error(MethodError::InvalidArguments(format!(
+                    "Failed to parse method: {}",
+                    err
+                ))),
                 MatchError::Eof => {
                     return Err(serde::de::Error::custom("Expected a method request."))
                 }
@@ -401,7 +408,7 @@ impl<'de> Visitor<'de> for CallVisitor {
 }
 
 enum MatchError {
-    Parse,
+    Parse(String),
     Eof,
 }
 
@@ -412,157 +419,157 @@ where
     Ok(match name {
         "Email/get" => Request::GetEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Email/changes" => Request::ChangesEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Email/query" => Request::QueryEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Email/queryChanges" => Request::QueryChangesEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Email/set" => Request::SetEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         /*"Email/copy" => Request::CopyEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or( MatchError::Eof)?,
         ),*/
         "Email/import" => Request::ImportEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Email/parse" => Request::ParseEmail(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Mailbox/get" => Request::GetMailbox(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Mailbox/changes" => Request::ChangesMailbox(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Mailbox/query" => Request::QueryMailbox(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Mailbox/queryChanges" => Request::QueryChangesMailbox(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Mailbox/set" => Request::SetMailbox(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Thread/get" => Request::GetThread(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Thread/changes" => Request::ChangesThread(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         /*"SearchSnippet/get" => Request::GetSearchSnippet(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or( MatchError::Eof)?,
         ),*/
         "Identity/get" => Request::GetIdentity(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Identity/changes" => Request::ChangesIdentity(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "Identity/set" => Request::SetIdentity(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "EmailSubmission/get" => Request::GetEmailSubmission(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "EmailSubmission/changes" => Request::ChangesEmailSubmission(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "EmailSubmission/query" => Request::QueryEmailSubmission(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "EmailSubmission/queryChanges" => Request::QueryChangesEmailSubmission(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "EmailSubmission/set" => Request::SetEmailSubmission(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "VacationResponse/get" => Request::GetVacationResponse(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "VacationResponse/set" => Request::SetVacationResponse(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "PushSubscription/get" => Request::GetPushSubscription(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         "PushSubscription/set" => Request::SetPushSubscription(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         /*"Blob/copy" => Request::CopyBlob(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or( MatchError::Eof)?,
         ),*/
         "Core/echo" => Request::Echo(
             seq.next_element()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
         _ => {
             seq.next_element::<serde_json::Value>()
-                .map_err(|_| MatchError::Parse)?
+                .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?;
             Request::Error(MethodError::UnknownMethod(name.to_string()))
         }

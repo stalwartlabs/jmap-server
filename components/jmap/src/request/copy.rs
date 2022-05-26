@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::set::SetError,
-    id::{jmap::JMAPId, state::JMAPState},
+    types::{jmap::JMAPId, state::JMAPState},
     jmap_store::Object,
 };
 

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -6,7 +7,10 @@ use std::{
 
 use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use ece::EcKeyComponents;
-use jmap::{base64, id::JMAPIdSerialize, protocol::type_state::TypeState};
+use jmap::{
+    base64,
+    types::{jmap::JMAPId, type_state::TypeState},
+};
 use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys};
 use reqwest::header::CONTENT_ENCODING;
 use store::Store;
@@ -21,6 +25,8 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Push Subscription tests...");
+
     // Create channels
     let (event_tx, mut event_rx) = mpsc::channel::<PushMessage>(100);
 
@@ -78,13 +84,13 @@ where
 
     // Create a mailbox and expect a state change
     let mailbox_id = client
-        .set_default_account_id(1u64.to_jmap_string())
+        .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("PushSubscription Test", None::<String>, Role::None)
         .await
         .unwrap()
         .unwrap_id();
 
-    assert_state(&mut event_rx, TypeState::Mailbox).await;
+    assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
 
     // Receive states just for the requested types
     client
@@ -138,14 +144,14 @@ where
         .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     push_server.fail_requests.store(false, Ordering::Relaxed);
-    assert_state(&mut event_rx, TypeState::Mailbox).await;
+    assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
 
     // Make a mailbox change and expect state change
     client
         .mailbox_rename(&mailbox_id, "My Mailbox")
         .await
         .unwrap();
-    assert_state(&mut event_rx, TypeState::Mailbox).await;
+    assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
 
     // Multiple change updates should be grouped and pushed in intervals
     for num in 0..50 {
@@ -154,12 +160,13 @@ where
             .await
             .unwrap();
     }
-    assert_state(&mut event_rx, TypeState::Mailbox).await;
+    assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
     expect_nothing(&mut event_rx).await;
 
     // Destroy mailbox
-    client.mailbox_destroy(&mailbox_id, true).await.unwrap();
     client.push_subscription_destroy(&push_id).await.unwrap();
+    client.mailbox_destroy(&mailbox_id, true).await.unwrap();
+    expect_nothing(&mut event_rx).await;
 
     server.store.assert_is_empty();
 }
@@ -260,21 +267,17 @@ async fn expect_nothing(event_rx: &mut mpsc::Receiver<PushMessage>) {
     }
 }
 
-async fn assert_state(
-    event_rx: &mut mpsc::Receiver<PushMessage>,
-    state: jmap::protocol::type_state::TypeState,
-) {
+async fn assert_state(event_rx: &mut mpsc::Receiver<PushMessage>, state: &[TypeState]) {
     assert_eq!(
         expect_push(event_rx)
             .await
             .unwrap_state_change()
             .changed
-            .get(&1u64.to_jmap_string())
+            .get(&JMAPId::new(1))
             .unwrap()
             .iter()
-            .next()
-            .unwrap()
-            .0,
-        &state
+            .map(|x| x.0)
+            .collect::<HashSet<&TypeState>>(),
+        state.iter().collect::<HashSet<&TypeState>>()
     );
 }

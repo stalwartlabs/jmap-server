@@ -6,7 +6,7 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use jmap::id::jmap::JMAPId;
+use jmap::types::jmap::JMAPId;
 use jmap::jmap_store::Object;
 
 use store::core::collection::Collection;

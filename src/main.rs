@@ -4,8 +4,8 @@ pub mod cluster;
 pub mod server;
 pub mod state;
 
-//#[cfg(test)]
-//pub mod tests;
+#[cfg(test)]
+pub mod tests;
 
 use std::sync::Arc;
 

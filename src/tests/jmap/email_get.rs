@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use actix_web::web;
-use jmap::id::JMAPIdSerialize;
+use jmap::types::jmap::JMAPId;
 use jmap_client::{
     client::Client,
     email::{self, Header, HeaderForm},
@@ -16,6 +16,8 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Email Get tests...");
+
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("src");
     test_dir.push("tests");
@@ -23,7 +25,7 @@ where
     test_dir.push("jmap_mail_get");
 
     let mailbox_id = client
-        .set_default_account_id(1u64.to_jmap_string())
+        .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("JMAP Get", None::<String>, Role::None)
         .await
         .unwrap()

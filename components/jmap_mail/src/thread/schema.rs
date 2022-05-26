@@ -1,4 +1,4 @@
-use jmap::id::jmap::JMAPId;
+use jmap::types::jmap::JMAPId;
 use serde::{Deserialize, Serialize};
 use store::FieldId;
 

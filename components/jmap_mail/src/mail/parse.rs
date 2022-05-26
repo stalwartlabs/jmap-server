@@ -6,7 +6,7 @@ use super::{
 use crate::mail::{HeaderName, MessageOutline, MimeHeaders, MimePart, MimePartType};
 use jmap::{
     error::method::MethodError,
-    id::{blob::JMAPBlob, jmap::JMAPId},
+    types::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::{blob::JMAPBlobStore, get::GetObject},
 };
 use mail_parser::{

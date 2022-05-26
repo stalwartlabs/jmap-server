@@ -79,9 +79,6 @@ where
                                 response.created_ids.extend(created_ids);
                             }
 
-                            // Add response
-                            response.push_response(call_id.clone(), method_response);
-
                             next_call
                         }
                         method::Changes::Subscription {
@@ -105,6 +102,9 @@ where
                         }
                         method::Changes::None => None,
                     };
+
+                    // Add response
+                    response.push_response(call_id.clone(), method_response);
 
                     // Process next call
                     if let Some(next_call_method) = next_call_method {

@@ -1,10 +1,9 @@
 use actix_web::{http::StatusCode, web, HttpResponse};
-use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::blob::JMAPBlobStore;
+use jmap::types::jmap::JMAPId;
 
-use jmap::{error::problem_details::ProblemDetails, id::blob::JMAPBlob};
+use jmap::{error::problem_details::ProblemDetails, types::blob::JMAPBlob};
 use jmap_mail::mail::parse::get_message_part;
-use store::core::JMAPIdPrefix;
 use store::{tracing::error, Store};
 
 use crate::JMAPServer;

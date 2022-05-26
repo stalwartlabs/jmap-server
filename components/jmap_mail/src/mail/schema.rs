@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
-    id::{blob::JMAPBlob, jmap::JMAPId},
     request::{MaybeIdReference, ResultReference},
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
@@ -18,7 +18,7 @@ use store::{
 
 use super::{HeaderName, MessageField};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct Email {
     pub properties: HashMap<Property, Value>,
 }
@@ -29,7 +29,7 @@ impl Email {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EmailBodyPart {
     pub properties: HashMap<BodyProperty, Value>,
 }
@@ -50,7 +50,7 @@ impl EmailBodyPart {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct EmailBodyValue {
     #[serde(rename = "value")]
     pub value: String,
@@ -458,7 +458,7 @@ impl Display for HeaderForm {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Value {
     Id {
         value: JMAPId,
@@ -689,89 +689,29 @@ impl TryFrom<&str> for Property {
     }
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
-#[serde(untagged)]
+#[derive(Clone, Debug)]
 pub enum Filter {
-    InMailbox {
-        #[serde(rename = "inMailbox")]
-        value: JMAPId,
-    },
-    InMailboxOtherThan {
-        #[serde(rename = "inMailboxOtherThan")]
-        value: Vec<JMAPId>,
-    },
-    Before {
-        #[serde(rename = "before")]
-        value: DateTime<Utc>,
-    },
-    After {
-        #[serde(rename = "after")]
-        value: DateTime<Utc>,
-    },
-    MinSize {
-        #[serde(rename = "minSize")]
-        value: u32,
-    },
-    MaxSize {
-        #[serde(rename = "maxSize")]
-        value: u32,
-    },
-    AllInThreadHaveKeyword {
-        #[serde(rename = "allInThreadHaveKeyword")]
-        value: Keyword,
-    },
-    SomeInThreadHaveKeyword {
-        #[serde(rename = "someInThreadHaveKeyword")]
-        value: Keyword,
-    },
-    NoneInThreadHaveKeyword {
-        #[serde(rename = "noneInThreadHaveKeyword")]
-        value: Keyword,
-    },
-    HasKeyword {
-        #[serde(rename = "hasKeyword")]
-        value: Keyword,
-    },
-    NotKeyword {
-        #[serde(rename = "notKeyword")]
-        value: Keyword,
-    },
-    HasAttachment {
-        #[serde(rename = "hasAttachment")]
-        value: bool,
-    },
-    Text {
-        #[serde(rename = "text")]
-        value: String,
-    },
-    From {
-        #[serde(rename = "from")]
-        value: String,
-    },
-    To {
-        #[serde(rename = "to")]
-        value: String,
-    },
-    Cc {
-        #[serde(rename = "cc")]
-        value: String,
-    },
-    Bcc {
-        #[serde(rename = "bcc")]
-        value: String,
-    },
-    Subject {
-        #[serde(rename = "subject")]
-        value: String,
-    },
-    Body {
-        #[serde(rename = "body")]
-        value: String,
-    },
-    Header {
-        #[serde(rename = "header")]
-        value: Vec<String>,
-    },
+    InMailbox { value: JMAPId },
+    InMailboxOtherThan { value: Vec<JMAPId> },
+    Before { value: DateTime<Utc> },
+    After { value: DateTime<Utc> },
+    MinSize { value: u32 },
+    MaxSize { value: u32 },
+    AllInThreadHaveKeyword { value: Keyword },
+    SomeInThreadHaveKeyword { value: Keyword },
+    NoneInThreadHaveKeyword { value: Keyword },
+    HasKeyword { value: Keyword },
+    NotKeyword { value: Keyword },
+    HasAttachment { value: bool },
+    Text { value: String },
+    From { value: String },
+    To { value: String },
+    Cc { value: String },
+    Bcc { value: String },
+    Subject { value: String },
+    Body { value: String },
+    Header { value: Vec<String> },
+    Unsupported { value: String },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

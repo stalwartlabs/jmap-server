@@ -1,4 +1,4 @@
-use jmap::{id::jmap::JMAPId, jmap_store::Object};
+use jmap::{types::jmap::JMAPId, jmap_store::Object};
 use store::core::collection::Collection;
 
 use self::schema::{Property, Thread};

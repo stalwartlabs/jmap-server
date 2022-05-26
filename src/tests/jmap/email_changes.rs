@@ -1,12 +1,13 @@
 use actix_web::web;
-use jmap::id::JMAPIdSerialize;
+
+use jmap::types::jmap::JMAPId;
 use jmap_client::client::Client;
 use store::Store;
 
 use std::collections::HashSet;
 
-use jmap::id::state::JMAPState;
-use store::{core::collection::Collection, write::batch::WriteBatch, JMAPId};
+use jmap::types::state::JMAPState;
+use store::{core::collection::Collection, write::batch::WriteBatch};
 
 use crate::tests::store::log::assert_compaction;
 
@@ -16,6 +17,8 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Email Changes tests...");
+
     let mut states = vec![JMAPState::Initial];
 
     for (changes, expected_changelog) in [
@@ -146,10 +149,7 @@ where
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
-            let changes = client
-                .email_changes(state.to_jmap_string(), 0)
-                .await
-                .unwrap();
+            let changes = client.email_changes(state.to_string(), 0).await.unwrap();
 
             assert_eq!(
                 expected_changelog[test_num],
@@ -158,8 +158,8 @@ where
                     .map(|list| {
                         let mut list = list
                             .iter()
-                            .map(|i| JMAPId::from_jmap_string(i).unwrap())
-                            .collect::<Vec<_>>();
+                            .map(|i| JMAPId::parse(i).unwrap().into())
+                            .collect::<Vec<u64>>();
                         list.sort_unstable();
                         list
                     })
@@ -170,7 +170,7 @@ where
             );
 
             if let JMAPState::Initial = state {
-                new_state = JMAPState::from_jmap_string(changes.new_state()).unwrap();
+                new_state = JMAPState::parse(changes.new_state()).unwrap();
             }
 
             for max_changes in 1..=8 {
@@ -191,7 +191,7 @@ where
 
                 for _ in 0..100 {
                     let changes = client
-                        .email_changes(int_state.to_jmap_string(), max_changes)
+                        .email_changes(int_state.to_string(), max_changes)
                         .await
                         .unwrap();
 
@@ -209,30 +209,30 @@ where
 
                     changes.created().iter().for_each(|id| {
                         assert!(
-                            insertions.remove(&JMAPId::from_jmap_string(id).unwrap()),
+                            insertions.remove(&JMAPId::parse(id).unwrap()),
                             "{:?} != {}",
                             insertions,
-                            JMAPId::from_jmap_string(id).unwrap()
+                            JMAPId::parse(id).unwrap()
                         );
                     });
                     changes.updated().iter().for_each(|id| {
                         assert!(
-                            updates.remove(&JMAPId::from_jmap_string(id).unwrap()),
+                            updates.remove(&JMAPId::parse(id).unwrap()),
                             "{:?} != {}",
                             updates,
-                            JMAPId::from_jmap_string(id).unwrap()
+                            JMAPId::parse(id).unwrap()
                         );
                     });
                     changes.destroyed().iter().for_each(|id| {
                         assert!(
-                            deletions.remove(&JMAPId::from_jmap_string(id).unwrap()),
+                            deletions.remove(&JMAPId::parse(id).unwrap()),
                             "{:?} != {}",
                             deletions,
-                            JMAPId::from_jmap_string(id).unwrap()
+                            JMAPId::parse(id).unwrap()
                         );
                     });
 
-                    int_state = JMAPState::from_jmap_string(changes.new_state()).unwrap();
+                    int_state = JMAPState::parse(changes.new_state()).unwrap();
 
                     if !changes.has_more_changes() {
                         break;
@@ -251,7 +251,7 @@ where
     assert_compaction(&server.store, 1);
 
     let changes = client
-        .email_changes(JMAPState::Initial.to_jmap_string(), 0)
+        .email_changes(JMAPState::Initial.to_string(), 0)
         .await
         .unwrap();
 
@@ -259,8 +259,8 @@ where
         changes
             .created()
             .iter()
-            .map(|i| JMAPId::from_jmap_string(i).unwrap())
-            .collect::<Vec<_>>(),
+            .map(|i| JMAPId::parse(i).unwrap().into())
+            .collect::<Vec<u64>>(),
         vec![2, 3, 11, 12]
     );
     assert_eq!(changes.updated(), Vec::<String>::new());
@@ -269,9 +269,9 @@ where
 
 #[derive(Debug, Clone, Copy)]
 pub enum LogAction {
-    Insert(JMAPId),
-    Update(JMAPId),
-    Delete(JMAPId),
-    UpdateChild(JMAPId),
-    Move(JMAPId, JMAPId),
+    Insert(u64),
+    Update(u64),
+    Delete(u64),
+    UpdateChild(u64),
+    Move(u64, u64),
 }

@@ -4,7 +4,8 @@ use std::{
 };
 
 use actix_web::web;
-use jmap::id::JMAPIdSerialize;
+
+use jmap::types::jmap::JMAPId;
 use jmap_client::{
     client::Client,
     core::query::{Comparator, Filter},
@@ -12,12 +13,12 @@ use jmap_client::{
 };
 use jmap_mail::mail_parser::RfcHeader;
 use store::{
-    core::{collection::Collection, JMAPIdPrefix},
+    core::collection::Collection,
     serialize::{
         bitmap::{clear_bits, set_bits},
         key::BitmapKey,
     },
-    ColumnFamily, JMAPId, Store,
+    ColumnFamily, Store,
 };
 
 use crate::{
@@ -36,6 +37,8 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Email Query tests...");
+
     // Add some "virtual" mailbox ids so create doesn't fail
     server
         .store
@@ -43,7 +46,7 @@ where
         .merge(
             ColumnFamily::Bitmaps,
             &BitmapKey::serialize_document_ids(
-                JMAPId::from_jmap_string(client.default_account_id())
+                JMAPId::parse(client.default_account_id())
                     .unwrap()
                     .get_document_id(),
                 Collection::Mailbox,
@@ -63,7 +66,7 @@ where
         .merge(
             ColumnFamily::Bitmaps,
             &BitmapKey::serialize_document_ids(
-                JMAPId::from_jmap_string(client.default_account_id())
+                JMAPId::parse(client.default_account_id())
                     .unwrap()
                     .get_document_id(),
                 Collection::Mailbox,
@@ -75,7 +78,7 @@ where
     for thread_id in 0..MAX_THREADS {
         assert!(
             client
-                .thread_get(&(thread_id as JMAPId).to_jmap_string())
+                .thread_get(&JMAPId::new(thread_id as u64).to_string())
                 .await
                 .unwrap()
                 .is_some(),
@@ -86,7 +89,7 @@ where
 
     assert!(
         client
-            .thread_get(&(MAX_THREADS as JMAPId).to_jmap_string())
+            .thread_get(&JMAPId::new(MAX_THREADS as u64).to_string())
             .await
             .unwrap()
             .is_none(),
@@ -131,7 +134,7 @@ pub async fn query(client: &mut Client) {
         ),
         (
             Filter::and(vec![
-                (email::query::Filter::in_mailbox(1768u64.to_jmap_string())),
+                (email::query::Filter::in_mailbox(JMAPId::new(1768u64).to_string())),
                 (email::query::Filter::cc("canvas")),
             ]),
             vec![email::query::Comparator::from()],
@@ -141,13 +144,13 @@ pub async fn query(client: &mut Client) {
             Filter::and(vec![
                 (email::query::Filter::subject("study")),
                 (email::query::Filter::in_mailbox_other_than(vec![
-                    1991.to_jmap_string(),
-                    1870.to_jmap_string(),
-                    2011.to_jmap_string(),
-                    1951.to_jmap_string(),
-                    1902.to_jmap_string(),
-                    1808.to_jmap_string(),
-                    1963.to_jmap_string(),
+                    JMAPId::new(1991).to_string(),
+                    JMAPId::new(1870).to_string(),
+                    JMAPId::new(2011).to_string(),
+                    JMAPId::new(1951).to_string(),
+                    JMAPId::new(1902).to_string(),
+                    JMAPId::new(1808).to_string(),
+                    JMAPId::new(1963).to_string(),
                 ])),
             ]),
             vec![email::query::Comparator::subject()],
@@ -735,8 +738,8 @@ pub async fn create(client: &mut Client) {
                 )
                 .into_bytes(),
                 [
-                    (values_int["year"] as JMAPId).to_jmap_string(),
-                    ((values_int["acquisitionYear"] + 1000) as JMAPId).to_jmap_string(),
+                    JMAPId::new(values_int["year"] as u64).to_string(),
+                    JMAPId::new((values_int["acquisitionYear"] + 1000) as u64).to_string(),
                 ],
                 [
                     values_str["medium"].to_string(),

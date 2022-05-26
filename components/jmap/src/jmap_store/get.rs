@@ -2,8 +2,11 @@ use store::{roaring::RoaringBitmap, AccountId, DocumentId, JMAPStore, Store};
 
 use crate::{
     error::method::MethodError,
-    id::jmap::JMAPId,
-    request::get::{GetRequest, GetResponse},
+    request::{
+        get::{GetRequest, GetResponse},
+        ArgumentSerializer,
+    },
+    types::jmap::JMAPId,
 };
 
 use super::{changes::JMAPChanges, Object};
@@ -24,7 +27,7 @@ where
 }
 
 pub trait GetObject: Object {
-    type GetArguments;
+    type GetArguments: Default + ArgumentSerializer;
 
     fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>>;
     fn default_properties() -> Vec<Self::Property>;
@@ -126,43 +129,3 @@ where
         Ok(self.response)
     }
 }
-
-/*
-
-impl GetObject for XYZ {
-    type GetArguments = GetArguments;
-
-    fn default_properties() -> Vec<Self::Property> {
-        vec![
-        ]
-    }
-}
-
-pub trait JMAPGetXYZ<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn xyz_get(&self, request: GetRequest<XYZ>) -> jmap::Result<GetResponse<XYZ>>;
-}
-
-impl<T> JMAPGetXYZ<T> for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn xyz_get(&self, request: GetRequest<XYZ>) -> jmap::Result<GetResponse<XYZ>> {
-        let account_id = request.account_id.as_ref().unwrap().get_document_id();
-        let mut helper = GetHelper::new(
-            self,
-            request,
-            None,
-        )?;
-        let response = helper.get(|item, properties| {
-            //coco
-            Ok(Some(XYZ::default()))
-        })?;
-
-        Ok(response)
-    }
-}
-
-*/

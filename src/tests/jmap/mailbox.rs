@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use actix_web::web;
-use jmap::id::{state::JMAPState, JMAPIdSerialize};
+use jmap::types::{jmap::JMAPId, state::JMAPState};
 use jmap_client::{
     client::Client,
     core::{
@@ -20,10 +20,10 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Mailbox tests...");
+
     // Create test mailboxes
     let id_map = create_test_mailboxes(client).await;
-
-    println!("{:?}", id_map);
 
     // Sort by name
     assert_eq!(
@@ -262,7 +262,7 @@ where
     request
         .set_mailbox()
         .update(&id_map["1"])
-        .parent_id(u64::MAX.to_jmap_string().into());
+        .parent_id(JMAPId::new(u64::MAX).to_string().into());
     assert!(matches!(
         request
             .send_set_mailbox()
@@ -277,7 +277,7 @@ where
 
     // Obtain state
     let state = client
-        .mailbox_changes(JMAPState::Initial.to_jmap_string(), 0)
+        .mailbox_changes(JMAPState::Initial.to_string(), 0)
         .await
         .unwrap()
         .new_state()

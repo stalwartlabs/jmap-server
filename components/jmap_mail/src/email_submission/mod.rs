@@ -6,7 +6,7 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use jmap::{id::jmap::JMAPId, jmap_store::Object};
+use jmap::{types::jmap::JMAPId, jmap_store::Object};
 use store::{core::collection::Collection, write::options::Options};
 
 use self::schema::{EmailSubmission, Property, Value};

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use jmap::{
-    id::{jmap::JMAPId, state::JMAPState},
-    protocol::type_state::TypeState,
+    types::type_state::TypeState,
+    types::{jmap::JMAPId, state::JMAPState},
 };
 use store::{core::bitmap::Bitmap, log::changes::ChangeId, AccountId, DocumentId};
 use tokio::sync::mpsc;

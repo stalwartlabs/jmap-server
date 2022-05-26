@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{id::jmap::JMAPId, jmap_store::orm, request::ResultReference};
+use jmap::{jmap_store::orm, request::ResultReference, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use store::FieldId;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct Mailbox {
     pub properties: HashMap<Property, Value>,
 }
@@ -175,29 +175,14 @@ impl Property {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
-#[serde(untagged)]
+#[derive(Clone, Debug)]
 pub enum Filter {
-    ParentId {
-        #[serde(rename = "parentId")]
-        value: Option<JMAPId>,
-    },
-    Name {
-        #[serde(rename = "name")]
-        value: String,
-    },
-    Role {
-        #[serde(rename = "role")]
-        value: Option<String>,
-    },
-    HasAnyRole {
-        #[serde(rename = "hasAnyRole")]
-        value: bool,
-    },
-    IsSubscribed {
-        #[serde(rename = "isSubscribed")]
-        value: bool,
-    },
+    ParentId { value: Option<JMAPId> },
+    Name { value: String },
+    Role { value: Option<String> },
+    HasAnyRole { value: bool },
+    IsSubscribed { value: bool },
+    Unsupported { value: String },
 }
 
 #[derive(Deserialize, Debug, Clone)]

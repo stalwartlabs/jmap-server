@@ -1,10 +1,10 @@
 use crate::mail::import::JMAPMailImport;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::id::blob::JMAPBlob;
-use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
+use jmap::types::blob::JMAPBlob;
+use jmap::types::jmap::JMAPId;
 
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::{MaybeIdReference, ResultReference};
@@ -198,8 +198,10 @@ where
                         | Property::ReplyTo,
                         Value::Addresses { value },
                     ) => {
-                        builder = builder
-                            .header(property.as_rfc_header(), Address::from(value.as_slice()));
+                        builder = builder.header(
+                            property.as_rfc_header(),
+                            Address::new_list(value.iter().map(|x| x.into()).collect()),
+                        );
                     }
                     (Property::Subject, Value::Text { value }) => {
                         builder = builder.subject(value);
@@ -209,7 +211,7 @@ where
                     }
                     (Property::TextBody, Value::BodyPartList { value }) => {
                         if let Some(body_part) = value.first() {
-                            builder.html_body = body_part
+                            builder.text_body = body_part
                                 .parse(self, account_id, body_values, "text/plain".into())?
                                 .0
                                 .into();
@@ -306,23 +308,31 @@ where
                             );
                         }
                         (HeaderForm::Addresses, Value::Addresses { value }) => {
-                            builder = builder
-                                .header(header.header.as_str(), Address::from(value.as_slice()));
+                            builder = builder.header(
+                                header.header.as_str(),
+                                Address::new_list(value.iter().map(|x| x.into()).collect()),
+                            );
                         }
                         (HeaderForm::Addresses, Value::AddressesList { value }) => {
                             builder = builder.headers(
                                 header.header.as_str(),
-                                value.iter().map(|v| Address::from(v.as_slice())),
+                                value.iter().map(|v| {
+                                    Address::new_list(v.iter().map(|x| x.into()).collect())
+                                }),
                             );
                         }
                         (HeaderForm::GroupedAddresses, Value::GroupedAddresses { value }) => {
-                            builder = builder
-                                .header(header.header.as_str(), Address::from(value.as_slice()));
+                            builder = builder.header(
+                                header.header.as_str(),
+                                Address::new_list(value.iter().map(|x| x.into()).collect()),
+                            );
                         }
                         (HeaderForm::GroupedAddresses, Value::GroupedAddressesList { value }) => {
                             builder = builder.headers(
                                 header.header.as_str(),
-                                value.iter().map(|v| Address::from(v.as_slice())),
+                                value.iter().map(|v| {
+                                    Address::new_list(v.iter().map(|x| x.into()).collect())
+                                }),
                             );
                         }
                         _ => (),

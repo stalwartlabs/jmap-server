@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::id::jmap::JMAPId;
 use crate::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use crate::jmap_store::orm::JMAPOrm;
 use crate::request::get::{GetRequest, GetResponse};
+use crate::types::jmap::JMAPId;
 
 use store::core::error::StoreError;
 use store::JMAPStore;

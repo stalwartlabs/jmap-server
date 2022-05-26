@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use jmap::from_timestamp;
 use mail_parser::{
     parsers::{
@@ -86,12 +88,34 @@ impl From<super::EmailAddress> for mail_builder::headers::address::Address<'_> {
     }
 }
 
+impl<'x> From<&'x super::EmailAddress> for mail_builder::headers::address::Address<'x> {
+    fn from(addr: &'x super::EmailAddress) -> Self {
+        mail_builder::headers::address::Address::Address(
+            mail_builder::headers::address::EmailAddress {
+                name: addr.name.as_ref().map(|name| name.into()),
+                email: Cow::from(&addr.email),
+            },
+        )
+    }
+}
+
 impl From<super::EmailAddressGroup> for mail_builder::headers::address::Address<'_> {
     fn from(addr: super::EmailAddressGroup) -> Self {
         mail_builder::headers::address::Address::Group(
             mail_builder::headers::address::GroupedAddresses {
                 name: addr.name.map(|name| name.into()),
                 addresses: addr.addresses.into_iter().map(Into::into).collect(),
+            },
+        )
+    }
+}
+
+impl<'x> From<&'x super::EmailAddressGroup> for mail_builder::headers::address::Address<'x> {
+    fn from(addr: &'x super::EmailAddressGroup) -> Self {
+        mail_builder::headers::address::Address::Group(
+            mail_builder::headers::address::GroupedAddresses {
+                name: addr.name.as_ref().map(|name| name.into()),
+                addresses: addr.addresses.iter().map(Into::into).collect(),
             },
         )
     }

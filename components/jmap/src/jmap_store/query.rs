@@ -8,8 +8,8 @@ use store::{
 
 use crate::{
     error::method::MethodError,
-    id::jmap::JMAPId,
     request::query::{self, QueryRequest, QueryResponse},
+    types::jmap::JMAPId,
 };
 
 use super::{changes::JMAPChanges, Object};

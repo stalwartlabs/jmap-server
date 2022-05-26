@@ -1,12 +1,12 @@
 use store::{JMAPStore, Store};
 
 use crate::{
-    id::jmap::JMAPId,
     request::{
         changes::{ChangesRequest, ChangesResponse},
         query::{QueryRequest, QueryResponse},
         query_changes::{AddedItem, QueryChangesRequest, QueryChangesResponse},
     },
+    types::jmap::JMAPId,
 };
 
 use super::{

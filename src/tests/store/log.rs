@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use jmap::{
-    id::{state::JMAPState, JMAPIdSerialize},
-    jmap_store::changes::JMAPChanges,
-    protocol::json::JSONValue,
     request::changes::ChangesRequest,
+    types::{jmap::JMAPId, state::JMAPState},
 };
+use jmap_mail::mail::changes::JMAPMailChanges;
 use store::{
     core::{collection::Collection, error::StoreError},
     log::{
@@ -24,7 +23,7 @@ where
     const NUM_ACCOUNTS: usize = 100;
 
     let mut expected_changed_accounts = HashSet::new();
-    let mut expected_inserted_ids = vec![Vec::new(); NUM_ACCOUNTS];
+    let mut expected_inserted_ids: Vec<Vec<JMAPId>> = vec![Vec::new(); NUM_ACCOUNTS];
 
     for run in 0u64..10u64 {
         //println!("Run {}", run);
@@ -41,7 +40,7 @@ where
             mail_store.write(batch).unwrap();
 
             expected_changed_accounts.insert(account_id);
-            expected_inserted_id.push((run + 1).to_jmap_string().into());
+            expected_inserted_id.push(JMAPId::new(run + 1));
         }
         assert_compaction(&mail_store, NUM_ACCOUNTS);
     }
@@ -74,26 +73,17 @@ where
     }
 
     for (num, expected_inserted_id) in expected_inserted_ids.into_iter().enumerate() {
-        let account_id = (num * 3) as AccountId;
-        let changes: JSONValue = mail_store
-            .changes::<ChangesMail>(ChangesRequest {
-                account_id,
+        let changes = mail_store
+            .mail_changes(ChangesRequest {
+                account_id: JMAPId::new((num * 3) as u64),
                 since_state: JMAPState::Initial,
-                max_changes: 0,
-                arguments: HashMap::new(),
+                max_changes: None,
             })
-            .unwrap()
-            .into();
+            .unwrap();
 
-        assert_eq!(
-            changes.eval("/created").unwrap(),
-            JSONValue::Array(expected_inserted_id),
-        );
-        assert_eq!(changes.eval("/updated").unwrap(), JSONValue::Array(vec![]));
-        assert_eq!(
-            changes.eval("/destroyed").unwrap(),
-            JSONValue::Array(vec![])
-        );
+        assert_eq!(changes.created, expected_inserted_id);
+        assert_eq!(changes.updated, vec![]);
+        assert_eq!(changes.destroyed, vec![]);
     }
 }
 

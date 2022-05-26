@@ -18,6 +18,7 @@ pub mod email_thread_merge;
 pub mod event_source;
 pub mod mailbox;
 pub mod push_subscription;
+pub mod references;
 pub mod websocket;
 
 #[actix_web::test]
@@ -37,13 +38,14 @@ async fn jmap_tests() {
         start_jmap_server(_server, settings).await.unwrap();
     });
 
+    // Wait for server to start
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Create client
     let mut client = Client::connect(&session_url).await.unwrap();
 
     // Run tests
-    /*email_changes::test(server.clone(), &mut client).await;
+    email_changes::test(server.clone(), &mut client).await;
     email_query_changes::test(server.clone(), &mut client).await;
     email_thread::test(server.clone(), &mut client).await;
     email_thread_merge::test(server.clone(), &mut client).await;
@@ -51,9 +53,9 @@ async fn jmap_tests() {
     email_parse::test(server.clone(), &mut client).await;
     email_set::test(server.clone(), &mut client).await;
     email_query::test(server.clone(), &mut client).await;
-    mailbox::test(server.clone(), &mut client).await;*/
-    //event_source::test(server.clone(), &mut client).await;
-    //push_subscription::test(server.clone(), &mut client).await;
+    mailbox::test(server.clone(), &mut client).await;
+    event_source::test(server.clone(), &mut client).await;
+    push_subscription::test(server.clone(), &mut client).await;
     websocket::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);

@@ -1,12 +1,12 @@
 use crate::mail::set::JMAPSetMail;
 use crate::mail::MessageField;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::ResultReference;
+use jmap::types::jmap::JMAPId;
 
 use store::core::collection::Collection;
 use store::core::document::Document;
@@ -24,10 +24,8 @@ use super::schema::{Mailbox, Property, Value};
 
 //TODO mailbox id 0 is inbox and cannot be deleted
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SetArguments {
-    #[serde(rename = "onDestroyRemoveEmails")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub on_destroy_remove_emails: Option<bool>,
 }
 
@@ -205,6 +203,75 @@ where
         mailbox_id: Option<DocumentId>,
         current_fields: Option<&TinyORM<Mailbox>>,
     ) -> jmap::error::set::Result<Self, Property> {
+        //TODO implement isSubscribed
+        // Set properties
+        for (property, value) in mailbox.properties {
+            let value = match (property, value) {
+                (Property::Name, Value::Text { value }) => {
+                    if value.len() < 255 {
+                        Value::Text { value }
+                    } else {
+                        return Err(SetError::invalid_property(
+                            property,
+                            "Mailbox name is too long.".to_string(),
+                        ));
+                    }
+                }
+                (Property::ParentId, Value::Id { value }) => {
+                    let parent_id = value.get_document_id();
+                    if helper.will_destroy.contains(&value) {
+                        return Err(SetError::new(
+                            SetErrorType::WillDestroy,
+                            "Parent ID will be destroyed.",
+                        ));
+                    } else if !helper.document_ids.contains(parent_id) {
+                        return Err(SetError::new(
+                            SetErrorType::InvalidProperties,
+                            "Parent ID does not exist.",
+                        ));
+                    }
+
+                    Value::Id {
+                        value: (parent_id + 1).into(),
+                    }
+                }
+                (Property::ParentId, Value::IdReference { value }) => Value::Id {
+                    value: (u64::from(helper.get_id_reference(Property::ParentId, &value)?) + 1)
+                        .into(),
+                },
+                (Property::ParentId, Value::Null) => Value::Id { value: 0u64.into() },
+                (Property::Role, Value::Text { value }) => {
+                    let role = value.to_lowercase();
+                    if [
+                        "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
+                    ]
+                    .contains(&role.as_str())
+                    {
+                        self.tag(property, Tag::Default);
+                        Value::Text { value: role }
+                    } else {
+                        return Err(SetError::invalid_property(
+                            property,
+                            "Invalid role.".to_string(),
+                        ));
+                    }
+                }
+                (Property::Role, Value::Null) => {
+                    self.untag(&property, &Tag::Default);
+                    Value::Null
+                }
+                (Property::SortOrder, value @ Value::Number { .. }) => value,
+                (_, _) => {
+                    return Err(SetError::invalid_property(
+                        property,
+                        "Unexpected value.".to_string(),
+                    ));
+                }
+            };
+
+            self.set(property, value);
+        }
+
         if let (Some(mailbox_id), Some(mut mailbox_parent_id)) = (
             mailbox_id,
             self.get(&Property::ParentId).and_then(|v| v.as_id()),
@@ -322,74 +389,6 @@ where
                     }
                 }
             }
-        }
-
-        //TODO implement isSubscribed
-        for (property, value) in mailbox.properties {
-            let value = match (property, value) {
-                (Property::Name, Value::Text { value }) => {
-                    if value.len() < 255 {
-                        Value::Text { value }
-                    } else {
-                        return Err(SetError::invalid_property(
-                            property,
-                            "Mailbox name is too long.".to_string(),
-                        ));
-                    }
-                }
-                (Property::ParentId, Value::Id { value }) => {
-                    let parent_id = value.get_document_id();
-                    if helper.will_destroy.contains(&value) {
-                        return Err(SetError::new(
-                            SetErrorType::WillDestroy,
-                            "Parent ID will be destroyed.",
-                        ));
-                    } else if !helper.document_ids.contains(parent_id) {
-                        return Err(SetError::new(
-                            SetErrorType::InvalidProperties,
-                            "Parent ID does not exist.",
-                        ));
-                    }
-
-                    Value::Id {
-                        value: (parent_id + 1).into(),
-                    }
-                }
-                (Property::ParentId, Value::IdReference { value }) => Value::Id {
-                    value: (u64::from(helper.get_id_reference(Property::ParentId, &value)?) + 1)
-                        .into(),
-                },
-                (Property::ParentId, Value::Null) => Value::Id { value: 0u64.into() },
-                (Property::Role, Value::Text { value }) => {
-                    let role = value.to_lowercase();
-                    if [
-                        "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
-                    ]
-                    .contains(&role.as_str())
-                    {
-                        self.tag(property, Tag::Default);
-                        Value::Text { value: role }
-                    } else {
-                        return Err(SetError::invalid_property(
-                            property,
-                            "Invalid role.".to_string(),
-                        ));
-                    }
-                }
-                (Property::Role, Value::Null) => {
-                    self.untag(&property, &Tag::Default);
-                    Value::Null
-                }
-                (Property::SortOrder, value @ Value::Number { .. }) => value,
-                (_, _) => {
-                    return Err(SetError::invalid_property(
-                        property,
-                        "Unexpected value.".to_string(),
-                    ));
-                }
-            };
-
-            self.set(property, value);
         }
 
         Ok(self)

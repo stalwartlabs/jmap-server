@@ -7,6 +7,7 @@ use jmap::{
     base64,
     jmap_store::orm::JMAPOrm,
     push_subscription::schema::{self, Property, Value},
+    types::jmap::JMAPId,
 };
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use store::{
@@ -136,7 +137,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                                             "\"pushSubscriptionId\":\"{}\",",
                                                             "\"verificationCode\":\"{}\"}}"
                                                         ),
-                                                        jmap::id::jmap::JMAPId::from(id),
+                                                        JMAPId::from(id),
                                                         code
                                                     ),
                                                     keys,
@@ -257,6 +258,8 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                 }
                                 remove_ids.push(*retry_id);
                             }
+                        } else {
+                            remove_ids.push(*retry_id);
                         }
                     }
 

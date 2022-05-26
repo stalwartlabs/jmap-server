@@ -1,4 +1,4 @@
-use jmap::protocol::type_state::TypeState;
+use jmap::types::type_state::TypeState;
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant, SystemTime},

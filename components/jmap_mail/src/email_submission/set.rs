@@ -7,9 +7,9 @@ use crate::mail::{MessageData, MessageField};
 
 use jmap::error::set::{SetError, SetErrorType};
 
-use jmap::id::jmap::JMAPId;
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::Object;
+use jmap::types::jmap::JMAPId;
 
 use jmap::jmap_store::set::SetHelper;
 use jmap::request::set::SetResponse;
@@ -28,11 +28,9 @@ use store::{JMAPStore, Store};
 
 use super::schema::{Address, EmailSubmission, Envelope, Property, Value};
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SetArguments {
-    #[serde(rename = "onSuccessUpdateEmail")]
     pub on_success_update_email: Option<HashMap<MaybeIdReference, Email>>,
-    #[serde(rename = "onSuccessDestroyEmail")]
     pub on_success_destroy_email: Option<Vec<MaybeIdReference>>,
 }
 

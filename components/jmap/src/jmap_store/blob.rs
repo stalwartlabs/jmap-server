@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use store::{AccountId, JMAPStore, Store};
 
-use crate::id::blob::JMAPBlob;
+use crate::types::blob::JMAPBlob;
 
 pub type InnerBlobFnc = fn(&[u8], u32) -> Option<Cow<[u8]>>;
 

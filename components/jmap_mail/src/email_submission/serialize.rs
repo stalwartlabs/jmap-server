@@ -1,9 +1,12 @@
 use std::{collections::HashMap, fmt};
 
-use jmap::request::MaybeIdReference;
+use jmap::request::{ArgumentSerializer, MaybeIdReference};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 
-use super::schema::{EmailSubmission, Envelope, Property, Value};
+use super::{
+    schema::{EmailSubmission, Envelope, Filter, Property, Value},
+    set::SetArguments,
+};
 
 // Property de/serialization
 impl Serialize for Property {
@@ -146,5 +149,75 @@ impl<'de> Deserialize<'de> for EmailSubmission {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_map(EmailSubmissionVisitor)
+    }
+}
+
+// Argument serializer
+impl ArgumentSerializer for SetArguments {
+    fn deserialize<'x: 'y, 'y>(
+        &'y mut self,
+        property: &'x str,
+        value: &mut impl serde::de::MapAccess<'x>,
+    ) -> Result<(), String> {
+        if property == "onSuccessUpdateEmail" {
+            self.on_success_update_email = value.next_value().map_err(|err| err.to_string())?;
+        } else if property == "onSuccessDestroyEmail" {
+            self.on_success_destroy_email = value.next_value().map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+// Filter deserializer
+struct FilterVisitor;
+
+impl<'de> serde::de::Visitor<'de> for FilterVisitor {
+    type Value = Filter;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP e-mail object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        Ok(
+            match map
+                .next_key::<&str>()?
+                .ok_or_else(|| serde::de::Error::custom("Missing filter property"))?
+            {
+                "identityIds" => Filter::IdentityIds {
+                    value: map.next_value()?,
+                },
+                "emailIds" => Filter::EmailIds {
+                    value: map.next_value()?,
+                },
+                "threadIds" => Filter::ThreadIds {
+                    value: map.next_value()?,
+                },
+                "undoStatus" => Filter::UndoStatus {
+                    value: map.next_value()?,
+                },
+                "before" => Filter::Before {
+                    value: map.next_value()?,
+                },
+                "after" => Filter::After {
+                    value: map.next_value()?,
+                },
+                unsupported => Filter::Unsupported {
+                    value: unsupported.to_string(),
+                },
+            },
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for Filter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(FilterVisitor)
     }
 }

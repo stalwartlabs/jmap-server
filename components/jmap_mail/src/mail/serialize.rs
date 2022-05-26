@@ -1,16 +1,19 @@
 use std::{collections::HashMap, fmt};
 
 use jmap::{
-    id::{blob::JMAPBlob, jmap::JMAPId},
-    protocol::json_pointer::JSONPointer,
-    request::MaybeIdReference,
+    request::{ArgumentSerializer, MaybeIdReference},
+    types::json_pointer::JSONPointer,
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
 
-use super::schema::{
-    BodyProperty, Email, EmailAddress, EmailBodyPart, EmailHeader, HeaderForm, HeaderProperty,
-    Keyword, Property, Value,
+use super::{
+    get::GetArguments,
+    schema::{
+        BodyProperty, Email, EmailAddress, EmailBodyPart, EmailHeader, Filter, HeaderForm,
+        HeaderProperty, Keyword, Property, Value,
+    },
 };
 
 // Email de/serialization
@@ -56,7 +59,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
     type Value = Email;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail object")
+        formatter.write_str("a valid JMAP Email object")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -308,7 +311,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                         }
                                         Property::Keywords => {
                                             properties
-                                                .entry(Property::MailboxIds)
+                                                .entry(Property::Keywords)
                                                 .or_insert_with(|| Value::Keywords {
                                                     value: HashMap::new(),
                                                     set: false,
@@ -411,8 +414,8 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
                     }
                 }
                 "name" => {
-                    if let Some(value) = map.next_value::<Option<Vec<EmailHeader>>>()? {
-                        properties.insert(BodyProperty::Headers, Value::Headers { value });
+                    if let Some(value) = map.next_value::<Option<String>>()? {
+                        properties.insert(BodyProperty::Name, Value::Text { value });
                     }
                 }
                 "type" => {
@@ -448,6 +451,11 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
                 "subParts" => {
                     if let Some(value) = map.next_value::<Option<Vec<EmailBodyPart>>>()? {
                         properties.insert(BodyProperty::Subparts, Value::BodyPartList { value });
+                    }
+                }
+                "headers" => {
+                    if let Some(value) = map.next_value::<Option<Vec<EmailHeader>>>()? {
+                        properties.insert(BodyProperty::Headers, Value::Headers { value });
                     }
                 }
                 _ if key.starts_with("header:") => {
@@ -666,5 +674,130 @@ impl<'de> Deserialize<'de> for Keyword {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_str(KeywordVisitor)
+    }
+}
+
+// Argument serializers
+impl ArgumentSerializer for GetArguments {
+    fn deserialize<'x: 'y, 'y>(
+        &'y mut self,
+        property: &'x str,
+        value: &mut impl serde::de::MapAccess<'x>,
+    ) -> Result<(), String> {
+        match property {
+            "bodyProperties" => {
+                self.body_properties = value.next_value().map_err(|err| err.to_string())?;
+            }
+            "fetchTextBodyValues" => {
+                self.fetch_text_body_values = value.next_value().map_err(|err| err.to_string())?;
+            }
+            "fetchHTMLBodyValues" => {
+                self.fetch_html_body_values = value.next_value().map_err(|err| err.to_string())?;
+            }
+            "fetchAllBodyValues" => {
+                self.fetch_all_body_values = value.next_value().map_err(|err| err.to_string())?;
+            }
+            "maxBodyValueBytes" => {
+                self.max_body_value_bytes = value.next_value().map_err(|err| err.to_string())?;
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+}
+
+// Filter deserializer
+struct FilterVisitor;
+
+impl<'de> serde::de::Visitor<'de> for FilterVisitor {
+    type Value = Filter;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP e-mail object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        Ok(
+            match map
+                .next_key::<&str>()?
+                .ok_or_else(|| serde::de::Error::custom("Missing filter property"))?
+            {
+                "inMailbox" => Filter::InMailbox {
+                    value: map.next_value()?,
+                },
+                "inMailboxOtherThan" => Filter::InMailboxOtherThan {
+                    value: map.next_value()?,
+                },
+                "before" => Filter::Before {
+                    value: map.next_value()?,
+                },
+                "after" => Filter::After {
+                    value: map.next_value()?,
+                },
+                "minSize" => Filter::MinSize {
+                    value: map.next_value()?,
+                },
+                "maxSize" => Filter::MaxSize {
+                    value: map.next_value()?,
+                },
+                "allInThreadHaveKeyword" => Filter::AllInThreadHaveKeyword {
+                    value: map.next_value()?,
+                },
+                "someInThreadHaveKeyword" => Filter::SomeInThreadHaveKeyword {
+                    value: map.next_value()?,
+                },
+                "noneInThreadHaveKeyword" => Filter::NoneInThreadHaveKeyword {
+                    value: map.next_value()?,
+                },
+                "hasKeyword" => Filter::HasKeyword {
+                    value: map.next_value()?,
+                },
+                "notKeyword" => Filter::NotKeyword {
+                    value: map.next_value()?,
+                },
+                "hasAttachment" => Filter::HasAttachment {
+                    value: map.next_value()?,
+                },
+                "text" => Filter::Text {
+                    value: map.next_value()?,
+                },
+                "from" => Filter::From {
+                    value: map.next_value()?,
+                },
+                "to" => Filter::To {
+                    value: map.next_value()?,
+                },
+                "cc" => Filter::Cc {
+                    value: map.next_value()?,
+                },
+                "bcc" => Filter::Bcc {
+                    value: map.next_value()?,
+                },
+                "subject" => Filter::Subject {
+                    value: map.next_value()?,
+                },
+                "body" => Filter::Body {
+                    value: map.next_value()?,
+                },
+                "header" => Filter::Header {
+                    value: map.next_value()?,
+                },
+                unsupported => Filter::Unsupported {
+                    value: unsupported.to_string(),
+                },
+            },
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for Filter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(FilterVisitor)
     }
 }

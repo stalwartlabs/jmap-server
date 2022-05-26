@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
-    id::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::orm::{self},
     request::ResultReference,
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use serde::{Deserialize, Serialize};
 use store::{
@@ -204,33 +204,15 @@ impl TryFrom<&str> for Property {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
-#[serde(untagged)]
+#[derive(Clone, Debug)]
 pub enum Filter {
-    IdentityIds {
-        #[serde(rename = "identityIds")]
-        value: Vec<JMAPId>,
-    },
-    EmailIds {
-        #[serde(rename = "emailIds")]
-        value: Vec<JMAPId>,
-    },
-    ThreadIds {
-        #[serde(rename = "threadIds")]
-        value: Vec<JMAPId>,
-    },
-    UndoStatus {
-        #[serde(rename = "undoStatus")]
-        value: UndoStatus,
-    },
-    Before {
-        #[serde(rename = "before")]
-        value: DateTime<Utc>,
-    },
-    After {
-        #[serde(rename = "after")]
-        value: DateTime<Utc>,
-    },
+    IdentityIds { value: Vec<JMAPId> },
+    EmailIds { value: Vec<JMAPId> },
+    ThreadIds { value: Vec<JMAPId> },
+    UndoStatus { value: UndoStatus },
+    Before { value: DateTime<Utc> },
+    After { value: DateTime<Utc> },
+    Unsupported { value: String },
 }
 
 #[derive(Deserialize, Debug, Clone)]

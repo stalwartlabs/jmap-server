@@ -10,13 +10,14 @@ use store::{
     read::{
         comparator::Comparator,
         filter::{ComparisonOperator, FieldValue, Filter, TextQuery},
+        FilterMapper,
     },
     write::{
         batch::WriteBatch,
         options::{IndexOptions, Options},
     },
 };
-use store::{read::DefaultIdMapper, JMAPStore, Store};
+use store::{JMAPStore, Store};
 
 use crate::tests::store::utils::deflate_artwork_data;
 
@@ -425,7 +426,7 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query_store::<DefaultIdMapper>(
+            .query_store::<FilterMapper>(
                 0,
                 Collection::Mail,
                 filter,
@@ -514,7 +515,7 @@ where
         let mut results: Vec<String> = Vec::with_capacity(expected_results.len());
 
         for jmap_id in db
-            .query_store::<DefaultIdMapper>(0, Collection::Mail, filter, Comparator::List(sort))
+            .query_store::<FilterMapper>(0, Collection::Mail, filter, Comparator::List(sort))
             .unwrap()
         {
             results.push(

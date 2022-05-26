@@ -9,3 +9,6 @@ fi
 
 #RUST_BACKTRACE=1 RUST_LOG="actix_web=debug,jmap_server=debug" cargo run
 RUST_LOG="actix_web=debug,jmap_server=debug" cargo test test_cluster -- --nocapture
+RUST_BACKTRACE=1 RUST_LOG="jmap_server=debug" cargo test jmap_tests -- --nocapture
+
+#vagrant ssh -- -L 3000:localhost:3000

@@ -1,7 +1,8 @@
 use std::{fs, path::PathBuf};
 
 use actix_web::web;
-use jmap::id::JMAPIdSerialize;
+
+use jmap::types::jmap::JMAPId;
 use jmap_client::{
     client::Client,
     core::set::{SetError, SetErrorType},
@@ -17,8 +18,10 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Email Set tests...");
+
     let mailbox_id = client
-        .set_default_account_id(1u64.to_jmap_string())
+        .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("JMAP Set", None::<String>, Role::None)
         .await
         .unwrap()
@@ -134,21 +137,6 @@ async fn create(client: &mut Client, mailbox_id: &str) {
             .unwrap()
             .into_test();
 
-        // Compare response
-        file_name.set_extension("jmap");
-
-        assert_diff(
-            &replace_boundaries(serde_json::to_string_pretty(&email).unwrap()),
-            &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
-            file_name.to_str().unwrap(),
-        );
-
-        /*fs::write(
-            file_name.clone(),
-            replace_boundaries(serde_json::to_string_pretty(&email).unwrap()),
-        )
-        .unwrap();*/
-
         // Compare raw message
         file_name.set_extension("eml");
 
@@ -161,6 +149,21 @@ async fn create(client: &mut Client, mailbox_id: &str) {
         /*fs::write(
             file_name,
             replace_boundaries(String::from_utf8(raw_message).unwrap()),
+        )
+        .unwrap();*/
+
+        // Compare response
+        file_name.set_extension("jmap");
+
+        assert_diff(
+            &replace_boundaries(serde_json::to_string_pretty(&email).unwrap()),
+            &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
+            file_name.to_str().unwrap(),
+        );
+
+        /*fs::write(
+            file_name.clone(),
+            replace_boundaries(serde_json::to_string_pretty(&email).unwrap()),
         )
         .unwrap();*/
     }
@@ -178,13 +181,13 @@ async fn update(client: &mut Client, root_mailbox_id: &str) {
 
     // Create two test mailboxes
     let test_mailbox1_id = client
-        .set_default_account_id(1u64.to_jmap_string())
+        .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("Test 1", None::<String>, Role::None)
         .await
         .unwrap()
         .unwrap_id();
     let test_mailbox2_id = client
-        .set_default_account_id(1u64.to_jmap_string())
+        .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("Test 2", None::<String>, Role::None)
         .await
         .unwrap()
@@ -368,10 +371,11 @@ fn assert_diff(str1: &str, str2: &str, filename: &str) {
     for ((pos1, ch1), (pos2, ch2)) in str1.char_indices().zip(str2.char_indices()) {
         if ch1 != ch2 {
             panic!(
-                "{:?} != {:?} ({})",
+                "{:?} != {:?} ({}) '{}'",
                 &str1[if pos1 >= 10 { pos1 - 10 } else { pos1 }..pos1 + 10],
                 &str2[if pos2 >= 10 { pos2 - 10 } else { pos2 }..pos2 + 10],
-                filename
+                filename,
+                str1
             );
         }
     }

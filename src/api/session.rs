@@ -9,7 +9,7 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::{id::jmap::JMAPId, URI};
+use jmap::{types::jmap::JMAPId, URI};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     Store,

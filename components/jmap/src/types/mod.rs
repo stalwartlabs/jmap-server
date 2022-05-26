@@ -1,13 +1,8 @@
 pub mod blob;
 pub mod jmap;
+pub mod json_pointer;
 pub mod state;
-
-pub trait JMAPIdSerialize {
-    fn from_jmap_string(id: &str) -> Option<Self>
-    where
-        Self: Sized;
-    fn to_jmap_string(&self) -> String;
-}
+pub mod type_state;
 
 pub struct HexWriter {
     pub result: String,

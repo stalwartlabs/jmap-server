@@ -9,12 +9,11 @@ use store::{write::options::Options, Store};
 
 use std::collections::{HashMap, HashSet};
 
-use jmap::id::{state::JMAPState, JMAPIdSerialize};
+use jmap::types::{jmap::JMAPId, state::JMAPState};
 use jmap_mail::mail::MessageField;
 use store::{
-    core::{collection::Collection, document::Document, tag::Tag, JMAPIdPrefix},
+    core::{collection::Collection, document::Document, tag::Tag},
     write::{batch::WriteBatch, options::IndexOptions},
-    JMAPId,
 };
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
@@ -25,8 +24,10 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Email QueryChanges tests...");
+
     let mailbox1_id = client
-        .set_default_account_id(1u64.to_jmap_string())
+        .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("JMAP Changes 1", None::<String>, Role::None)
         .await
         .unwrap()
@@ -81,7 +82,7 @@ where
     {
         match &change {
             LogAction::Insert(id) => {
-                let jmap_id = JMAPId::from_jmap_string(
+                let jmap_id = JMAPId::parse(
                     client
                         .email_import(
                             format!(
@@ -118,7 +119,7 @@ where
             }
             LogAction::Delete(id) => {
                 let id = *id_map.get(id).unwrap();
-                client.email_destroy(&id.to_jmap_string()).await.unwrap();
+                client.email_destroy(&id.to_string()).await.unwrap();
 
                 let mut batch = WriteBatch::new(1);
                 let mut document = Document::new(Collection::Mail, id.get_document_id());
@@ -199,7 +200,7 @@ where
                     max_changes: 0,
                     up_to_id: id_map
                         .get(&7)
-                        .map(|id| id.to_jmap_string().into())
+                        .map(|id| id.to_string().into())
                         .unwrap_or(None),
                 },
             ]
@@ -211,7 +212,7 @@ where
                 }
                 let mut request = client.build();
                 let query_request = request
-                    .query_email_changes(query.since_query_state.to_jmap_string())
+                    .query_email_changes(query.since_query_state.to_string())
                     .sort(query.sort);
 
                 if let Some(filter) = query.filter {
@@ -227,7 +228,7 @@ where
                 if test_num == 0 || test_num == 1 {
                     // Immutable filters should not return modified ids, only deletions.
                     for id in changes.removed() {
-                        let id = JMAPId::from_jmap_string(id).unwrap();
+                        let id = JMAPId::parse(id).unwrap();
                         assert!(
                             removed_ids.contains(&id),
                             "{:?} (id: {})",
@@ -239,7 +240,7 @@ where
                 if test_num == 1 || test_num == 2 {
                     // Only type 1 results should be added to the list.
                     for item in changes.added() {
-                        let id = JMAPId::from_jmap_string(item.id()).unwrap();
+                        let id = JMAPId::parse(item.id()).unwrap();
                         assert!(
                             type1_ids.contains(&id),
                             "{:?} (id: {})",
@@ -251,14 +252,14 @@ where
                 if test_num == 3 {
                     // Only ids up to 7 should be added to the list.
                     for item in changes.added() {
-                        let item_id = JMAPId::from_jmap_string(item.id()).unwrap();
+                        let item_id = JMAPId::parse(item.id()).unwrap();
                         let id = id_map.iter().find(|(_, v)| **v == item_id).unwrap().0;
                         assert!(id < &7, "{:?} (id: {})", changes, id);
                     }
                 }
 
                 if let JMAPState::Initial = state {
-                    new_state = JMAPState::from_jmap_string(changes.new_query_state()).unwrap();
+                    new_state = JMAPState::parse(changes.new_query_state()).unwrap();
                 }
             }
         }

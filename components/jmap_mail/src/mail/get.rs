@@ -3,7 +3,6 @@ use std::{borrow::Cow, collections::HashMap};
 use crate::mail::{HeaderName, MessageData, MessageField, MessageOutline, MimePart, MimePartType};
 use jmap::{
     from_timestamp,
-    id::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::{
         get::{GetHelper, GetObject},
         orm::JMAPOrm,
@@ -12,6 +11,7 @@ use jmap::{
         get::{GetRequest, GetResponse},
         MaybeIdReference,
     },
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
@@ -39,21 +39,12 @@ enum FetchRaw {
     None,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct GetArguments {
-    #[serde(rename = "bodyProperties")]
     pub body_properties: Option<Vec<BodyProperty>>,
-
-    #[serde(rename = "fetchTextBodyValues")]
     pub fetch_text_body_values: Option<bool>,
-
-    #[serde(rename = "fetchHTMLBodyValues")]
     pub fetch_html_body_values: Option<bool>,
-
-    #[serde(rename = "fetchAllBodyValues")]
     pub fetch_all_body_values: Option<bool>,
-
-    #[serde(rename = "maxBodyValueBytes")]
     pub max_body_value_bytes: Option<usize>,
 }
 
@@ -325,7 +316,7 @@ where
                         message_data.header(&RfcHeader::Subject, &HeaderForm::Text, false)
                     }
                     Property::SentAt => {
-                        message_data.header(&RfcHeader::Date, &HeaderForm::MessageIds, false)
+                        message_data.header(&RfcHeader::Date, &HeaderForm::Date, false)
                     }
                     Property::HasAttachment => Value::Bool {
                         value: message_data.has_attachments,
@@ -542,7 +533,7 @@ impl MimePart {
                         );
                     }
                 }
-                BodyProperty::Size => {
+                BodyProperty::Size if part_id.is_some() => {
                     body_part.insert(
                         BodyProperty::Size,
                         Value::Size {
@@ -635,13 +626,17 @@ impl MimePart {
                     let headers_raw = headers_raw.unwrap();
                     let mut headers = Vec::with_capacity(headers_raw.len());
                     for (header, value) in headers_raw {
-                        if let HeaderValue::Text(value) =
-                            HeaderForm::Raw.parse_offsets(value, message_raw.unwrap(), false)
+                        if let HeaderValue::Collection(values) =
+                            HeaderForm::Raw.parse_offsets(value, message_raw.unwrap(), true)
                         {
-                            headers.push(EmailHeader {
-                                name: header.as_str().to_string(),
-                                value: value.into_owned(),
-                            });
+                            for value in values {
+                                if let HeaderValue::Text(value) = value {
+                                    headers.push(EmailHeader {
+                                        name: header.as_str().to_string(),
+                                        value: value.into_owned(),
+                                    });
+                                }
+                            }
                         }
                     }
                     body_part.insert(BodyProperty::Headers, Value::Headers { value: headers });

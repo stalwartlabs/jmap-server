@@ -1,7 +1,7 @@
 use jmap::{
-    id::jmap::JMAPId,
-    jmap_store::get::{default_mapper, GetHelper, GetObject},
+    jmap_store::get::{GetHelper, GetObject, IdMapper},
     request::get::{GetRequest, GetResponse},
+    types::jmap::JMAPId,
 };
 use store::{
     core::{collection::Collection, tag::Tag, JMAPIdPrefix},
@@ -45,7 +45,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn thread_get(&self, request: GetRequest<Thread>) -> jmap::Result<GetResponse<Thread>> {
-        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let helper = GetHelper::new(self, request, None::<IdMapper>)?;
         let account_id = helper.account_id;
 
         let response = helper.get(|id, _properties| {

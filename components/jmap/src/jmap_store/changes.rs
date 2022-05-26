@@ -5,8 +5,8 @@ use store::{
 };
 
 use crate::{
-    id::state::JMAPState,
-    protocol::json_pointer::JSONPointerEval,
+    types::state::JMAPState,
+    types::json_pointer::JSONPointerEval,
     request::changes::{ChangesRequest, ChangesResponse},
 };
 
@@ -15,7 +15,7 @@ use super::Object;
 impl JSONPointerEval for () {
     fn eval_json_pointer(
         &self,
-        _ptr: &crate::protocol::json_pointer::JSONPointer,
+        _ptr: &crate::types::json_pointer::JSONPointer,
     ) -> Option<Vec<u64>> {
         None
     }

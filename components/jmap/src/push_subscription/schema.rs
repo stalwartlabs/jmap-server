@@ -6,7 +6,7 @@ use store::{
     FieldId,
 };
 
-use crate::{id::jmap::JMAPId, protocol::type_state::TypeState};
+use crate::{types::jmap::JMAPId, types::type_state::TypeState};
 
 #[derive(Debug, Clone, Default)]
 pub struct PushSubscription {

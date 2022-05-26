@@ -1,6 +1,6 @@
 use actix_web::{http::StatusCode, web, HttpResponse};
 use async_stream::stream;
-use jmap::{error::problem_details::ProblemDetails, protocol::type_state::TypeState};
+use jmap::{error::problem_details::ProblemDetails, types::type_state::TypeState};
 use std::{
     collections::HashMap,
     time::{Duration, Instant},

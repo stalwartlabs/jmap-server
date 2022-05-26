@@ -1,13 +1,14 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use actix_web::web;
 use futures::StreamExt;
-use jmap::id::JMAPIdSerialize;
+
+use jmap::types::jmap::JMAPId;
 use jmap_client::{
     client::Client,
     client_ws::WebSocketMessage,
     core::{
-        response::{MethodResponse, Response},
+        response::{Response, TaggedMethodResponse},
         set::Create,
     },
     TypeState,
@@ -21,6 +22,8 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running WebSockets tests...");
+
     let mut ws_stream = client.connect_ws().await.unwrap();
 
     let (stream_tx, mut stream_rx) = mpsc::channel::<WebSocketMessage>(100);
@@ -32,7 +35,9 @@ where
     });
 
     // Create mailbox
-    let mut request = client.set_default_account_id(1u64.to_jmap_string()).build();
+    let mut request = client
+        .set_default_account_id(JMAPId::new(1).to_string())
+        .build();
     let create_id = request
         .set_mailbox()
         .create()
@@ -61,7 +66,7 @@ where
         .mailbox_update_sort_order(&mailbox_id, 1)
         .await
         .unwrap();
-    assert_state(&mut stream_rx, TypeState::Mailbox).await;
+    assert_state(&mut stream_rx, &[TypeState::Mailbox]).await;
 
     // Multiple changes should be grouped and delivered in intervals
     for num in 0..5 {
@@ -70,7 +75,7 @@ where
             .await
             .unwrap();
     }
-    assert_state(&mut stream_rx, TypeState::Mailbox).await;
+    assert_state(&mut stream_rx, &[TypeState::Mailbox]).await;
     expect_nothing(&mut stream_rx).await;
 
     // Disable push notifications
@@ -94,7 +99,7 @@ where
 
 async fn expect_response(
     stream_rx: &mut mpsc::Receiver<WebSocketMessage>,
-) -> Response<MethodResponse> {
+) -> Response<TaggedMethodResponse> {
     match tokio::time::timeout(Duration::from_millis(100), stream_rx.recv()).await {
         Ok(Some(message)) => match message {
             WebSocketMessage::Response(response) => response,
@@ -106,18 +111,17 @@ async fn expect_response(
     }
 }
 
-async fn assert_state(stream_rx: &mut mpsc::Receiver<WebSocketMessage>, state: TypeState) {
+async fn assert_state(stream_rx: &mut mpsc::Receiver<WebSocketMessage>, state: &[TypeState]) {
     match tokio::time::timeout(Duration::from_millis(700), stream_rx.recv()).await {
         Ok(Some(message)) => match message {
             WebSocketMessage::StateChange(changes) => {
                 assert_eq!(
                     changes
-                        .changes(&1u64.to_jmap_string())
+                        .changes(&JMAPId::new(1).to_string())
                         .unwrap()
-                        .next()
-                        .unwrap()
-                        .0,
-                    &state
+                        .map(|x| x.0)
+                        .collect::<HashSet<&TypeState>>(),
+                    state.iter().collect::<HashSet<&TypeState>>()
                 );
             }
             _ => panic!("Expected state change, got: {:?}", message),

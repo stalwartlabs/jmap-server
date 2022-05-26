@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap::id::jmap::JMAPId;
+use jmap::error::method::MethodError;
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::request::query::{QueryRequest, QueryResponse};
+use jmap::types::jmap::JMAPId;
 
 use store::core::collection::Collection;
 use store::core::error::StoreError;
@@ -75,13 +76,16 @@ where
                 Filter::HasAnyRole { value } => {
                     let filter =
                         filter::Filter::eq(Property::Role.into(), FieldValue::Tag(Tag::Default));
-                    if value {
+                    if !value {
                         filter::Filter::not(vec![filter])
                     } else {
                         filter
                     }
                 }
                 Filter::IsSubscribed { value: _value } => todo!(), //TODO implement
+                Filter::Unsupported { value } => {
+                    return Err(MethodError::UnsupportedFilter(value));
+                }
             })
         })?;
 

@@ -6,8 +6,8 @@ use std::{
 };
 
 use flate2::bufread::GzDecoder;
-use jmap::{jmap_store::orm::TinyORM, protocol::json::JSONValue};
-use jmap_mail::{mail::MessageField, mailbox::MailboxProperty};
+use jmap::jmap_store::orm::TinyORM;
+use jmap_mail::{mail::schema::Email, mailbox::schema::Mailbox};
 use store::{
     blob::BLOB_HASH_LEN,
     serialize::{key::ValueKey, leb128::Leb128},
@@ -105,46 +105,6 @@ impl<T> JMAPFilter<T> {
             operator: JMAPLogicalOperator::Not,
             conditions,
         })
-    }
-}
-
-impl<T> From<JMAPFilterOperator<T>> for JSONValue
-where
-    JSONValue: From<T>,
-{
-    fn from(filter: JMAPFilterOperator<T>) -> Self {
-        let mut map = HashMap::new();
-        map.insert(
-            "operator".to_string(),
-            match filter.operator {
-                JMAPLogicalOperator::And => "AND".to_string().into(),
-                JMAPLogicalOperator::Or => "OR".to_string().into(),
-                JMAPLogicalOperator::Not => "NOT".to_string().into(),
-            },
-        );
-        map.insert(
-            "conditions".to_string(),
-            filter
-                .conditions
-                .into_iter()
-                .map(|c| c.into())
-                .collect::<Vec<_>>()
-                .into(),
-        );
-        map.into()
-    }
-}
-
-impl<T> From<JMAPFilter<T>> for JSONValue
-where
-    JSONValue: From<T>,
-{
-    fn from(filter: JMAPFilter<T>) -> Self {
-        match filter {
-            JMAPFilter::Condition(cond) => cond.into(),
-            JMAPFilter::Operator(op) => op.into(),
-            JMAPFilter::None => JSONValue::Null,
-        }
     }
 }
 
@@ -373,18 +333,14 @@ where
                                             Collection::Account => todo!(),
                                             Collection::PushSubscription => todo!(),
                                             Collection::Mail => assert_eq!(
-                                                TinyORM::<MessageField>::deserialize(&value)
-                                                    .unwrap(),
-                                                TinyORM::<MessageField>::deserialize(&other_value)
+                                                TinyORM::<Email>::deserialize(&value).unwrap(),
+                                                TinyORM::<Email>::deserialize(&other_value)
                                                     .unwrap()
                                             ),
                                             Collection::Mailbox => assert_eq!(
-                                                TinyORM::<MailboxProperty>::deserialize(&value)
-                                                    .unwrap(),
-                                                TinyORM::<MailboxProperty>::deserialize(
-                                                    &other_value
-                                                )
-                                                .unwrap()
+                                                TinyORM::<Mailbox>::deserialize(&value).unwrap(),
+                                                TinyORM::<Mailbox>::deserialize(&other_value)
+                                                    .unwrap()
                                             ),
                                             Collection::Identity => todo!(),
                                             Collection::EmailSubmission => todo!(),

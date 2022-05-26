@@ -1,7 +1,7 @@
 use crate::{
-    id::{jmap::JMAPId, state::JMAPState},
+    types::{jmap::JMAPId, state::JMAPState},
     jmap_store::changes::ChangesObject,
-    protocol::json_pointer::{JSONPointer, JSONPointerEval},
+    types::json_pointer::{JSONPointer, JSONPointerEval},
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]

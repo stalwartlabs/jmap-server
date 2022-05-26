@@ -3,11 +3,11 @@ use jmap::{
         changes::{ChangesObject, JMAPChanges},
         query_changes::QueryChangesHelper,
     },
-    protocol::json_pointer::{JSONPointer, JSONPointerEval},
     request::{
         changes::{ChangesRequest, ChangesResponse},
         query_changes::{QueryChangesRequest, QueryChangesResponse},
     },
+    types::json_pointer::{JSONPointer, JSONPointerEval},
 };
 use store::{JMAPStore, Store};
 

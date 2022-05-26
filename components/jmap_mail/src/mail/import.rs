@@ -3,14 +3,14 @@ use std::time::SystemTime;
 
 use jmap::error::method::MethodError;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::id::blob::JMAPBlob;
-use jmap::id::jmap::JMAPId;
-use jmap::id::state::JMAPState;
 use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::orm::TinyORM;
 use jmap::jmap_store::Object;
 use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
+use jmap::types::blob::JMAPBlob;
+use jmap::types::jmap::JMAPId;
+use jmap::types::state::JMAPState;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};

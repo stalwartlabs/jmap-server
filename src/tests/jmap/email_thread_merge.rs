@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
 use actix_web::web;
-use jmap::id::JMAPIdSerialize;
+
+use jmap::types::jmap::JMAPId;
 use jmap_client::{client::Client, email, mailbox::Role};
-use store::{core::JMAPIdPrefix, JMAPId, Store, ThreadId};
+use store::{Store, ThreadId};
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
 
@@ -11,6 +12,8 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
+    println!("Running Email Merge Threads tests...");
+
     let mut all_mailboxes = HashMap::new();
 
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
@@ -26,7 +29,9 @@ where
         for test_num in 0..=5 {
             mailbox_ids.push(
                 client
-                    .set_default_account_id(((base_test_num + test_num) as JMAPId).to_jmap_string())
+                    .set_default_account_id(
+                        JMAPId::new((base_test_num + test_num) as u64).to_string(),
+                    )
                     .mailbox_create("Thread nightmare", None::<String>, Role::None)
                     .await
                     .unwrap()
@@ -36,7 +41,7 @@ where
 
         for message in &messages {
             client
-                .set_default_account_id((base_test_num as JMAPId).to_jmap_string())
+                .set_default_account_id(JMAPId::new(base_test_num as u64).to_string())
                 .email_import(
                     message.to_string().into_bytes(),
                     [mailbox_ids[0].clone()],
@@ -49,7 +54,7 @@ where
 
         for message in messages.iter().rev() {
             client
-                .set_default_account_id(((base_test_num + 1) as JMAPId).to_jmap_string())
+                .set_default_account_id(JMAPId::new((base_test_num + 1) as u64).to_string())
                 .email_import(
                     message.to_string().into_bytes(),
                     [mailbox_ids[1].clone()],
@@ -61,7 +66,7 @@ where
         }
 
         for chunk in messages.chunks(5) {
-            client.set_default_account_id(((base_test_num + 2) as JMAPId).to_jmap_string());
+            client.set_default_account_id(JMAPId::new((base_test_num + 2) as u64).to_string());
 
             for message in chunk {
                 client
@@ -75,7 +80,7 @@ where
                     .unwrap();
             }
 
-            client.set_default_account_id(((base_test_num + 3) as JMAPId).to_jmap_string());
+            client.set_default_account_id(JMAPId::new((base_test_num + 3) as u64).to_string());
 
             for message in chunk.iter().rev() {
                 client
@@ -91,7 +96,7 @@ where
         }
 
         for chunk in messages.chunks(5).rev() {
-            client.set_default_account_id(((base_test_num + 4) as JMAPId).to_jmap_string());
+            client.set_default_account_id(JMAPId::new((base_test_num + 4) as u64).to_string());
 
             for message in chunk {
                 client
@@ -105,7 +110,7 @@ where
                     .unwrap();
             }
 
-            client.set_default_account_id(((base_test_num + 5) as JMAPId).to_jmap_string());
+            client.set_default_account_id(JMAPId::new((base_test_num + 5) as u64).to_string());
 
             for message in chunk.iter().rev() {
                 client
@@ -122,7 +127,7 @@ where
 
         for test_num in 0..=5 {
             let result = client
-                .set_default_account_id(((base_test_num + test_num) as JMAPId).to_jmap_string())
+                .set_default_account_id(JMAPId::new((base_test_num + test_num) as u64).to_string())
                 .email_query(
                     email::query::Filter::in_mailbox(mailbox_ids[test_num as usize].clone()).into(),
                     None,
@@ -141,7 +146,7 @@ where
             let thread_ids: HashSet<ThreadId> = result
                 .ids()
                 .iter()
-                .map(|id| JMAPId::from_jmap_string(id).unwrap().get_prefix_id())
+                .map(|id| JMAPId::parse(id).unwrap().get_prefix_id())
                 .collect();
 
             assert_eq!(
@@ -156,7 +161,7 @@ where
             for thread_id in thread_ids {
                 messages_per_thread_db.push(
                     client
-                        .thread_get(&(thread_id as JMAPId).to_jmap_string())
+                        .thread_get(&JMAPId::new(thread_id as u64).to_string())
                         .await
                         .unwrap()
                         .unwrap()
@@ -176,7 +181,7 @@ where
     for (base_test_num, mailbox_ids) in all_mailboxes {
         for (test_num, mailbox_id) in mailbox_ids.into_iter().enumerate() {
             client
-                .set_default_account_id(((base_test_num + test_num) as JMAPId).to_jmap_string())
+                .set_default_account_id(JMAPId::new((base_test_num + test_num) as u64).to_string())
                 .mailbox_destroy(&mailbox_id, true)
                 .await
                 .unwrap();

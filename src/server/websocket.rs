@@ -4,9 +4,9 @@ use actix::{Actor, ActorContext, AsyncContext, Handler, Message, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws::{self, WsResponseBuilder};
 use jmap::error::request::{RequestError, RequestErrorType, RequestLimitError};
-use jmap::id::jmap::JMAPId;
-use jmap::id::state::JMAPState;
-use jmap::protocol::type_state::TypeState;
+use jmap::types::jmap::JMAPId;
+use jmap::types::state::JMAPState;
+use jmap::types::type_state::TypeState;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},

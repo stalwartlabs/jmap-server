@@ -5,7 +5,7 @@ pub mod query;
 pub mod query_changes;
 pub mod set;
 
-use crate::{id::jmap::JMAPId, protocol::json_pointer::JSONPointer};
+use crate::{types::jmap::JMAPId, types::json_pointer::JSONPointer};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ResultReference {
@@ -174,5 +174,23 @@ impl<'de> serde::Deserialize<'de> for MaybeIdReference {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_str(MaybeIdReferenceVisitor)
+    }
+}
+
+pub trait ArgumentSerializer {
+    fn deserialize<'x: 'y, 'y>(
+        &'y mut self,
+        property: &'x str,
+        value: &mut impl serde::de::MapAccess<'x>,
+    ) -> Result<(), String>;
+}
+
+impl ArgumentSerializer for () {
+    fn deserialize<'x: 'y, 'y>(
+        &'y mut self,
+        _property: &'x str,
+        _value: &mut impl serde::de::MapAccess<'x>,
+    ) -> Result<(), String> {
+        Ok(())
     }
 }

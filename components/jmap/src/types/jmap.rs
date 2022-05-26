@@ -8,6 +8,10 @@ pub struct JMAPId {
 }
 
 impl JMAPId {
+    pub fn new(id: u64) -> Self {
+        Self { id }
+    }
+
     pub fn parse(id: &str) -> Option<Self>
     where
         Self: Sized,

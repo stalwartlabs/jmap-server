@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jmap::id::jmap::JMAPId;
+use jmap::types::jmap::JMAPId;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
 use jmap::jmap_store::orm::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
