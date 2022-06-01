@@ -1,17 +1,16 @@
-use std::collections::HashMap;
-
 use actix_web::web;
 use jmap::types::{jmap::JMAPId, state::JMAPState};
 use jmap_client::{
     client::Client,
     core::{
         query::Filter,
-        set::{Create, SetError, SetErrorType, SetRequest},
+        set::{SetError, SetErrorType, SetObject, SetRequest},
     },
     mailbox::{self, Mailbox, Role},
     Error, Set,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use store::Store;
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
@@ -541,7 +540,7 @@ async fn create_test_mailboxes(client: &mut Client) -> HashMap<String, String> {
 }
 
 fn build_create_query(
-    request: &mut SetRequest<Mailbox<Set>, mailbox::SetArguments>,
+    request: &mut SetRequest<Mailbox<Set>>,
     mailbox_map: &mut HashMap<String, String>,
     mailboxes: Vec<TestMailbox>,
     parent_id: Option<String>,

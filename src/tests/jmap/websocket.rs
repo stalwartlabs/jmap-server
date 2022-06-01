@@ -2,14 +2,13 @@ use std::{collections::HashSet, time::Duration};
 
 use actix_web::web;
 use futures::StreamExt;
-
 use jmap::types::jmap::JMAPId;
 use jmap_client::{
     client::Client,
     client_ws::WebSocketMessage,
     core::{
         response::{Response, TaggedMethodResponse},
-        set::Create,
+        set::SetObject,
     },
     TypeState,
 };

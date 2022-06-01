@@ -1,15 +1,16 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    time::{Duration, Instant, SystemTime},
-};
-
+use super::{state_change::StateChange, LONG_SLUMBER_MS, THROTTLE_MS};
+use crate::{api::StateChangeResponse, cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 use jmap::{
     base64,
     jmap_store::orm::JMAPOrm,
     push_subscription::schema::{self, Property, Value},
-    types::jmap::JMAPId,
+    types::{jmap::JMAPId, type_state::TypeState},
 };
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
+use std::{
+    collections::{hash_map::Entry, HashMap, HashSet},
+    time::{Duration, Instant, SystemTime},
+};
 use store::{
     core::{bitmap::Bitmap, collection::Collection, error::StoreError},
     tracing::debug,
@@ -17,12 +18,31 @@ use store::{
 };
 use tokio::{sync::mpsc, time};
 
-use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer};
+#[derive(Debug)]
+pub enum UpdateSubscription {
+    Unverified {
+        id: DocumentId,
+        url: String,
+        code: String,
+        keys: Option<EncriptionKeys>,
+    },
+    Verified(PushSubscription),
+}
 
-use super::{
-    EncriptionKeys, StateChange, StateChangeResponse, UpdateSubscription, LONG_SLUMBER_MS,
-    THROTTLE_MS,
-};
+#[derive(Debug)]
+pub struct PushSubscription {
+    pub id: DocumentId,
+    pub url: String,
+    pub expires: u64,
+    pub types: Bitmap<TypeState>,
+    pub keys: Option<EncriptionKeys>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EncriptionKeys {
+    pub p256dh: Vec<u8>,
+    pub auth: Vec<u8>,
+}
 
 #[derive(Debug)]
 pub enum Event {
@@ -63,7 +83,7 @@ pub enum PushUpdate {
 }
 
 #[derive(Debug)]
-pub struct PushSubscription {
+pub struct PushServer {
     url: String,
     keys: Option<EncriptionKeys>,
     num_attempts: u32,
@@ -159,7 +179,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                     }
                                     PushUpdate::Register { id, url, keys } => {
                                         if let Entry::Vacant(entry) = subscriptions.entry(id) {
-                                            entry.insert(PushSubscription {
+                                            entry.insert(PushServer {
                                                 url,
                                                 keys,
                                                 num_attempts: 0,
@@ -286,7 +306,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
     push_tx_
 }
 
-impl PushSubscription {
+impl PushServer {
     fn send(&mut self, id: store::JMAPId, push_tx: mpsc::Sender<Event>) {
         let url = self.url.clone();
         let keys = self.keys.clone();
@@ -368,7 +388,7 @@ where
     pub async fn fetch_push_subscriptions(
         &self,
         account_id: AccountId,
-    ) -> jmap::Result<super::Event> {
+    ) -> jmap::Result<super::state_change::Event> {
         let store = self.store.clone();
 
         self.spawn_jmap_request(move || {
@@ -449,7 +469,7 @@ where
                         };
 
                         // Add verified subscription
-                        subscriptions.push(UpdateSubscription::Verified(super::PushSubscription {
+                        subscriptions.push(UpdateSubscription::Verified(PushSubscription {
                             id: document_id,
                             url,
                             expires,
@@ -468,7 +488,7 @@ where
                 }
             }
 
-            Ok(super::Event::UpdateSubscriptions {
+            Ok(super::state_change::Event::UpdateSubscriptions {
                 account_id,
                 subscriptions,
             })

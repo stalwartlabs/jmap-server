@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::identity;
 use crate::identity::schema::Identity;
@@ -18,12 +18,12 @@ use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use mail_parser::RfcHeader;
 
 use store::blob::BlobId;
-use store::chrono::Utc;
+use store::chrono::{DateTime, Utc};
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::parking_lot::MutexGuard;
 use store::serialize::StoreSerialize;
-use store::write::options::IndexOptions;
+use store::write::options::{IndexOptions, Options};
 use store::{JMAPStore, Store};
 
 use super::schema::{Address, EmailSubmission, Envelope, Property, Value};
@@ -168,8 +168,9 @@ where
                 })?;
 
             // Make sure the envelope address matches the identity email address
+            let mut send_at = Utc::now();
             let mut envelope = if let Some(envelope) = envelope {
-                if envelope.mail_from.email != mail_from {
+                if !envelope.mail_from.email.eq_ignore_ascii_case(&mail_from) {
                     return Err(SetError::invalid_property(
                         Property::IdentityId,
                         format!(
@@ -178,6 +179,22 @@ where
                         ),
                     ));
                 }
+
+                // Parse future release
+                if let Some(parameters) = &envelope.mail_from.parameters {
+                    if let Some(hold_for) = parameters
+                        .get("HOLDFOR")
+                        .and_then(|s| s.as_ref().and_then(|s| s.parse::<u64>().ok()))
+                    {
+                        send_at
+                            .checked_add_signed(store::chrono::Duration::seconds(hold_for as i64));
+                    } else if let Some(Some(hold_until)) = parameters.get("HOLDUNTIL") {
+                        if let Ok(hold_until) = DateTime::parse_from_rfc3339(hold_until) {
+                            send_at = hold_until.into();
+                        }
+                    }
+                }
+
                 envelope
             } else {
                 Envelope::new(mail_from)
@@ -192,8 +209,7 @@ where
             }
 
             // Set the sentAt property
-            // TODO parse FUTURERELEASE
-            fields.set(Property::SendAt, Value::DateTime { value: Utc::now() });
+            fields.set(Property::SendAt, Value::DateTime { value: send_at });
 
             // Fetch message data
             let mut message_data = MessageData::from_metadata(
@@ -218,27 +234,42 @@ where
 
             // Obtain recipients from e-mail if missing
             if envelope.rcpt_to.is_empty() {
+                let mut rcpt_to = HashSet::new();
                 for header in [RfcHeader::To, RfcHeader::Cc] {
                     if let Some(values) = message_data.headers.remove(&header) {
                         for value in values {
                             if let Some(recipients) = value.into_addresses() {
                                 for recipient in recipients {
-                                    envelope.rcpt_to.push(Address {
-                                        email: recipient.email,
-                                        parameters: None,
-                                    });
+                                    rcpt_to.insert(recipient.email.trim().to_string());
                                 }
                             }
                         }
                     }
                 }
 
-                if envelope.rcpt_to.is_empty() {
+                if !rcpt_to.is_empty() {
+                    for addr in rcpt_to {
+                        envelope.rcpt_to.push(Address {
+                            email: addr,
+                            parameters: None,
+                        });
+                    }
+                } else {
                     return Err(SetError::invalid_property(
                         Property::Envelope,
                         "No recipients found in the e-mail.",
                     ));
                 }
+            } else {
+                // De-duplicate and sanitize recipients
+                envelope.rcpt_to = envelope
+                    .rcpt_to
+                    .into_iter()
+                    .map(|a| (a.email.trim().to_string(), a.parameters))
+                    .collect::<HashMap<_, _>>()
+                    .into_iter()
+                    .map(|(email, parameters)| Address { email, parameters })
+                    .collect::<Vec<_>>();
             }
 
             // Add and link blob
@@ -303,18 +334,41 @@ where
             Ok(None)
         })?;
 
-        helper.destroy(|_id, _batch, _document| {
-            Err(SetError::forbidden(concat!(
-                "Deleting Email Submissions is not allowed, ",
-                "update its status to 'canceled' insted."
-            )))
+        helper.destroy(|id, helper, document| {
+            let document_id = id.get_document_id();
+
+            // Fetch ORM
+            let email_submission = self
+                .get_orm::<EmailSubmission>(helper.account_id, document_id)?
+                .ok_or(StoreError::DataCorruption)?;
+
+            // Delete ORM
+            email_submission.delete(document);
+
+            // Unlink e-mail
+            if let Some(raw_message_id) = self.get_document_value::<BlobId>(
+                helper.account_id,
+                Collection::EmailSubmission,
+                document_id,
+                Property::EmailId.into(),
+            )? {
+                document.blob(raw_message_id, IndexOptions::new().clear());
+                document.binary(
+                    Property::EmailId,
+                    Vec::with_capacity(0),
+                    IndexOptions::new().clear(),
+                );
+                Ok(())
+            } else {
+                Err(StoreError::DataCorruption.into())
+            }
         })?;
 
-        let account_id = helper.request.account_id;
+        let account_id = JMAPId::from(helper.account_id);
         helper.into_response().map(|mut r| {
             if has_on_success && (!update_emails.is_empty() || !destroy_emails.is_empty()) {
                 r.next_call = SetRequest {
-                    account_id,
+                    account_id: account_id.into(),
                     if_in_state: None,
                     create: None,
                     update: if !update_emails.is_empty() {

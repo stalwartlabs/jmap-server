@@ -1,3 +1,4 @@
+pub mod event_source;
 pub mod http;
 pub mod tls;
 pub mod websocket;

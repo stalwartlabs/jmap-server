@@ -17,8 +17,8 @@ use store::Store;
 use tokio::sync::mpsc;
 
 use crate::{
-    server::tls::load_tls_config, state::StateChangeResponse,
-    tests::store::utils::StoreCompareWith, JMAPServer,
+    api::StateChangeResponse, server::tls::load_tls_config, tests::store::utils::StoreCompareWith,
+    JMAPServer,
 };
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)

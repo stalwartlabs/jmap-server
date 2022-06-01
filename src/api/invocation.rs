@@ -74,6 +74,34 @@ where
                                 }
                             }
 
+                            // Notify E-mail delivery service of changes
+                            if let method::Response::SetEmailSubmission(submission_response) =
+                                &method_response
+                            {
+                                if let Err(err) = core
+                                    .notify_email_delivery(
+                                        submission_response.account_id(),
+                                        created_ids
+                                            .as_ref()
+                                            .map(|created_ids| {
+                                                created_ids
+                                                    .values()
+                                                    .map(|id| id.get_document_id())
+                                                    .collect()
+                                            })
+                                            .unwrap_or_default(),
+                                        submission_response
+                                            .updated
+                                            .keys()
+                                            .map(|id| id.get_document_id())
+                                            .collect(),
+                                    )
+                                    .await
+                                {
+                                    error!("No e-mail delivery configured or something bad happened: {}", err);
+                                }
+                            }
+
                             // Add created ids to response
                             if let Some(created_ids) = created_ids {
                                 response.created_ids.extend(created_ids);

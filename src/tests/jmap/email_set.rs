@@ -302,7 +302,7 @@ async fn update(client: &mut Client, root_mailbox_id: &str) {
         .unwrap();
 }
 
-async fn assert_email_properties(
+pub async fn assert_email_properties(
     client: &mut Client,
     message_id: &str,
     mailbox_ids: &[&str],

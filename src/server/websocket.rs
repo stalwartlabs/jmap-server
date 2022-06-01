@@ -1,5 +1,6 @@
 use crate::api::request::Request;
 use crate::api::response::{serialize_hex, Response};
+use crate::services::{LONG_SLUMBER_MS, THROTTLE_MS};
 use actix::{Actor, ActorContext, AsyncContext, Handler, Message, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws::{self, WsResponseBuilder};
@@ -17,7 +18,6 @@ use store::Store;
 
 use crate::api::invocation::handle_method_calls;
 use crate::api::method;
-use crate::state::{LONG_SLUMBER_MS, THROTTLE_MS};
 use crate::JMAPServer;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);

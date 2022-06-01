@@ -2,7 +2,7 @@ pub mod api;
 pub mod blob;
 pub mod cluster;
 pub mod server;
-pub mod state;
+pub mod services;
 
 #[cfg(test)]
 pub mod tests;
@@ -15,6 +15,7 @@ use cluster::{
     ClusterIpc,
 };
 use server::http::{init_jmap_server, start_jmap_server};
+use services::{email_delivery, state_change};
 use store::{config::env_settings::EnvSettings, tracing::info, JMAPStore};
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
@@ -27,7 +28,8 @@ pub struct JMAPServer<T> {
     pub worker_pool: rayon::ThreadPool,
     pub base_session: Session,
     pub cluster: Option<ClusterIpc>,
-    pub state_change: mpsc::Sender<state::Event>,
+    pub state_change: mpsc::Sender<state_change::Event>,
+    pub email_delivery: mpsc::Sender<email_delivery::Event>,
 
     #[cfg(test)]
     pub is_offline: std::sync::atomic::AtomicBool,

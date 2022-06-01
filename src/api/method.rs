@@ -30,7 +30,7 @@ use jmap_mail::{
 use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
 use store::{log::changes::ChangeId, AccountId};
 
-use crate::state::StateChange;
+use crate::services::state_change::StateChange;
 
 use super::response;
 

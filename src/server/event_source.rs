@@ -8,9 +8,11 @@ use std::{
 use store::{core::bitmap::Bitmap, tracing::debug, Store};
 use tokio::time::{self};
 
-use crate::JMAPServer;
-
-use super::{StateChangeResponse, LONG_SLUMBER_MS, THROTTLE_MS};
+use crate::{
+    api::StateChangeResponse,
+    services::{LONG_SLUMBER_MS, THROTTLE_MS},
+    JMAPServer,
+};
 
 #[derive(Debug, Copy, Clone, serde::Deserialize)]
 pub enum CloseAfter {

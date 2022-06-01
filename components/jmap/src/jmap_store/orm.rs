@@ -113,6 +113,10 @@ where
         self.properties.get(property)
     }
 
+    pub fn get_mut(&mut self, property: &T::Property) -> Option<&mut T::Value> {
+        self.properties.get_mut(property)
+    }
+
     pub fn set(&mut self, property: T::Property, value: impl Into<T::Value>) {
         self.properties.insert(property, value.into());
     }

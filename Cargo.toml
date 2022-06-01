@@ -9,6 +9,7 @@ store = { path = "components/store" }
 store_rocksdb = { path = "components/store_rocksdb" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
+mail-send = { path = "/home/vagrant/code/mail-send" } #TODO: remove local path
 tracing-subscriber = "0.2"
 actix-web = { version = "4", features = ["rustls"] }
 actix-web-actors = "4"
@@ -28,7 +29,7 @@ reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"
 ece = "2.2"
 
 [dev-dependencies]
-jmap-client = { path = "/home/vagrant/code/jmap-client", features = ["websockets", "debug"] }
+jmap-client = { path = "/home/vagrant/code/jmap-client", features = ["websockets", "debug"] } #TODO: remove local path
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}

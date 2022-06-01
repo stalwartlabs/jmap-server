@@ -14,8 +14,11 @@ use crate::{
     },
     blob::{download::handle_jmap_download, upload::handle_jmap_upload},
     cluster::ClusterIpc,
-    server::{tls::load_tls_config, websocket::handle_ws},
-    state::{event_source::handle_jmap_event_source, manager::spawn_state_manager},
+    server::{event_source::handle_jmap_event_source, tls::load_tls_config, websocket::handle_ws},
+    services::{
+        email_delivery::{init_email_delivery, spawn_email_delivery},
+        state_change::spawn_state_manager,
+    },
     JMAPServer, DEFAULT_HTTP_PORT,
 };
 
@@ -30,8 +33,9 @@ where
     let config = JMAPConfig::from(settings);
     let base_session = Session::new(settings, &config);
     let store = JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
+    let (email_tx, email_rx) = init_email_delivery();
 
-    web::Data::new(JMAPServer {
+    let server = web::Data::new(JMAPServer {
         base_session,
         store,
         worker_pool: rayon::ThreadPoolBuilder::new()
@@ -44,10 +48,16 @@ where
             .build()
             .unwrap(),
         state_change: spawn_state_manager(cluster.is_none()),
+        email_delivery: email_tx.clone(),
         cluster,
         #[cfg(test)]
         is_offline: false.into(),
-    })
+    });
+
+    // Spawn email delivery service
+    spawn_email_delivery(server.clone(), settings, email_tx, email_rx);
+
+    server
 }
 
 pub async fn start_jmap_server<T>(

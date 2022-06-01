@@ -75,6 +75,22 @@ pub struct Address {
     pub parameters: Option<HashMap<String, Option<String>>>,
 }
 
+impl Display for Address {
+    // SMTP address format
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{}>", self.email)?;
+        if let Some(parameters) = &self.parameters {
+            for (key, value) in parameters {
+                write!(f, " {}", key)?;
+                if let Some(value) = value {
+                    write!(f, "={}", value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UndoStatus {
     #[serde(rename = "pending")]
@@ -95,6 +111,16 @@ pub struct DeliveryStatus {
 
     #[serde(rename = "displayed")]
     pub displayed: Displayed,
+}
+
+impl DeliveryStatus {
+    pub fn new(smtp_reply: String, delivered: Delivered, displayed: Displayed) -> Self {
+        DeliveryStatus {
+            smtp_reply,
+            delivered,
+            displayed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

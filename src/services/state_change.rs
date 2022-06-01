@@ -5,6 +5,7 @@ use std::{
 };
 use store::{
     core::bitmap::Bitmap,
+    log::changes::ChangeId,
     tracing::{debug, error},
     AccountId, JMAPId, Store,
 };
@@ -13,7 +14,42 @@ use tokio::sync::mpsc;
 
 use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 
-use super::{push::spawn_push_manager, Event, StateChange, UpdateSubscription};
+use super::push_subscription::{spawn_push_manager, UpdateSubscription};
+
+#[derive(Debug)]
+pub enum Event {
+    Start,
+    Stop,
+    Subscribe {
+        id: DocumentId,
+        account_id: AccountId,
+        types: Bitmap<TypeState>,
+        tx: mpsc::Sender<StateChange>,
+    },
+    Publish {
+        state_change: StateChange,
+    },
+    UpdateSharedAccounts {
+        owner_account_id: AccountId,
+        shared_account_ids: Vec<AccountId>,
+    },
+    UpdateSubscriptions {
+        account_id: AccountId,
+        subscriptions: Vec<UpdateSubscription>,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct StateChange {
+    pub account_id: AccountId,
+    pub types: Vec<(TypeState, ChangeId)>,
+}
+
+impl StateChange {
+    pub fn new(account_id: AccountId, types: Vec<(TypeState, ChangeId)>) -> Self {
+        Self { account_id, types }
+    }
+}
 
 #[derive(Debug)]
 struct Subscriber {
@@ -67,7 +103,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                     shared_accounts.clear();
                     shared_accounts_map.clear();
 
-                    if let Err(err) = push_tx.send(super::push::Event::Reset).await {
+                    if let Err(err) = push_tx.send(super::push_subscription::Event::Reset).await {
                         debug!("Error sending push reset: {}", err);
                     }
                 }
@@ -184,7 +220,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
 
                         if !push_ids.is_empty() {
                             if let Err(err) = push_tx
-                                .send(super::push::Event::Push {
+                                .send(super::push_subscription::Event::Push {
                                     ids: push_ids,
                                     state_change,
                                 })
@@ -209,10 +245,9 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                             #[allow(clippy::match_like_matches_macro)]
                             if (*subscriber_id < DocumentId::MAX / 2)
                                 && !subscriptions.iter().any(|s| match s {
-                                    UpdateSubscription::Verified(super::PushSubscription {
-                                        id,
-                                        ..
-                                    }) if id == subscriber_id => true,
+                                    UpdateSubscription::Verified(
+                                        super::push_subscription::PushSubscription { id, .. },
+                                    ) if id == subscriber_id => true,
                                     _ => false,
                                 })
                             {
@@ -221,7 +256,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                         }
 
                         for remove_id in remove_ids {
-                            push_updates.push(super::push::PushUpdate::Unregister {
+                            push_updates.push(super::push_subscription::PushUpdate::Unregister {
                                 id: JMAPId::from_parts(account_id, remove_id),
                             });
                             subscribers.remove(&remove_id);
@@ -236,7 +271,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                                 code,
                                 keys,
                             } => {
-                                push_updates.push(super::push::PushUpdate::Verify {
+                                push_updates.push(super::push_subscription::PushUpdate::Verify {
                                     id,
                                     account_id,
                                     url,
@@ -259,7 +294,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                                         },
                                     );
 
-                                push_updates.push(super::push::PushUpdate::Register {
+                                push_updates.push(super::push_subscription::PushUpdate::Register {
                                     id: JMAPId::from_parts(account_id, verified.id),
                                     url: verified.url,
                                     keys: verified.keys,
@@ -270,7 +305,7 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
 
                     if !push_updates.is_empty() {
                         if let Err(err) = push_tx
-                            .send(super::push::Event::Update {
+                            .send(super::push_subscription::Event::Update {
                                 updates: push_updates,
                             })
                             .await

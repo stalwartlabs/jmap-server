@@ -25,6 +25,7 @@ use super::{
     options::{IndexOptions, Options},
 };
 
+#[derive(Debug)]
 pub struct Changes {
     pub collections: Bitmap<Collection>,
     pub change_id: ChangeId,

@@ -11,7 +11,8 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time;
 
 use crate::cluster::leader;
-use crate::{state, JMAPServer};
+use crate::services::state_change;
+use crate::JMAPServer;
 
 use super::log::{MergedChanges, RaftStore};
 use super::{log, rpc, RAFT_LOG_BEHIND, RAFT_LOG_LEADER, RAFT_LOG_UPDATED};
@@ -487,11 +488,13 @@ where
             .state
             .store(RAFT_LOG_LEADER, Ordering::Relaxed);
         self.store.raft_term.store(term, Ordering::Relaxed);
-        self.store.tombstone_deletions.store(true, Ordering::Relaxed);
+        self.store
+            .tombstone_deletions
+            .store(true, Ordering::Relaxed);
         self.store.doc_id_cache.invalidate_all();
         self.state_change
             .clone()
-            .send(state::Event::Start)
+            .send(state_change::Event::Start)
             .await
             .ok();
     }
@@ -502,10 +505,12 @@ where
             .unwrap()
             .state
             .store(RAFT_LOG_BEHIND, Ordering::Relaxed);
-        self.store.tombstone_deletions.store(false, Ordering::Relaxed);
+        self.store
+            .tombstone_deletions
+            .store(false, Ordering::Relaxed);
         self.state_change
             .clone()
-            .send(state::Event::Stop)
+            .send(state_change::Event::Stop)
             .await
             .ok();
     }

@@ -135,61 +135,42 @@ pub fn init_settings(
     if delete_if_exists && temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).unwrap();
     }
-    (
-        if total_peers > 1 {
-            EnvSettings {
-                args: HashMap::from_iter(
-                    vec![
-                        (
-                            "db-path".to_string(),
-                            temp_dir.to_str().unwrap().to_string(),
-                        ),
-                        ("cluster".to_string(), "secret_key".to_string()),
-                        (
-                            "hostname".to_string(),
-                            format!("127.0.0.1:{}", 8000 + peer_num),
-                        ),
-                        ("http-port".to_string(), (8000 + peer_num).to_string()),
-                        ("rpc-port".to_string(), (9000 + peer_num).to_string()),
-                        (
-                            "seed-nodes".to_string(),
-                            (1..=total_peers)
-                                .filter_map(|i| {
-                                    if i == peer_num {
-                                        None
-                                    } else {
-                                        Some(format!("127.0.0.1:{}", (9000 + i)))
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join(";"),
-                        ),
-                    ]
-                    .into_iter(),
-                ),
-            }
-        } else {
-            EnvSettings {
-                args: HashMap::from_iter(
-                    vec![
-                        (
-                            "db-path".to_string(),
-                            temp_dir.to_str().unwrap().to_string(),
-                        ),
-                        (
-                            "hostname".to_string(),
-                            format!("127.0.0.1:{}", 8000 + peer_num),
-                        ),
-                        ("max-objects-in-set".to_string(), "100000".to_string()),
-                        ("query-max-results".to_string(), "100000".to_string()),
-                        ("http-port".to_string(), (8000 + peer_num).to_string()),
-                    ]
-                    .into_iter(),
-                ),
-            }
-        },
-        temp_dir,
-    )
+    let mut args = HashMap::from_iter(
+        vec![
+            (
+                "db-path".to_string(),
+                temp_dir.to_str().unwrap().to_string(),
+            ),
+            (
+                "hostname".to_string(),
+                format!("127.0.0.1:{}", 8000 + peer_num),
+            ),
+            ("max-objects-in-set".to_string(), "100000".to_string()),
+            ("query-max-results".to_string(), "100000".to_string()),
+            ("http-port".to_string(), (8000 + peer_num).to_string()),
+            ("smtp-relay".to_string(), "!127.0.0.1:9999".to_string()),
+        ]
+        .into_iter(),
+    );
+    if total_peers > 1 {
+        args.insert("cluster".to_string(), "secret_key".to_string());
+        args.insert("rpc-port".to_string(), (9000 + peer_num).to_string());
+        args.insert(
+            "seed-nodes".to_string(),
+            (1..=total_peers)
+                .filter_map(|i| {
+                    if i == peer_num {
+                        None
+                    } else {
+                        Some(format!("127.0.0.1:{}", (9000 + i)))
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(";"),
+        );
+    }
+
+    (EnvSettings { args }, temp_dir)
 }
 
 pub fn destroy_temp_dir(temp_dir: PathBuf) {
