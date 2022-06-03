@@ -11,8 +11,8 @@ use jmap_mail::{
     },
     identity::{changes::JMAPIdentityChanges, get::JMAPGetIdentity, set::JMAPSetIdentity},
     mail::{
-        changes::JMAPMailChanges, get::JMAPGetMail, import::JMAPMailImport, parse::JMAPMailParse,
-        query::JMAPMailQuery, set::JMAPSetMail,
+        changes::JMAPMailChanges, copy::JMAPCopyMail, get::JMAPGetMail, import::JMAPMailImport,
+        parse::JMAPMailParse, query::JMAPMailQuery, set::JMAPSetMail,
     },
     mailbox::{
         changes::JMAPMailboxChanges, get::JMAPGetMailbox, query::JMAPMailboxQuery,
@@ -206,9 +206,9 @@ where
             method::Request::SetEmail(request) => {
                 method::Response::SetEmail(store.mail_set(request)?)
             }
-            /*method::Request::CopyEmail(request) => {
+            method::Request::CopyEmail(request) => {
                 method::Response::CopyEmail(store.mail_copy(request)?)
-            }*/
+            }
             method::Request::ImportEmail(request) => {
                 method::Response::ImportEmail(store.mail_import(request)?)
             }

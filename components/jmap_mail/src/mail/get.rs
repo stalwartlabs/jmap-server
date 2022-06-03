@@ -17,12 +17,12 @@ use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::serialize::leb128::Leb128;
 use store::{blob::BlobId, JMAPStore};
 use store::{
     core::{collection::Collection, error::StoreError},
     serialize::StoreDeserialize,
 };
+use store::{serialize::leb128::Leb128, tracing::error};
 use store::{DocumentId, Store};
 
 use super::{
@@ -195,7 +195,7 @@ where
         helper.get(|id, properties| {
             let document_id = id.get_document_id();
 
-            // Fetch message metadat
+            // Fetch message metadata
             let message_data_bytes = self
                 .blob_get(
                     &self
@@ -205,45 +205,90 @@ where
                             document_id,
                             MessageField::Metadata.into(),
                         )?
-                        .ok_or(StoreError::DataCorruption)?,
+                        .ok_or_else(|| {
+                            error!(
+                                "Email metadata blobId for {}/{} does not exist.",
+                                account_id, document_id
+                            );
+                            StoreError::DataCorruption
+                        })?,
                 )?
-                .ok_or(StoreError::DataCorruption)?;
+                .ok_or_else(|| {
+                    error!(
+                        "Email metadata blob linked to {}/{} does not exist.",
+                        account_id, document_id
+                    );
+                    StoreError::DataCorruption
+                })?;
 
             let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
-                .ok_or(StoreError::DataCorruption)?;
+                .ok_or_else(|| {
+                    error!(
+                        "Failed to deserialize email metadata position for {}/{}",
+                        account_id, document_id
+                    );
+                    StoreError::DataCorruption
+                })?;
 
             // Deserialize message data
             let mut message_data = MessageData::deserialize(
                 &message_data_bytes[read_bytes..read_bytes + message_data_len],
             )
-            .ok_or(StoreError::DataCorruption)?;
+            .ok_or_else(|| {
+                error!(
+                    "Failed to deserialize email metadata for {}/{}",
+                    account_id, document_id
+                );
+                StoreError::DataCorruption
+            })?;
 
             // Fetch raw message only if needed
             let (raw_message, message_outline) = match &fetch_raw {
                 FetchRaw::All => (
-                    Some(
-                        self.blob_get(&message_data.raw_message)?
-                            .ok_or(StoreError::DataCorruption)?,
-                    ),
+                    Some(self.blob_get(&message_data.raw_message)?.ok_or_else(|| {
+                        error!(
+                            "Raw email message not found for {}/{}.",
+                            account_id, document_id
+                        );
+                        StoreError::DataCorruption
+                    })?),
                     Some(
                         MessageOutline::deserialize(
                             &message_data_bytes[read_bytes + message_data_len..],
                         )
-                        .ok_or(StoreError::DataCorruption)?,
+                        .ok_or_else(|| {
+                            error!(
+                                "Failed to deserialize email outline for {}/{}.",
+                                account_id, document_id
+                            );
+                            StoreError::DataCorruption
+                        })?,
                     ),
                 ),
                 FetchRaw::Header => {
                     let message_outline = MessageOutline::deserialize(
                         &message_data_bytes[read_bytes + message_data_len..],
                     )
-                    .ok_or(StoreError::DataCorruption)?;
+                    .ok_or_else(|| {
+                        error!(
+                            "Failed to deserialize email outline for {}/{}.",
+                            account_id, document_id
+                        );
+                        StoreError::DataCorruption
+                    })?;
                     (
                         Some(
                             self.blob_get_range(
                                 &message_data.raw_message,
                                 0..message_outline.body_offset as u32,
                             )?
-                            .ok_or(StoreError::DataCorruption)?,
+                            .ok_or_else(|| {
+                                error!(
+                                    "Raw email message not found for {}/{}.",
+                                    account_id, document_id
+                                );
+                                StoreError::DataCorruption
+                            })?,
                         ),
                         Some(message_outline),
                     )
@@ -375,12 +420,32 @@ where
                                             parts
                                                 .get(0)
                                                 .and_then(|p| message_data.mime_parts.get(p + 1))
-                                                .ok_or(StoreError::DataCorruption)?
+                                                .ok_or_else(|| {
+                                                    error!(
+                                                        "Missing message part for {}/{}",
+                                                        account_id, document_id
+                                                    );
+                                                    StoreError::DataCorruption
+                                                })?
                                                 .blob_id
                                                 .as_ref()
-                                                .ok_or(StoreError::DataCorruption)?,
+                                                .ok_or_else(|| {
+                                                    error!(
+                                                        "Message part blobId not found for {}/{}.",
+                                                        account_id, document_id
+                                                    );
+                                                    StoreError::DataCorruption
+                                                })?,
                                         )?
-                                        .ok_or(StoreError::DataCorruption)?,
+                                        .ok_or_else(
+                                            || {
+                                                error!(
+                                                    "Message part blob not found for {}/{}.",
+                                                    account_id, document_id
+                                                );
+                                                StoreError::DataCorruption
+                                            },
+                                        )?,
                                     )
                                     .map_or_else(
                                         |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
@@ -409,13 +474,20 @@ where
                                     || message_data.html_body.contains(&part_id))
                             {
                                 let blob = self
-                                    .blob_get(
-                                        mime_part
-                                            .blob_id
-                                            .as_ref()
-                                            .ok_or(StoreError::DataCorruption)?,
-                                    )?
-                                    .ok_or(StoreError::DataCorruption)?;
+                                    .blob_get(mime_part.blob_id.as_ref().ok_or_else(|| {
+                                        error!(
+                                            "BodyValue blobId not found for {}/{}.",
+                                            account_id, document_id
+                                        );
+                                        StoreError::DataCorruption
+                                    })?)?
+                                    .ok_or_else(|| {
+                                        error!(
+                                            "BodyValue blob not found for {}/{}.",
+                                            account_id, document_id
+                                        );
+                                        StoreError::DataCorruption
+                                    })?;
 
                                 body_values.insert(
                                     part_id.to_string(),

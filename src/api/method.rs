@@ -5,6 +5,7 @@ use jmap::{
     push_subscription::schema::PushSubscription,
     request::{
         changes::{ChangesRequest, ChangesResponse},
+        copy::{CopyRequest, CopyResponse},
         get::{GetRequest, GetResponse},
         query::{QueryRequest, QueryResponse},
         query_changes::{QueryChangesRequest, QueryChangesResponse},
@@ -73,7 +74,7 @@ pub enum Request {
     QueryEmail(QueryRequest<Email>),
     QueryChangesEmail(QueryChangesRequest<Email>),
     SetEmail(SetRequest<Email>),
-    //CopyEmail(CopyRequest<Email>),
+    CopyEmail(CopyRequest<Email>),
     ImportEmail(EmailImportRequest),
     ParseEmail(EmailParseRequest),
     //GetSearchSnippet(SearchSnippetGetResponse),
@@ -108,7 +109,7 @@ pub enum Response {
     QueryEmail(QueryResponse),
     QueryChangesEmail(QueryChangesResponse),
     SetEmail(SetResponse<Email>),
-    //CopyEmail(CopyResponse<Email>),
+    CopyEmail(CopyResponse<Email>),
     ImportEmail(EmailImportResponse),
     ParseEmail(EmailParseResponse),
     //GetSearchSnippet(SearchSnippetGetResponse),
@@ -128,6 +129,7 @@ pub enum Response {
 
 impl Request {
     pub fn prepare_request(&mut self, response: &response::Response) -> jmap::Result<()> {
+        // Create JSON Pointer evaluation function
         let mut eval_result_ref = |rr: &ResultReference| -> Option<Vec<u64>> {
             for r in &response.method_responses {
                 if r.id == rr.result_of {
@@ -224,6 +226,9 @@ impl Request {
             Request::ImportEmail(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
             }
+            Request::CopyEmail(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
             Request::SetIdentity(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
             }
@@ -273,10 +278,20 @@ impl Response {
                     Changes::None
                 }
             }
-            /*Response::CopyEmail(response) => {
-                response.account_id;
-                Changes::None
-            }*/
+            Response::CopyEmail(response) => {
+                if let Some(change_id) = response.has_changes() {
+                    Changes::Item {
+                        created_ids: response.created_ids(),
+                        change_id,
+                        state_change: response
+                            .state_changes()
+                            .map(|s| StateChange::new(response.account_id(), s)),
+                        next_call: response.next_call.take().map(Request::SetEmail),
+                    }
+                } else {
+                    Changes::None
+                }
+            }
             Response::ImportEmail(response) => {
                 if let Some(change_id) = response.has_changes() {
                     Changes::Item {
@@ -442,11 +457,11 @@ where
                 .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
-        /*"Email/copy" => Request::CopyEmail(
+        "Email/copy" => Request::CopyEmail(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
-                .ok_or( MatchError::Eof)?,
-        ),*/
+                .ok_or(MatchError::Eof)?,
+        ),
         "Email/import" => Request::ImportEmail(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
@@ -640,10 +655,10 @@ impl Serialize for Call<Response> {
                 seq.serialize_element("Email/set")?;
                 seq.serialize_element(response)?;
             }
-            /*Response::CopyEmail(response) => {
+            Response::CopyEmail(response) => {
                 seq.serialize_element("Email/copy")?;
                 seq.serialize_element(response)?;
-            }*/
+            }
             Response::ImportEmail(response) => {
                 seq.serialize_element("Email/import")?;
                 seq.serialize_element(response)?;

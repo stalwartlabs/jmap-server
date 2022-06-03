@@ -11,6 +11,7 @@ use crate::{
 use super::store::utils::{destroy_temp_dir, init_settings};
 
 pub mod email_changes;
+pub mod email_copy;
 pub mod email_get;
 pub mod email_parse;
 pub mod email_query;
@@ -58,8 +59,9 @@ async fn jmap_tests() {
     email_parse::test(server.clone(), &mut client).await;
     email_set::test(server.clone(), &mut client).await;
     email_query::test(server.clone(), &mut client).await;*/
-    email_submission::test(server.clone(), &mut client).await;
-    vacation_response::test(server.clone(), &mut client).await;
+    email_copy::test(server.clone(), &mut client).await;
+    //email_submission::test(server.clone(), &mut client).await;
+    //vacation_response::test(server.clone(), &mut client).await;
     //mailbox::test(server.clone(), &mut client).await;
     //event_source::test(server.clone(), &mut client).await;
     //push_subscription::test(server.clone(), &mut client).await;

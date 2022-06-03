@@ -44,10 +44,10 @@ where
         .create_id()
         .unwrap();
     let request_id = request.send_ws().await.unwrap();
-    let response = expect_response(&mut stream_rx).await;
+    let mut response = expect_response(&mut stream_rx).await;
     assert_eq!(request_id, response.request_id().unwrap());
     let mailbox_id = response
-        .unwrap_method_response()
+        .pop_method_response()
         .unwrap_set_mailbox()
         .unwrap()
         .created(&create_id)
@@ -86,7 +86,7 @@ where
     request.send_ws().await.unwrap();
     expect_response(&mut stream_rx)
         .await
-        .unwrap_method_response()
+        .pop_method_response()
         .unwrap_set_mailbox()
         .unwrap()
         .destroyed(&mailbox_id)

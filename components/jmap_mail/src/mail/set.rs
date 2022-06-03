@@ -38,7 +38,7 @@ use super::{MessageData, MessageField};
 impl SetObject for Email {
     type SetArguments = ();
 
-    type NextCall = ();
+    type NextCall = SetRequest<Email>;
 
     fn eval_id_references(&mut self, mut fnc: impl FnMut(&str) -> Option<JMAPId>) {
         if let Some(Value::MailboxIds { value, .. }) =

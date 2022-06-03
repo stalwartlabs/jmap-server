@@ -5,6 +5,7 @@ use store::core::collection::Collection;
 
 pub mod blob;
 pub mod changes;
+pub mod copy;
 pub mod get;
 pub mod orm;
 pub mod query;

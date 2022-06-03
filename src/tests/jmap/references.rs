@@ -5,6 +5,7 @@ use jmap_mail::mailbox::schema::Property;
 
 use crate::api::{method, request::Request, response::Response};
 
+// TODO test references pointing to updatedProperties in mailbox
 #[test]
 fn map_sort_created_ids() {
     let request = serde_json::from_slice::<Request>(
