@@ -4,8 +4,8 @@ use actix_web::{
 };
 use jmap::{
     error::problem_details::ProblemDetails,
-    types::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::blob::JMAPBlobStore,
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use reqwest::header::CONTENT_TYPE;
 use store::{tracing::error, Store};
@@ -21,12 +21,6 @@ struct UploadResponse {
     #[serde(rename(serialize = "type"))]
     c_type: String,
     size: usize,
-}
-
-impl UploadResponse {
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(&self).unwrap()
-    }
 }
 
 pub async fn handle_jmap_upload<T>(
@@ -48,20 +42,17 @@ where
         Ok(blob_id) => {
             return HttpResponse::build(StatusCode::OK)
                 .insert_header(ContentType::json())
-                .body(
-                    UploadResponse {
-                        account_id,
-                        blob_id,
-                        c_type: request
-                            .headers()
-                            .get(CONTENT_TYPE)
-                            .and_then(|h| h.to_str().ok())
-                            .unwrap_or("application/octet-stream")
-                            .to_string(),
-                        size,
-                    }
-                    .to_json(),
-                );
+                .json(UploadResponse {
+                    account_id,
+                    blob_id,
+                    c_type: request
+                        .headers()
+                        .get(CONTENT_TYPE)
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or("application/octet-stream")
+                        .to_string(),
+                    size,
+                });
         }
         Err(err) => {
             error!("Blob upload failed: {:?}", err);

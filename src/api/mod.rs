@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use jmap::types::{jmap::JMAPId, state::JMAPState, type_state::TypeState};
 
+pub mod ingest;
 pub mod invocation;
 pub mod method;
 pub mod request;

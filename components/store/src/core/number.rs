@@ -1,6 +1,6 @@
 use crate::{serialize::StoreSerialize, Float, Integer, LongInteger};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Number {
     Integer(Integer),
     LongInteger(LongInteger),

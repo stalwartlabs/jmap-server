@@ -7,7 +7,7 @@ pub trait FieldLen {
     fn len(&self) -> usize;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Field<T> {
     pub field: FieldId,
     pub options: u64,

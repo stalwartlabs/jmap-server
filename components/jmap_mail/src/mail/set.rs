@@ -17,6 +17,7 @@ use mail_builder::headers::text::Text;
 use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
+use mail_parser::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::core::collection::Collection;
 use store::core::document::Document;
@@ -380,7 +381,14 @@ where
             // Parse message
             // TODO: write parsed message directly to store, avoid parsing it again.
             let size = blob.len();
-            self.mail_parse_item(document, blob_id, &blob, received_at)?;
+            self.mail_parse_item(
+                document,
+                blob_id,
+                Message::parse(&blob).ok_or_else(|| {
+                    SetError::new(SetErrorType::InvalidProperties, "Failed to parse e-mail.")
+                })?,
+                received_at,
+            )?;
             fields.insert(document)?;
 
             // Lock collection

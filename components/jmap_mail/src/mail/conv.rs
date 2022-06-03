@@ -608,7 +608,7 @@ impl MessageData {
 impl HeaderForm {
     pub fn parse_offsets<'x>(
         &self,
-        offsets: &[HeaderOffset],
+        offsets: &[&HeaderOffset],
         raw_message: &'x [u8],
         all: bool,
     ) -> HeaderValue<'x> {

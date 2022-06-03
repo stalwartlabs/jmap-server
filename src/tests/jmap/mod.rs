@@ -3,7 +3,10 @@ use std::time::Duration;
 use jmap_client::client::Client;
 use store_rocksdb::RocksDB;
 
-use crate::server::http::{init_jmap_server, start_jmap_server};
+use crate::{
+    api::ingest::Dsn,
+    server::http::{init_jmap_server, start_jmap_server},
+};
 
 use super::store::utils::{destroy_temp_dir, init_settings};
 
@@ -20,6 +23,7 @@ pub mod event_source;
 pub mod mailbox;
 pub mod push_subscription;
 pub mod references;
+pub mod vacation_response;
 pub mod websocket;
 
 #[actix_web::test]
@@ -55,10 +59,33 @@ async fn jmap_tests() {
     email_set::test(server.clone(), &mut client).await;
     email_query::test(server.clone(), &mut client).await;*/
     email_submission::test(server.clone(), &mut client).await;
-    /*mailbox::test(server.clone(), &mut client).await;
-    event_source::test(server.clone(), &mut client).await;
-    push_subscription::test(server.clone(), &mut client).await;
-    websocket::test(server.clone(), &mut client).await;*/
+    vacation_response::test(server.clone(), &mut client).await;
+    //mailbox::test(server.clone(), &mut client).await;
+    //event_source::test(server.clone(), &mut client).await;
+    //push_subscription::test(server.clone(), &mut client).await;
+    //websocket::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
+}
+
+pub async fn ingest_message(raw_message: Vec<u8>, recipients: &[&str]) -> Vec<Dsn> {
+    let mut url = "http://127.0.0.1:8001/ingest?api_key=SECRET_API_KEY".to_string();
+    for to in recipients {
+        url.push_str(&format!("&to={}", to));
+    }
+
+    serde_json::from_slice(
+        &reqwest::Client::builder()
+            .build()
+            .unwrap_or_default()
+            .post(&url)
+            .body(raw_message)
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap(),
+    )
+    .unwrap()
 }

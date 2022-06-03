@@ -9,6 +9,7 @@ use store::{
 
 use crate::{
     api::{
+        ingest::handle_ingest,
         request::handle_jmap_request,
         session::{handle_jmap_session, Session},
     },
@@ -116,6 +117,7 @@ where
                 web::get().to(handle_jmap_event_source::<T>),
             )
             .route("/jmap/ws", web::get().to(handle_ws::<T>))
+            .route("/ingest", web::post().to(handle_ingest::<T>))
     });
 
     if let Some(tls_config) = tls_config {

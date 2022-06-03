@@ -6,13 +6,13 @@ pub const MAX_TOKEN_LENGTH: usize = 40;
 pub const MAX_ID_LENGTH: usize = 100;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Text {
     pub text: String,
     pub language: Language,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Document {
     pub collection: Collection,
     pub document_id: DocumentId,

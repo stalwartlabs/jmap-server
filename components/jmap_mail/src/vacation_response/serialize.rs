@@ -55,6 +55,7 @@ impl Serialize for VacationResponse {
                 Value::Null => map.serialize_entry(name, &None::<&str>)?,
                 Value::DateTime { value } => map.serialize_entry(name, value)?,
                 Value::Bool { value } => map.serialize_entry(name, value)?,
+                Value::SentResponses { .. } => (),
             }
         }
 

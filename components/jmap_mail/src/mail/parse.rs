@@ -2,12 +2,13 @@ use super::{
     conv::IntoForm,
     get::AsBodyParts,
     schema::{BodyProperty, Email, HeaderForm, Property, Value},
+    GetRawHeader,
 };
 use crate::mail::{HeaderName, MessageOutline, MimeHeaders, MimePart, MimePartType};
 use jmap::{
     error::method::MethodError,
-    types::{blob::JMAPBlob, jmap::JMAPId},
     jmap_store::{blob::JMAPBlobStore, get::GetObject},
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
@@ -364,10 +365,10 @@ impl IntoParsedEmail for Message<'_> {
                         if let Some(offsets) = message_outline
                             .headers
                             .get(0)
-                            .and_then(|h| h.get(header_name))
+                            .and_then(|h| h.get_header(header_name))
                         {
                             header_form
-                                .parse_offsets(offsets, raw_message, header.all)
+                                .parse_offsets(&offsets, raw_message, header.all)
                                 .into_form(header_form, header.all)
                         } else {
                             None

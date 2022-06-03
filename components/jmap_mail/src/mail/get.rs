@@ -31,6 +31,7 @@ use super::{
         BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
         HeaderProperty, Property, Value,
     },
+    GetRawHeader,
 };
 
 enum FetchRaw {
@@ -339,10 +340,10 @@ where
                                 if let Some(offsets) = message_outline
                                     .headers
                                     .get(0)
-                                    .and_then(|h| h.get(header_name))
+                                    .and_then(|h| h.get_header(header_name))
                                 {
                                     header_form
-                                        .parse_offsets(offsets, raw_message, header.all)
+                                        .parse_offsets(&offsets, raw_message, header.all)
                                         .into_form(header_form, header.all)
                                 } else {
                                     None
@@ -499,7 +500,7 @@ impl MimePart {
         part_id: Option<usize>,
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        headers_raw: Option<&HashMap<HeaderName, Vec<HeaderOffset>>>,
+        headers_raw: Option<&Vec<(HeaderName, HeaderOffset)>>,
         base_blob_id: Option<&BlobId>,
     ) -> EmailBodyPart {
         let mut body_part = HashMap::with_capacity(properties.len());
@@ -612,10 +613,10 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Header(header) if headers_raw.is_some() => {
-                    if let Some(offsets) = headers_raw.unwrap().get(&header.header) {
+                    if let Some(offsets) = headers_raw.unwrap().get_header(&header.header) {
                         if let Some(value) = header
                             .form
-                            .parse_offsets(offsets, message_raw.unwrap(), header.all)
+                            .parse_offsets(&offsets, message_raw.unwrap(), header.all)
                             .into_form(&header.form, header.all)
                         {
                             body_part.insert(BodyProperty::Header(header.clone()), value);
@@ -627,7 +628,7 @@ impl MimePart {
                     let mut headers = Vec::with_capacity(headers_raw.len());
                     for (header, value) in headers_raw {
                         if let HeaderValue::Collection(values) =
-                            HeaderForm::Raw.parse_offsets(value, message_raw.unwrap(), true)
+                            HeaderForm::Raw.parse_offsets(&[value], message_raw.unwrap(), true)
                         {
                             for value in values {
                                 if let HeaderValue::Text(value) = value {

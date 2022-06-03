@@ -37,7 +37,7 @@ pub enum Event {
     VacationResponse {
         from: String,
         to: String,
-        message: String,
+        message: Vec<u8>,
     },
     RelayReady,
     Stop,
@@ -54,6 +54,10 @@ impl Event {
             created_ids,
             updated_ids,
         }
+    }
+
+    pub fn vacation_response(from: String, to: String, message: Vec<u8>) -> Self {
+        Event::VacationResponse { from, to, message }
     }
 }
 
@@ -432,7 +436,7 @@ where
                     } {
                         Ok(mut client) => {
                             if let Err(err) = client
-                                .send(Message::empty().from(from).to(to).body(message.as_bytes()))
+                                .send(Message::empty().from(from).to(to).body(&message))
                                 .await
                             {
                                 debug!("Failed to send vacation response: {}", err);
@@ -507,18 +511,9 @@ impl<T> JMAPServer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn notify_email_delivery(
-        &self,
-        account_id: AccountId,
-        created_ids: Vec<DocumentId>,
-        updated_ids: Vec<DocumentId>,
-    ) -> jmap::Result<()> {
+    pub async fn notify_email_delivery(&self, event: Event) -> jmap::Result<()> {
         let email_tx = self.email_delivery.clone();
-        if let Err(err) = email_tx
-            .clone()
-            .send(Event::new_submission(account_id, created_ids, updated_ids))
-            .await
-        {
+        if let Err(err) = email_tx.clone().send(event).await {
             error!("Channel failure while publishing state change: {}", err);
         }
         Ok(())

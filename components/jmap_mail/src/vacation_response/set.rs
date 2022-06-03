@@ -1,11 +1,11 @@
 use crate::vacation_response::schema::VacationResponse;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::types::jmap::JMAPId;
 use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::request::set::SetResponse;
 use jmap::request::ResultReference;
+use jmap::types::jmap::JMAPId;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::parking_lot::MutexGuard;
 use store::{JMAPStore, Store};
@@ -41,7 +41,22 @@ where
     ) -> jmap::Result<SetResponse<VacationResponse>> {
         let mut helper = SetHelper::new(self, request)?;
 
-        helper.create(|_create_id, item, _helper, document| {
+        helper.create(|_create_id, item, helper, document| {
+            // Create as a singleton
+            let id = JMAPId::singleton();
+            document.document_id = id.get_document_id();
+
+            // Make sure the VacationResponse object does not exist already
+            if self
+                .get_orm::<VacationResponse>(helper.account_id, document.document_id)?
+                .is_some()
+            {
+                return Err(SetError::new(
+                    SetErrorType::Forbidden,
+                    "VacationResponse already exists, use update instead.",
+                ));
+            }
+
             let mut fields = TinyORM::<VacationResponse>::new();
 
             for (property, value) in item.properties {
@@ -78,10 +93,7 @@ where
             // Validate fields
             fields.insert_validate(document)?;
 
-            Ok((
-                VacationResponse::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
+            Ok((VacationResponse::new(id), None::<MutexGuard<'_, ()>>))
         })?;
 
         helper.update(|id, item, helper, document| {
@@ -120,6 +132,9 @@ where
                     },
                 );
             }
+
+            // Remove sent responses
+            fields.remove(&Property::SentResponses_);
 
             // Merge changes
             current_fields.merge_validate(document, fields)?;

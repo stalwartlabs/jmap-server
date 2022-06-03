@@ -23,7 +23,7 @@ use jmap_mail::{
 };
 use store::{tracing::error, Store};
 
-use crate::JMAPServer;
+use crate::{services::email_delivery, JMAPServer};
 
 use super::{method, request::Request, response::Response};
 
@@ -69,8 +69,6 @@ where
                             if let Some(state_change) = state_change {
                                 if let Err(err) = core.publish_state_change(state_change).await {
                                     error!("Failed to publish state change: {}", err);
-                                    response.push_error(call_id, MethodError::ServerPartialFail);
-                                    break;
                                 }
                             }
 
@@ -79,7 +77,7 @@ where
                                 &method_response
                             {
                                 if let Err(err) = core
-                                    .notify_email_delivery(
+                                    .notify_email_delivery(email_delivery::Event::new_submission(
                                         submission_response.account_id(),
                                         created_ids
                                             .as_ref()
@@ -95,10 +93,10 @@ where
                                             .keys()
                                             .map(|id| id.get_document_id())
                                             .collect(),
-                                    )
+                                    ))
                                     .await
                                 {
-                                    error!("No e-mail delivery configured or something bad happened: {}", err);
+                                    error!("No e-mail delivery configured or something else happened: {}", err);
                                 }
                             }
 

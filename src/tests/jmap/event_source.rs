@@ -8,7 +8,10 @@ use jmap_client::{client::Client, event_source::Changes, mailbox::Role, TypeStat
 use store::Store;
 use tokio::sync::mpsc;
 
-use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
+use crate::{
+    tests::{jmap::ingest_message, store::utils::StoreCompareWith},
+    JMAPServer,
+};
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
@@ -51,19 +54,29 @@ where
     assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
     assert_ping(&mut event_rx).await; // Pings are only received in cfg(test)
 
-    // Create email and expect state change
-    client
-        .email_import(
-            b"From: test@test.com\nSubject: hey\n\ntest".to_vec(),
-            [&mailbox_id],
-            None::<Vec<&str>>,
-            None,
+    // Ingest email and expect state change
+    ingest_message(
+        concat!(
+            "From: bill@example.com\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: TPS Report\r\n",
+            "\r\n",
+            "I'm going to need those TPS reports ASAP. ",
+            "So, if you could do that, that'd be great."
         )
-        .await
-        .unwrap();
+        .as_bytes()
+        .to_vec(),
+        &["jdoe@example.com"],
+    )
+    .await;
+
     assert_state(
         &mut event_rx,
-        &[TypeState::Email, TypeState::Thread, TypeState::Mailbox],
+        &[
+            TypeState::EmailDelivery,
+            TypeState::Thread,
+            TypeState::Mailbox,
+        ],
     )
     .await;
     assert_ping(&mut event_rx).await;

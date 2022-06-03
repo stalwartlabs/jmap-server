@@ -1,6 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
-use jmap::{types::jmap::JMAPId, jmap_store::orm};
+use jmap::{jmap_store::orm, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use store::{
     chrono::{DateTime, Utc},
@@ -18,6 +21,7 @@ pub enum Value {
     Text { value: String },
     Bool { value: bool },
     DateTime { value: DateTime<Utc> },
+    SentResponses { value: HashSet<String> },
     Null,
 }
 
@@ -51,7 +55,7 @@ pub enum Property {
     Subject = 4,
     TextBody = 5,
     HtmlBody = 6,
-    Invalid = 7,
+    SentResponses_ = 7,
 }
 
 impl Property {
@@ -64,7 +68,7 @@ impl Property {
             "subject" => Property::Subject,
             "textBody" => Property::TextBody,
             "htmlBody" => Property::HtmlBody,
-            _ => Property::Invalid,
+            _ => Property::SentResponses_,
         }
     }
 }
@@ -79,7 +83,7 @@ impl Display for Property {
             Property::Subject => write!(f, "subject"),
             Property::TextBody => write!(f, "textBody"),
             Property::HtmlBody => write!(f, "htmlBody"),
-            Property::Invalid => Ok(()),
+            Property::SentResponses_ => Ok(()),
         }
     }
 }
@@ -100,7 +104,7 @@ impl From<FieldId> for Property {
             4 => Property::Subject,
             5 => Property::TextBody,
             6 => Property::HtmlBody,
-            _ => Property::Invalid,
+            _ => Property::SentResponses_,
         }
     }
 }
@@ -110,7 +114,7 @@ impl TryFrom<&str> for Property {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match Property::parse(value) {
-            Property::Invalid => Err(()),
+            Property::SentResponses_ => Err(()),
             property => Ok(property),
         }
     }

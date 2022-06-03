@@ -2,6 +2,7 @@ pub mod changes;
 pub mod conv;
 pub mod get;
 pub mod import;
+pub mod ingest;
 pub mod parse;
 pub mod query;
 pub mod raft;
@@ -18,11 +19,12 @@ use mail_parser::{HeaderOffset, MessagePartId, MessageStructure, RfcHeader};
 use store::{
     bincode,
     blob::BlobId,
+    core::collection::Collection,
     serialize::{StoreDeserialize, StoreSerialize},
-    FieldId, core::collection::Collection,
+    FieldId,
 };
 
-use self::schema::{EmailAddress, EmailAddressGroup, Email, Property, Value};
+use self::schema::{Email, EmailAddress, EmailAddressGroup, Property, Value};
 
 pub const MAX_MESSAGE_PARTS: usize = 1000;
 
@@ -100,7 +102,25 @@ impl StoreDeserialize for MessageData {
 pub struct MessageOutline {
     pub body_offset: usize,
     pub body_structure: MessageStructure,
-    pub headers: Vec<HashMap<HeaderName, Vec<HeaderOffset>>>,
+    pub headers: Vec<Vec<(HeaderName, HeaderOffset)>>,
+}
+
+pub trait GetRawHeader {
+    fn get_header(&self, name: &HeaderName) -> Option<Vec<&HeaderOffset>>;
+}
+
+impl GetRawHeader for Vec<(HeaderName, HeaderOffset)> {
+    fn get_header(&self, name: &HeaderName) -> Option<Vec<&HeaderOffset>> {
+        let offsets = self
+            .iter()
+            .filter_map(|(k, v)| if k == name { Some(v) } else { None })
+            .collect::<Vec<_>>();
+        if !offsets.is_empty() {
+            Some(offsets)
+        } else {
+            None
+        }
+    }
 }
 
 impl StoreSerialize for MessageOutline {

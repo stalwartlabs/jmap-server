@@ -47,6 +47,7 @@ pub struct MockSMTPSettings {
     pub fail_mail_from: bool,
     pub fail_rcpt_to: bool,
     pub fail_message: bool,
+    pub do_stop: bool,
 }
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
@@ -382,6 +383,7 @@ where
     assert_email_properties(client, &email_id, &[&mailbox_id_2], &["$draft"]).await;
 
     // Verify onSuccessDestroyEmail action
+    smtp_settings.lock().do_stop = true;
     let mut request = client.build();
     let set_request = request.set_email_submission();
     let create_id = set_request
@@ -399,7 +401,7 @@ where
         .unwrap()
         .is_none());
 
-    // Destroy mailbox, identity and all submissions
+    // Destroy the created mailbox, identity and all submissions
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();
     client.mailbox_destroy(&mailbox_id_2, true).await.unwrap();
     client.identity_destroy(&identity_id).await.unwrap();
@@ -514,19 +516,30 @@ pub fn spawn_mock_smtp_server() -> (mpsc::Receiver<MockMessage>, Arc<Mutex<MockS
                 }
                 buf.clear();
             }
+
+            if settings.lock().do_stop {
+                println!("Mock SMTP server stopped.");
+                break;
+            }
         }
     });
 
     (event_rx, _settings)
 }
 
-async fn assert_message_delivery(
+pub async fn assert_message_delivery(
     event_rx: &mut mpsc::Receiver<MockMessage>,
     expected_message: MockMessage,
 ) {
     match tokio::time::timeout(Duration::from_millis(3000), event_rx.recv()).await {
         Ok(Some(message)) => {
-            assert_eq!(message, expected_message);
+            if let Some(needle) = expected_message.message.strip_prefix('@') {
+                assert_eq!(message.mail_from, expected_message.mail_from);
+                assert_eq!(message.rcpt_to, expected_message.rcpt_to);
+                assert!(message.message.contains(needle));
+            } else {
+                assert_eq!(message, expected_message);
+            }
         }
         result => {
             panic!(
@@ -537,7 +550,7 @@ async fn assert_message_delivery(
     }
 }
 
-async fn expect_nothing(event_rx: &mut mpsc::Receiver<MockMessage>) {
+pub async fn expect_nothing(event_rx: &mut mpsc::Receiver<MockMessage>) {
     match tokio::time::timeout(Duration::from_millis(500), event_rx.recv()).await {
         Err(_) => {}
         message => {

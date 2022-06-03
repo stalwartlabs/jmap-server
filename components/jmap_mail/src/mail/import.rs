@@ -109,7 +109,7 @@ pub trait JMAPMailImport {
         &self,
         document: &mut Document,
         blob_id: BlobId,
-        raw_message: &[u8],
+        message: Message,
         received_at: Option<i64>,
     ) -> store::Result<()>;
 
@@ -255,7 +255,14 @@ where
 
         // Parse message
         let raw_blob: JMAPBlob = (&blob_id).into();
-        self.mail_parse_item(&mut document, blob_id, blob, received_at)?;
+        self.mail_parse_item(
+            &mut document,
+            blob_id,
+            Message::parse(blob).ok_or_else(|| {
+                MethodError::InvalidArguments("Failed to parse e-mail message.".to_string())
+            })?,
+            received_at,
+        )?;
 
         // Add keyword tags
         let mut orm = TinyORM::<Email>::new();
@@ -298,12 +305,9 @@ where
         &self,
         document: &mut Document,
         blob_id: BlobId,
-        raw_message: &[u8],
+        message: Message,
         received_at: Option<i64>,
     ) -> store::Result<()> {
-        let message = Message::parse(raw_message).ok_or_else(|| {
-            StoreError::InvalidArguments("Failed to parse e-mail message.".to_string())
-        })?;
         let mut total_parts = message.parts.len();
         let mut message_data = MessageData {
             headers: HashMap::with_capacity(message.headers_rfc.len()),

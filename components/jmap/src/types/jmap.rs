@@ -12,6 +12,10 @@ impl JMAPId {
         Self { id }
     }
 
+    pub fn singleton() -> Self {
+        Self::new(u64::MAX)
+    }
+
     pub fn parse(id: &str) -> Option<Self>
     where
         Self: Sized,

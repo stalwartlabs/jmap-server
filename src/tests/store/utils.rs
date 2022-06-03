@@ -149,6 +149,7 @@ pub fn init_settings(
             ("query-max-results".to_string(), "100000".to_string()),
             ("http-port".to_string(), (8000 + peer_num).to_string()),
             ("smtp-relay".to_string(), "!127.0.0.1:9999".to_string()),
+            ("api-key".to_string(), "SECRET_API_KEY".to_string()),
         ]
         .into_iter(),
     );
