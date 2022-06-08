@@ -86,6 +86,63 @@ impl ValueKey {
         document.to_leb128_bytes(&mut bytes);
         bytes
     }
+
+    pub fn serialize_member_of(account_id: AccountId, member_of: AccountId) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<AccountId>() + 1);
+        account_id.to_leb128_bytes(&mut bytes);
+        bytes.push(u8::MAX);
+        bytes.push(u8::MAX);
+        member_of.to_leb128_bytes(&mut bytes);
+        bytes
+    }
+
+    pub fn serialize_member_of_prefix(account_id: AccountId) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>() + 2);
+        account_id.to_leb128_bytes(&mut bytes);
+        bytes.push(u8::MAX);
+        bytes.push(u8::MAX);
+        bytes
+    }
+
+    pub fn serialize_acl(
+        grant_account: AccountId,
+        to_account: AccountId,
+        to_collection: Collection,
+        to_document: DocumentId,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<AccountId>() + 1);
+        grant_account.to_leb128_bytes(&mut bytes);
+        bytes.push(u8::MAX);
+        bytes.push(to_collection.into());
+        to_account.to_leb128_bytes(&mut bytes);
+        to_document.to_leb128_bytes(&mut bytes);
+        bytes
+    }
+
+    pub fn serialize_acl_prefix(
+        grant_account: AccountId,
+        to_account: AccountId,
+        to_collection: Collection,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>() + 1);
+        grant_account.to_leb128_bytes(&mut bytes);
+        bytes.push(u8::MAX);
+        if to_collection != Collection::None {
+            bytes.push(to_collection.into());
+        }
+        if to_account != AccountId::MAX {
+            to_account.to_leb128_bytes(&mut bytes);
+        }
+        bytes
+    }
+
+    pub fn deserialize_acl_target(bytes: &[u8]) -> Option<(AccountId, DocumentId)> {
+        let mut bytes = bytes.iter();
+        Some((
+            AccountId::from_leb128_it(&mut bytes)?,
+            DocumentId::from_leb128_it(&mut bytes)?,
+        ))
+    }
 }
 
 impl BlobKey {

@@ -1,4 +1,9 @@
-use crate::{blob::BlobId, nlp::Language, write::field::Field, DocumentId, FieldId};
+use crate::{
+    blob::BlobId,
+    nlp::Language,
+    write::{field::Field, operation::WriteOperation},
+    DocumentId, FieldId,
+};
 
 use super::{collection::Collection, number::Number, tag::Tag};
 
@@ -23,6 +28,7 @@ pub struct Document {
     pub binary_fields: Vec<Field<Vec<u8>>>,
     pub tag_fields: Vec<Field<Tag>>,
     pub blobs: Vec<(BlobId, u64)>,
+    pub operations: Vec<WriteOperation>,
 }
 
 impl Document {
@@ -35,6 +41,7 @@ impl Document {
             binary_fields: Vec::new(),
             tag_fields: Vec::new(),
             blobs: Vec::new(),
+            operations: Vec::new(),
             term_index: None,
         }
     }

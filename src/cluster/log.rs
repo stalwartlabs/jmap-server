@@ -835,7 +835,7 @@ where
         match collection {
             Collection::Mail => self.raft_apply_update::<Email>(write_batch, update),
             Collection::Mailbox => self.raft_apply_update::<Mailbox>(write_batch, update),
-            Collection::Account => todo!(),
+            Collection::Principal => todo!(),
             Collection::PushSubscription => todo!(),
             Collection::Thread => todo!(),
             Collection::Identity => todo!(),
@@ -857,7 +857,7 @@ where
                 self.mail_delete(write_batch.account_id, None, &mut document)?;
             }
             Collection::Mailbox => todo!(), //self.mailbox_delete(self, write_batch.account_id, &mut document)?,
-            Collection::Account => todo!(),
+            Collection::Principal => todo!(),
             Collection::PushSubscription => todo!(),
             Collection::Thread => todo!(),
             Collection::Identity => todo!(),

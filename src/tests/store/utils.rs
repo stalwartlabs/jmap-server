@@ -312,7 +312,7 @@ where
                                         .into_boxed_slice()
                                     {
                                         match collection {
-                                            Collection::Account => todo!(),
+                                            Collection::Principal => todo!(),
                                             Collection::PushSubscription => todo!(),
                                             Collection::Mail => assert_eq!(
                                                 TinyORM::<Email>::deserialize(&value).unwrap(),

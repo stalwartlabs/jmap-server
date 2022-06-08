@@ -3,7 +3,7 @@ use super::bitmap::BitmapItem;
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum Collection {
-    Account = 0,
+    Principal = 0,
     PushSubscription = 1,
     Mail = 2,
     Mailbox = 3,
@@ -23,7 +23,7 @@ impl Default for Collection {
 impl From<u8> for Collection {
     fn from(value: u8) -> Self {
         match value {
-            0 => Collection::Account,
+            0 => Collection::Principal,
             1 => Collection::PushSubscription,
             2 => Collection::Mail,
             3 => Collection::Mailbox,
@@ -54,7 +54,7 @@ impl From<Collection> for u64 {
 impl From<u64> for Collection {
     fn from(value: u64) -> Self {
         match value {
-            0 => Collection::Account,
+            0 => Collection::Principal,
             1 => Collection::PushSubscription,
             2 => Collection::Mail,
             3 => Collection::Mailbox,

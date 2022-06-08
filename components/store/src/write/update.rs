@@ -94,6 +94,9 @@ where
                 }
             };
 
+            // Add operations
+            write_batch.extend(document.operations);
+
             // Process text fields
             if !document.text_fields.is_empty() {
                 // Detect language for unknown fields
@@ -212,7 +215,7 @@ where
                         }
                     }
 
-                    if field.is_sorted() {
+                    if field.is_indexed() {
                         let key = IndexKey::serialize(
                             batch.account_id,
                             document.collection,
@@ -343,7 +346,7 @@ where
                     }
                 }
 
-                if field.is_sorted() {
+                if field.is_indexed() {
                     let key = IndexKey::serialize(
                         batch.account_id,
                         document.collection,

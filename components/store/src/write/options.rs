@@ -9,7 +9,7 @@ impl IndexOptions {
 
 pub trait Options {
     const F_STORE: u64 = 0x01 << 32;
-    const F_SORT: u64 = 0x02 << 32;
+    const F_INDEX: u64 = 0x02 << 32;
     const F_CLEAR: u64 = 0x04 << 32;
     const F_NONE: u64 = 0;
     const F_KEYWORD: u64 = 1;
@@ -17,14 +17,14 @@ pub trait Options {
     const F_FULL_TEXT: u64 = 3;
 
     fn store(self) -> Self;
-    fn sort(self) -> Self;
+    fn index(self) -> Self;
     fn clear(self) -> Self;
     fn keyword(self) -> Self;
     fn tokenize(self) -> Self;
     fn full_text(self, part_id: u32) -> Self;
 
     fn is_store(&self) -> bool;
-    fn is_sort(&self) -> bool;
+    fn is_index(&self) -> bool;
     fn is_clear(&self) -> bool;
     fn is_full_text(&self) -> bool;
     fn get_text_options(&self) -> u64;
@@ -36,8 +36,8 @@ impl Options for u64 {
         self
     }
 
-    fn sort(mut self) -> Self {
-        self |= Self::F_SORT;
+    fn index(mut self) -> Self {
+        self |= Self::F_INDEX;
         self
     }
 
@@ -62,8 +62,8 @@ impl Options for u64 {
         self & Self::F_STORE != 0
     }
 
-    fn is_sort(&self) -> bool {
-        self & Self::F_SORT != 0
+    fn is_index(&self) -> bool {
+        self & Self::F_INDEX != 0
     }
 
     fn is_clear(&self) -> bool {

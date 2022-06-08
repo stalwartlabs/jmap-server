@@ -4,7 +4,7 @@ use jmap::request::query::{QueryRequest, QueryResponse};
 
 use store::read::comparator::{self, FieldComparator};
 use store::read::default_filter_mapper;
-use store::read::filter::{self, FieldValue};
+use store::read::filter::{self, Query};
 use store::JMAPStore;
 use store::Store;
 
@@ -46,7 +46,7 @@ where
                         .map(|id| {
                             filter::Filter::eq(
                                 Property::IdentityId.into(),
-                                FieldValue::LongInteger(id.into()),
+                                Query::LongInteger(id.into()),
                             )
                         })
                         .collect(),
@@ -57,7 +57,7 @@ where
                         .map(|id| {
                             filter::Filter::eq(
                                 Property::EmailId.into(),
-                                FieldValue::LongInteger(id.into()),
+                                Query::LongInteger(id.into()),
                             )
                         })
                         .collect(),
@@ -68,14 +68,14 @@ where
                         .map(|id| {
                             filter::Filter::eq(
                                 Property::ThreadId.into(),
-                                FieldValue::LongInteger(id.into()),
+                                Query::LongInteger(id.into()),
                             )
                         })
                         .collect(),
                 ),
                 Filter::UndoStatus { value } => filter::Filter::eq(
                     Property::UndoStatus.into(),
-                    FieldValue::Text(match value {
+                    Query::Keyword(match value {
                         UndoStatus::Pending => "p".to_string(),
                         UndoStatus::Final => "f".to_string(),
                         UndoStatus::Canceled => "c".to_string(),
@@ -83,11 +83,11 @@ where
                 ),
                 Filter::Before { value } => filter::Filter::lt(
                     Property::SendAt.into(),
-                    FieldValue::LongInteger(value.timestamp() as u64),
+                    Query::LongInteger(value.timestamp() as u64),
                 ),
                 Filter::After { value } => filter::Filter::gt(
                     Property::SendAt.into(),
-                    FieldValue::LongInteger(value.timestamp() as u64),
+                    Query::LongInteger(value.timestamp() as u64),
                 ),
                 Filter::Unsupported { value } => {
                     return Err(MethodError::UnsupportedFilter(value));

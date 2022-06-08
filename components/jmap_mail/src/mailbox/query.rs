@@ -11,7 +11,7 @@ use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::read::comparator::{self, FieldComparator};
 use store::read::default_filter_mapper;
-use store::read::filter::{self, FieldValue};
+use store::read::filter::{self, Query};
 use store::JMAPStore;
 use store::Store;
 
@@ -54,28 +54,27 @@ where
             Ok(match filter {
                 Filter::ParentId { value } => filter::Filter::eq(
                     Property::ParentId.into(),
-                    FieldValue::LongInteger(value.map(|id| u64::from(id) + 1).unwrap_or(0)),
+                    Query::LongInteger(value.map(|id| u64::from(id) + 1).unwrap_or(0)),
                 ),
-                Filter::Name { value } => filter::Filter::eq(
-                    Property::Name.into(),
-                    FieldValue::Text(value.to_lowercase()),
-                ),
+                Filter::Name { value } => {
+                    filter::Filter::eq(Property::Name.into(), Query::Tokenize(value.to_lowercase()))
+                }
                 Filter::Role { value } => {
                     if let Some(value) = value {
                         filter::Filter::eq(
                             Property::Role.into(),
-                            FieldValue::Text(value.to_lowercase()),
+                            Query::Tokenize(value.to_lowercase()),
                         )
                     } else {
                         filter::Filter::not(vec![filter::Filter::eq(
                             Property::Role.into(),
-                            FieldValue::Tag(Tag::Default),
+                            Query::Tag(Tag::Default),
                         )])
                     }
                 }
                 Filter::HasAnyRole { value } => {
                     let filter =
-                        filter::Filter::eq(Property::Role.into(), FieldValue::Tag(Tag::Default));
+                        filter::Filter::eq(Property::Role.into(), Query::Tag(Tag::Default));
                     if !value {
                         filter::Filter::not(vec![filter])
                     } else {

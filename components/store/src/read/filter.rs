@@ -15,7 +15,7 @@ pub enum ComparisonOperator {
 pub struct FilterCondition {
     pub field: FieldId,
     pub op: ComparisonOperator,
-    pub value: FieldValue,
+    pub value: Query,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -40,11 +40,11 @@ impl Default for Filter {
 }
 
 impl Filter {
-    pub fn new_condition(field: FieldId, op: ComparisonOperator, value: FieldValue) -> Self {
+    pub fn new_condition(field: FieldId, op: ComparisonOperator, value: Query) -> Self {
         Filter::Condition(FilterCondition { field, op, value })
     }
 
-    pub fn eq(field: FieldId, value: FieldValue) -> Self {
+    pub fn eq(field: FieldId, value: Query) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::Equal,
@@ -52,7 +52,7 @@ impl Filter {
         })
     }
 
-    pub fn lt(field: FieldId, value: FieldValue) -> Self {
+    pub fn lt(field: FieldId, value: Query) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::LowerThan,
@@ -60,7 +60,7 @@ impl Filter {
         })
     }
 
-    pub fn le(field: FieldId, value: FieldValue) -> Self {
+    pub fn le(field: FieldId, value: Query) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::LowerEqualThan,
@@ -68,7 +68,7 @@ impl Filter {
         })
     }
 
-    pub fn gt(field: FieldId, value: FieldValue) -> Self {
+    pub fn gt(field: FieldId, value: Query) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::GreaterThan,
@@ -76,7 +76,7 @@ impl Filter {
         })
     }
 
-    pub fn ge(field: FieldId, value: FieldValue) -> Self {
+    pub fn ge(field: FieldId, value: Query) -> Self {
         Filter::Condition(FilterCondition {
             field,
             op: ComparisonOperator::GreaterEqualThan,
@@ -113,26 +113,24 @@ pub struct FilterOperator {
 }
 
 #[derive(Debug)]
-pub enum FieldValue {
+pub enum Query {
     Keyword(String),
-    Text(String),
-    FullText(TextQuery),
+    Tokenize(String),
+    Index(String),
+    Match {
+        text: String,
+        language: Language,
+        match_phrase: bool,
+    },
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
     Tag(Tag),
 }
 
-#[derive(Debug)]
-pub struct TextQuery {
-    pub text: String,
-    pub language: Language,
-    pub match_phrase: bool,
-}
-
-impl TextQuery {
-    pub fn query(text: String, language: Language) -> Self {
-        TextQuery {
+impl Query {
+    pub fn match_text(text: String, language: Language) -> Self {
+        Query::Match {
             language,
             match_phrase: (text.starts_with('"') && text.ends_with('"'))
                 || (text.starts_with('\'') && text.ends_with('\'')),
@@ -140,7 +138,7 @@ impl TextQuery {
         }
     }
 
-    pub fn query_english(text: String) -> Self {
-        TextQuery::query(text, Language::English)
+    pub fn match_english(text: String) -> Self {
+        Query::match_text(text, Language::English)
     }
 }

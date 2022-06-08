@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use serde::{Deserialize, Serialize};
 use store::core::{bitmap::BitmapItem, collection::Collection};
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
 #[repr(u8)]
 pub enum TypeState {
     Email = 0,

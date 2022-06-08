@@ -9,7 +9,7 @@ use store::{
     nlp::Language,
     read::{
         comparator::Comparator,
-        filter::{ComparisonOperator, FieldValue, Filter, TextQuery},
+        filter::{ComparisonOperator, Filter, Query},
         FilterMapper,
     },
     write::{
@@ -110,7 +110,7 @@ where
                                             pos as u8,
                                             field.to_lowercase(),
                                             Language::English,
-                                            IndexOptions::new().sort().tokenize(),
+                                            IndexOptions::new().index().tokenize(),
                                         );
                                     }
                                 }
@@ -120,7 +120,7 @@ where
                                             pos as u8,
                                             field.to_lowercase(),
                                             Language::English,
-                                            IndexOptions::new().sort().full_text(0),
+                                            IndexOptions::new().index().full_text(0),
                                         );
                                     }
                                 }
@@ -128,7 +128,7 @@ where
                                     builder.number(
                                         pos as u8,
                                         field.parse::<u32>().unwrap_or(0),
-                                        IndexOptions::new().store().sort(),
+                                        IndexOptions::new().store().index(),
                                     );
                                 }
                                 FieldType::Keyword => {
@@ -137,7 +137,7 @@ where
                                             pos as u8,
                                             field.to_lowercase(),
                                             Language::Unknown,
-                                            IndexOptions::new().store().sort().keyword(),
+                                            IndexOptions::new().store().index().keyword(),
                                         );
                                     }
                                 }
@@ -207,12 +207,12 @@ where
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("water".into())),
+                    Query::match_english("water".into()),
                 ),
                 Filter::new_condition(
                     fields["year"],
                     ComparisonOperator::Equal,
-                    FieldValue::Integer(1979),
+                    Query::Integer(1979),
                 ),
             ]),
             vec!["p11293"],
@@ -222,22 +222,22 @@ where
                 Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("gelatin".into())),
+                    Query::match_english("gelatin".into()),
                 ),
                 Filter::new_condition(
                     fields["year"],
                     ComparisonOperator::GreaterThan,
-                    FieldValue::Integer(2000),
+                    Query::Integer(2000),
                 ),
                 Filter::new_condition(
                     fields["width"],
                     ComparisonOperator::LowerThan,
-                    FieldValue::Integer(180),
+                    Query::Integer(180),
                 ),
                 Filter::new_condition(
                     fields["width"],
                     ComparisonOperator::GreaterThan,
-                    FieldValue::Integer(0),
+                    Query::Integer(0),
                 ),
             ]),
             vec!["p79426", "p79427", "p79428", "p79429", "p79430"],
@@ -246,7 +246,7 @@ where
             Filter::and(vec![Filter::new_condition(
                 fields["title"],
                 ComparisonOperator::Equal,
-                FieldValue::FullText(TextQuery::query_english("'rustic bridge'".into())),
+                Query::match_english("'rustic bridge'".into()),
             )]),
             vec!["d05503"],
         ),
@@ -255,12 +255,12 @@ where
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("'rustic'".into())),
+                    Query::match_english("'rustic'".into()),
                 ),
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("study".into())),
+                    Query::match_english("study".into()),
                 ),
             ]),
             vec!["d00399", "d05352"],
@@ -270,23 +270,23 @@ where
                 Filter::new_condition(
                     fields["artist"],
                     ComparisonOperator::Equal,
-                    FieldValue::Text("mauro kunst".into()),
+                    Query::Tokenize("mauro kunst".into()),
                 ),
                 Filter::new_condition(
                     fields["artistRole"],
                     ComparisonOperator::Equal,
-                    FieldValue::Keyword("artist".into()),
+                    Query::Keyword("artist".into()),
                 ),
                 Filter::or(vec![
                     Filter::new_condition(
                         fields["year"],
                         ComparisonOperator::Equal,
-                        FieldValue::Integer(1969),
+                        Query::Integer(1969),
                     ),
                     Filter::new_condition(
                         fields["year"],
                         ComparisonOperator::Equal,
-                        FieldValue::Integer(1971),
+                        Query::Integer(1971),
                     ),
                 ]),
             ]),
@@ -297,36 +297,36 @@ where
                 Filter::not(vec![Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("oil".into())),
+                    Query::match_english("oil".into()),
                 )]),
                 Filter::new_condition(
                     fields["creditLine"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("bequeath".into())),
+                    Query::match_english("bequeath".into()),
                 ),
                 Filter::or(vec![
                     Filter::and(vec![
                         Filter::new_condition(
                             fields["year"],
                             ComparisonOperator::GreaterEqualThan,
-                            FieldValue::Integer(1900),
+                            Query::Integer(1900),
                         ),
                         Filter::new_condition(
                             fields["year"],
                             ComparisonOperator::LowerThan,
-                            FieldValue::Integer(1910),
+                            Query::Integer(1910),
                         ),
                     ]),
                     Filter::and(vec![
                         Filter::new_condition(
                             fields["year"],
                             ComparisonOperator::GreaterEqualThan,
-                            FieldValue::Integer(2000),
+                            Query::Integer(2000),
                         ),
                         Filter::new_condition(
                             fields["year"],
                             ComparisonOperator::LowerThan,
-                            FieldValue::Integer(2010),
+                            Query::Integer(2010),
                         ),
                     ]),
                 ]),
@@ -342,36 +342,36 @@ where
                 Filter::new_condition(
                     fields["artist"],
                     ComparisonOperator::Equal,
-                    FieldValue::Text("warhol".into()),
+                    Query::Tokenize("warhol".into()),
                 ),
                 Filter::not(vec![Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("'campbell'".into())),
+                    Query::match_english("'campbell'".into()),
                 )]),
                 Filter::not(vec![Filter::or(vec![
                     Filter::new_condition(
                         fields["year"],
                         ComparisonOperator::GreaterThan,
-                        FieldValue::Integer(1980),
+                        Query::Integer(1980),
                     ),
                     Filter::and(vec![
                         Filter::new_condition(
                             fields["width"],
                             ComparisonOperator::GreaterThan,
-                            FieldValue::Integer(500),
+                            Query::Integer(500),
                         ),
                         Filter::new_condition(
                             fields["height"],
                             ComparisonOperator::GreaterThan,
-                            FieldValue::Integer(500),
+                            Query::Integer(500),
                         ),
                     ]),
                 ])]),
                 Filter::new_condition(
                     fields["acquisitionYear"],
                     ComparisonOperator::Equal,
-                    FieldValue::Integer(2008),
+                    Query::Integer(2008),
                 ),
             ]),
             vec!["ar00039", "t12600"],
@@ -381,39 +381,39 @@ where
                 Filter::new_condition(
                     fields["title"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("study".into())),
+                    Query::match_english("study".into()),
                 ),
                 Filter::new_condition(
                     fields["medium"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("paper".into())),
+                    Query::match_english("paper".into()),
                 ),
                 Filter::new_condition(
                     fields["creditLine"],
                     ComparisonOperator::Equal,
-                    FieldValue::FullText(TextQuery::query_english("'purchased'".into())),
+                    Query::match_english("'purchased'".into()),
                 ),
                 Filter::not(vec![
                     Filter::new_condition(
                         fields["title"],
                         ComparisonOperator::Equal,
-                        FieldValue::FullText(TextQuery::query_english("'anatomical'".into())),
+                        Query::match_english("'anatomical'".into()),
                     ),
                     Filter::new_condition(
                         fields["title"],
                         ComparisonOperator::Equal,
-                        FieldValue::FullText(TextQuery::query_english("'for'".into())),
+                        Query::match_english("'for'".into()),
                     ),
                 ]),
                 Filter::new_condition(
                     fields["year"],
                     ComparisonOperator::GreaterThan,
-                    FieldValue::Integer(1900),
+                    Query::Integer(1900),
                 ),
                 Filter::new_condition(
                     fields["acquisitionYear"],
                     ComparisonOperator::GreaterThan,
-                    FieldValue::Integer(2000),
+                    Query::Integer(2000),
                 ),
             ]),
             vec![
@@ -461,9 +461,9 @@ where
     let tests = [
         (
             Filter::and(vec![
-                Filter::gt(fields["year"], FieldValue::Integer(0)),
-                Filter::gt(fields["acquisitionYear"], FieldValue::Integer(0)),
-                Filter::gt(fields["width"], FieldValue::Integer(0)),
+                Filter::gt(fields["year"], Query::Integer(0)),
+                Filter::gt(fields["acquisitionYear"], Query::Integer(0)),
+                Filter::gt(fields["width"], Query::Integer(0)),
             ]),
             vec![
                 Comparator::descending(fields["year"]),
@@ -483,8 +483,8 @@ where
         ),
         (
             Filter::and(vec![
-                Filter::gt(fields["width"], FieldValue::Integer(0)),
-                Filter::gt(fields["height"], FieldValue::Integer(0)),
+                Filter::gt(fields["width"], Query::Integer(0)),
+                Filter::gt(fields["height"], Query::Integer(0)),
             ]),
             vec![
                 Comparator::descending(fields["width"]),

@@ -6,7 +6,7 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use jmap::{types::jmap::JMAPId, jmap_store::Object};
+use jmap::{jmap_store::Object, types::jmap::JMAPId};
 use store::{core::collection::Collection, write::options::Options};
 
 use self::schema::{EmailSubmission, Property, Value};
@@ -37,10 +37,10 @@ impl Object for EmailSubmission {
     fn indexed() -> &'static [(Self::Property, u64)] {
         &[
             (Property::UndoStatus, <u64 as Options>::F_KEYWORD),
-            (Property::EmailId, <u64 as Options>::F_SORT),
-            (Property::IdentityId, <u64 as Options>::F_SORT),
-            (Property::ThreadId, <u64 as Options>::F_SORT),
-            (Property::SendAt, <u64 as Options>::F_SORT),
+            (Property::EmailId, <u64 as Options>::F_INDEX),
+            (Property::IdentityId, <u64 as Options>::F_INDEX),
+            (Property::ThreadId, <u64 as Options>::F_INDEX),
+            (Property::SendAt, <u64 as Options>::F_INDEX),
         ]
     }
 

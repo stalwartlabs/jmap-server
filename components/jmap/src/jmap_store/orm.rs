@@ -7,6 +7,7 @@ use store::write::options::{IndexOptions, Options};
 use store::{AccountId, DocumentId, Integer, JMAPStore, LongInteger, Store};
 
 use crate::error::set::SetError;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use super::Object;
@@ -115,6 +116,10 @@ where
 
     pub fn get_mut(&mut self, property: &T::Property) -> Option<&mut T::Value> {
         self.properties.get_mut(property)
+    }
+
+    pub fn entry(&mut self, property: T::Property) -> Entry<'_, T::Property, T::Value> {
+        self.properties.entry(property)
     }
 
     pub fn set(&mut self, property: T::Property, value: impl Into<T::Value>) {

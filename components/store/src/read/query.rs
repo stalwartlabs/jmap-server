@@ -13,7 +13,7 @@ use std::{collections::HashSet, vec::IntoIter};
 
 use super::{
     comparator::Comparator,
-    filter::{FieldValue, Filter, FilterOperator, LogicalOperator},
+    filter::{Filter, FilterOperator, LogicalOperator, Query},
     iterator::StoreIterator,
 };
 
@@ -83,7 +83,7 @@ where
                 match cond {
                     Filter::Condition(filter_cond) => {
                         match filter_cond.value {
-                            FieldValue::Keyword(keyword) => {
+                            Query::Keyword(keyword) => {
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
@@ -97,7 +97,7 @@ where
                                     &document_ids,
                                 );
                             }
-                            FieldValue::Text(text) => {
+                            Query::Tokenize(text) => {
                                 let field_cond_field = filter_cond.field;
                                 bitmap_op(
                                     state.op,
@@ -118,33 +118,33 @@ where
                                     &document_ids,
                                 );
                             }
-                            FieldValue::FullText(query) => {
-                                if query.match_phrase {
+                            Query::Match {
+                                text,
+                                language,
+                                match_phrase,
+                            } => {
+                                if match_phrase {
                                     let mut phrase: Vec<String> = Vec::new();
                                     let field = filter_cond.field;
 
                                     // Retrieve the Term Index for each candidate and match the exact phrase
                                     if let Some(candidates) = self.get_bitmaps_intersection(
-                                        Tokenizer::new(
-                                            &query.text,
-                                            query.language,
-                                            MAX_TOKEN_LENGTH,
-                                        )
-                                        .into_iter()
-                                        .filter_map(|token| {
-                                            let word = token.word.into_owned();
-                                            let r = if !phrase.contains(&word) {
-                                                BitmapKey::serialize_term(
-                                                    account_id, collection, field, &word, true,
-                                                )
-                                                .into()
-                                            } else {
-                                                None
-                                            };
-                                            phrase.push(word);
-                                            r
-                                        })
-                                        .collect(),
+                                        Tokenizer::new(&text, language, MAX_TOKEN_LENGTH)
+                                            .into_iter()
+                                            .filter_map(|token| {
+                                                let word = token.word.into_owned();
+                                                let r = if !phrase.contains(&word) {
+                                                    BitmapKey::serialize_term(
+                                                        account_id, collection, field, &word, true,
+                                                    )
+                                                    .into()
+                                                } else {
+                                                    None
+                                                };
+                                                phrase.push(word);
+                                                r
+                                            })
+                                            .collect(),
                                     )? {
                                         let mut results = RoaringBitmap::new();
                                         for document_id in candidates.iter() {
@@ -191,9 +191,7 @@ where
                                     let mut requested_keys = HashSet::new();
                                     let mut text_bitmap = None;
 
-                                    for token in
-                                        Stemmer::new(&query.text, query.language, MAX_TOKEN_LENGTH)
-                                    {
+                                    for token in Stemmer::new(&text, language, MAX_TOKEN_LENGTH) {
                                         let mut keys = Vec::new();
 
                                         for (word, is_exact) in [
@@ -239,7 +237,7 @@ where
                                     bitmap_op(state.op, &mut state.bm, text_bitmap, &document_ids);
                                 }
                             }
-                            FieldValue::Integer(i) => {
+                            Query::Integer(i) => {
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
@@ -255,7 +253,7 @@ where
                                     &document_ids,
                                 );
                             }
-                            FieldValue::LongInteger(i) => {
+                            Query::LongInteger(i) => {
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
@@ -271,7 +269,7 @@ where
                                     &document_ids,
                                 );
                             }
-                            FieldValue::Float(f) => {
+                            Query::Float(f) => {
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,
@@ -287,7 +285,23 @@ where
                                     &document_ids,
                                 );
                             }
-                            FieldValue::Tag(tag) => {
+                            Query::Index(text) => {
+                                bitmap_op(
+                                    state.op,
+                                    &mut state.bm,
+                                    self.range_to_bitmap(
+                                        &IndexKey::serialize_key(
+                                            account_id,
+                                            collection,
+                                            filter_cond.field,
+                                            text.as_bytes(),
+                                        ),
+                                        filter_cond.op,
+                                    )?,
+                                    &document_ids,
+                                );
+                            }
+                            Query::Tag(tag) => {
                                 bitmap_op(
                                     state.op,
                                     &mut state.bm,

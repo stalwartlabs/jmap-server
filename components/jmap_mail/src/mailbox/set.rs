@@ -15,7 +15,7 @@ use store::core::tag::Tag;
 use store::core::JMAPIdPrefix;
 use store::parking_lot::MutexGuard;
 use store::read::comparator::Comparator;
-use store::read::filter::{ComparisonOperator, FieldValue, Filter};
+use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
 use store::Store;
 use store::{DocumentId, JMAPStore, LongInteger};
@@ -124,7 +124,7 @@ where
                     Filter::new_condition(
                         Property::ParentId.into(),
                         ComparisonOperator::Equal,
-                        FieldValue::LongInteger((document_id + 1) as LongInteger),
+                        Query::LongInteger((document_id + 1) as LongInteger),
                     ),
                     Comparator::None,
                 )?
@@ -322,7 +322,7 @@ where
                     Filter::new_condition(
                         Property::Role.into(),
                         ComparisonOperator::Equal,
-                        FieldValue::Keyword(mailbox_role.into()),
+                        Query::Keyword(mailbox_role.into()),
                     ),
                     Comparator::None,
                 )?
@@ -368,7 +368,7 @@ where
                     Filter::new_condition(
                         Property::ParentId.into(),
                         ComparisonOperator::Equal,
-                        FieldValue::LongInteger(parent_mailbox_id),
+                        Query::LongInteger(parent_mailbox_id),
                     ),
                     Comparator::None,
                 )? {

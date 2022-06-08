@@ -34,8 +34,8 @@ impl<T> Field<T> {
     }
 
     #[inline(always)]
-    pub fn is_sorted(&self) -> bool {
-        self.options.is_sort()
+    pub fn is_indexed(&self) -> bool {
+        self.options.is_index()
     }
 
     #[inline(always)]

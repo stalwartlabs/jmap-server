@@ -6,8 +6,8 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use jmap::types::jmap::JMAPId;
 use jmap::jmap_store::Object;
+use jmap::types::jmap::JMAPId;
 
 use store::core::collection::Collection;
 use store::write::options::Options;
@@ -34,11 +34,11 @@ impl Object for Mailbox {
         &[
             (
                 Property::Name,
-                <u64 as Options>::F_TOKENIZE | <u64 as Options>::F_SORT,
+                <u64 as Options>::F_TOKENIZE | <u64 as Options>::F_INDEX,
             ),
             (Property::Role, <u64 as Options>::F_KEYWORD),
-            (Property::ParentId, <u64 as Options>::F_SORT),
-            (Property::SortOrder, <u64 as Options>::F_SORT),
+            (Property::ParentId, <u64 as Options>::F_INDEX),
+            (Property::SortOrder, <u64 as Options>::F_INDEX),
         ]
     }
 

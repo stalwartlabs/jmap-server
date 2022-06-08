@@ -111,6 +111,13 @@ impl JSONPointer {
             _ => None,
         }
     }
+
+    pub fn unwrap_string(self) -> Option<String> {
+        match self {
+            JSONPointer::String(s) => s.into(),
+            _ => None,
+        }
+    }
 }
 
 struct JSONPointerVisitor;

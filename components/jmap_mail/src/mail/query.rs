@@ -12,7 +12,7 @@ use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::nlp::Language;
 use store::read::comparator::{self, DocumentSetComparator, FieldComparator};
-use store::read::filter::{self, FieldValue, TextQuery};
+use store::read::filter::{self, Query};
 use store::LongInteger;
 use store::{roaring::RoaringBitmap, AccountId, JMAPStore, Store};
 
@@ -64,7 +64,7 @@ where
                     }
                     filter::Filter::eq(
                         MessageField::Mailbox.into(),
-                        FieldValue::Tag(Tag::Id(value.get_document_id())),
+                        Query::Tag(Tag::Id(value.get_document_id())),
                     )
                 }
                 Filter::InMailboxOtherThan { value } => {
@@ -77,7 +77,7 @@ where
                             .map(|mailbox| {
                                 filter::Filter::eq(
                                     MessageField::Mailbox.into(),
-                                    FieldValue::Tag(Tag::Id(mailbox.get_document_id())),
+                                    Query::Tag(Tag::Id(mailbox.get_document_id())),
                                 )
                             })
                             .collect::<Vec<filter::Filter>>(),
@@ -85,19 +85,19 @@ where
                 }
                 Filter::Before { value } => filter::Filter::lt(
                     MessageField::ReceivedAt.into(),
-                    FieldValue::LongInteger(value.timestamp() as LongInteger),
+                    Query::LongInteger(value.timestamp() as LongInteger),
                 ),
                 Filter::After { value } => filter::Filter::gt(
                     MessageField::ReceivedAt.into(),
-                    FieldValue::LongInteger(value.timestamp() as LongInteger),
+                    Query::LongInteger(value.timestamp() as LongInteger),
                 ),
                 Filter::MinSize { value } => filter::Filter::ge(
                     MessageField::Size.into(),
-                    FieldValue::LongInteger(value as LongInteger),
+                    Query::LongInteger(value as LongInteger),
                 ),
                 Filter::MaxSize { value } => filter::Filter::le(
                     MessageField::Size.into(),
-                    FieldValue::LongInteger(value as LongInteger),
+                    Query::LongInteger(value as LongInteger),
                 ),
                 Filter::AllInThreadHaveKeyword { value } => {
                     if is_immutable_filter {
@@ -127,7 +127,7 @@ where
                     if is_immutable_filter {
                         is_immutable_filter = false;
                     }
-                    filter::Filter::eq(MessageField::Keyword.into(), FieldValue::Tag(value.tag))
+                    filter::Filter::eq(MessageField::Keyword.into(), Query::Tag(value.tag))
                 }
                 Filter::NotKeyword { value } => {
                     if is_immutable_filter {
@@ -135,13 +135,13 @@ where
                     }
                     filter::Filter::not(vec![filter::Filter::eq(
                         MessageField::Keyword.into(),
-                        FieldValue::Tag(value.tag),
+                        Query::Tag(value.tag),
                     )])
                 }
                 Filter::HasAttachment { value } => {
                     let filter = filter::Filter::eq(
                         MessageField::Attachment.into(),
-                        FieldValue::Tag(Tag::Static(0)),
+                        Query::Tag(Tag::Static(0)),
                     );
                     if !value {
                         filter::Filter::not(vec![filter])
@@ -150,41 +150,38 @@ where
                     }
                 }
                 Filter::Text { value } => filter::Filter::or(vec![
-                    filter::Filter::eq(RfcHeader::From.into(), FieldValue::Text(value.clone())),
-                    filter::Filter::eq(RfcHeader::To.into(), FieldValue::Text(value.clone())),
-                    filter::Filter::eq(RfcHeader::Cc.into(), FieldValue::Text(value.clone())),
-                    filter::Filter::eq(RfcHeader::Bcc.into(), FieldValue::Text(value.clone())),
+                    filter::Filter::eq(RfcHeader::From.into(), Query::Tokenize(value.clone())),
+                    filter::Filter::eq(RfcHeader::To.into(), Query::Tokenize(value.clone())),
+                    filter::Filter::eq(RfcHeader::Cc.into(), Query::Tokenize(value.clone())),
+                    filter::Filter::eq(RfcHeader::Bcc.into(), Query::Tokenize(value.clone())),
                     filter::Filter::eq(
                         RfcHeader::Subject.into(),
-                        FieldValue::FullText(TextQuery::query(value.clone(), Language::English)),
+                        Query::match_text(value.clone(), Language::English),
                     ),
                     filter::Filter::eq(
                         MessageField::Body.into(),
-                        FieldValue::FullText(TextQuery::query(
-                            value,
-                            Language::English, //TODO detect language
-                        )),
+                        Query::match_text(value, Language::English), //TODO detect language
                     ),
                 ]),
                 Filter::From { value } => {
-                    filter::Filter::eq(RfcHeader::From.into(), FieldValue::Text(value))
+                    filter::Filter::eq(RfcHeader::From.into(), Query::Tokenize(value))
                 }
                 Filter::To { value } => {
-                    filter::Filter::eq(RfcHeader::To.into(), FieldValue::Text(value))
+                    filter::Filter::eq(RfcHeader::To.into(), Query::Tokenize(value))
                 }
                 Filter::Cc { value } => {
-                    filter::Filter::eq(RfcHeader::Cc.into(), FieldValue::Text(value))
+                    filter::Filter::eq(RfcHeader::Cc.into(), Query::Tokenize(value))
                 }
                 Filter::Bcc { value } => {
-                    filter::Filter::eq(RfcHeader::Bcc.into(), FieldValue::Text(value))
+                    filter::Filter::eq(RfcHeader::Bcc.into(), Query::Tokenize(value))
                 }
                 Filter::Subject { value } => filter::Filter::eq(
                     RfcHeader::Subject.into(), //TODO detect language
-                    FieldValue::FullText(TextQuery::query(value, Language::English)),
+                    Query::match_text(value, Language::English),
                 ),
                 Filter::Body { value } => filter::Filter::eq(
                     MessageField::Body.into(),
-                    FieldValue::FullText(TextQuery::query(value, Language::English)),
+                    Query::match_text(value, Language::English),
                 ),
                 Filter::Header { mut value } => {
                     let (value, header) = match value.len() {
@@ -208,11 +205,11 @@ where
 
                     // TODO special case for message references
                     if let Some(value) = value {
-                        filter::Filter::eq(header.into(), FieldValue::Keyword(value))
+                        filter::Filter::eq(header.into(), Query::Keyword(value))
                     } else {
                         filter::Filter::eq(
                             MessageField::HasHeader.into(),
-                            FieldValue::Tag(Tag::Static(header.into())),
+                            Query::Tag(Tag::Static(header.into())),
                         )
                     }
                 }

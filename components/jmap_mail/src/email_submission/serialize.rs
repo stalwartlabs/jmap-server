@@ -175,7 +175,7 @@ impl<'de> serde::de::Visitor<'de> for FilterVisitor {
     type Value = Filter;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail object")
+        formatter.write_str("a valid JMAP e-mail submission filter")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>

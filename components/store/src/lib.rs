@@ -1,3 +1,4 @@
+pub mod acl;
 pub mod blob;
 pub mod config;
 pub mod core;
@@ -47,7 +48,9 @@ pub type LongInteger = u64;
 pub type Float = f64;
 pub type JMAPId = u64;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(
+    Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub enum ColumnFamily {
     Bitmaps,
     Values,

@@ -1,6 +1,6 @@
 use crate::ColumnFamily;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum WriteOperation {
     Set {
         cf: ColumnFamily,

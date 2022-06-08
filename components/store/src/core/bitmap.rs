@@ -7,7 +7,7 @@ pub struct Bitmap<T: BitmapItem> {
     _state: std::marker::PhantomData<T>,
 }
 
-pub trait BitmapItem: From<u64> + Into<u64> + Sized {
+pub trait BitmapItem: From<u64> + Into<u64> + Sized + Copy {
     fn max() -> u64;
     fn is_valid(&self) -> bool;
 }
@@ -112,6 +112,18 @@ impl<T: BitmapItem> From<Vec<T>> for Bitmap<T> {
         for value in values {
             if value.is_valid() {
                 bitmap.insert(value);
+            }
+        }
+        bitmap
+    }
+}
+
+impl<T: BitmapItem> From<&Vec<T>> for Bitmap<T> {
+    fn from(values: &Vec<T>) -> Self {
+        let mut bitmap = Bitmap::default();
+        for value in values {
+            if value.is_valid() {
+                bitmap.insert(*value);
             }
         }
         bitmap

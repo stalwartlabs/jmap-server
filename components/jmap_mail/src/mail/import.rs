@@ -24,7 +24,7 @@ use store::core::JMAPIdPrefix;
 use store::log::changes::ChangeId;
 use store::nlp::Language;
 use store::read::comparator::Comparator;
-use store::read::filter::{FieldValue, Filter};
+use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
 use store::serialize::leb128::Leb128;
 use store::serialize::StoreSerialize;
@@ -680,7 +680,7 @@ where
                         Filter::and(vec![
                             Filter::eq(
                                 MessageField::ThreadName.into(),
-                                FieldValue::Keyword(thread_name.unwrap_or("!").to_string()),
+                                Query::Keyword(thread_name.unwrap_or("!").to_string()),
                             ),
                             Filter::or(
                                 reference_ids
@@ -688,7 +688,7 @@ where
                                     .map(|id| {
                                         Filter::eq(
                                             MessageField::MessageIdRef.into(),
-                                            FieldValue::Keyword(id.to_string()),
+                                            Query::Keyword(id.to_string()),
                                         )
                                     })
                                     .collect(),
@@ -929,13 +929,13 @@ impl MessageData {
         document.number(
             MessageField::Size,
             self.size as Integer,
-            IndexOptions::new().sort() | options,
+            IndexOptions::new().index() | options,
         );
 
         document.number(
             MessageField::ReceivedAt,
             self.received_at as LongInteger,
-            IndexOptions::new().sort() | options,
+            IndexOptions::new().index() | options,
         );
 
         if self.has_attachments {
@@ -1041,7 +1041,7 @@ impl MessageData {
                             "!".to_string()
                         },
                         Language::Unknown,
-                        IndexOptions::new().sort() | options,
+                        IndexOptions::new().index() | options,
                     );
                 }
                 RfcHeader::Date => {
@@ -1049,7 +1049,7 @@ impl MessageData {
                         document.number(
                             header_name,
                             timestamp as LongInteger,
-                            IndexOptions::new().sort() | options,
+                            IndexOptions::new().index() | options,
                         );
                     }
                 }
@@ -1065,7 +1065,7 @@ impl MessageData {
                                 "!".to_string()
                             },
                             Language::Unknown,
-                            IndexOptions::new().keyword().sort() | options,
+                            IndexOptions::new().keyword().index() | options,
                         );
                     }
                 }
