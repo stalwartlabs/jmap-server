@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use jmap::{
-    jmap_store::orm::{self},
+    orm,
     request::ResultReference,
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
@@ -253,7 +253,7 @@ pub enum Comparator {
 }
 
 impl orm::Value for Value {
-    fn index_as(&self) -> orm::IndexableValue {
+    fn index_as(&self) -> orm::Index {
         match self {
             Value::Id { value } => u64::from(value).into(),
             Value::DateTime { value } => (value.timestamp() as u64).into(),
@@ -262,7 +262,7 @@ impl orm::Value for Value {
                 UndoStatus::Final => "f".to_string().into(),
                 UndoStatus::Canceled => "c".to_string().into(),
             },
-            _ => orm::IndexableValue::Null,
+            _ => orm::Index::Null,
         }
     }
 

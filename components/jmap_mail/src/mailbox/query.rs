@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap::error::method::MethodError;
-use jmap::jmap_store::orm::JMAPOrm;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
+use jmap::orm::serialize::JMAPOrm;
 use jmap::request::query::{QueryRequest, QueryResponse};
 use jmap::types::jmap::JMAPId;
 

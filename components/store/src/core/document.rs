@@ -1,11 +1,6 @@
-use crate::{
-    blob::BlobId,
-    nlp::Language,
-    write::{field::Field, operation::WriteOperation},
-    DocumentId, FieldId,
-};
+use crate::{blob::BlobId, nlp::Language, write::field::Field, DocumentId, FieldId};
 
-use super::{collection::Collection, number::Number, tag::Tag};
+use super::{acl::Permission, collection::Collection, number::Number, tag::Tag};
 
 pub const MAX_TOKEN_LENGTH: usize = 40;
 pub const MAX_ID_LENGTH: usize = 100;
@@ -27,8 +22,8 @@ pub struct Document {
     pub number_fields: Vec<Field<Number>>,
     pub binary_fields: Vec<Field<Vec<u8>>>,
     pub tag_fields: Vec<Field<Tag>>,
+    pub acls: Vec<(Permission, u64)>,
     pub blobs: Vec<(BlobId, u64)>,
-    pub operations: Vec<WriteOperation>,
 }
 
 impl Document {
@@ -41,7 +36,7 @@ impl Document {
             binary_fields: Vec::new(),
             tag_fields: Vec::new(),
             blobs: Vec::new(),
-            operations: Vec::new(),
+            acls: Vec::new(),
             term_index: None,
         }
     }
@@ -80,6 +75,10 @@ impl Document {
 
     pub fn blob(&mut self, blob: BlobId, options: u64) {
         self.blobs.push((blob, options));
+    }
+
+    pub fn acl(&mut self, acl: Permission, options: u64) {
+        self.acls.push((acl, options));
     }
 
     pub fn term_index(&mut self, blob: BlobId, options: u64) {

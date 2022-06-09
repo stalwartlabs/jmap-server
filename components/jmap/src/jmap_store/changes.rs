@@ -5,9 +5,9 @@ use store::{
 };
 
 use crate::{
-    types::state::JMAPState,
-    types::json_pointer::JSONPointerEval,
     request::changes::{ChangesRequest, ChangesResponse},
+    types::json_pointer::JSONPointerEval,
+    types::state::JMAPState,
 };
 
 use super::Object;

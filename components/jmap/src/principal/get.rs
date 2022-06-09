@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::jmap_store::get::{default_mapper, GetHelper, GetObject};
-use crate::jmap_store::orm::JMAPOrm;
+use crate::orm::acl::ACLUpdate;
+use crate::orm::serialize::JMAPOrm;
 use crate::request::get::{GetRequest, GetResponse};
 use crate::types::jmap::JMAPId;
 
@@ -60,6 +61,10 @@ where
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },
+                        Property::ACL => Value::ACL(ACLUpdate {
+                            acl: fields.get_acls(),
+                            set: true,
+                        }),
                         Property::Secret => Value::Null,
                         _ => fields.remove(property).unwrap_or_default(),
                     },

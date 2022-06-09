@@ -207,35 +207,6 @@ where
     }
 }
 
-/*
-
-pub trait JMAPXYZQuery<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn xyz_query(&self, request: QueryRequest<XYZ>) -> jmap::Result<QueryResponse>;
-}
-
-impl<T> JMAPXYZQuery<T> for JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    fn xyz_query(&self, request: QueryRequest<XYZ>) -> jmap::Result<QueryResponse> {
-        let mut helper = QueryHelper::new(self, request)?;
-
-        helper.parse_filter(|filter| {
-            Ok(filter)
-        })?;
-        helper.parse_comparator(|comparator| {
-            Ok(comparator)
-        })?;
-
-        helper.query(None, None)
-    }
-}
-
-*/
-
 impl QueryResponse {
     pub fn paginate<W>(
         &mut self,

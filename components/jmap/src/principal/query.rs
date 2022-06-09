@@ -61,9 +61,10 @@ where
                         Type::Other => "o".to_string(),
                     }),
                 ),
-                Filter::MemberOf { value } => {
-                    filter::Filter::eq(Property::MemberOf.into(), Query::LongInteger(value.into()))
-                }
+                Filter::Members { value } => filter::Filter::eq(
+                    Property::Members.into(),
+                    Query::Integer(value.get_document_id()),
+                ),
                 Filter::QuotaLt { value } => {
                     filter::Filter::lt(Property::Quota.into(), Query::LongInteger(value))
                 }

@@ -1,8 +1,31 @@
 use std::fmt::{self, Display};
 
-use crate::core::bitmap::BitmapItem;
+use crate::AccountId;
 
-use super::ACL;
+use super::bitmap::{Bitmap, BitmapItem};
+
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[repr(u8)]
+pub enum ACL {
+    Read = 0,
+    Modify = 1,
+    Delete = 2,
+    ReadItems = 3,
+    AddItems = 4,
+    ModifyItems = 5,
+    RemoveItems = 6,
+    CreateChild = 7,
+    Administer = 8,
+    None_ = 9,
+}
+
+#[derive(
+    Debug, Default, Clone, Eq, PartialEq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct Permission {
+    pub id: AccountId,
+    pub acl: Bitmap<ACL>,
+}
 
 impl ACL {
     pub fn parse(value: &str) -> ACL {

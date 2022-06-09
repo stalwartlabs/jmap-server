@@ -7,8 +7,8 @@ use crate::mail::{MessageData, MessageField};
 
 use jmap::error::set::{SetError, SetErrorType};
 
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::Object;
+use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::types::jmap::JMAPId;
 
 use jmap::jmap_store::set::SetHelper;

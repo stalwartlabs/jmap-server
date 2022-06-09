@@ -3,7 +3,7 @@ use std::{
     fmt::Display,
 };
 
-use jmap::{jmap_store::orm, types::jmap::JMAPId};
+use jmap::{orm, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use store::{
     chrono::{DateTime, Utc},
@@ -32,8 +32,8 @@ impl Default for Value {
 }
 
 impl orm::Value for Value {
-    fn index_as(&self) -> orm::IndexableValue {
-        orm::IndexableValue::Null
+    fn index_as(&self) -> orm::Index {
+        orm::Index::Null
     }
 
     fn is_empty(&self) -> bool {

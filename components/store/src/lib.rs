@@ -1,4 +1,3 @@
-pub mod acl;
 pub mod blob;
 pub mod config;
 pub mod core;
@@ -30,6 +29,7 @@ use write::{
 pub use bincode;
 pub use chrono;
 pub use lz4_flex;
+pub use moka;
 pub use parking_lot;
 pub use rand;
 pub use roaring;
@@ -48,9 +48,7 @@ pub type LongInteger = u64;
 pub type Float = f64;
 pub type JMAPId = u64;
 
-#[derive(
-    Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ColumnFamily {
     Bitmaps,
     Values,

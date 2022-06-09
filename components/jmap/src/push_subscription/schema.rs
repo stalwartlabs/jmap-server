@@ -6,7 +6,7 @@ use store::{
     FieldId,
 };
 
-use crate::{types::jmap::JMAPId, types::type_state::TypeState};
+use crate::{orm, types::jmap::JMAPId, types::type_state::TypeState};
 
 #[derive(Debug, Clone, Default)]
 pub struct PushSubscription {
@@ -52,9 +52,9 @@ impl Value {
     }
 }
 
-impl crate::jmap_store::orm::Value for Value {
-    fn index_as(&self) -> crate::jmap_store::orm::IndexableValue {
-        crate::jmap_store::orm::IndexableValue::Null
+impl orm::Value for Value {
+    fn index_as(&self) -> orm::Index {
+        orm::Index::Null
     }
 
     fn is_empty(&self) -> bool {

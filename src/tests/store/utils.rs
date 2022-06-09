@@ -6,7 +6,7 @@ use std::{
 };
 
 use flate2::bufread::GzDecoder;
-use jmap::jmap_store::orm::TinyORM;
+use jmap::orm::TinyORM;
 use jmap_mail::{mail::schema::Email, mailbox::schema::Mailbox};
 use store::{
     blob::BLOB_HASH_LEN,

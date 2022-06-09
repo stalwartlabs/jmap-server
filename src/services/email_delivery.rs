@@ -5,7 +5,7 @@ use std::{
 
 use actix_web::web;
 use jmap::{
-    jmap_store::orm::{JMAPOrm, TinyORM},
+    orm::{serialize::JMAPOrm, TinyORM},
     types::type_state::TypeState,
 };
 use jmap_mail::email_submission::schema::{

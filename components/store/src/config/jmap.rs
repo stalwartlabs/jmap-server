@@ -15,6 +15,10 @@ pub struct JMAPConfig {
     pub max_objects_in_get: usize,
     pub max_objects_in_set: usize,
 
+    pub rate_limit_authenticated: (u64, u64),
+    pub rate_limit_anonymous: (u64, u64),
+    pub use_forwarded_header: bool,
+
     pub query_max_results: usize,
     pub changes_max_results: usize,
     pub mailbox_name_max_len: usize,
@@ -46,6 +50,9 @@ impl From<&EnvSettings> for JMAPConfig {
             mail_import_max_items: 2,
             mail_parse_max_items: 5,
             default_language: Language::English,
+            rate_limit_authenticated: (1000, 60),
+            rate_limit_anonymous: (100, 60),
+            use_forwarded_header: false,
         }
     }
 }

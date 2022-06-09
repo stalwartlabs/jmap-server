@@ -1,15 +1,17 @@
 use crate::error::set::{SetError, SetErrorType};
-use crate::jmap_store::orm::{JMAPOrm, TinyORM};
 use crate::jmap_store::set::SetHelper;
 use crate::jmap_store::Object;
+use crate::orm::{serialize::JMAPOrm, TinyORM};
 use crate::principal::schema::Principal;
 use crate::request::set::SetResponse;
 use crate::request::ResultReference;
 use crate::types::jmap::JMAPId;
 use crate::{jmap_store::set::SetObject, request::set::SetRequest};
 use crate::{sanitize_domain, sanitize_email};
+use scrypt::password_hash::rand_core::OsRng;
+use scrypt::password_hash::{PasswordHasher, SaltString};
+use scrypt::Scrypt;
 use store::core::collection::Collection;
-use store::core::document::Document;
 use store::parking_lot::MutexGuard;
 use store::read::comparator::Comparator;
 use store::read::filter::{Filter, Query};
@@ -49,8 +51,7 @@ where
 
         helper.create(|_create_id, item, helper, document| {
             // Set values
-            let principal =
-                TinyORM::<Principal>::new().principal_set(helper, item, document, None)?;
+            let principal = TinyORM::<Principal>::new().principal_set(helper, item, None)?;
 
             // Set parentId if the field is missing
             principal.insert_validate(document)?;
@@ -69,7 +70,6 @@ where
             let fields = TinyORM::track_changes(&current_fields).principal_set(
                 helper,
                 item,
-                document,
                 Some(&current_fields),
             )?;
 
@@ -99,7 +99,6 @@ where
         self,
         helper: &mut SetHelper<Principal, T>,
         principal: Principal,
-        document: &mut Document,
         fields: Option<&TinyORM<Principal>>,
     ) -> crate::error::set::Result<Self, Property>;
 }
@@ -112,7 +111,6 @@ where
         mut self,
         helper: &mut SetHelper<Principal, T>,
         mut principal: Principal,
-        document: &mut Document,
         current_fields: Option<&TinyORM<Principal>>,
     ) -> crate::error::set::Result<Self, Property> {
         // Obtain type
@@ -227,14 +225,44 @@ where
                     Value::TextList { value: aliases }
                 }
                 (Property::Secret, Value::Text { value })
-                    if !value.is_empty() && [Type::Individual, Type::Domain].contains(&ptype) =>
+                    if !value.is_empty() && ptype == Type::Individual =>
+                {
+                    Value::Text {
+                        value: Scrypt
+                            .hash_password(value.as_bytes(), &SaltString::generate(&mut OsRng))
+                            .map_err(|_| {
+                                SetError::invalid_property(
+                                    property,
+                                    "Failed to hash password.".to_string(),
+                                )
+                            })?
+                            .to_string(),
+                    }
+                }
+                (Property::Secret, Value::Text { value })
+                    if !value.is_empty() && ptype == Type::Domain =>
                 {
                     Value::Text { value }
+                }
+                (Property::ACL, Value::ACL(value)) => {
+                    for id in value.acl.keys() {
+                        if !helper.document_ids.contains(id.get_document_id()) {
+                            return Err(SetError::invalid_property(
+                                property,
+                                format!("Principal {} does not exist.", id),
+                            ));
+                        }
+                    }
+
+                    self.acl_update(value);
+                    continue;
                 }
                 (Property::DKIM, value @ Value::DKIM { .. }) if ptype == Type::Domain => value,
                 (Property::Quota, value @ (Value::Number { .. } | Value::Null)) => value,
                 (Property::Picture, value @ (Value::Blob { .. } | Value::Null)) => value,
-                (Property::MemberOf, Value::Members { value }) if ptype != Type::Domain => {
+                (Property::Members, Value::Members { value })
+                    if ![Type::Individual, Type::Domain].contains(&ptype) =>
+                {
                     let mut new_members = Vec::with_capacity(value.len());
                     for id in &value {
                         if helper.document_ids.contains(id.get_document_id()) {
@@ -247,22 +275,6 @@ where
                         }
                     }
 
-                    // Update member index
-                    if let Some(Value::Members {
-                        value: current_members,
-                    }) = current_fields.and_then(|f| f.get(&Property::MemberOf))
-                    {
-                        document.merge_members(
-                            &current_members
-                                .iter()
-                                .map(|id| id.get_document_id())
-                                .collect::<Vec<_>>(),
-                            &new_members,
-                        );
-                    } else {
-                        document.insert_members(&new_members);
-                    }
-
                     Value::Members { value }
                 }
                 (
@@ -270,7 +282,7 @@ where
                     | Property::Secret
                     | Property::DKIM
                     | Property::Aliases
-                    | Property::MemberOf,
+                    | Property::Members,
                     Value::Null,
                 ) => Value::Null,
                 (Property::Type, _) => {
@@ -297,7 +309,12 @@ where
                     Filter::or(
                         validate_emails
                             .into_iter()
-                            .map(|email| Filter::eq(Property::Aliases.into(), Query::Index(email)))
+                            .map(|email| {
+                                Filter::or(vec![
+                                    Filter::eq(Property::Email.into(), Query::Index(email.clone())),
+                                    Filter::eq(Property::Aliases.into(), Query::Index(email)),
+                                ])
+                            })
                             .collect(),
                     ),
                     Comparator::None,

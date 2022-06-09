@@ -1,11 +1,10 @@
 use roaring::RoaringBitmap;
 
-use crate::acl::ACL;
 use crate::serialize::leb128::Leb128;
 use crate::serialize::StoreDeserialize;
 use crate::DocumentId;
 use crate::{
-    core::{bitmap::Bitmap, collection::Collection, error::StoreError},
+    core::{acl::ACL, bitmap::Bitmap, collection::Collection, error::StoreError},
     serialize::key::ValueKey,
     AccountId, ColumnFamily, Direction, JMAPStore, Store,
 };
@@ -14,7 +13,7 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn member_of(&self, mut account_id: AccountId) -> crate::Result<Vec<AccountId>> {
+    /*pub fn member_of(&self, mut account_id: AccountId) -> crate::Result<Vec<AccountId>> {
         let mut member_of = Vec::new();
         let mut iter_stack = Vec::new();
 
@@ -32,7 +31,7 @@ where
                         )
                         .ok_or_else(|| {
                             StoreError::InternalError(format!(
-                                "Corrupted ACL memberOf key for [{:?}]",
+                                "Corrupted ACL members key for [{:?}]",
                                 key
                             ))
                         })?;
@@ -59,7 +58,7 @@ where
             }
         }
         Ok(member_of)
-    }
+    }*/
 
     pub fn shared_accounts(&self, member_of: Vec<AccountId>) -> crate::Result<Vec<AccountId>> {
         let mut shared_accounts = Vec::new();
@@ -112,7 +111,7 @@ where
                     let (document_id, _) = DocumentId::from_leb128_bytes(&key[prefix.len()..])
                         .ok_or_else(|| {
                             StoreError::InternalError(format!(
-                                "Corrupted ACL memberOf key for [{:?}]",
+                                "Corrupted ACL members key for [{:?}]",
                                 key
                             ))
                         })?;

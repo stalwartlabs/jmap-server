@@ -1,5 +1,6 @@
 use crate::{DocumentId, JMAPId};
 
+pub mod acl;
 pub mod comparator;
 pub mod filter;
 pub mod get;

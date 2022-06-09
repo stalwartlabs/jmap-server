@@ -1,27 +1,33 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
+use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
+    moka::sync::Cache,
     tracing::info,
     JMAPStore, Store,
 };
 
 use crate::{
     api::{
+        blob::{handle_jmap_download, handle_jmap_upload},
         ingest::handle_ingest,
         request::handle_jmap_request,
         session::{handle_jmap_session, Session},
     },
-    blob::{download::handle_jmap_download, upload::handle_jmap_upload},
     cluster::ClusterIpc,
     server::{event_source::handle_jmap_event_source, tls::load_tls_config, websocket::handle_ws},
     services::{
         email_delivery::{init_email_delivery, spawn_email_delivery},
         state_change::spawn_state_manager,
     },
+    session::auth::SessionFactory,
     JMAPServer, DEFAULT_HTTP_PORT,
 };
+
+const ONE_DAY_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
+const ONE_HOUR_EXPIRY: Duration = Duration::from_secs(60 * 60);
 
 pub fn init_jmap_server<T>(
     settings: &EnvSettings,
@@ -50,6 +56,22 @@ where
             .unwrap(),
         state_change: spawn_state_manager(cluster.is_none()),
         email_delivery: email_tx.clone(),
+        sessions: Cache::builder()
+            .initial_capacity(128)
+            .time_to_idle(ONE_DAY_EXPIRY)
+            .build(),
+        rate_limiters: Cache::builder()
+            .initial_capacity(128)
+            .time_to_idle(ONE_DAY_EXPIRY)
+            .build(),
+        emails: Cache::builder()
+            .initial_capacity(128)
+            .time_to_idle(ONE_DAY_EXPIRY)
+            .build(),
+        session_tokens: Cache::builder()
+            .initial_capacity(128)
+            .time_to_idle(ONE_HOUR_EXPIRY)
+            .build(),
         cluster,
         #[cfg(test)]
         is_offline: false.into(),
@@ -99,6 +121,12 @@ where
 
     let server = HttpServer::new(move || {
         App::new()
+            .wrap(SessionFactory::new(jmap_server.clone()))
+            .wrap(
+                Cors::default()
+                    .allow_any_origin()
+                    .allowed_methods(vec!["GET", "POST", "OPTIONS"]),
+            )
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())
             .app_data(jmap_server.clone())

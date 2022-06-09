@@ -51,6 +51,7 @@ impl Object for Principal {
                 Property::Aliases,
                 <u64 as Options>::F_TOKENIZE | <u64 as Options>::F_INDEX,
             ),
+            (Property::Members, <u64 as Options>::F_INDEX),
             (Property::Description, <u64 as Options>::F_TOKENIZE),
             (Property::Timezone, <u64 as Options>::F_TOKENIZE),
             (Property::Quota, <u64 as Options>::F_INDEX),

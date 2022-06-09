@@ -1,4 +1,4 @@
-use jmap::{jmap_store::orm::TinyORM, types::jmap::JMAPId};
+use jmap::{orm::TinyORM, types::jmap::JMAPId};
 use mail_parser::Message;
 use store::{
     core::{collection::Collection, document::Document, tag::Tag},

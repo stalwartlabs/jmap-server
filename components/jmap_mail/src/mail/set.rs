@@ -1,8 +1,8 @@
 use crate::mail::import::JMAPMailImport;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::blob::JMAPBlobStore;
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::{SetHelper, SetObject};
+use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::types::blob::JMAPBlob;
 use jmap::types::jmap::JMAPId;
 

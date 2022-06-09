@@ -1,22 +1,26 @@
 pub mod api;
-pub mod blob;
 pub mod cluster;
 pub mod server;
 pub mod services;
+pub mod session;
 
 #[cfg(test)]
 pub mod tests;
 
 use std::sync::Arc;
 
-use api::session::Session;
 use cluster::{
     main::{init_cluster, start_cluster},
     ClusterIpc,
 };
+
 use server::http::{init_jmap_server, start_jmap_server};
 use services::{email_delivery, state_change};
-use store::{config::env_settings::EnvSettings, tracing::info, JMAPStore};
+use session::{auth::RemoteAddress, rate_limit::RateLimiter};
+use store::{
+    config::env_settings::EnvSettings, moka::sync::Cache, parking_lot::Mutex, tracing::info,
+    AccountId, JMAPStore,
+};
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
 
@@ -26,10 +30,15 @@ pub const DEFAULT_RPC_PORT: u16 = 7911;
 pub struct JMAPServer<T> {
     pub store: Arc<JMAPStore<T>>,
     pub worker_pool: rayon::ThreadPool,
-    pub base_session: Session,
+    pub base_session: api::session::Session,
     pub cluster: Option<ClusterIpc>,
     pub state_change: mpsc::Sender<state_change::Event>,
     pub email_delivery: mpsc::Sender<email_delivery::Event>,
+
+    pub sessions: Cache<AccountId, Arc<session::Session>>,
+    pub session_tokens: Cache<String, AccountId>,
+    pub rate_limiters: Cache<RemoteAddress, Arc<Mutex<RateLimiter>>>,
+    pub emails: Cache<String, AccountId>,
 
     #[cfg(test)]
     pub is_offline: std::sync::atomic::AtomicBool,

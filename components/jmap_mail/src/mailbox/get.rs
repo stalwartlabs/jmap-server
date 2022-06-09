@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap::types::jmap::JMAPId;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
-use jmap::jmap_store::orm::JMAPOrm;
+use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
+use jmap::types::jmap::JMAPId;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;

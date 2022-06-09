@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use store::FieldId;
 
 use crate::{
-    jmap_store::orm,
+    orm::{self, acl::ACLUpdate},
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
 
@@ -28,8 +28,9 @@ pub enum Property {
     DKIM = 9,
     Quota = 10,
     Picture = 11,
-    MemberOf = 12,
-    Invalid = 13,
+    Members = 12,
+    ACL = 13,
+    Invalid = 14,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ pub enum Value {
     Type { value: Type },
     DKIM { value: DKIM },
     Members { value: Vec<JMAPId> },
+    ACL(ACLUpdate),
     Null,
 }
 
@@ -78,7 +80,7 @@ pub enum Filter {
     Text { value: String },
     Type { value: Type },
     Timezone { value: String },
-    MemberOf { value: JMAPId },
+    Members { value: JMAPId },
     QuotaLt { value: u64 },
     QuotaGt { value: u64 },
     Unsupported { value: String },
@@ -96,10 +98,16 @@ pub enum Comparator {
 }
 
 impl orm::Value for Value {
-    fn index_as(&self) -> orm::IndexableValue {
+    fn index_as(&self) -> orm::Index {
         match self {
             Value::Text { value } => value.to_string().into(),
-            Value::TextList { value } => todo!(),
+            Value::TextList { value } => {
+                if !value.is_empty() {
+                    value.to_vec().into()
+                } else {
+                    orm::Index::Null
+                }
+            }
             Value::Number { value } => (*value as u64).into(),
             Value::Type { value } => match value {
                 Type::Individual => "i".to_string().into(),
@@ -110,8 +118,18 @@ impl orm::Value for Value {
                 Type::List => "t".to_string().into(),
                 Type::Other => "o".to_string().into(),
             },
-            Value::Members { value } => todo!(),
-            _ => orm::IndexableValue::Null,
+            Value::Members { value } => {
+                if !value.is_empty() {
+                    value
+                        .iter()
+                        .map(|id| id.get_document_id())
+                        .collect::<Vec<_>>()
+                        .into()
+                } else {
+                    orm::Index::Null
+                }
+            }
+            _ => orm::Index::Null,
         }
     }
 
@@ -145,7 +163,8 @@ impl Property {
             "dkim" => Property::DKIM,
             "quota" => Property::Quota,
             "picture" => Property::Picture,
-            "memberOf" => Property::MemberOf,
+            "members" => Property::Members,
+            "acl" => Property::ACL,
             _ => Property::Invalid,
         }
     }
@@ -165,8 +184,9 @@ impl Display for Property {
             Property::DKIM => f.write_str("dkim"),
             Property::Quota => f.write_str("quota"),
             Property::Picture => f.write_str("picture"),
-            Property::MemberOf => f.write_str("memberOf"),
+            Property::Members => f.write_str("members"),
             Property::Aliases => f.write_str("aliases"),
+            Property::ACL => f.write_str("acl"),
             Property::Invalid => Ok(()),
         }
     }
@@ -193,7 +213,8 @@ impl From<FieldId> for Property {
             9 => Property::DKIM,
             10 => Property::Quota,
             11 => Property::Picture,
-            12 => Property::MemberOf,
+            12 => Property::Members,
+            13 => Property::ACL,
             _ => Property::Invalid,
         }
     }

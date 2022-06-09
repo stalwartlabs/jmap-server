@@ -1,8 +1,8 @@
 use crate::vacation_response::schema::VacationResponse;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
+use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::SetResponse;
 use jmap::request::ResultReference;
 use jmap::types::jmap::JMAPId;

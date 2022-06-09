@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{jmap_store::orm, request::ResultReference, types::jmap::JMAPId};
+use jmap::{orm, request::ResultReference, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use store::FieldId;
 
@@ -28,12 +28,12 @@ impl Default for Value {
 }
 
 impl orm::Value for Value {
-    fn index_as(&self) -> orm::IndexableValue {
+    fn index_as(&self) -> orm::Index {
         match self {
             Value::Id { value } => u64::from(value).into(),
             Value::Text { value } => value.to_string().into(),
             Value::Number { value } => (*value).into(),
-            _ => orm::IndexableValue::Null,
+            _ => orm::Index::Null,
         }
     }
 

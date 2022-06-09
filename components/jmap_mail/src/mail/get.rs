@@ -3,10 +3,8 @@ use std::{borrow::Cow, collections::HashMap};
 use crate::mail::{HeaderName, MessageData, MessageField, MessageOutline, MimePart, MimePartType};
 use jmap::{
     from_timestamp,
-    jmap_store::{
-        get::{GetHelper, GetObject},
-        orm::JMAPOrm,
-    },
+    jmap_store::get::{GetHelper, GetObject},
+    orm::serialize::JMAPOrm,
     request::{
         get::{GetRequest, GetResponse},
         MaybeIdReference,

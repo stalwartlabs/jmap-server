@@ -1,8 +1,8 @@
 use crate::error::set::{SetError, SetErrorType};
 use crate::from_timestamp;
-use crate::jmap_store::orm::{JMAPOrm, TinyORM};
 use crate::jmap_store::set::SetHelper;
 use crate::jmap_store::Object;
+use crate::orm::{serialize::JMAPOrm, TinyORM};
 use crate::request::set::SetResponse;
 use crate::request::ResultReference;
 use crate::types::jmap::JMAPId;

@@ -1,8 +1,12 @@
 use std::{collections::HashMap, fmt};
 
 use serde::{ser::SerializeMap, Deserialize, Serialize};
+use store::core::acl::ACL;
 
-use crate::types::{blob::JMAPBlob, jmap::JMAPId};
+use crate::{
+    orm::acl::ACLUpdate,
+    types::{blob::JMAPBlob, jmap::JMAPId, json_pointer::JSONPointer},
+};
 
 use super::schema::{Filter, Principal, Property, Type, Value, DKIM};
 
@@ -60,6 +64,7 @@ impl Serialize for Principal {
                 Value::Members { value } => map.serialize_entry(name, value)?,
                 Value::Blob { value } => map.serialize_entry(name, value)?,
                 Value::DKIM { value } => map.serialize_entry(name, value)?,
+                Value::ACL(value) => map.serialize_entry(name, &value.acl)?,
             }
         }
 
@@ -172,9 +177,9 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                         },
                     );
                 }
-                "memberOf" => {
+                "members" => {
                     properties.insert(
-                        Property::MemberOf,
+                        Property::Members,
                         if let Some(value) = map.next_value::<Option<Vec<JMAPId>>>()? {
                             Value::Members { value }
                         } else {
@@ -204,7 +209,46 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                         },
                     );
                 }
-                _ => (),
+                "acl" => {
+                    properties.insert(
+                        Property::ACL,
+                        Value::ACL(ACLUpdate {
+                            acl: map
+                                .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
+                                .unwrap_or_default(),
+                            set: true,
+                        }),
+                    );
+                }
+                _ => match JSONPointer::parse(key) {
+                    Some(JSONPointer::Path(path))
+                        if path.len() == 2
+                            && path
+                                .get(0)
+                                .and_then(|p| p.to_string())
+                                .map(Property::parse)
+                                .unwrap_or(Property::Invalid)
+                                == Property::ACL =>
+                    {
+                        if let Some(id) = path
+                            .get(1)
+                            .and_then(|p| p.to_string())
+                            .and_then(JMAPId::parse)
+                        {
+                            properties.insert(
+                                Property::ACL,
+                                Value::ACL(ACLUpdate {
+                                    acl: HashMap::from_iter([(
+                                        id,
+                                        map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
+                                    )]),
+                                    set: false,
+                                }),
+                            );
+                        }
+                    }
+                    _ => (),
+                },
             }
         }
 
@@ -255,7 +299,7 @@ impl<'de> serde::de::Visitor<'de> for FilterVisitor {
                 "timezone" => Filter::Timezone {
                     value: map.next_value()?,
                 },
-                "memberOf" => Filter::MemberOf {
+                "members" => Filter::Members {
                     value: map.next_value()?,
                 },
                 "quotaLowerThan" => Filter::QuotaLt {

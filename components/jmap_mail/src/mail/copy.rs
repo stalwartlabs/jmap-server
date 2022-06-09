@@ -5,7 +5,8 @@ use super::{
 };
 use jmap::{
     error::set::{SetError, SetErrorType},
-    jmap_store::{copy::CopyHelper, orm::TinyORM},
+    jmap_store::copy::CopyHelper,
+    orm::TinyORM,
     request::{
         copy::{CopyRequest, CopyResponse},
         set::SetRequest,

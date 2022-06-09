@@ -1,7 +1,6 @@
-use super::{
-    orm::{JMAPOrm, TinyORM},
-    Object,
-};
+use crate::orm::serialize::JMAPOrm;
+
+use super::{orm::TinyORM, Object};
 use store::{
     blob::BlobId,
     core::{document::Document, error::StoreError, JMAPIdPrefix},

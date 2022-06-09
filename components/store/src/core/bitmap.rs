@@ -1,6 +1,8 @@
 use std::ops::Deref;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, serde::Serialize, serde::Deserialize, Clone, PartialOrd, Ord, PartialEq, Eq, Hash,
+)]
 pub struct Bitmap<T: BitmapItem> {
     pub bitmap: u64,
     #[serde(skip)]

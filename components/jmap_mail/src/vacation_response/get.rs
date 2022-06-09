@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper};
-use jmap::jmap_store::orm::{JMAPOrm, TinyORM};
+use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
 
@@ -118,10 +118,11 @@ where
                 Some(Value::Bool { value: true })
             ) {
                 let now = Utc::now();
-                if !matches!(vr.get(&Property::FromDate), Some(Value::DateTime { value: from_date }) 
-                        if from_date > &now) &&
-                   !matches!(vr.get(&Property::ToDate), Some(Value::DateTime { value: to_date }) 
-                        if to_date < &now) {
+                if !matches!(vr.get(&Property::FromDate), Some(Value::DateTime { value: from_date })
+                        if from_date > &now)
+                    && !matches!(vr.get(&Property::ToDate), Some(Value::DateTime { value: to_date })
+                        if to_date < &now)
+                {
                     let address = to.to_string();
 
                     // Make sure we havent emailed this address before

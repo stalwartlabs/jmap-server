@@ -1,4 +1,4 @@
-use crate::types::jmap::JMAPId;
+use crate::{orm, types::jmap::JMAPId};
 use core::hash::Hash;
 use std::fmt::Debug;
 use store::core::collection::Collection;
@@ -7,7 +7,6 @@ pub mod blob;
 pub mod changes;
 pub mod copy;
 pub mod get;
-pub mod orm;
 pub mod query;
 pub mod query_changes;
 pub mod raft;

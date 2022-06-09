@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{types::jmap::JMAPId, jmap_store::orm};
+use jmap::{orm, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use store::FieldId;
 
@@ -27,8 +27,8 @@ impl Default for Value {
 }
 
 impl orm::Value for Value {
-    fn index_as(&self) -> orm::IndexableValue {
-        orm::IndexableValue::Null
+    fn index_as(&self) -> orm::Index {
+        orm::Index::Null
     }
 
     fn is_empty(&self) -> bool {

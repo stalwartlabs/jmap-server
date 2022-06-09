@@ -94,9 +94,6 @@ where
                 }
             };
 
-            // Add operations
-            write_batch.extend(document.operations);
-
             // Process text fields
             if !document.text_fields.is_empty() {
                 // Detect language for unknown fields
@@ -405,6 +402,28 @@ where
                 } else {
                     WriteOperation::delete(ColumnFamily::Blobs, key)
                 });
+            }
+
+            // Process ACLs
+            for (acl, options) in document.acls {
+                let key = ValueKey::serialize_acl(
+                    acl.id,
+                    batch.account_id,
+                    document.collection,
+                    document.document_id,
+                );
+                if !options.is_clear() {
+                    write_batch.push(WriteOperation::Set {
+                        cf: ColumnFamily::Values,
+                        key,
+                        value: acl.acl.serialize().unwrap(),
+                    });
+                } else {
+                    write_batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Values,
+                        key,
+                    });
+                }
             }
         }
 

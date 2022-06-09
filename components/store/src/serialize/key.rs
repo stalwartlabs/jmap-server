@@ -87,23 +87,6 @@ impl ValueKey {
         bytes
     }
 
-    pub fn serialize_member_of(account_id: AccountId, member_of: AccountId) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<AccountId>() + 1);
-        account_id.to_leb128_bytes(&mut bytes);
-        bytes.push(u8::MAX);
-        bytes.push(u8::MAX);
-        member_of.to_leb128_bytes(&mut bytes);
-        bytes
-    }
-
-    pub fn serialize_member_of_prefix(account_id: AccountId) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>() + 2);
-        account_id.to_leb128_bytes(&mut bytes);
-        bytes.push(u8::MAX);
-        bytes.push(u8::MAX);
-        bytes
-    }
-
     pub fn serialize_acl(
         grant_account: AccountId,
         to_account: AccountId,
