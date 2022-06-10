@@ -13,7 +13,7 @@ pub struct Response {
 
     #[serde(rename = "sessionState")]
     #[serde(serialize_with = "serialize_hex")]
-    pub session_state: u64,
+    pub session_state: u32,
 
     #[serde(rename(deserialize = "createdIds"))]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -21,7 +21,7 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn new(session_state: u64, created_ids: HashMap<String, JMAPId>, capacity: usize) -> Self {
+    pub fn new(session_state: u32, created_ids: HashMap<String, JMAPId>, capacity: usize) -> Self {
         Response {
             session_state,
             created_ids,
@@ -45,7 +45,7 @@ impl Response {
     }
 }
 
-pub fn serialize_hex<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+pub fn serialize_hex<S>(value: &u32, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {

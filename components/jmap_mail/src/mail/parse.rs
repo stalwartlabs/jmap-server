@@ -1,13 +1,13 @@
 use super::{
     conv::IntoForm,
-    get::AsBodyParts,
+    get::{AsBodyParts, JMAPGetMail},
     schema::{BodyProperty, Email, HeaderForm, Property, Value},
     GetRawHeader,
 };
 use crate::mail::{HeaderName, MessageOutline, MimeHeaders, MimePart, MimePartType};
 use jmap::{
     error::method::MethodError,
-    jmap_store::{blob::JMAPBlobStore, get::GetObject},
+    jmap_store::get::GetObject,
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use mail_parser::{
@@ -114,11 +114,9 @@ where
         };
 
         for blob_id in request.blob_ids {
-            if let Some(blob) = self.blob_jmap_get(
-                request.account_id.get_document_id(),
-                &blob_id,
-                get_message_part,
-            )? {
+            if let Some(blob) =
+                self.mail_blob_get(request.account_id.get_document_id(), &blob_id)?
+            {
                 if let Some(message) = Message::parse(&blob) {
                     let email = message.into_parsed_email(&parse_properties, &blob_id, &blob);
                     response.parsed.insert(blob_id, email);

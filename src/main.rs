@@ -1,8 +1,8 @@
 pub mod api;
+pub mod authorization;
 pub mod cluster;
 pub mod server;
 pub mod services;
-pub mod session;
 
 #[cfg(test)]
 pub mod tests;
@@ -14,11 +14,11 @@ use cluster::{
     ClusterIpc,
 };
 
+use authorization::{auth::RemoteAddress, rate_limit::RateLimiter};
 use server::http::{init_jmap_server, start_jmap_server};
 use services::{email_delivery, state_change};
-use session::{auth::RemoteAddress, rate_limit::RateLimiter};
 use store::{
-    config::env_settings::EnvSettings, moka::sync::Cache, parking_lot::Mutex, tracing::info,
+    config::env_settings::EnvSettings, moka::future::Cache, parking_lot::Mutex, tracing::info,
     AccountId, JMAPStore,
 };
 use store_rocksdb::RocksDB;
@@ -35,7 +35,7 @@ pub struct JMAPServer<T> {
     pub state_change: mpsc::Sender<state_change::Event>,
     pub email_delivery: mpsc::Sender<email_delivery::Event>,
 
-    pub sessions: Cache<AccountId, Arc<session::Session>>,
+    pub sessions: Cache<AccountId, Arc<authorization::Session>>,
     pub session_tokens: Cache<String, AccountId>,
     pub rate_limiters: Cache<RemoteAddress, Arc<Mutex<RateLimiter>>>,
     pub emails: Cache<String, AccountId>,

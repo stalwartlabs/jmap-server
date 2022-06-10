@@ -15,7 +15,7 @@ use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{blob::BlobId, JMAPStore};
+use store::{blob::BlobId, AccountId, JMAPStore};
 use store::{
     core::{collection::Collection, error::StoreError},
     serialize::StoreDeserialize,
@@ -25,6 +25,7 @@ use store::{DocumentId, Store};
 
 use super::{
     conv::IntoForm,
+    parse::get_message_part,
     schema::{
         BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
         HeaderProperty, Property, Value,
@@ -112,6 +113,8 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mail_get(&self, request: GetRequest<Email>) -> jmap::Result<GetResponse<Email>>;
+    fn mail_blob_get(&self, owner_id: AccountId, blob: &JMAPBlob)
+        -> store::Result<Option<Vec<u8>>>;
 }
 
 impl<T> JMAPGetMail<T> for JMAPStore<T>
@@ -560,6 +563,23 @@ where
             }
 
             Ok(Some(Email { properties: email }))
+        })
+    }
+
+    fn mail_blob_get(
+        &self,
+        owner_id: AccountId,
+        blob: &JMAPBlob,
+    ) -> store::Result<Option<Vec<u8>>> {
+        Ok(if self.blob_account_has_access(&blob.id, owner_id)? {
+            let bytes = self.blob_get(&blob.id)?;
+            if let (Some(bytes), Some(inner_id)) = (&bytes, blob.inner_id) {
+                get_message_part(bytes, inner_id).map(|bytes| bytes.into_owned())
+            } else {
+                bytes
+            }
+        } else {
+            None
         })
     }
 }

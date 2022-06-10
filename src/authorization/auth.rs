@@ -16,15 +16,15 @@ use actix_web::{
 };
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
-use jmap::{base64, sanitize_email, types::jmap::JMAPId};
+use jmap::{base64, types::jmap::JMAPId};
 use store::{
     tracing::{debug, error, warn},
     AccountId, Store,
 };
 
-use crate::JMAPServer;
+use crate::{api::ProblemDetails, JMAPServer};
 
-use super::{base::JMAPSessionStore, Session};
+use super::{base::JMAPSessionStore, InFlightRequest, Session};
 
 pub struct SessionMiddleware<S, T>
 where
@@ -67,25 +67,28 @@ where
             {
                 if let Some(account_id) = core.session_tokens.get(&token.to_string()) {
                     // Enforce rate limit for an authenticated user
-                    if core.is_allowed(RemoteAddress::AccountId(account_id)) {
+                    if core.is_allowed(RemoteAddress::AccountId(account_id)).await {
                         authenticated_id = Some(account_id);
                     } else {
                         warn!(
                             "Rate limited request {}.",
                             RemoteAddress::AccountId(account_id)
                         );
-                        return Err(error::ErrorTooManyRequests("Rate limited".to_string()));
+                        return Err(ProblemDetails::too_many_requests().into());
                     }
                 } else if mechanism.eq_ignore_ascii_case("basic") {
                     // Before authenticating enforce rate limit for an anonymous request
-                    if core.is_allowed(req.remote_address(core.store.config.use_forwarded_header)) {
+                    if core
+                        .is_allowed(req.remote_address(core.store.config.use_forwarded_header))
+                        .await
+                    {
                         // Decode the base64 encoded credentials
                         if let Some((login, secret)) = base64::decode(token)
                             .ok()
                             .and_then(|token| String::from_utf8(token).ok())
                             .and_then(|token| {
-                                token.split_once(':').and_then(|(login, secret)| {
-                                    Some((sanitize_email(login)?, secret.to_string()))
+                                token.split_once(':').map(|(login, secret)| {
+                                    (login.trim().to_lowercase(), secret.to_string())
                                 })
                             })
                         {
@@ -93,7 +96,7 @@ where
                             match core
                                 .spawn_worker(move || {
                                     // Map login to account_id
-                                    if let Some(account_id) = store.find_login(login.clone())? {
+                                    if let Some(account_id) = store.find_account(login.clone())? {
                                         // Validate password
                                         if store.auth(account_id, &login, &secret)? {
                                             return Ok(Some(account_id));
@@ -116,9 +119,7 @@ where
                                 }
                                 Err(err) => {
                                     error!("Store error during authentication: {}", err);
-                                    return Err(error::ErrorInternalServerError(
-                                        "Internal Server Error".to_string(),
-                                    ));
+                                    return Err(ProblemDetails::internal_server_error().into());
                                 }
                             }
                         } else {
@@ -133,7 +134,7 @@ where
                             "Rate limited request {}.",
                             req.remote_address(core.store.config.use_forwarded_header)
                         );
-                        return Err(error::ErrorTooManyRequests("Rate limited".to_string()));
+                        return Err(ProblemDetails::too_many_requests().into());
                     }
                 }
             }
@@ -161,21 +162,22 @@ where
                         }
                         Err(err) => {
                             error!("Store error while building session: {}", err);
-                            return Err(error::ErrorInternalServerError(
-                                "Internal Server Error".to_string(),
-                            ));
+                            return Err(ProblemDetails::internal_server_error().into());
                         }
                     }
                 };
 
                 // Add session to request
                 req.extensions_mut().insert::<Arc<Session>>(session);
-            } else if !core.is_allowed(req.remote_address(core.store.config.use_forwarded_header)) {
+            } else if !core
+                .is_allowed(req.remote_address(core.store.config.use_forwarded_header))
+                .await
+            {
                 warn!(
                     "Rate limited request {}.",
                     req.remote_address(core.store.config.use_forwarded_header)
                 );
-                return Err(error::ErrorTooManyRequests("Rate limited".to_string()));
+                return Err(ProblemDetails::too_many_requests().into());
             }
 
             service.call(req).await
@@ -241,36 +243,14 @@ where
 
 pub struct Authorized(Arc<Session>);
 
-#[derive(Debug)]
-pub struct UnauthorizedError;
-
-impl Display for UnauthorizedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Unauthorized")
-    }
-}
-
-impl error::ResponseError for UnauthorizedError {
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code())
-            .insert_header(ContentType::plaintext())
-            .insert_header((header::WWW_AUTHENTICATE, "Basic realm=\"Stalwart JMAP\""))
-            .body(self.to_string())
-    }
-
-    fn status_code(&self) -> StatusCode {
-        StatusCode::UNAUTHORIZED
-    }
-}
-
 impl FromRequest for Authorized {
-    type Error = UnauthorizedError;
+    type Error = ProblemDetails;
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         ready(match req.extensions().get::<Arc<Session>>() {
             Some(session) => Ok(Authorized(session.clone())),
-            None => Err(UnauthorizedError),
+            None => Err(ProblemDetails::unauthorized()),
         })
     }
 }

@@ -13,58 +13,11 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    /*pub fn member_of(&self, mut account_id: AccountId) -> crate::Result<Vec<AccountId>> {
-        let mut member_of = Vec::new();
-        let mut iter_stack = Vec::new();
-
-        'outer: loop {
-            let mut prefix = ValueKey::serialize_member_of_prefix(account_id);
-            let mut iter = self
-                .db
-                .iterator(ColumnFamily::Values, &prefix, Direction::Forward)?;
-
-            loop {
-                while let Some((key, _)) = iter.next() {
-                    if key.starts_with(&prefix) && key.len() > prefix.len() {
-                        let (member_account, _) = AccountId::from_leb128_bytes(
-                            &key[prefix.len()..],
-                        )
-                        .ok_or_else(|| {
-                            StoreError::InternalError(format!(
-                                "Corrupted ACL members key for [{:?}]",
-                                key
-                            ))
-                        })?;
-
-                        if !member_of.contains(&member_account) {
-                            member_of.push(member_account);
-                            if iter_stack.len() < 10 {
-                                iter_stack.push((iter, prefix));
-                                account_id = member_account;
-                                continue 'outer;
-                            }
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                if let Some((prev_it, prev_prefix)) = iter_stack.pop() {
-                    iter = prev_it;
-                    prefix = prev_prefix;
-                } else {
-                    break 'outer;
-                }
-            }
-        }
-        Ok(member_of)
-    }*/
-
-    pub fn shared_accounts(&self, member_of: Vec<AccountId>) -> crate::Result<Vec<AccountId>> {
+    pub fn shared_accounts(&self, member_of: &[AccountId]) -> crate::Result<Vec<AccountId>> {
         let mut shared_accounts = Vec::new();
         for account_id in member_of {
             let prefix =
-                ValueKey::serialize_acl_prefix(account_id, AccountId::MAX, Collection::None);
+                ValueKey::serialize_acl_prefix(*account_id, AccountId::MAX, Collection::None);
             for (key, value) in
                 self.db
                     .iterator(ColumnFamily::Values, &prefix, Direction::Forward)?
@@ -95,14 +48,14 @@ where
 
     pub fn shared_documents(
         &self,
-        member_of: Vec<AccountId>,
+        member_of: &[AccountId],
         to_account_id: AccountId,
         to_collection: Collection,
         acls: Bitmap<ACL>,
-    ) -> crate::Result<RoaringBitmap> {
+    ) -> crate::Result<Option<RoaringBitmap>> {
         let mut shared_documents = RoaringBitmap::new();
         for account_id in member_of {
-            let prefix = ValueKey::serialize_acl_prefix(account_id, to_account_id, to_collection);
+            let prefix = ValueKey::serialize_acl_prefix(*account_id, to_account_id, to_collection);
             for (key, value) in
                 self.db
                     .iterator(ColumnFamily::Values, &prefix, Direction::Forward)?
@@ -128,7 +81,11 @@ where
                 }
             }
         }
-        Ok(shared_documents)
+        Ok(if !shared_documents.is_empty() {
+            shared_documents.into()
+        } else {
+            None
+        })
     }
 
     pub fn get_acl(

@@ -1,8 +1,18 @@
-use jmap::{orm::TinyORM, types::jmap::JMAPId};
+use jmap::{
+    orm::{serialize::JMAPOrm, TinyORM},
+    principal::{self, schema::Principal},
+    types::jmap::JMAPId,
+    SUPERUSER_ID,
+};
 use mail_parser::Message;
 use store::{
-    core::{collection::Collection, document::Document, tag::Tag},
-    tracing::error,
+    core::{collection::Collection, document::Document, tag::Tag, JMAPIdPrefix},
+    read::{
+        comparator::Comparator,
+        filter::{Filter, Query},
+        FilterMapper,
+    },
+    tracing::{debug, error},
     write::{batch::WriteBatch, update::Changes},
     AccountId, DocumentId, JMAPStore, Store,
 };
@@ -13,6 +23,12 @@ use super::{
     import::JMAPMailImport,
     schema::{Email, Property},
 };
+
+pub enum RecipientType {
+    Individual(AccountId),
+    List(Vec<AccountId>),
+    NotFound,
+}
 
 pub enum Status {
     Success {
@@ -39,6 +55,7 @@ impl Status {
 
 pub trait JMAPMailIngest {
     fn mail_ingest(&self, account_ids: Vec<AccountId>, raw_message: Vec<u8>) -> Vec<Status>;
+    fn mail_expand_rcpt(&self, email: String) -> store::Result<RecipientType>;
 }
 
 impl<T> JMAPMailIngest for JMAPStore<T>
@@ -183,5 +200,55 @@ where
         }
 
         result
+    }
+    fn mail_expand_rcpt(&self, email: String) -> store::Result<RecipientType> {
+        if let Some(account_id) = self
+            .query_store::<FilterMapper>(
+                SUPERUSER_ID,
+                Collection::Principal,
+                Filter::or(vec![
+                    Filter::eq(
+                        principal::schema::Property::Email.into(),
+                        Query::Index(email.clone()),
+                    ),
+                    Filter::eq(
+                        principal::schema::Property::Aliases.into(),
+                        Query::Index(email),
+                    ),
+                ]),
+                Comparator::None,
+            )?
+            .into_iter()
+            .next()
+            .map(|id| id.get_document_id())
+        {
+            if let Some(mut fields) = self.get_orm::<Principal>(SUPERUSER_ID, account_id)? {
+                match fields.get(&principal::schema::Property::Type) {
+                    Some(principal::schema::Value::Type {
+                        value: principal::schema::Type::List,
+                    }) => {
+                        if let Some(principal::schema::Value::Members { value }) =
+                            fields.remove(&principal::schema::Property::Members)
+                        {
+                            if !value.is_empty() {
+                                return Ok(RecipientType::List(
+                                    value.into_iter().map(|id| id.get_document_id()).collect(),
+                                ));
+                            }
+                        }
+                        Ok(RecipientType::NotFound)
+                    }
+                    _ => Ok(RecipientType::Individual(account_id)),
+                }
+            } else {
+                debug!(
+                    "Rcpt expand failed: ORM for account {} does not exist.",
+                    JMAPId::from(account_id)
+                );
+                Ok(RecipientType::NotFound)
+            }
+        } else {
+            Ok(RecipientType::NotFound)
+        }
     }
 }

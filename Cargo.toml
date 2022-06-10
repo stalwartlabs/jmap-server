@@ -15,7 +15,6 @@ actix = "0.13"
 actix-web = { version = "4", features = ["rustls"] }
 actix-web-actors = "4"
 actix-cors = "0.6.1"
-actix-web-httpauth = "0.6.0"
 rustls = "0.20"
 rustls-pemfile = "1.0"
 serde = { version = "1.0", features = ["derive"]}

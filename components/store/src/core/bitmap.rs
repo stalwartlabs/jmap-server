@@ -15,6 +15,10 @@ pub trait BitmapItem: From<u64> + Into<u64> + Sized + Copy {
 }
 
 impl<T: BitmapItem> Bitmap<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     #[inline(always)]
     pub fn all() -> Self {
         Self {
@@ -128,6 +132,14 @@ impl<T: BitmapItem> From<&Vec<T>> for Bitmap<T> {
                 bitmap.insert(*value);
             }
         }
+        bitmap
+    }
+}
+
+impl<T: BitmapItem> From<T> for Bitmap<T> {
+    fn from(value: T) -> Self {
+        let mut bitmap = Bitmap::default();
+        bitmap.insert(value);
         bitmap
     }
 }

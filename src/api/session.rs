@@ -1,21 +1,22 @@
-use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
-    hash::{Hash, Hasher},
-    iter::FromIterator,
-};
+use std::{collections::HashMap, iter::FromIterator};
 
-use crate::api::response::serialize_hex;
+use crate::{
+    api::response::serialize_hex,
+    authorization::{auth::Authorized, base::JMAPSessionStore},
+};
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::{types::jmap::JMAPId, URI};
+use jmap::{principal::schema::Type, types::jmap::JMAPId, URI};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     Store,
 };
 
 use crate::JMAPServer;
+
+use super::ProblemDetails;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Session {
@@ -37,7 +38,7 @@ pub struct Session {
     event_source_url: String,
     #[serde(rename(serialize = "state"))]
     #[serde(serialize_with = "serialize_hex")]
-    state: u64,
+    state: u32,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -175,19 +176,6 @@ impl Session {
             account_id,
             Account::new(name, true, false).add_capabilities(capabilities, &self.capabilities),
         );
-
-        self.update_state();
-    }
-
-    fn update_state(&mut self) {
-        // Generate state id
-        let mut s = DefaultHasher::new();
-        for (account_id, account) in &self.accounts {
-            account_id.hash(&mut s);
-            account.name.hash(&mut s);
-        }
-        self.state = s.finish();
-        self.state = 1234; //TODO: remove this line
     }
 
     pub fn add_account(
@@ -203,16 +191,10 @@ impl Session {
             Account::new(name, is_personal, is_read_only)
                 .add_capabilities(capabilities, &self.capabilities),
         );
-        self.update_state();
     }
 
-    pub fn remove_account(&mut self, account_id: &JMAPId) {
-        self.accounts.remove(account_id);
-        self.update_state();
-    }
-
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(&self).unwrap()
+    pub fn set_state(&mut self, state: u32) {
+        self.state = state;
     }
 }
 
@@ -303,14 +285,46 @@ impl MailCapabilities {
     }
 }
 
-pub async fn handle_jmap_session<T>(core: web::Data<JMAPServer<T>>) -> HttpResponse
+pub async fn handle_jmap_session<T>(
+    core: web::Data<JMAPServer<T>>,
+    session: Authorized,
+) -> Result<HttpResponse, ProblemDetails>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut session = core.base_session.clone();
-    session.set_primary_account(1u64.into(), "hello@stalw.art".to_string(), None);
+    let store = core.store.clone();
+    match core
+        .clone()
+        .spawn_worker(move || {
+            let mut response = core.base_session.clone();
+            response.set_primary_account(
+                session.primary_id().into(),
+                session.email().to_string(),
+                None,
+            );
+            response.set_state(session.state());
 
-    HttpResponse::build(StatusCode::OK)
-        .insert_header(ContentType::json())
-        .body(session.to_json())
+            // TODO set read only for shared accounts
+            for id in session.member_of().iter().chain(session.access_to().iter()) {
+                let (name, email, ptype) = store
+                    .account_details(*id)?
+                    .unwrap_or_else(|| ("".to_string(), "".to_string(), Type::Individual));
+                response.add_account(
+                    (*id).into(),
+                    if !name.is_empty() { name } else { email },
+                    matches!(ptype, Type::Individual),
+                    false,
+                    Some(&[URI::Core, URI::Mail]),
+                );
+            }
+
+            Ok(response)
+        })
+        .await
+    {
+        Ok(response) => Ok(HttpResponse::build(StatusCode::OK)
+            .insert_header(ContentType::json())
+            .body(serde_json::to_string(&response).unwrap_or_default())),
+        Err(_) => Err(ProblemDetails::internal_server_error()),
+    }
 }

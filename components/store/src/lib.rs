@@ -14,6 +14,7 @@ use config::{env_settings::EnvSettings, jmap::JMAPConfig};
 use log::raft::{LogIndex, RaftId};
 use moka::sync::Cache;
 use parking_lot::{Mutex, MutexGuard};
+use roaring::RoaringBitmap;
 use serialize::StoreDeserialize;
 use std::sync::atomic::AtomicBool;
 use std::{
@@ -47,6 +48,8 @@ pub type Integer = u32;
 pub type LongInteger = u64;
 pub type Float = f64;
 pub type JMAPId = u64;
+
+const FIVE_MINUTES_EXPIRY: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ColumnFamily {
@@ -91,6 +94,13 @@ where
     fn compact(&self, cf: ColumnFamily) -> Result<()>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SharedResource {
+    pub owner_id: AccountId,
+    pub shared_to: AccountId,
+    pub collection: Collection,
+}
+
 pub struct JMAPStore<T> {
     pub db: T,
     pub blob: BlobStoreWrapper,
@@ -99,6 +109,7 @@ pub struct JMAPStore<T> {
     pub account_lock: MutexMap<()>,
 
     pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
+    pub shared_documents: Cache<SharedResource, Arc<Option<RoaringBitmap>>>,
 
     pub raft_term: AtomicU64,
     pub raft_index: AtomicU64,
@@ -117,6 +128,10 @@ where
                 .initial_capacity(128)
                 .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
                 .time_to_idle(Duration::from_secs(60 * 60))
+                .build(),
+            shared_documents: Cache::builder()
+                .initial_capacity(128)
+                .time_to_idle(FIVE_MINUTES_EXPIRY)
                 .build(),
             account_lock: MutexMap::with_capacity(1024),
             raft_index: 0.into(),
@@ -144,5 +159,15 @@ where
 
     pub fn lock_account(&self, account: AccountId, collection: Collection) -> MutexGuard<'_, ()> {
         self.account_lock.lock_hash((account, collection))
+    }
+}
+
+impl SharedResource {
+    pub fn new(owner_id: AccountId, shared_to: AccountId, collection: Collection) -> Self {
+        Self {
+            owner_id,
+            shared_to,
+            collection,
+        }
     }
 }

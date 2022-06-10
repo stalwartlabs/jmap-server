@@ -4,7 +4,7 @@ use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
-    moka::sync::Cache,
+    moka::future::Cache,
     tracing::info,
     JMAPStore, Store,
 };
@@ -16,13 +16,13 @@ use crate::{
         request::handle_jmap_request,
         session::{handle_jmap_session, Session},
     },
+    authorization::auth::SessionFactory,
     cluster::ClusterIpc,
     server::{event_source::handle_jmap_event_source, tls::load_tls_config, websocket::handle_ws},
     services::{
         email_delivery::{init_email_delivery, spawn_email_delivery},
         state_change::spawn_state_manager,
     },
-    session::auth::SessionFactory,
     JMAPServer, DEFAULT_HTTP_PORT,
 };
 
@@ -72,6 +72,7 @@ where
             .initial_capacity(128)
             .time_to_idle(ONE_HOUR_EXPIRY)
             .build(),
+
         cluster,
         #[cfg(test)]
         is_offline: false.into(),

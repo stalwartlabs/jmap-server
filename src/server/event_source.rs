@@ -1,6 +1,6 @@
 use actix_web::{http::StatusCode, web, HttpResponse};
 use async_stream::stream;
-use jmap::{error::problem_details::ProblemDetails, types::type_state::TypeState};
+use jmap::types::type_state::TypeState;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -9,7 +9,7 @@ use store::{core::bitmap::Bitmap, tracing::debug, Store};
 use tokio::time::{self};
 
 use crate::{
-    api::StateChangeResponse,
+    api::{ProblemDetails, StateChangeResponse},
     services::{LONG_SLUMBER_MS, THROTTLE_MS},
     JMAPServer,
 };
@@ -39,7 +39,7 @@ struct Ping {
 pub async fn handle_jmap_event_source<T>(
     params: web::Query<Params>,
     core: web::Data<JMAPServer<T>>,
-) -> HttpResponse
+) -> Result<HttpResponse, ProblemDetails>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -54,9 +54,7 @@ where
             if !matches!(t, TypeState::None) {
                 types.insert(t);
             } else {
-                return HttpResponse::build(StatusCode::BAD_REQUEST)
-                    .insert_header(("Content-Type", "application/problem+json"))
-                    .body(ProblemDetails::invalid_parameters().to_json());
+                return Err(ProblemDetails::invalid_parameters());
             }
         }
     }
@@ -89,12 +87,10 @@ where
     {
         change_rx
     } else {
-        return HttpResponse::build(StatusCode::BAD_REQUEST)
-            .insert_header(("Content-Type", "application/problem+json"))
-            .body(ProblemDetails::internal_server_error().to_json());
+        return Err(ProblemDetails::internal_server_error());
     };
 
-    HttpResponse::Ok()
+    Ok(HttpResponse::Ok()
         .insert_header(("Content-Type", "text/event-stream"))
         .insert_header(("Cache-Control", "no-store"))
         .streaming::<_, std::io::Error>(stream! {
@@ -152,5 +148,5 @@ where
                     Duration::from_millis(LONG_SLUMBER_MS)
                 };
             }
-        })
+        }))
 }

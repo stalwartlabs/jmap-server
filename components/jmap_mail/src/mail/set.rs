@@ -1,6 +1,5 @@
 use crate::mail::import::JMAPMailImport;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::types::blob::JMAPBlob;
@@ -29,6 +28,7 @@ use store::write::options::{IndexOptions, Options};
 use store::blob::BlobId;
 use store::{AccountId, DocumentId, JMAPStore, Store};
 
+use super::get::JMAPGetMail;
 use super::parse::get_message_part;
 use super::schema::{
     BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
@@ -667,7 +667,7 @@ impl EmailBodyPart {
             } else if let Some(blob_id) = self.get_blob(BodyProperty::BlobId) {
                 BodyPart::Binary(
                     store
-                        .blob_jmap_get(account_id, blob_id, get_message_part)
+                        .mail_blob_get(account_id, blob_id)
                         .map_err(|_| {
                             SetError::new(SetErrorType::BlobNotFound, "Failed to fetch blob.")
                         })?

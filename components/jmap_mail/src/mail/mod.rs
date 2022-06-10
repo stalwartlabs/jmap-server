@@ -10,6 +10,7 @@ pub mod raft;
 pub mod schema;
 pub mod serialize;
 pub mod set;
+pub mod sharing;
 
 use jmap::{jmap_store::Object, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};

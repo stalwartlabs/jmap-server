@@ -44,10 +44,10 @@ impl<T> JMAPServer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn is_allowed(&self, addr: RemoteAddress) -> bool {
+    pub async fn is_allowed(&self, addr: RemoteAddress) -> bool {
         let is_authenticated = matches!(&addr, RemoteAddress::AccountId(_));
         self.rate_limiters
-            .get_or_insert_with(addr, || {
+            .get_with(addr, async {
                 Arc::new(Mutex::new(if is_authenticated {
                     RateLimiter::new(
                         self.store.config.rate_limit_authenticated.0,
@@ -60,6 +60,7 @@ where
                     )
                 }))
             })
+            .await
             .lock()
             .is_allowed()
     }

@@ -1,10 +1,13 @@
 use std::{ops::Range, time::SystemTime};
 
+use roaring::RoaringBitmap;
 use tracing::error;
 
+use crate::serialize::leb128::Leb128;
 use crate::{
+    core::collection::Collection,
     serialize::{key::BlobKey, StoreSerialize},
-    AccountId, ColumnFamily, Direction, JMAPStore, Store,
+    AccountId, ColumnFamily, Direction, DocumentId, JMAPStore, Store,
 };
 
 use super::{BlobId, BlobStore, BlobStoreType};
@@ -95,16 +98,50 @@ where
         }
     }
 
-    pub fn blob_has_access(&self, blob_id: &BlobId, account_id: AccountId) -> crate::Result<bool> {
-        let key = BlobKey::serialize_prefix(blob_id, account_id);
+    pub fn blob_account_has_access(
+        &self,
+        blob_id: &BlobId,
+        account_id: AccountId,
+    ) -> crate::Result<bool> {
+        let prefix = BlobKey::serialize_prefix(blob_id, account_id);
 
         if let Some((key, _)) = self
             .db
-            .iterator(ColumnFamily::Blobs, &key, Direction::Forward)?
+            .iterator(ColumnFamily::Blobs, &prefix, Direction::Forward)?
             .next()
         {
-            if key.starts_with(&key) {
+            if key.starts_with(&prefix) {
                 return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    pub fn blob_document_has_access(
+        &self,
+        blob_id: &BlobId,
+        account_id: AccountId,
+        collection: Collection,
+        documents: &RoaringBitmap,
+    ) -> crate::Result<bool> {
+        let prefix = BlobKey::serialize_collection(blob_id, account_id, collection);
+
+        for (key, _) in self
+            .db
+            .iterator(ColumnFamily::Blobs, &prefix, Direction::Forward)?
+        {
+            if key.starts_with(&prefix) && key.len() > prefix.len() {
+                if let Some((document_id, _)) = DocumentId::from_leb128_bytes(&key[prefix.len()..])
+                {
+                    if documents.contains(document_id) {
+                        return Ok(true);
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
             }
         }
 

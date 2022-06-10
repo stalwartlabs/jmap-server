@@ -155,6 +155,21 @@ impl BlobKey {
         key
     }
 
+    pub fn serialize_collection(
+        id: &BlobId,
+        account: AccountId,
+        collection: Collection,
+    ) -> Vec<u8> {
+        let mut key = Vec::with_capacity(
+            BLOB_HASH_LEN + std::mem::size_of::<u32>() + std::mem::size_of::<AccountId>(),
+        );
+        key.extend_from_slice(&id.hash);
+        id.size.to_leb128_bytes(&mut key);
+        account.to_leb128_bytes(&mut key);
+        key.push(collection.into());
+        key
+    }
+
     pub fn serialize(id: &BlobId) -> Vec<u8> {
         let mut key = Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<u32>());
         key.extend_from_slice(&id.hash);

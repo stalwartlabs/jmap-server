@@ -75,14 +75,11 @@ where
         collection: Collection,
     ) -> crate::Result<Arc<Mutex<IdAssigner>>> {
         self.doc_id_cache
-            .get_or_try_insert_with::<_, StoreError>(
-                IdCacheKey::new(account_id, collection),
-                || {
-                    Ok(Arc::new(Mutex::new(IdAssigner::new(
-                        self.get_document_ids(account_id, collection)?,
-                    ))))
-                },
-            )
+            .try_get_with::<_, StoreError>(IdCacheKey::new(account_id, collection), || {
+                Ok(Arc::new(Mutex::new(IdAssigner::new(
+                    self.get_document_ids(account_id, collection)?,
+                ))))
+            })
             .map_err(|e| e.as_ref().clone())
     }
 

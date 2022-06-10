@@ -50,7 +50,7 @@ pub struct WebSocketResponse {
 
     #[serde(rename = "sessionState")]
     #[serde(serialize_with = "serialize_hex")]
-    session_state: u64,
+    session_state: u32,
 
     #[serde(rename(deserialize = "createdIds"))]
     #[serde(skip_serializing_if = "HashMap::is_empty")]

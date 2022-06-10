@@ -3,7 +3,6 @@ use std::time::SystemTime;
 
 use jmap::error::method::MethodError;
 use jmap::error::set::{SetError, SetErrorType};
-use jmap::jmap_store::blob::JMAPBlobStore;
 use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::Object;
 use jmap::orm::TinyORM;
@@ -38,6 +37,7 @@ use store::{DocumentId, Integer, LongInteger};
 use crate::mail::MessageField;
 
 use super::conv::HeaderValueInto;
+use super::get::JMAPGetMail;
 use super::parse::get_message_part;
 use super::schema::{Email, Keyword, Property};
 use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PARTS};
@@ -172,9 +172,7 @@ where
                     }
                 }
 
-                if let Some(blob) =
-                    self.blob_jmap_get(account_id, &item.blob_id, get_message_part)?
-                {
+                if let Some(blob) = self.mail_blob_get(account_id, &item.blob_id)? {
                     created.insert(
                         id,
                         self.mail_import_item(
