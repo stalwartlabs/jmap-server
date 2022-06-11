@@ -1,13 +1,17 @@
+use crate::api::invocation::handle_method_calls;
 use crate::api::request::Request;
 use crate::api::response::{serialize_hex, Response};
+use crate::api::{method, RequestError, RequestErrorType, RequestLimitError};
+use crate::authorization::Session;
 use crate::services::{LONG_SLUMBER_MS, THROTTLE_MS};
+use crate::JMAPServer;
 use actix::{Actor, ActorContext, AsyncContext, Handler, Message, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
 use actix_web_actors::ws::{self, WsResponseBuilder};
-use jmap::error::request::{RequestError, RequestErrorType, RequestLimitError};
 use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use jmap::types::type_state::TypeState;
+use std::borrow::Cow;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -15,10 +19,6 @@ use std::{
 use store::core::bitmap::Bitmap;
 use store::tracing::log::debug;
 use store::Store;
-
-use crate::api::invocation::handle_method_calls;
-use crate::api::method;
-use crate::JMAPServer;
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -120,18 +120,19 @@ pub struct WebSocketStateChange {
     push_state: Option<String>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Message, serde::Serialize)]
+#[rtype(result = "()")]
 pub struct WebSocketRequestError {
     #[serde(rename = "@type")]
     pub type_: WebSocketRequestErrorType,
 
     #[serde(rename(serialize = "type"))]
-    error: RequestErrorType,
+    p_type: RequestErrorType,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     limit: Option<RequestLimitError>,
-    status: u32,
-    detail: String,
+    status: u16,
+    detail: Cow<'static, str>,
 
     #[serde(rename = "requestId")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -147,6 +148,7 @@ pub struct WebSocket<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
+    session: Session,
     core: web::Data<JMAPServer<T>>,
     state_handle: Option<actix::SpawnHandle>,
     hb: Instant,
@@ -156,10 +158,11 @@ impl<T> WebSocket<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn new(core: web::Data<JMAPServer<T>>) -> Self {
+    pub fn new(core: web::Data<JMAPServer<T>>, session: Session) -> Self {
         Self {
             hb: Instant::now(),
             core,
+            session,
             state_handle: None,
         }
     }
@@ -202,6 +205,21 @@ where
     }
 }
 
+impl<T> Handler<WebSocketRequestError> for WebSocket<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    type Result = ();
+
+    fn handle(&mut self, error: WebSocketRequestError, ctx: &mut Self::Context) -> Self::Result {
+        /*println!(
+            "Send response: {}",
+            serde_json::to_string_pretty(&msg).unwrap_or_default()
+        );*/
+        ctx.text(serde_json::to_string(&error).unwrap_or_default());
+    }
+}
+
 impl<T> StreamHandler<WebSocketStateChange> for WebSocket<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -239,20 +257,31 @@ where
                                 {
                                     let addr = ctx.address();
                                     let core = self.core.clone();
-                                    //TODO limit concurrent calls
+                                    let session = self.session.clone();
+
                                     tokio::spawn(async move {
-                                        addr.do_send(WebSocketResponse::from_response(
-                                            handle_method_calls(
-                                                Request {
-                                                    using: request.using,
-                                                    method_calls: request.method_calls,
-                                                    created_ids: request.created_ids,
-                                                },
-                                                core,
-                                            )
-                                            .await,
-                                            request.id,
-                                        ));
+                                        if let Ok(_in_flight_request) =
+                                            core.is_account_allowed(session.account_id()).await
+                                        {
+                                            addr.do_send(WebSocketResponse::from_response(
+                                                handle_method_calls(
+                                                    Request {
+                                                        using: request.using,
+                                                        method_calls: request.method_calls,
+                                                        created_ids: request.created_ids,
+                                                    },
+                                                    core,
+                                                    session,
+                                                )
+                                                .await,
+                                                request.id,
+                                            ));
+                                        } else {
+                                            addr.do_send(WebSocketRequestError::from_error(
+                                                RequestError::limit(RequestLimitError::Concurrent),
+                                                request.id,
+                                            ));
+                                        }
                                     });
                                     return;
                                 } else {
@@ -264,7 +293,7 @@ where
                             }
                             WebSocketMessage::PushEnable(request) => {
                                 let core = self.core.clone();
-                                let _account_id = 1; //TODO obtain from session, plus shared accounts + device ids limit
+                                let account_id = self.session.account_id();
                                 let types = if let Some(data_types) = request.data_types {
                                     if !data_types.is_empty() {
                                         data_types.into()
@@ -277,7 +306,7 @@ where
 
                                 self.state_handle = Some(ctx.add_stream(async_stream::stream! {
                                     let mut change_rx = if let Some(change_rx) = core
-                                        .subscribe_state_manager(_account_id, _account_id, types)
+                                        .subscribe_state_manager(account_id, account_id, types)
                                         .await
                                     {
                                         change_rx
@@ -364,11 +393,12 @@ pub async fn handle_ws<T>(
     req: HttpRequest,
     stream: web::Payload,
     core: web::Data<JMAPServer<T>>,
+    session: Session,
 ) -> actix_web::Result<HttpResponse>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    WsResponseBuilder::new(WebSocket::new(core), &req, stream)
+    WsResponseBuilder::new(WebSocket::new(core, session), &req, stream)
         .protocols(&["jmap"])
         .start()
 }
@@ -377,7 +407,7 @@ impl WebSocketRequestError {
     pub fn from_error(error: RequestError, request_id: Option<String>) -> Self {
         Self {
             type_: WebSocketRequestErrorType::RequestError,
-            error: error.error,
+            p_type: error.p_type,
             limit: error.limit,
             status: error.status,
             detail: error.detail,

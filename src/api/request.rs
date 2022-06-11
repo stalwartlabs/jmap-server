@@ -4,13 +4,14 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::{
-    error::request::{RequestError, RequestLimitError},
-    types::jmap::JMAPId,
-};
+use jmap::types::jmap::JMAPId;
 use store::{tracing::debug, Store};
 
-use crate::{api::invocation::handle_method_calls, JMAPServer};
+use crate::{
+    api::{invocation::handle_method_calls, RequestError, RequestLimitError},
+    authorization::Session,
+    JMAPServer,
+};
 
 use super::method;
 
@@ -28,11 +29,12 @@ pub struct Request {
 pub async fn handle_jmap_request<T>(
     request: web::Bytes,
     core: web::Data<JMAPServer<T>>,
-) -> HttpResponse
+    session: Session,
+) -> Result<HttpResponse, RequestError>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let error = if request.len() < core.store.config.max_size_request {
+    if request.len() < core.store.config.max_size_request {
         println!(
             "{}",
             serde_json::to_string_pretty(
@@ -44,27 +46,23 @@ where
         match serde_json::from_slice::<Request>(&request) {
             Ok(request) => {
                 if request.method_calls.len() < core.store.config.max_calls_in_request {
-                    let result = handle_method_calls(request, core).await;
+                    let result = handle_method_calls(request, core, session).await;
                     println!("{}", serde_json::to_string_pretty(&result).unwrap());
 
-                    return HttpResponse::build(StatusCode::OK)
+                    Ok(HttpResponse::build(StatusCode::OK)
                         .insert_header(ContentType::json())
-                        .json(result);
+                        .json(result))
                 } else {
-                    RequestError::limit(RequestLimitError::CallsIn)
+                    Err(RequestError::limit(RequestLimitError::CallsIn))
                 }
             }
             Err(err) => {
                 debug!("Failed to parse request: {}", err);
 
-                RequestError::not_request()
+                Err(RequestError::not_request())
             }
         }
     } else {
-        RequestError::limit(RequestLimitError::Size)
-    };
-
-    HttpResponse::build(StatusCode::BAD_REQUEST)
-        .insert_header(ContentType::json())
-        .json(error)
+        Err(RequestError::limit(RequestLimitError::Size))
+    }
 }

@@ -7,24 +7,20 @@ use std::{
 
 use actix_web::{
     dev::{forward_ready, Payload, Service, ServiceRequest, ServiceResponse, Transform},
-    error,
-    http::{
-        header::{self, ContentType},
-        StatusCode,
-    },
-    web, Error, FromRequest, HttpMessage, HttpRequest, HttpResponse,
+    http::header::{self},
+    web, Error, FromRequest, HttpMessage, HttpRequest,
 };
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
-use jmap::{base64, types::jmap::JMAPId};
+use jmap::{base64, principal::account::JMAPAccountStore, types::jmap::JMAPId};
 use store::{
-    tracing::{debug, error, warn},
+    tracing::{debug, error},
     AccountId, Store,
 };
 
-use crate::{api::ProblemDetails, JMAPServer};
+use crate::{api::RequestError, JMAPServer};
 
-use super::{base::JMAPSessionStore, InFlightRequest, Session};
+use super::{rate_limit::InFlightRequest, Session};
 
 pub struct SessionMiddleware<S, T>
 where
@@ -57,7 +53,7 @@ where
         let service = self.service.clone();
 
         async move {
-            let mut authenticated_id = None;
+            let mut authorized = None;
 
             if let Some((mechanism, token)) = req
                 .headers()
@@ -65,119 +61,77 @@ where
                 .and_then(|h| h.to_str().ok())
                 .and_then(|h| h.split_once(' ').map(|(l, t)| (l, t.trim())))
             {
-                if let Some(account_id) = core.session_tokens.get(&token.to_string()) {
-                    // Enforce rate limit for an authenticated user
-                    if core.is_allowed(RemoteAddress::AccountId(account_id)).await {
-                        authenticated_id = Some(account_id);
-                    } else {
-                        warn!(
-                            "Rate limited request {}.",
-                            RemoteAddress::AccountId(account_id)
-                        );
-                        return Err(ProblemDetails::too_many_requests().into());
-                    }
+                if let Some(session) = core.sessions.get(&token.to_string()) {
+                    authorized = session.into();
                 } else if mechanism.eq_ignore_ascii_case("basic") {
-                    // Before authenticating enforce rate limit for an anonymous request
-                    if core
-                        .is_allowed(req.remote_address(core.store.config.use_forwarded_header))
-                        .await
-                    {
-                        // Decode the base64 encoded credentials
-                        if let Some((login, secret)) = base64::decode(token)
-                            .ok()
-                            .and_then(|token| String::from_utf8(token).ok())
-                            .and_then(|token| {
-                                token.split_once(':').map(|(login, secret)| {
-                                    (login.trim().to_lowercase(), secret.to_string())
-                                })
-                            })
-                        {
-                            let store = core.store.clone();
-                            match core
-                                .spawn_worker(move || {
-                                    // Map login to account_id
-                                    if let Some(account_id) = store.find_account(login.clone())? {
-                                        // Validate password
-                                        if store.auth(account_id, &login, &secret)? {
-                                            return Ok(Some(account_id));
-                                        }
-                                    } else {
-                                        debug!("Authentication failed: Login {} not found.", login);
-                                    }
+                    // Before authenticating enforce rate limit for anonymous requests
+                    core.is_anonymous_allowed(
+                        req.remote_address(core.store.config.use_forwarded_header),
+                    )
+                    .await?;
 
-                                    Ok(None)
-                                })
-                                .await
-                            {
-                                Ok(Some(account_id)) => {
-                                    // Basic authentication successful, add token to session store
-                                    core.session_tokens.insert(token.to_string(), account_id);
-                                    authenticated_id = Some(account_id);
-                                }
-                                Ok(None) => {
-                                    return service.call(req).await;
-                                }
-                                Err(err) => {
-                                    error!("Store error during authentication: {}", err);
-                                    return Err(ProblemDetails::internal_server_error().into());
-                                }
+                    // Decode the base64 encoded credentials
+                    if let Some((login, secret)) = base64::decode(token)
+                        .ok()
+                        .and_then(|token| String::from_utf8(token).ok())
+                        .and_then(|token| {
+                            token.split_once(':').map(|(login, secret)| {
+                                (login.trim().to_lowercase(), secret.to_string())
+                            })
+                        })
+                    {
+                        let store = core.store.clone();
+                        match core
+                            .spawn_worker(move || {
+                                // Validate password
+                                Ok(
+                                    if let Some(account_id) = store.authenticate(&login, &secret)? {
+                                        let member_of = store.get_member_accounts(account_id)?;
+                                        Session::new(
+                                            account_id,
+                                            &member_of,
+                                            &store.get_shared_accounts(&member_of)?,
+                                        )
+                                        .into()
+                                    } else {
+                                        None
+                                    },
+                                )
+                            })
+                            .await
+                        {
+                            Ok(Some(session)) => {
+                                // Basic authentication successful, add token to session store
+                                core.sessions
+                                    .insert(token.to_string(), session.clone())
+                                    .await;
+                                authorized = session.into();
                             }
-                        } else {
-                            debug!(concat!(
-                                "Authentication failed: ",
-                                "Failed to parse Basic Authentication header."
-                            ));
-                            return service.call(req).await;
+                            Ok(None) => {
+                                return service.call(req).await;
+                            }
+                            Err(err) => {
+                                error!("Store error during authentication: {}", err);
+                                return Err(RequestError::internal_server_error().into());
+                            }
                         }
                     } else {
-                        warn!(
-                            "Rate limited request {}.",
-                            req.remote_address(core.store.config.use_forwarded_header)
-                        );
-                        return Err(ProblemDetails::too_many_requests().into());
+                        debug!("Failed to decode Basic auth request.",);
                     }
                 }
             }
 
-            if let Some(authenticated_id) = authenticated_id {
-                let session = if let Some(session) = core.sessions.get(&authenticated_id) {
-                    session
-                } else {
-                    let store = core.store.clone();
-                    match core
-                        .spawn_worker(move || store.build_session(authenticated_id))
-                        .await
-                    {
-                        Ok(Some(session)) => {
-                            let session = Arc::new(session);
-                            core.sessions.insert(authenticated_id, session.clone());
-                            session
-                        }
-                        Ok(None) => {
-                            error!(
-                                "Failed to build session for account {}",
-                                JMAPId::from(authenticated_id)
-                            );
-                            return service.call(req).await;
-                        }
-                        Err(err) => {
-                            error!("Store error while building session: {}", err);
-                            return Err(ProblemDetails::internal_server_error().into());
-                        }
-                    }
-                };
+            if let Some(session) = authorized {
+                let in_flight_request = core.is_account_allowed(session.account_id).await?;
 
                 // Add session to request
-                req.extensions_mut().insert::<Arc<Session>>(session);
-            } else if !core
-                .is_allowed(req.remote_address(core.store.config.use_forwarded_header))
-                .await
-            {
-                warn!(
-                    "Rate limited request {}.",
-                    req.remote_address(core.store.config.use_forwarded_header)
-                );
-                return Err(ProblemDetails::too_many_requests().into());
+                req.extensions_mut()
+                    .insert::<(Session, InFlightRequest)>((session, in_flight_request));
+            } else {
+                core.is_anonymous_allowed(
+                    req.remote_address(core.store.config.use_forwarded_header),
+                )
+                .await?
             }
 
             service.call(req).await
@@ -241,25 +195,15 @@ where
     }
 }
 
-pub struct Authorized(Arc<Session>);
-
-impl FromRequest for Authorized {
-    type Error = ProblemDetails;
+impl FromRequest for Session {
+    type Error = RequestError;
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-        ready(match req.extensions().get::<Arc<Session>>() {
-            Some(session) => Ok(Authorized(session.clone())),
-            None => Err(ProblemDetails::unauthorized()),
+        ready(match req.extensions().get::<(Session, InFlightRequest)>() {
+            Some((session, _)) => Ok(session.clone()),
+            None => Err(RequestError::unauthorized()),
         })
-    }
-}
-
-impl std::ops::Deref for Authorized {
-    type Target = Arc<Session>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 

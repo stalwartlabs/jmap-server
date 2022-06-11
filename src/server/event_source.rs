@@ -1,4 +1,4 @@
-use actix_web::{http::StatusCode, web, HttpResponse};
+use actix_web::{web, HttpResponse};
 use async_stream::stream;
 use jmap::types::type_state::TypeState;
 use std::{
@@ -9,7 +9,8 @@ use store::{core::bitmap::Bitmap, tracing::debug, Store};
 use tokio::time::{self};
 
 use crate::{
-    api::{ProblemDetails, StateChangeResponse},
+    api::{RequestError, StateChangeResponse},
+    authorization::Session,
     services::{LONG_SLUMBER_MS, THROTTLE_MS},
     JMAPServer,
 };
@@ -39,7 +40,8 @@ struct Ping {
 pub async fn handle_jmap_event_source<T>(
     params: web::Query<Params>,
     core: web::Data<JMAPServer<T>>,
-) -> Result<HttpResponse, ProblemDetails>
+    session: Session,
+) -> Result<HttpResponse, RequestError>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -54,7 +56,7 @@ where
             if !matches!(t, TypeState::None) {
                 types.insert(t);
             } else {
-                return Err(ProblemDetails::invalid_parameters());
+                return Err(RequestError::invalid_parameters());
             }
         }
     }
@@ -76,18 +78,17 @@ where
     } else {
         None
     };
-    let _account_id = 1; //TODO obtain from session, plus shared accounts + device ids limit
     let mut response = StateChangeResponse::new();
     let close_after_state = matches!(params.closeafter, CloseAfter::State);
 
     // Register with state manager
     let mut change_rx = if let Some(change_rx) = core
-        .subscribe_state_manager(_account_id, _account_id, types)
+        .subscribe_state_manager(session.account_id(), session.account_id(), types)
         .await
     {
         change_rx
     } else {
-        return Err(ProblemDetails::internal_server_error());
+        return Err(RequestError::internal_server_error());
     };
 
     Ok(HttpResponse::Ok()

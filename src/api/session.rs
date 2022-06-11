@@ -1,14 +1,15 @@
 use std::{collections::HashMap, iter::FromIterator};
 
-use crate::{
-    api::response::serialize_hex,
-    authorization::{auth::Authorized, base::JMAPSessionStore},
-};
+use crate::{api::response::serialize_hex, authorization};
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::{principal::schema::Type, types::jmap::JMAPId, URI};
+use jmap::{
+    principal::{account::JMAPAccountStore, schema::Type},
+    types::jmap::JMAPId,
+    URI,
+};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     Store,
@@ -16,7 +17,7 @@ use store::{
 
 use crate::JMAPServer;
 
-use super::ProblemDetails;
+use super::RequestError;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Session {
@@ -287,8 +288,8 @@ impl MailCapabilities {
 
 pub async fn handle_jmap_session<T>(
     core: web::Data<JMAPServer<T>>,
-    session: Authorized,
-) -> Result<HttpResponse, ProblemDetails>
+    session: authorization::Session,
+) -> Result<HttpResponse, RequestError>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -298,16 +299,23 @@ where
         .spawn_worker(move || {
             let mut response = core.base_session.clone();
             response.set_primary_account(
-                session.primary_id().into(),
-                session.email().to_string(),
+                session.account_id().into(),
+                store
+                    .get_account_details(session.account_id())?
+                    .map(|(name, email, _)| if !name.is_empty() { name } else { email })
+                    .unwrap_or_default(),
                 None,
             );
             response.set_state(session.state());
 
+            // Obtain member and shared accounts
+            let member_of = store.get_member_accounts(session.account_id())?;
+            let access_to = store.get_shared_accounts(&member_of)?;
+
             // TODO set read only for shared accounts
-            for id in session.member_of().iter().chain(session.access_to().iter()) {
+            for id in member_of.iter().chain(access_to.iter()) {
                 let (name, email, ptype) = store
-                    .account_details(*id)?
+                    .get_account_details(*id)?
                     .unwrap_or_else(|| ("".to_string(), "".to_string(), Type::Individual));
                 response.add_account(
                     (*id).into(),
@@ -325,6 +333,6 @@ where
         Ok(response) => Ok(HttpResponse::build(StatusCode::OK)
             .insert_header(ContentType::json())
             .body(serde_json::to_string(&response).unwrap_or_default())),
-        Err(_) => Err(ProblemDetails::internal_server_error()),
+        Err(_) => Err(RequestError::internal_server_error()),
     }
 }

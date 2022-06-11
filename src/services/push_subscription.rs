@@ -323,7 +323,7 @@ impl PushServer {
                         .changed
                         .entry(state_change.account_id.into())
                         .or_insert_with(HashMap::new)
-                        .insert(type_state.clone(), (*change_id).into());
+                        .insert(*type_state, (*change_id).into());
                 }
             }
 

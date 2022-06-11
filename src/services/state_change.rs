@@ -1,6 +1,7 @@
-use jmap::types::type_state::TypeState;
+use actix_web::web;
+use jmap::{principal::account::JMAPAccountStore, types::type_state::TypeState};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     time::{Duration, Instant, SystemTime},
 };
 use store::{
@@ -30,8 +31,7 @@ pub enum Event {
         state_change: StateChange,
     },
     UpdateSharedAccounts {
-        owner_account_id: AccountId,
-        shared_account_ids: Vec<AccountId>,
+        account_id: AccountId,
     },
     UpdateSubscriptions {
         account_id: AccountId,
@@ -75,15 +75,24 @@ impl Subscriber {
 const PURGE_EVERY_SECS: u64 = 3600;
 const SEND_TIMEOUT_MS: u64 = 500;
 
-//TODO: emailDelivery type
-pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
-    let (change_tx, mut change_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
+pub fn init_state_manager() -> (mpsc::Sender<Event>, mpsc::Receiver<Event>) {
+    mpsc::channel::<Event>(IPC_CHANNEL_BUFFER)
+}
+
+pub fn spawn_state_manager<T>(
+    core: web::Data<JMAPServer<T>>,
+    mut started: bool,
+    mut change_rx: mpsc::Receiver<Event>,
+) where
+    T: for<'x> Store<'x> + 'static,
+{
     let push_tx = spawn_push_manager();
 
     tokio::spawn(async move {
         let mut subscribers: HashMap<AccountId, HashMap<DocumentId, Subscriber>> = HashMap::new();
         let mut shared_accounts: HashMap<AccountId, Vec<AccountId>> = HashMap::new();
-        let mut shared_accounts_map: HashMap<AccountId, HashSet<AccountId>> = HashMap::new();
+        let mut shared_accounts_map: HashMap<AccountId, Vec<(AccountId, Bitmap<TypeState>)>> =
+            HashMap::new();
 
         let mut last_purge = Instant::now();
 
@@ -107,37 +116,66 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                         debug!("Error sending push reset: {}", err);
                     }
                 }
-                Event::UpdateSharedAccounts {
-                    owner_account_id,
-                    shared_account_ids,
-                } => {
-                    // Delete any removed sharings
-                    if let Some(current_shared_account_ids) = shared_accounts.get(&owner_account_id)
+                Event::UpdateSharedAccounts { account_id } => {
+                    // Obtain account membership and shared mailboxes
+                    let store = core.store.clone();
+                    let (member_of, shared) = match core
+                        .spawn_worker(move || {
+                            let member_of = store.get_member_accounts(account_id)?;
+                            let shared = store.get_shared_accounts(&member_of)?;
+                            Ok((member_of, shared))
+                        })
+                        .await
                     {
-                        for current_shared_account_id in current_shared_account_ids {
-                            if !shared_account_ids.contains(current_shared_account_id) {
-                                if let Some(shared_accounts_map) =
-                                    shared_accounts_map.get_mut(current_shared_account_id)
+                        Ok(result) => result,
+                        Err(err) => {
+                            error!("Error updating shared accounts: {}", err);
+                            continue;
+                        }
+                    };
+
+                    // Delete any removed sharings
+                    if let Some(shared_account_ids) = shared_accounts.get(&account_id) {
+                        for shared_account_id in shared_account_ids {
+                            if !member_of.contains(shared_account_id)
+                                && !shared.contains(shared_account_id)
+                            {
+                                if let Some(shared_list) =
+                                    shared_accounts_map.get_mut(shared_account_id)
                                 {
-                                    shared_accounts_map.remove(&owner_account_id);
+                                    if let Some(pos) =
+                                        shared_list.iter().position(|(id, _)| *id == account_id)
+                                    {
+                                        if shared_list.len() > 1 {
+                                            shared_list.swap_remove(pos);
+                                        } else {
+                                            shared_accounts_map.remove(shared_account_id);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Link account owner
-                    shared_accounts_map
-                        .entry(owner_account_id)
-                        .or_insert_with(HashSet::new)
-                        .insert(owner_account_id);
-
-                    // Link shared accounts
-                    for shared_account_id in shared_account_ids {
+                    // Update lists
+                    let mut shared_account_ids = Vec::with_capacity(member_of.len() + shared.len());
+                    for member_id in member_of.iter() {
+                        shared_account_ids.push(*member_id);
                         shared_accounts_map
-                            .entry(shared_account_id)
-                            .or_insert_with(HashSet::new)
-                            .insert(owner_account_id);
+                            .entry(*member_id)
+                            .or_insert_with(Vec::new)
+                            .push((account_id, Bitmap::all()));
                     }
+                    let types: Bitmap<TypeState> =
+                        vec![TypeState::Mailbox, TypeState::Email].into();
+                    for member_id in shared.iter() {
+                        shared_account_ids.push(*member_id);
+                        shared_accounts_map
+                            .entry(*member_id)
+                            .or_insert_with(Vec::new)
+                            .push((account_id, types.clone()));
+                    }
+                    shared_accounts.insert(account_id, shared_account_ids);
                 }
                 Event::Subscribe {
                     id,
@@ -167,13 +205,15 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
                             .unwrap_or(0);
                         let mut push_ids = Vec::new();
 
-                        for owner_account_id in shared_accounts {
+                        for (owner_account_id, allowed_types) in shared_accounts {
                             if let Some(subscribers) = subscribers.get(owner_account_id) {
                                 for (subscriber_id, subscriber) in subscribers {
                                     let mut types = Vec::with_capacity(state_change.types.len());
                                     for (state_type, change_id) in &state_change.types {
-                                        if subscriber.types.contains(state_type.clone()) {
-                                            types.push((state_type.clone(), *change_id));
+                                        if subscriber.types.contains(*state_type)
+                                            && allowed_types.contains(*state_type)
+                                        {
+                                            types.push((*state_type, *change_id));
                                         }
                                     }
                                     if !types.is_empty() {
@@ -352,7 +392,6 @@ pub fn spawn_state_manager(mut started: bool) -> mpsc::Sender<Event> {
             }
         }
     });
-    change_tx
 }
 
 impl<T> JMAPServer<T>
@@ -362,20 +401,17 @@ where
     pub async fn subscribe_state_manager(
         &self,
         id: DocumentId,
-        owner_account_id: DocumentId,
+        account_id: DocumentId,
         types: Bitmap<TypeState>,
     ) -> Option<mpsc::Receiver<StateChange>> {
         let (change_tx, change_rx) = mpsc::channel::<StateChange>(IPC_CHANNEL_BUFFER);
         let state_tx = self.state_change.clone();
 
         for event in [
-            Event::UpdateSharedAccounts {
-                owner_account_id,
-                shared_account_ids: vec![], //TODO: shared accounts
-            },
+            Event::UpdateSharedAccounts { account_id },
             Event::Subscribe {
                 id,
-                account_id: owner_account_id,
+                account_id,
                 types,
                 tx: change_tx,
             },
@@ -403,10 +439,7 @@ where
     pub async fn update_push_subscriptions(&self, account_id: AccountId) -> jmap::Result<()> {
         let state_tx = self.state_change.clone();
         for event in [
-            Event::UpdateSharedAccounts {
-                owner_account_id: account_id,
-                shared_account_ids: vec![], //TODO: shared accounts
-            },
+            Event::UpdateSharedAccounts { account_id },
             self.fetch_push_subscriptions(account_id).await?,
         ] {
             if let Err(err) = state_tx.send(event).await {

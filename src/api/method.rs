@@ -128,7 +128,11 @@ pub enum Response {
 }
 
 impl Request {
-    pub fn prepare_request(&mut self, response: &response::Response) -> jmap::Result<()> {
+    pub fn prepare_request(
+        &mut self,
+        account_id: AccountId,
+        response: &response::Response,
+    ) -> jmap::Result<()> {
         // Create JSON Pointer evaluation function
         let mut eval_result_ref = |rr: &ResultReference| -> Option<Vec<u64>> {
             for r in &response.method_responses {

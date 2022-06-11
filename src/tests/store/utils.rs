@@ -530,6 +530,6 @@ where
             keys.insert(cf, total_keys);
         }
 
-        self.doc_id_cache.invalidate_all();
+        self.id_assigner.invalidate_all();
     }
 }

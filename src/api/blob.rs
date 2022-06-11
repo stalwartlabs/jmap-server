@@ -1,6 +1,7 @@
 use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{http::StatusCode, web, HttpResponse};
+use jmap::principal::account::JMAPAccountStore;
 use jmap::types::jmap::JMAPId;
 
 use jmap::types::blob::JMAPBlob;
@@ -10,29 +11,31 @@ use reqwest::header::CONTENT_TYPE;
 use store::core::collection::Collection;
 use store::{tracing::error, Store};
 
-use crate::authorization::auth::Authorized;
+use crate::authorization::Session;
 use crate::JMAPServer;
 
-use super::ProblemDetails;
+use super::RequestError;
 
 #[derive(serde::Deserialize)]
 pub struct Params {
     accept: String,
 }
 
+enum Response {
+    Blob(Vec<u8>),
+    Unauthorized,
+    NotFound,
+}
+
 pub async fn handle_jmap_download<T>(
     path: web::Path<(JMAPId, JMAPBlob, String)>,
     params: web::Query<Params>,
     core: web::Data<JMAPServer<T>>,
-    session: Authorized,
-) -> Result<HttpResponse, ProblemDetails>
+    session: Session,
+) -> Result<HttpResponse, RequestError>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    // Enforce rate limits
-    let _req = session.assert_concurrent_requests(core.store.config.max_concurrent_requests)?;
-    let session = session.clone();
-
     // Enforce access control
     let (id, blob_id, filename) = path.into_inner();
     let account_id = id.get_document_id();
@@ -40,10 +43,10 @@ where
     let store = core.store.clone();
     match core
         .spawn_worker(move || {
-            if !session.is_owner(account_id) {
-                if let Some(shared_ids) = store
-                    .mail_shared_messages(account_id, session.member_of())?
-                    .as_ref()
+            let member_of = store.get_member_accounts(session.account_id())?;
+            if !member_of.contains(&account_id) {
+                if let Some(shared_ids) =
+                    store.mail_shared_messages(account_id, &member_of)?.as_ref()
                 {
                     if !store.blob_document_has_access(
                         &blob_id.id,
@@ -51,10 +54,10 @@ where
                         Collection::Mail,
                         shared_ids,
                     )? {
-                        return Ok(None);
+                        return Ok(Response::Unauthorized);
                     }
                 } else {
-                    return Ok(None);
+                    return Ok(Response::Unauthorized);
                 }
             }
 
@@ -64,12 +67,14 @@ where
                     get_message_part(bytes, inner_id).map(|bytes| bytes.into_owned())
                 } else {
                     bytes
-                },
+                }
+                .map(Response::Blob)
+                .unwrap_or(Response::NotFound),
             )
         })
         .await
     {
-        Ok(Some(bytes)) => {
+        Ok(Response::Blob(bytes)) => {
             Ok(HttpResponse::build(StatusCode::OK)
                 .insert_header(("Content-Type", params.into_inner().accept))
                 .insert_header((
@@ -79,10 +84,11 @@ where
                 .insert_header(("Cache-Control", "private, immutable, max-age=31536000"))
                 .body(bytes))
         }
-        Ok(None) => Err(ProblemDetails::not_found()),
+        Ok(Response::NotFound) => Err(RequestError::not_found()),
+        Ok(Response::Unauthorized) => Err(RequestError::forbidden()),
         Err(err) => {
             error!("Blob download failed: {:?}", err);
-            Err(ProblemDetails::internal_server_error())
+            Err(RequestError::internal_server_error())
         }
     }
 }
@@ -103,30 +109,34 @@ pub async fn handle_jmap_upload<T>(
     request: HttpRequest,
     bytes: web::Bytes,
     core: web::Data<JMAPServer<T>>,
-    session: Authorized,
-) -> Result<HttpResponse, ProblemDetails>
+    session: Session,
+) -> Result<HttpResponse, RequestError>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    // Enforce rate limits
-    let _req = session.assert_concurrent_requests(core.store.config.max_concurrent_requests)?;
-
-    // Enforce access control
     let (id,) = path.into_inner();
     let account_id = id.get_document_id();
-    session.assert_is_owner(account_id)?;
 
     let store = core.store.clone();
     let size = bytes.len();
     match core
         .spawn_worker(move || {
-            let blob_id = store.blob_store(&bytes)?;
-            store.blob_link_ephimeral(&blob_id, account_id)?;
-            Ok(JMAPBlob::new(blob_id))
+            Ok(
+                if store
+                    .get_member_accounts(session.account_id())?
+                    .contains(&account_id)
+                {
+                    let blob_id = store.blob_store(&bytes)?;
+                    store.blob_link_ephimeral(&blob_id, account_id)?;
+                    JMAPBlob::new(blob_id).into()
+                } else {
+                    None
+                },
+            )
         })
         .await
     {
-        Ok(blob_id) => Ok(HttpResponse::build(StatusCode::OK)
+        Ok(Some(blob_id)) => Ok(HttpResponse::build(StatusCode::OK)
             .insert_header(ContentType::json())
             .json(UploadResponse {
                 account_id: id,
@@ -139,9 +149,10 @@ where
                     .to_string(),
                 size,
             })),
+        Ok(None) => Err(RequestError::forbidden()),
         Err(err) => {
             error!("Blob upload failed: {:?}", err);
-            Err(ProblemDetails::internal_server_error())
+            Err(RequestError::internal_server_error())
         }
     }
 }

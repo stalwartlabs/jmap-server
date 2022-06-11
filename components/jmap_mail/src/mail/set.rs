@@ -1,12 +1,16 @@
+use super::get::JMAPGetMail;
+use super::schema::{
+    BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
+};
+use super::{MessageData, MessageField};
 use crate::mail::import::JMAPMailImport;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
-use jmap::types::blob::JMAPBlob;
-use jmap::types::jmap::JMAPId;
-
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::{MaybeIdReference, ResultReference};
+use jmap::types::blob::JMAPBlob;
+use jmap::types::jmap::JMAPId;
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
 use mail_builder::headers::date::Date;
@@ -18,22 +22,14 @@ use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use mail_parser::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use store::blob::BlobId;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
-
-use store::blob::BlobId;
 use store::{AccountId, DocumentId, JMAPStore, Store};
-
-use super::get::JMAPGetMail;
-use super::parse::get_message_part;
-use super::schema::{
-    BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
-};
-use super::{MessageData, MessageField};
 
 impl SetObject for Email {
     type SetArguments = ();

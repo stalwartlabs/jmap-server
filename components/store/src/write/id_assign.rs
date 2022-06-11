@@ -74,7 +74,7 @@ where
         account_id: AccountId,
         collection: Collection,
     ) -> crate::Result<Arc<Mutex<IdAssigner>>> {
-        self.doc_id_cache
+        self.id_assigner
             .try_get_with::<_, StoreError>(IdCacheKey::new(account_id, collection), || {
                 Ok(Arc::new(Mutex::new(IdAssigner::new(
                     self.get_document_ids(account_id, collection)?,

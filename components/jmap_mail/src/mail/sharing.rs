@@ -41,7 +41,7 @@ where
                     Collection::Mail,
                 ),
                 || {
-                    Ok(Arc::new(self.shared_documents(
+                    Ok(Arc::new(self.get_shared_documents(
                         shared_to,
                         owner_id,
                         Collection::Mailbox,

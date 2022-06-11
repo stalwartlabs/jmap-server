@@ -491,7 +491,7 @@ where
         self.store
             .tombstone_deletions
             .store(true, Ordering::Relaxed);
-        self.store.doc_id_cache.invalidate_all();
+        self.store.id_assigner.invalidate_all();
         self.state_change
             .clone()
             .send(state_change::Event::Start)

@@ -4,6 +4,7 @@ use crate::jmap_store::Object;
 
 use self::schema::{Principal, Property, Value};
 
+pub mod account;
 pub mod get;
 pub mod query;
 pub mod schema;

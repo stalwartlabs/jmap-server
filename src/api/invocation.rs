@@ -1,5 +1,6 @@
+use super::{method, request::Request, response::Response};
+use crate::{authorization::Session, services::email_delivery, JMAPServer};
 use actix_web::web;
-
 use jmap::{
     error::method::MethodError,
     push_subscription::{get::JMAPGetPushSubscription, set::JMAPSetPushSubscription},
@@ -23,17 +24,17 @@ use jmap_mail::{
 };
 use store::{tracing::error, Store};
 
-use crate::{services::email_delivery, JMAPServer};
-
-use super::{method, request::Request, response::Response};
-
-pub async fn handle_method_calls<T>(request: Request, core: web::Data<JMAPServer<T>>) -> Response
+pub async fn handle_method_calls<T>(
+    request: Request,
+    core: web::Data<JMAPServer<T>>,
+    session: Session,
+) -> Response
 where
     T: for<'x> Store<'x> + 'static,
 {
     let include_created_ids = request.created_ids.is_some();
     let mut response = Response::new(
-        1234, //TODO
+        session.state(),
         request.created_ids.unwrap_or_default(),
         request.method_calls.len(),
     );
@@ -44,7 +45,7 @@ where
 
         loop {
             // Prepare request
-            if let Err(err) = call_method.prepare_request(&response) {
+            if let Err(err) = call_method.prepare_request(session.account_id(), &response) {
                 response.push_error(call_id, err);
                 break;
             }

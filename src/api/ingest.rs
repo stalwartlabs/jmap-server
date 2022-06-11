@@ -2,7 +2,7 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::types::type_state::TypeState;
+use jmap::{sanitize_email, types::type_state::TypeState};
 use jmap_mail::mail::ingest::{JMAPMailIngest, Status};
 use store::{
     log::changes::ChangeId,
@@ -56,9 +56,10 @@ where
     }
 
     // Ingest message
+    let recipients = params.to.split(',').filter_map(sanitize_email).collect();
     let store = core.store.clone();
     let results = core
-        .spawn_worker(move || Ok(store.mail_ingest(vec![1], bytes.to_vec())))
+        .spawn_worker(move || Ok(store.mail_ingest(recipients, bytes.to_vec())))
         .await
         .unwrap();
 
@@ -71,6 +72,7 @@ where
         match result {
             Status::Success {
                 account_id,
+                email,
                 changes,
                 vacation_response,
             } => {
@@ -118,18 +120,18 @@ where
                 }
 
                 response.push(Dsn {
-                    to: "jdoe@example.com".to_string(), //TODO
+                    to: email,
                     status: DeliveryStatus::Success,
                     reason: None,
                 });
             }
             Status::Failure {
-                account_id,
+                email,
                 permanent,
                 reason,
             } => {
                 response.push(Dsn {
-                    to: "jdoe@example.com".to_string(),
+                    to: email,
                     status: if permanent {
                         DeliveryStatus::Failure
                     } else {

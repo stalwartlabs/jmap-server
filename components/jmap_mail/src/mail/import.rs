@@ -38,7 +38,6 @@ use crate::mail::MessageField;
 
 use super::conv::HeaderValueInto;
 use super::get::JMAPGetMail;
-use super::parse::get_message_part;
 use super::schema::{Email, Keyword, Property};
 use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PARTS};
 

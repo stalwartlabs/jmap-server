@@ -50,6 +50,8 @@ pub type Float = f64;
 pub type JMAPId = u64;
 
 const FIVE_MINUTES_EXPIRY: Duration = Duration::from_secs(5 * 60);
+const ONE_HOUR_EXPIRY: Duration = Duration::from_secs(60 * 60);
+const ONE_DAY_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ColumnFamily {
@@ -101,6 +103,13 @@ pub struct SharedResource {
     pub collection: Collection,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecipientType {
+    Individual(AccountId),
+    List(Vec<(AccountId, String)>),
+    NotFound,
+}
+
 pub struct JMAPStore<T> {
     pub db: T,
     pub blob: BlobStoreWrapper,
@@ -108,8 +117,10 @@ pub struct JMAPStore<T> {
 
     pub account_lock: MutexMap<()>,
 
-    pub doc_id_cache: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
+    pub id_assigner: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
     pub shared_documents: Cache<SharedResource, Arc<Option<RoaringBitmap>>>,
+    pub member_of: Cache<AccountId, Arc<Vec<AccountId>>>,
+    pub recipients: Cache<String, Arc<RecipientType>>,
 
     pub raft_term: AtomicU64,
     pub raft_index: AtomicU64,
@@ -124,7 +135,7 @@ where
         let mut store = Self {
             config,
             blob: BlobStoreWrapper::new(settings).unwrap(),
-            doc_id_cache: Cache::builder()
+            id_assigner: Cache::builder()
                 .initial_capacity(128)
                 .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
                 .time_to_idle(Duration::from_secs(60 * 60))
@@ -132,6 +143,14 @@ where
             shared_documents: Cache::builder()
                 .initial_capacity(128)
                 .time_to_idle(FIVE_MINUTES_EXPIRY)
+                .build(),
+            member_of: Cache::builder()
+                .initial_capacity(128)
+                .time_to_idle(ONE_HOUR_EXPIRY)
+                .build(),
+            recipients: Cache::builder()
+                .initial_capacity(128)
+                .time_to_idle(ONE_DAY_EXPIRY)
                 .build(),
             account_lock: MutexMap::with_capacity(1024),
             raft_index: 0.into(),

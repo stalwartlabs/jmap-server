@@ -21,12 +21,11 @@ use crate::{
     server::{event_source::handle_jmap_event_source, tls::load_tls_config, websocket::handle_ws},
     services::{
         email_delivery::{init_email_delivery, spawn_email_delivery},
-        state_change::spawn_state_manager,
+        state_change::{init_state_manager, spawn_state_manager},
     },
     JMAPServer, DEFAULT_HTTP_PORT,
 };
 
-const ONE_DAY_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
 const ONE_HOUR_EXPIRY: Duration = Duration::from_secs(60 * 60);
 
 pub fn init_jmap_server<T>(
@@ -41,6 +40,8 @@ where
     let base_session = Session::new(settings, &config);
     let store = JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
     let (email_tx, email_rx) = init_email_delivery();
+    let (change_tx, change_rx) = init_state_manager();
+    let is_in_cluster = cluster.is_some();
 
     let server = web::Data::new(JMAPServer {
         base_session,
@@ -54,29 +55,23 @@ where
             )
             .build()
             .unwrap(),
-        state_change: spawn_state_manager(cluster.is_none()),
+        state_change: change_tx,
         email_delivery: email_tx.clone(),
         sessions: Cache::builder()
             .initial_capacity(128)
-            .time_to_idle(ONE_DAY_EXPIRY)
+            .time_to_idle(ONE_HOUR_EXPIRY)
             .build(),
         rate_limiters: Cache::builder()
             .initial_capacity(128)
-            .time_to_idle(ONE_DAY_EXPIRY)
-            .build(),
-        emails: Cache::builder()
-            .initial_capacity(128)
-            .time_to_idle(ONE_DAY_EXPIRY)
-            .build(),
-        session_tokens: Cache::builder()
-            .initial_capacity(128)
             .time_to_idle(ONE_HOUR_EXPIRY)
             .build(),
-
         cluster,
         #[cfg(test)]
         is_offline: false.into(),
     });
+
+    // Spawn TypeState manager
+    spawn_state_manager(server.clone(), !is_in_cluster, change_rx);
 
     // Spawn email delivery service
     spawn_email_delivery(server.clone(), settings, email_tx, email_rx);

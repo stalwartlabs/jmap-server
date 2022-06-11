@@ -13,7 +13,7 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn shared_accounts(&self, member_of: &[AccountId]) -> crate::Result<Vec<AccountId>> {
+    pub fn get_shared_accounts(&self, member_of: &[AccountId]) -> crate::Result<Vec<AccountId>> {
         let mut shared_accounts = Vec::new();
         for account_id in member_of {
             let prefix =
@@ -35,7 +35,9 @@ where
                     let acl = Bitmap::from(u64::deserialize(&value).ok_or_else(|| {
                         StoreError::InternalError(format!("Corrupted ACL value for [{:?}]", key))
                     })?);
-                    if acl.contains(ACL::Read) || acl.contains(ACL::ReadItems) {
+                    if !member_of.contains(&to_account_id)
+                        && (acl.contains(ACL::Read) || acl.contains(ACL::ReadItems))
+                    {
                         shared_accounts.push(to_account_id);
                     }
                 } else {
@@ -46,7 +48,7 @@ where
         Ok(shared_accounts)
     }
 
-    pub fn shared_documents(
+    pub fn get_shared_documents(
         &self,
         member_of: &[AccountId],
         to_account_id: AccountId,
