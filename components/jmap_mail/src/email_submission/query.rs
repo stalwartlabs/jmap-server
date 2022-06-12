@@ -1,4 +1,5 @@
 use jmap::error::method::MethodError;
+use jmap::jmap_store::get::SharedDocsFnc;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::request::query::{QueryRequest, QueryResponse};
 
@@ -36,7 +37,7 @@ where
         &self,
         request: QueryRequest<EmailSubmission>,
     ) -> jmap::Result<QueryResponse> {
-        let mut helper = QueryHelper::new(self, request)?;
+        let mut helper = QueryHelper::new(self, request, None::<SharedDocsFnc>)?;
 
         helper.parse_filter(|filter| {
             Ok(match filter {

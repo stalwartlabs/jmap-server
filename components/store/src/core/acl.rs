@@ -2,7 +2,10 @@ use std::fmt::{self, Display};
 
 use crate::AccountId;
 
-use super::bitmap::{Bitmap, BitmapItem};
+use super::{
+    bitmap::{Bitmap, BitmapItem},
+    collection::Collection,
+};
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, Copy)]
 #[repr(u8)]
@@ -16,7 +19,10 @@ pub enum ACL {
     RemoveItems = 6,
     CreateChild = 7,
     Administer = 8,
-    None_ = 9,
+    SetSeen = 9,
+    SetKeywords = 10,
+    Submit = 11,
+    None_ = 12,
 }
 
 #[derive(
@@ -25,6 +31,12 @@ pub enum ACL {
 pub struct Permission {
     pub id: AccountId,
     pub acl: Bitmap<ACL>,
+}
+
+#[derive(Debug)]
+pub struct ACLToken {
+    pub member_of: Vec<AccountId>,
+    pub access_to: Vec<(AccountId, Bitmap<Collection>)>,
 }
 
 impl ACL {
@@ -39,6 +51,9 @@ impl ACL {
             "removeItems" => ACL::RemoveItems,
             "createChild" => ACL::CreateChild,
             "administer" => ACL::Administer,
+            "setSeen" => ACL::SetSeen,
+            "setKeywords" => ACL::SetKeywords,
+            "submit" => ACL::Submit,
             _ => ACL::None_,
         }
     }
@@ -72,6 +87,9 @@ impl From<u64> for ACL {
             6 => ACL::RemoveItems,
             7 => ACL::CreateChild,
             8 => ACL::Administer,
+            9 => ACL::SetSeen,
+            10 => ACL::SetKeywords,
+            11 => ACL::Submit,
             _ => {
                 debug_assert!(false, "Invalid ACL value: {}", value);
                 ACL::None_
@@ -92,6 +110,9 @@ impl Display for ACL {
             ACL::RemoveItems => write!(f, "removeItems"),
             ACL::CreateChild => write!(f, "createChild"),
             ACL::Administer => write!(f, "administer"),
+            ACL::SetSeen => write!(f, "setSeen"),
+            ACL::SetKeywords => write!(f, "setKeywords"),
+            ACL::Submit => write!(f, "submit"),
             ACL::None_ => Ok(()),
         }
     }

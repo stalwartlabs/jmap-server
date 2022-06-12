@@ -309,11 +309,15 @@ where
             response.set_state(session.state());
 
             // Obtain member and shared accounts
-            let member_of = store.get_member_accounts(session.account_id())?;
-            let access_to = store.get_shared_accounts(&member_of)?;
+            let acl = store.get_acl_token(session.account_id())?;
 
             // TODO set read only for shared accounts
-            for id in member_of.iter().chain(access_to.iter()) {
+            for id in acl
+                .member_of
+                .iter()
+                .skip(1)
+                .chain(acl.access_to.iter().map(|(id, _)| id))
+            {
                 let (name, email, ptype) = store
                     .get_account_details(*id)?
                     .unwrap_or_else(|| ("".to_string(), "".to_string(), Type::Individual));

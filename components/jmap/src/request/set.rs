@@ -1,6 +1,6 @@
 use serde::Deserialize;
-use store::log::changes::ChangeId;
 use store::AccountId;
+use store::{core::acl::ACLToken, log::changes::ChangeId};
 
 use crate::error::method::MethodError;
 use crate::error::set::SetError;
@@ -8,13 +8,15 @@ use crate::jmap_store::set::SetObject;
 use crate::types::jmap::JMAPId;
 use crate::types::state::JMAPState;
 use crate::types::type_state::TypeState;
+use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 
 use super::{ArgumentSerializer, MaybeResultReference, ResultReference};
 
 #[derive(Debug, Clone, Default)]
 pub struct SetRequest<O: SetObject> {
-    pub account_id: Option<JMAPId>,
+    pub acl: Option<Arc<ACLToken>>,
+    pub account_id: JMAPId,
     pub if_in_state: Option<JMAPState>,
     pub create: Option<Vec<(String, O)>>,
     pub update: Option<HashMap<JMAPId, O>>,
@@ -213,7 +215,8 @@ impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
         A: serde::de::MapAccess<'de>,
     {
         let mut request = SetRequest {
-            account_id: None,
+            acl: None,
+            account_id: JMAPId::default(),
             if_in_state: None,
             create: None,
             update: None,

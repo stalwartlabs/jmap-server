@@ -59,7 +59,7 @@ where
         email_delivery: email_tx.clone(),
         sessions: Cache::builder()
             .initial_capacity(128)
-            .time_to_idle(ONE_HOUR_EXPIRY)
+            .time_to_live(ONE_HOUR_EXPIRY)
             .build(),
         rate_limiters: Cache::builder()
             .initial_capacity(128)

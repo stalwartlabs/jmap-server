@@ -124,6 +124,18 @@ impl<T: BitmapItem> From<Vec<T>> for Bitmap<T> {
     }
 }
 
+impl<T: BitmapItem> FromIterator<T> for Bitmap<T> {
+    fn from_iter<U: IntoIterator<Item = T>>(iter: U) -> Self {
+        let mut bitmap = Bitmap::new();
+        for value in iter {
+            if value.is_valid() {
+                bitmap.insert(value);
+            }
+        }
+        bitmap
+    }
+}
+
 impl<T: BitmapItem> From<&Vec<T>> for Bitmap<T> {
     fn from(values: &Vec<T>) -> Self {
         let mut bitmap = Bitmap::default();

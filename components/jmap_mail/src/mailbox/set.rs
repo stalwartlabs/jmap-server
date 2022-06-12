@@ -1,13 +1,16 @@
+use super::schema::{Mailbox, Property, Value};
 use crate::mail::set::JMAPSetMail;
+use crate::mail::sharing::JMAPShareMail;
 use crate::mail::MessageField;
+use crate::{INBOX_ID, TRASH_ID};
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::{SetRequest, SetResponse};
-use jmap::request::ResultReference;
+use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
-
+use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
@@ -17,12 +20,8 @@ use store::parking_lot::MutexGuard;
 use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
-use store::Store;
 use store::{DocumentId, JMAPStore, LongInteger};
-
-use super::schema::{Mailbox, Property, Value};
-
-//TODO mailbox id 0 is inbox and cannot be deleted
+use store::{SharedBitmap, Store};
 
 #[derive(Debug, Clone, Default)]
 pub struct SetArguments {
@@ -83,6 +82,32 @@ where
             // Set values
             let mut mailbox = TinyORM::<Mailbox>::new().mailbox_set(helper, mailbox, None, None)?;
 
+            // Check ACLs
+            if helper.acl.is_shared(helper.account_id) {
+                match mailbox.get(&Property::ParentId) {
+                    Some(Value::Id { value }) => {
+                        if !helper
+                            .store
+                            .mail_shared_folders(
+                                helper.account_id,
+                                &helper.acl.member_of,
+                                ACL::CreateChild,
+                            )?
+                            .has_access(value.get_document_id())
+                        {
+                            return Err(SetError::forbidden(
+                                "You are not allowed to create sub folders under this folder.",
+                            ));
+                        }
+                    }
+                    _ => {
+                        return Err(SetError::forbidden(
+                            "You are not allowed to create root folders.",
+                        ));
+                    }
+                }
+            }
+
             // Set parentId if the field is missing
             if !mailbox.has_property(&Property::ParentId) {
                 mailbox.set(Property::ParentId, Value::Id { value: 0u64.into() });
@@ -100,12 +125,41 @@ where
             let current_fields = self
                 .get_orm::<Mailbox>(helper.account_id, document_id)?
                 .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+
             let fields = TinyORM::track_changes(&current_fields).mailbox_set(
                 helper,
                 mailbox,
                 document_id.into(),
                 Some(&current_fields),
             )?;
+
+            // Check ACLs
+            if helper.acl.is_shared(helper.account_id) {
+                if !helper
+                    .store
+                    .mail_shared_folders(helper.account_id, &helper.acl.member_of, ACL::Modify)?
+                    .has_access(document_id)
+                {
+                    return Err(SetError::forbidden(
+                        "You are not allowed to modify this folder.",
+                    ));
+                }
+
+                if fields.has_property(&Property::ACL)
+                    && !helper
+                        .store
+                        .mail_shared_folders(
+                            helper.account_id,
+                            &helper.acl.member_of,
+                            ACL::AddItems,
+                        )?
+                        .has_access(document_id)
+                {
+                    return Err(SetError::forbidden(
+                        "You are not allowed to change the permissions of this folder.",
+                    ));
+                }
+            }
 
             // Merge changes
             current_fields.merge_validate(document, fields)?;
@@ -115,6 +169,40 @@ where
 
         helper.destroy(|id, helper, document| {
             let document_id = id.get_document_id();
+
+            // Internal folders cannot be deleted
+            if document_id == INBOX_ID || document_id == TRASH_ID {
+                return Err(SetError::forbidden(
+                    "You are not allowed to delete Inbox or Trash folders.",
+                ));
+            }
+
+            // Check ACLs
+            if helper.acl.is_shared(helper.account_id) {
+                if !helper
+                    .store
+                    .mail_shared_folders(helper.account_id, &helper.acl.member_of, ACL::Delete)?
+                    .has_access(document_id)
+                {
+                    return Err(SetError::forbidden(
+                        "You are not allowed to delete this folder.",
+                    ));
+                }
+                if on_destroy_remove_emails
+                    && !helper
+                        .store
+                        .mail_shared_folders(
+                            helper.account_id,
+                            &helper.acl.member_of,
+                            ACL::RemoveItems,
+                        )?
+                        .has_access(document_id)
+                {
+                    return Err(SetError::forbidden(
+                        "You are not allowed to delete emails from this folder.",
+                    ));
+                }
+            }
 
             // Verify that this mailbox does not have sub-mailboxes
             if !self

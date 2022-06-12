@@ -16,11 +16,13 @@ where
         &self,
         owner_id: AccountId,
         shared_to: &[AccountId],
+        acl: ACL,
     ) -> store::Result<Arc<Option<RoaringBitmap>>>;
     fn mail_shared_messages(
         &self,
         owner_id: AccountId,
         shared_to: &[AccountId],
+        acl: ACL,
     ) -> store::Result<Arc<Option<RoaringBitmap>>>;
 }
 
@@ -32,6 +34,7 @@ where
         &self,
         owner_id: AccountId,
         shared_to: &[AccountId],
+        acl: ACL,
     ) -> store::Result<Arc<Option<RoaringBitmap>>> {
         self.shared_documents
             .try_get_with::<_, StoreError>(
@@ -39,13 +42,14 @@ where
                     owner_id,
                     shared_to.first().copied().unwrap(),
                     Collection::Mail,
+                    acl,
                 ),
                 || {
                     Ok(Arc::new(self.get_shared_documents(
                         shared_to,
                         owner_id,
                         Collection::Mailbox,
-                        ACL::ReadItems.into(),
+                        acl.into(),
                     )?))
                 },
             )
@@ -56,6 +60,7 @@ where
         &self,
         owner_id: AccountId,
         shared_to: &[AccountId],
+        acl: ACL,
     ) -> store::Result<Arc<Option<RoaringBitmap>>> {
         self.shared_documents
             .try_get_with::<_, StoreError>(
@@ -63,11 +68,12 @@ where
                     owner_id,
                     shared_to.first().copied().unwrap(),
                     Collection::Mail,
+                    acl,
                 ),
                 || {
                     Ok(Arc::new(
                         if let Some(shared_folders) =
-                            self.mail_shared_folders(owner_id, shared_to)?.as_ref()
+                            self.mail_shared_folders(owner_id, shared_to, acl)?.as_ref()
                         {
                             let mut shared_messages = RoaringBitmap::new();
                             for mailbox_id in shared_folders {

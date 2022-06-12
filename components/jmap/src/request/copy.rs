@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use store::{log::changes::ChangeId, AccountId};
 
@@ -8,11 +8,14 @@ use crate::{
     types::{jmap::JMAPId, state::JMAPState, type_state::TypeState},
 };
 
-use super::{MaybeIdReference, ResultReference};
+use super::{ACLToken, MaybeIdReference, ResultReference};
 
 //TODO implement + searchsnippet
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CopyRequest<T: SetObject> {
+    #[serde(skip)]
+    pub acl: Option<Arc<ACLToken>>,
+
     #[serde(rename = "fromAccountId")]
     pub from_account_id: JMAPId,
 

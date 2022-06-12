@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use store::core::acl::ACLToken;
+
 use crate::{
     jmap_store::query::QueryObject,
     types::json_pointer::{JSONPointer, JSONPointerEval},
@@ -7,6 +11,9 @@ use crate::{
 use super::query::{Comparator, Filter};
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct QueryChangesRequest<O: QueryObject> {
+    #[serde(skip)]
+    pub acl: Option<Arc<ACLToken>>,
+
     #[serde(rename = "accountId")]
     pub account_id: JMAPId,
 

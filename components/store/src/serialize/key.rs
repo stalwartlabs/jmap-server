@@ -96,8 +96,8 @@ impl ValueKey {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<AccountId>() + 1);
         grant_account.to_leb128_bytes(&mut bytes);
         bytes.push(u8::MAX);
-        bytes.push(to_collection.into());
         to_account.to_leb128_bytes(&mut bytes);
+        bytes.push(to_collection.into());
         to_document.to_leb128_bytes(&mut bytes);
         bytes
     }
@@ -110,19 +110,20 @@ impl ValueKey {
         let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>() + 1);
         grant_account.to_leb128_bytes(&mut bytes);
         bytes.push(u8::MAX);
-        if to_collection != Collection::None {
-            bytes.push(to_collection.into());
-        }
         if to_account != AccountId::MAX {
             to_account.to_leb128_bytes(&mut bytes);
+        }
+        if to_collection != Collection::None {
+            bytes.push(to_collection.into());
         }
         bytes
     }
 
-    pub fn deserialize_acl_target(bytes: &[u8]) -> Option<(AccountId, DocumentId)> {
+    pub fn deserialize_acl_target(bytes: &[u8]) -> Option<(AccountId, Collection, DocumentId)> {
         let mut bytes = bytes.iter();
         Some((
             AccountId::from_leb128_it(&mut bytes)?,
+            (*bytes.next()?).into(),
             DocumentId::from_leb128_it(&mut bytes)?,
         ))
     }

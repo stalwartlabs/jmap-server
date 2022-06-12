@@ -119,12 +119,8 @@ pub fn spawn_state_manager<T>(
                 Event::UpdateSharedAccounts { account_id } => {
                     // Obtain account membership and shared mailboxes
                     let store = core.store.clone();
-                    let (member_of, shared) = match core
-                        .spawn_worker(move || {
-                            let member_of = store.get_member_accounts(account_id)?;
-                            let shared = store.get_shared_accounts(&member_of)?;
-                            Ok((member_of, shared))
-                        })
+                    let acl = match core
+                        .spawn_worker(move || store.get_acl_token(account_id))
                         .await
                     {
                         Ok(result) => result,
@@ -137,8 +133,11 @@ pub fn spawn_state_manager<T>(
                     // Delete any removed sharings
                     if let Some(shared_account_ids) = shared_accounts.get(&account_id) {
                         for shared_account_id in shared_account_ids {
-                            if !member_of.contains(shared_account_id)
-                                && !shared.contains(shared_account_id)
+                            if !acl.member_of.contains(shared_account_id)
+                                && !acl
+                                    .access_to
+                                    .iter()
+                                    .any(|(id, _)| *id == *shared_account_id)
                             {
                                 if let Some(shared_list) =
                                     shared_accounts_map.get_mut(shared_account_id)
@@ -158,22 +157,33 @@ pub fn spawn_state_manager<T>(
                     }
 
                     // Update lists
-                    let mut shared_account_ids = Vec::with_capacity(member_of.len() + shared.len());
-                    for member_id in member_of.iter() {
+                    let mut shared_account_ids =
+                        Vec::with_capacity(acl.member_of.len() + acl.access_to.len());
+                    for member_id in acl.member_of.iter() {
                         shared_account_ids.push(*member_id);
                         shared_accounts_map
                             .entry(*member_id)
                             .or_insert_with(Vec::new)
                             .push((account_id, Bitmap::all()));
                     }
-                    let types: Bitmap<TypeState> =
-                        vec![TypeState::Mailbox, TypeState::Email].into();
-                    for member_id in shared.iter() {
-                        shared_account_ids.push(*member_id);
-                        shared_accounts_map
-                            .entry(*member_id)
-                            .or_insert_with(Vec::new)
-                            .push((account_id, types.clone()));
+                    for (shared_account_id, shared_collections) in acl.access_to.iter() {
+                        let mut types: Bitmap<TypeState> = Bitmap::new();
+                        for collection in shared_collections.clone() {
+                            if let Ok(type_state) = TypeState::try_from(collection) {
+                                types.insert(type_state);
+                                if type_state == TypeState::Email {
+                                    types.insert(TypeState::EmailDelivery);
+                                    types.insert(TypeState::Thread);
+                                }
+                            }
+                        }
+                        if !types.is_empty() {
+                            shared_account_ids.push(*shared_account_id);
+                            shared_accounts_map
+                                .entry(*shared_account_id)
+                                .or_insert_with(Vec::new)
+                                .push((account_id, types.clone()));
+                        }
                     }
                     shared_accounts.insert(account_id, shared_account_ids);
                 }

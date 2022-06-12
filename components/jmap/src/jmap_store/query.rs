@@ -1,14 +1,21 @@
+use std::sync::Arc;
+
 use store::{
+    core::JMAPIdPrefix,
     read::{
         comparator::Comparator,
         filter::{Filter, FilterOperator, LogicalOperator},
     },
-    AccountId, DocumentId, JMAPStore, Store,
+    roaring::RoaringBitmap,
+    AccountId, DocumentId, JMAPStore, SharedBitmap, Store,
 };
 
 use crate::{
     error::method::MethodError,
-    request::query::{self, QueryRequest, QueryResponse},
+    request::{
+        query::{self, QueryRequest, QueryResponse},
+        ACLEnforce,
+    },
     types::jmap::JMAPId,
 };
 
@@ -20,6 +27,7 @@ where
     O: QueryObject,
 {
     pub store: &'y JMAPStore<T>,
+    pub shared_documents: Option<Arc<Option<RoaringBitmap>>>,
     pub account_id: AccountId,
     pub request: QueryRequest<O>,
     pub filter: Filter,
@@ -45,10 +53,25 @@ where
     T: for<'x> Store<'x> + 'static,
     O: QueryObject,
 {
-    pub fn new(store: &'y JMAPStore<T>, request: QueryRequest<O>) -> crate::Result<Self> {
+    pub fn new(
+        store: &'y JMAPStore<T>,
+        request: QueryRequest<O>,
+        shared_documents: Option<
+            impl FnOnce(AccountId, &[AccountId]) -> store::Result<Arc<Option<RoaringBitmap>>>,
+        >,
+    ) -> crate::Result<Self> {
+        let account_id = request.account_id.into();
+        let acl = request.acl.as_ref().unwrap();
         Ok(QueryHelper {
             store,
-            account_id: request.account_id.into(),
+            account_id,
+            shared_documents: match shared_documents {
+                Some(fnc) if acl.is_shared(account_id) => fnc(account_id, &acl.member_of)?.into(),
+                _ => {
+                    debug_assert!(!acl.is_shared(account_id));
+                    None
+                }
+            },
             request,
             filter: Filter::None,
             comparator: Comparator::None,
@@ -135,6 +158,23 @@ where
         W: FnMut(Vec<JMAPId>) -> crate::Result<Vec<JMAPId>>,
     {
         let collection = O::collection();
+
+        // Do not run the query if there are no shared documents to include
+        if let Some(shared_documents) = &self.shared_documents {
+            if !shared_documents.has_some_access() {
+                return Ok(QueryResponse {
+                    account_id: self.request.account_id,
+                    position: 0,
+                    query_state: self.store.get_state(self.account_id, collection)?,
+                    total: None,
+                    limit: None,
+                    ids: Vec::with_capacity(0),
+                    is_immutable: false,
+                    can_calculate_changes: true,
+                });
+            }
+        }
+
         let results_it = self.store.query_store::<X>(
             self.account_id,
             collection,
@@ -167,11 +207,26 @@ where
         let anchor_offset = self.request.anchor_offset.unwrap_or(0);
 
         let total_results = if let Some(mut extra_filters) = extra_filters {
-            let results = results_it
-                .set_filter_map(filter_map_fnc)
-                .into_iter()
-                .map(|id| id.into())
-                .collect::<Vec<JMAPId>>();
+            let results = if let Some(shared_documents) = self.shared_documents {
+                // Filter out documents that are not shared
+                results_it
+                    .set_filter_map(filter_map_fnc)
+                    .into_iter()
+                    .filter_map(|id| {
+                        if shared_documents.has_access(id.get_document_id()) {
+                            Some(id.into())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<JMAPId>>()
+            } else {
+                results_it
+                    .set_filter_map(filter_map_fnc)
+                    .into_iter()
+                    .map(|id| id.into())
+                    .collect::<Vec<JMAPId>>()
+            };
 
             let results = extra_filters(results)?;
             let total_results = results.len();
@@ -181,16 +236,36 @@ where
             total_results
         } else {
             let total_results = results_it.len();
-            result.paginate(
-                results_it
-                    .set_filter_map(filter_map_fnc)
-                    .into_iter()
-                    .map(|id| id.into()),
-                limit,
-                position,
-                anchor,
-                anchor_offset,
-            )?;
+            if let Some(shared_documents) = self.shared_documents {
+                // Filter out documents that are not shared
+                result.paginate(
+                    results_it
+                        .set_filter_map(filter_map_fnc)
+                        .into_iter()
+                        .filter_map(|id| {
+                            if shared_documents.has_access(id.get_document_id()) {
+                                Some(id.into())
+                            } else {
+                                None
+                            }
+                        }),
+                    limit,
+                    position,
+                    anchor,
+                    anchor_offset,
+                )?;
+            } else {
+                result.paginate(
+                    results_it
+                        .set_filter_map(filter_map_fnc)
+                        .into_iter()
+                        .map(|id| id.into()),
+                    limit,
+                    position,
+                    anchor,
+                    anchor_offset,
+                )?;
+            }
 
             total_results
         };

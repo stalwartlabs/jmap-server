@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::jmap_store::get::{default_mapper, GetHelper, GetObject};
+use crate::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use crate::orm::serialize::JMAPOrm;
 use crate::request::get::{GetRequest, GetResponse};
 use crate::types::jmap::JMAPId;
@@ -47,7 +47,7 @@ where
         &self,
         request: GetRequest<PushSubscription>,
     ) -> crate::Result<GetResponse<PushSubscription>> {
-        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let helper = GetHelper::new(self, request, default_mapper.into(), None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
 
         helper.get(|id, properties| {

@@ -2,13 +2,14 @@ use super::get::JMAPGetMail;
 use super::schema::{
     BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
 };
+use super::sharing::JMAPShareMail;
 use super::{MessageData, MessageField};
 use crate::mail::import::JMAPMailImport;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::{SetRequest, SetResponse};
-use jmap::request::{MaybeIdReference, ResultReference};
+use jmap::request::{ACLEnforce, MaybeIdReference, ResultReference};
 use jmap::types::blob::JMAPBlob;
 use jmap::types::jmap::JMAPId;
 use mail_builder::headers::address::Address;
@@ -23,13 +24,14 @@ use mail_builder::MessageBuilder;
 use mail_parser::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use store::blob::BlobId;
+use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
-use store::{AccountId, DocumentId, JMAPStore, Store};
+use store::{AccountId, DocumentId, JMAPStore, SharedBitmap, Store};
 
 impl SetObject for Email {
     type SetArguments = ();
@@ -346,6 +348,25 @@ where
                 ));
             }
 
+            // Check ACLs
+            if helper.acl.is_shared(helper.account_id) {
+                let allowed_folders = helper.store.mail_shared_folders(
+                    helper.account_id,
+                    &helper.acl.member_of,
+                    ACL::AddItems,
+                )?;
+
+                for mailbox in fields.get_tags(&Property::MailboxIds).unwrap() {
+                    let mailbox_id = mailbox.as_id();
+                    if !allowed_folders.has_access(mailbox_id) {
+                        return Err(SetError::forbidden(format!(
+                            "You are not allowed to add messages to folder {}.",
+                            JMAPId::from(mailbox_id)
+                        )));
+                    }
+                }
+            }
+
             // Make sure the message is not empty
             if builder.headers.is_empty()
                 && builder.body.is_none()
@@ -488,11 +509,81 @@ where
                     "Message has to belong to at least one mailbox.",
                 ));
             }
+            let changed_tags = current_fields.get_changed_tags(&fields, &Property::Keywords);
+
+            // Check ACLs
+            if helper.acl.is_shared(helper.account_id) {
+                // All folders have to allow insertions
+                let added_mailboxes = current_fields.get_added_tags(&fields, &Property::MailboxIds);
+                if !added_mailboxes.is_empty() {
+                    let allowed_folders = helper.store.mail_shared_folders(
+                        helper.account_id,
+                        &helper.acl.member_of,
+                        ACL::AddItems,
+                    )?;
+                    for mailbox in added_mailboxes {
+                        let mailbox_id = mailbox.as_id();
+                        if !allowed_folders.has_access(mailbox_id) {
+                            return Err(SetError::forbidden(format!(
+                                "You are not allowed to add messages to folder {}.",
+                                JMAPId::from(mailbox_id)
+                            )));
+                        }
+                    }
+                }
+
+                // All folders have to allow deletions
+                let added_mailboxes =
+                    current_fields.get_removed_tags(&fields, &Property::MailboxIds);
+                if !added_mailboxes.is_empty() {
+                    let allowed_folders = helper.store.mail_shared_folders(
+                        helper.account_id,
+                        &helper.acl.member_of,
+                        ACL::AddItems,
+                    )?;
+                    for mailbox in added_mailboxes {
+                        let mailbox_id = mailbox.as_id();
+                        if !allowed_folders.has_access(mailbox_id) {
+                            return Err(SetError::forbidden(format!(
+                                "You are not allowed to delete messages from folder {}.",
+                                JMAPId::from(mailbox_id)
+                            )));
+                        }
+                    }
+                }
+
+                // Enforce setSeen and setKeywords
+                if !changed_tags.is_empty() {
+                    let allowed_set_seen = helper.store.mail_shared_messages(
+                        helper.account_id,
+                        &helper.acl.member_of,
+                        ACL::SetSeen,
+                    )?;
+                    let allowed_set_keywords = helper.store.mail_shared_messages(
+                        helper.account_id,
+                        &helper.acl.member_of,
+                        ACL::SetKeywords,
+                    )?;
+
+                    for keyword in changed_tags.iter() {
+                        if matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN) {
+                            if !allowed_set_seen.has_access(document.document_id) {
+                                return Err(SetError::forbidden(
+                                    "You are not allowed to set the seen flag.",
+                                ));
+                            }
+                        } else if !allowed_set_keywords.has_access(document.document_id) {
+                            return Err(SetError::forbidden(
+                                "You are not allowed to set the flagged flag.",
+                            ));
+                        }
+                    }
+                }
+            }
 
             // Set all current mailboxes as changed if the Seen tag changed
             let mut changed_mailboxes = HashSet::new();
-            if current_fields
-                .get_changed_tags(&fields, &Property::Keywords)
+            if changed_tags
                 .iter()
                 .any(|keyword| matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN))
             {
@@ -524,6 +615,22 @@ where
         })?;
 
         helper.destroy(|_id, helper, document| {
+            // Check ACLs
+            if helper.acl.is_shared(helper.account_id)
+                && !helper
+                    .store
+                    .mail_shared_messages(
+                        helper.account_id,
+                        &helper.acl.member_of,
+                        ACL::RemoveItems,
+                    )?
+                    .has_access(document.document_id)
+            {
+                return Err(SetError::forbidden(
+                    "You are not allowed to delete this message.",
+                ));
+            }
+
             self.mail_delete(account_id, Some(&mut helper.changes), document)?;
             Ok(())
         })?;

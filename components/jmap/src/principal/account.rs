@@ -11,7 +11,7 @@ use crate::{
     SUPERUSER_ID,
 };
 use store::{
-    core::{collection::Collection, error::StoreError, JMAPIdPrefix},
+    core::{acl::ACLToken, collection::Collection, error::StoreError, JMAPIdPrefix},
     read::{
         comparator::Comparator,
         filter::{Filter, Query},
@@ -24,7 +24,7 @@ use store::{
 pub trait JMAPAccountStore {
     fn find_individual(&self, email: &str) -> store::Result<Option<AccountId>>;
     fn authenticate(&self, login: &str, password: &str) -> store::Result<Option<AccountId>>;
-    fn get_member_accounts(&self, primary_id: AccountId) -> store::Result<Arc<Vec<AccountId>>>;
+    fn get_acl_token(&self, primary_id: AccountId) -> store::Result<Arc<ACLToken>>;
     fn get_account_details(
         &self,
         account_id: AccountId,
@@ -122,8 +122,8 @@ where
         }
     }
 
-    fn get_member_accounts(&self, primary_id: AccountId) -> store::Result<Arc<Vec<AccountId>>> {
-        self.member_of
+    fn get_acl_token(&self, primary_id: AccountId) -> store::Result<Arc<ACLToken>> {
+        self.acl_tokens
             .try_get_with::<_, StoreError>(primary_id, || {
                 // Find all groups this account is a member of
                 let mut member_of = vec![primary_id];
@@ -166,7 +166,13 @@ where
                     }
                 }
 
-                Ok(member_of.into())
+                let access_to = self.get_shared_accounts(&member_of)?;
+
+                Ok(ACLToken {
+                    member_of,
+                    access_to,
+                }
+                .into())
             })
             .map_err(|e| e.as_ref().clone())
     }

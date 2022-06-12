@@ -1,5 +1,5 @@
-use std::collections::HashSet;
-
+use super::schema::{Comparator, Email, Filter};
+use super::sharing::JMAPShareMail;
 use crate::mail::MessageField;
 use jmap::error::method::MethodError;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
@@ -7,6 +7,8 @@ use jmap::request::query::{QueryRequest, QueryResponse};
 use jmap::types::jmap::JMAPId;
 use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
 use mail_parser::RfcHeader;
+use std::collections::HashSet;
+use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
@@ -15,8 +17,6 @@ use store::read::comparator::{self, DocumentSetComparator, FieldComparator};
 use store::read::filter::{self, Query};
 use store::LongInteger;
 use store::{roaring::RoaringBitmap, AccountId, JMAPStore, Store};
-
-use super::schema::{Comparator, Email, Filter};
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct QueryArguments {
@@ -50,7 +50,14 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mail_query(&self, request: QueryRequest<Email>) -> jmap::Result<QueryResponse> {
-        let mut helper = QueryHelper::new(self, request)?;
+        let mut helper = QueryHelper::new(
+            self,
+            request,
+            (|account_id: AccountId, member_of: &[AccountId]| {
+                self.mail_shared_messages(account_id, member_of, ACL::ReadItems)
+            })
+            .into(),
+        )?;
         let account_id = helper.account_id;
         let collapse_threads = helper.request.arguments.collapse_threads.unwrap_or(false);
         let mut is_immutable_filter = true;

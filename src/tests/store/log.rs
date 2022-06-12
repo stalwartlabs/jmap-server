@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use jmap::{
     request::changes::ChangesRequest,
@@ -6,7 +6,7 @@ use jmap::{
 };
 use jmap_mail::mail::changes::JMAPMailChanges;
 use store::{
-    core::{collection::Collection, error::StoreError},
+    core::{acl::ACLToken, collection::Collection, error::StoreError},
     log::{
         entry::Entry,
         raft::{LogIndex, RaftId, TermId},
@@ -75,6 +75,10 @@ where
     for (num, expected_inserted_id) in expected_inserted_ids.into_iter().enumerate() {
         let changes = mail_store
             .mail_changes(ChangesRequest {
+                acl: Some(Arc::new(ACLToken {
+                    member_of: vec![(num * 3) as AccountId],
+                    access_to: vec![],
+                })),
                 account_id: JMAPId::new((num * 3) as u64),
                 since_state: JMAPState::Initial,
                 max_changes: None,

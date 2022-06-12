@@ -1,20 +1,19 @@
+use super::RequestError;
+use crate::authorization::Session;
+use crate::JMAPServer;
 use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{http::StatusCode, web, HttpResponse};
 use jmap::principal::account::JMAPAccountStore;
-use jmap::types::jmap::JMAPId;
-
+use jmap::request::ACLEnforce;
 use jmap::types::blob::JMAPBlob;
+use jmap::types::jmap::JMAPId;
 use jmap_mail::mail::parse::get_message_part;
 use jmap_mail::mail::sharing::JMAPShareMail;
 use reqwest::header::CONTENT_TYPE;
+use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::{tracing::error, Store};
-
-use crate::authorization::Session;
-use crate::JMAPServer;
-
-use super::RequestError;
 
 #[derive(serde::Deserialize)]
 pub struct Params {
@@ -43,10 +42,11 @@ where
     let store = core.store.clone();
     match core
         .spawn_worker(move || {
-            let member_of = store.get_member_accounts(session.account_id())?;
-            if !member_of.contains(&account_id) {
-                if let Some(shared_ids) =
-                    store.mail_shared_messages(account_id, &member_of)?.as_ref()
+            let acl = store.get_acl_token(session.account_id())?;
+            if !acl.is_member(account_id) {
+                if let Some(shared_ids) = store
+                    .mail_shared_messages(account_id, &acl.member_of, ACL::ReadItems)?
+                    .as_ref()
                 {
                     if !store.blob_document_has_access(
                         &blob_id.id,
@@ -123,8 +123,8 @@ where
         .spawn_worker(move || {
             Ok(
                 if store
-                    .get_member_accounts(session.account_id())?
-                    .contains(&account_id)
+                    .get_acl_token(session.account_id())?
+                    .is_member(account_id)
                 {
                     let blob_id = store.blob_store(&bytes)?;
                     store.blob_link_ephimeral(&blob_id, account_id)?;

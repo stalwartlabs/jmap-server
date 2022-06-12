@@ -1,16 +1,14 @@
-use store::{
-    core::{collection::Collection, error::StoreError},
-    log::changes::{Change, Query},
-    AccountId, JMAPStore, Store,
-};
-
+use super::Object;
 use crate::{
     request::changes::{ChangesRequest, ChangesResponse},
     types::json_pointer::JSONPointerEval,
     types::state::JMAPState,
 };
-
-use super::Object;
+use store::{
+    core::{collection::Collection, error::StoreError},
+    log::changes::{Change, Query},
+    AccountId, JMAPStore, Store,
+};
 
 impl JSONPointerEval for () {
     fn eval_json_pointer(

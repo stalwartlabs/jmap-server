@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::changes::JMAPChanges;
 use super::Object;
@@ -12,6 +13,7 @@ use crate::{
     error::{method::MethodError, set::SetErrorType},
     request::set::SetRequest,
 };
+use store::core::acl::ACLToken;
 use store::core::collection::Collection;
 use store::core::document::Document;
 
@@ -38,6 +40,7 @@ where
     pub changes: WriteBatch,
     pub document_ids: RoaringBitmap,
     pub account_id: AccountId,
+    pub acl: Arc<ACLToken>,
     pub collection: Collection,
     pub will_destroy: Vec<JMAPId>,
 
@@ -55,7 +58,7 @@ where
 {
     pub fn new(store: &'y JMAPStore<T>, mut request: SetRequest<O>) -> crate::Result<Self> {
         let collection = O::collection();
-        let account_id = request.account_id.as_ref().unwrap().get_document_id();
+        let account_id = request.account_id.get_document_id();
 
         let old_state = store.get_state(account_id, collection)?;
         if let Some(if_in_state) = request.if_in_state.take() {
@@ -75,11 +78,12 @@ where
                 .get_document_ids(account_id, collection)?
                 .unwrap_or_else(RoaringBitmap::new),
             account_id,
+            acl: request.acl.take().unwrap(),
             collection,
             change_id: ChangeId::MAX,
             state_changes: Vec::new(),
             response: SetResponse {
-                account_id: request.account_id.take(),
+                account_id: request.account_id.into(),
                 new_state: old_state.clone().into(),
                 old_state: old_state.into(),
                 created: HashMap::with_capacity(request.create.as_ref().map_or(0, |v| v.len())),

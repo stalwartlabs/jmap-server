@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
+use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
@@ -44,7 +44,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn identity_get(&self, request: GetRequest<Identity>) -> jmap::Result<GetResponse<Identity>> {
-        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let helper = GetHelper::new(self, request, default_mapper.into(), None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
 
         helper.get(|id, properties| {

@@ -57,4 +57,36 @@ where
             _ => HashSet::with_capacity(0),
         }
     }
+
+    pub fn get_added_tags(&self, changes: &Self, property: &T::Property) -> HashSet<Tag> {
+        match (self.tags.get(property), changes.tags.get(property)) {
+            (Some(this), Some(changes)) if this != changes => {
+                let mut tag_diff = HashSet::new();
+                for tag in changes {
+                    if !this.contains(tag) {
+                        tag_diff.insert(tag.clone());
+                    }
+                }
+                tag_diff
+            }
+            (None, Some(changes)) => changes.clone(),
+            _ => HashSet::with_capacity(0),
+        }
+    }
+
+    pub fn get_removed_tags(&self, changes: &Self, property: &T::Property) -> HashSet<Tag> {
+        match (self.tags.get(property), changes.tags.get(property)) {
+            (Some(this), Some(changes)) if this != changes => {
+                let mut tag_diff = HashSet::new();
+                for tag in this {
+                    if !changes.contains(tag) {
+                        tag_diff.insert(tag.clone());
+                    }
+                }
+                tag_diff
+            }
+            (Some(this), None) => this.clone(),
+            _ => HashSet::with_capacity(0),
+        }
+    }
 }

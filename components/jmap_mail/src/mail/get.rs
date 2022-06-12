@@ -1,5 +1,13 @@
-use std::{borrow::Cow, collections::HashMap};
-
+use super::{
+    conv::IntoForm,
+    parse::get_message_part,
+    schema::{
+        BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
+        HeaderProperty, Property, Value,
+    },
+    sharing::JMAPShareMail,
+    GetRawHeader,
+};
 use crate::mail::{HeaderName, MessageData, MessageField, MessageOutline, MimePart, MimePartType};
 use jmap::{
     from_timestamp,
@@ -15,23 +23,14 @@ use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use store::{blob::BlobId, AccountId, JMAPStore};
+use std::{borrow::Cow, collections::HashMap};
+use store::{blob::BlobId, core::acl::ACL, AccountId, JMAPStore};
 use store::{
     core::{collection::Collection, error::StoreError},
     serialize::StoreDeserialize,
 };
 use store::{serialize::leb128::Leb128, tracing::error};
 use store::{DocumentId, Store};
-
-use super::{
-    conv::IntoForm,
-    parse::get_message_part,
-    schema::{
-        BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
-        HeaderProperty, Property, Value,
-    },
-    GetRawHeader,
-};
 
 enum FetchRaw {
     Header,
@@ -123,7 +122,7 @@ where
 {
     fn mail_get(&self, request: GetRequest<Email>) -> jmap::Result<GetResponse<Email>> {
         // Initialize helpers
-        let account_id = request.account_id.as_ref().unwrap().get_document_id();
+        let account_id = request.account_id.get_document_id();
         let mut helper = GetHelper::new(
             self,
             request,
@@ -144,6 +143,10 @@ where
                     )
                     .collect::<Vec<JMAPId>>())
             }),
+            (|account_id: AccountId, member_of: &[AccountId]| {
+                self.mail_shared_messages(account_id, member_of, ACL::ReadItems)
+            })
+            .into(),
         )?;
 
         // Process arguments

@@ -32,8 +32,8 @@ where
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum RemoteAddress {
-    SocketAddr(SocketAddr),
-    IpAddress(String),
+    IpAddress(SocketAddr),
+    IpAddressFwd(String),
     AccountId(AccountId),
 }
 
@@ -86,11 +86,9 @@ where
                                 // Validate password
                                 Ok(
                                     if let Some(account_id) = store.authenticate(&login, &secret)? {
-                                        let member_of = store.get_member_accounts(account_id)?;
                                         Session::new(
                                             account_id,
-                                            &member_of,
-                                            &store.get_shared_accounts(&member_of)?,
+                                            store.get_acl_token(account_id)?.as_ref(),
                                         )
                                         .into()
                                     } else {
@@ -149,13 +147,16 @@ impl ServiceRequestAddr for ServiceRequest {
         if use_forwarded {
             self.connection_info()
                 .realip_remote_addr()
-                .map(|ip| RemoteAddress::IpAddress(ip.to_string()))
+                .map(|ip| RemoteAddress::IpAddressFwd(ip.to_string()))
         } else {
-            self.peer_addr().map(RemoteAddress::SocketAddr)
+            self.peer_addr().map(|mut addr| {
+                addr.set_port(0);
+                RemoteAddress::IpAddress(addr)
+            })
         }
         .unwrap_or_else(|| {
             debug!("Warning: No remote address found in request, using localhost.");
-            RemoteAddress::IpAddress("127.0.0.1".to_string())
+            RemoteAddress::IpAddressFwd("127.0.0.1".to_string())
         })
     }
 }
@@ -210,7 +211,7 @@ impl FromRequest for Session {
 impl Display for RemoteAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RemoteAddress::SocketAddr(addr) => write!(f, "from IP Address [{}]", addr),
+            RemoteAddress::IpAddressFwd(addr) => write!(f, "from IP Address [{}]", addr),
             RemoteAddress::IpAddress(addr) => write!(f, "from IP Address [{}]", addr),
             RemoteAddress::AccountId(id) => write!(f, "for Account {}", JMAPId::from(*id)),
         }

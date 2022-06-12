@@ -1,21 +1,21 @@
-use std::collections::{HashMap, HashSet};
-
+use super::schema::{Mailbox, MailboxRights, Property, Value};
+use crate::mail::schema::Keyword;
+use crate::mail::sharing::JMAPShareMail;
+use crate::mail::MessageField;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
+use jmap::orm::acl::ACLUpdate;
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
+use jmap::request::ACLEnforce;
 use jmap::types::jmap::JMAPId;
+use std::collections::{HashMap, HashSet};
+use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::roaring::RoaringBitmap;
-
 use store::{AccountId, JMAPStore};
 use store::{DocumentId, Store};
-
-use crate::mail::schema::Keyword;
-use crate::mail::MessageField;
-
-use super::schema::{Mailbox, MailboxRights, Property, Value};
 
 impl GetObject for Mailbox {
     type GetArguments = ();
@@ -72,14 +72,27 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mailbox_get(&self, request: GetRequest<Mailbox>) -> jmap::Result<GetResponse<Mailbox>> {
-        let helper = GetHelper::new(self, request, default_mapper.into())?;
+        let helper = GetHelper::new(
+            self,
+            request,
+            default_mapper.into(),
+            (|account_id: AccountId, member_of: &[AccountId]| {
+                self.mail_shared_folders(account_id, member_of, ACL::ReadItems)
+            })
+            .into(),
+        )?;
         let fetch_fields = helper.properties.iter().any(|p| {
             matches!(
                 p,
-                Property::Name | Property::ParentId | Property::Role | Property::SortOrder
+                Property::Name
+                    | Property::ParentId
+                    | Property::Role
+                    | Property::SortOrder
+                    | Property::ACL
             )
         });
         let account_id = helper.account_id;
+        let acl = helper.acl.clone();
         let mail_document_ids = self.get_document_ids(account_id, Collection::Mail)?;
 
         helper.get(|id, properties| {
@@ -148,9 +161,22 @@ where
                         )? as u32,
                     },
                     Property::MyRights => Value::MailboxRights {
-                        value: MailboxRights::default(),
+                        value: if acl.is_shared(account_id) {
+                            MailboxRights::shared(self.get_acl(
+                                &acl.member_of,
+                                account_id,
+                                Collection::Mailbox,
+                                document_id,
+                            )?)
+                        } else {
+                            MailboxRights::owner()
+                        },
                     },
                     Property::IsSubscribed => Value::Bool { value: true }, //TODO implement
+                    Property::ACL if acl.is_member(account_id) => Value::ACL(ACLUpdate {
+                        acl: fields.as_ref().unwrap().get_acls(),
+                        set: true,
+                    }),
                     _ => Value::Null,
                 };
 

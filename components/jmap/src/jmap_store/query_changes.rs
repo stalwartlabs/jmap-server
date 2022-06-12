@@ -40,6 +40,7 @@ where
             account_id: request.account_id,
             up_to_id: request.up_to_id.take(),
             changes: store.changes::<O>(ChangesRequest {
+                acl: request.acl.clone(),
                 account_id: request.account_id,
                 since_state: request.since_query_state.clone(),
                 max_changes: request.max_changes,
@@ -52,6 +53,7 @@ where
         let request = self.request.take().unwrap();
         if self.changes.total_changes > 0 || request.calculate_total.unwrap_or(false) {
             QueryRequest {
+                acl: request.acl.clone(),
                 account_id: request.account_id,
                 filter: request.filter,
                 sort: request.sort,

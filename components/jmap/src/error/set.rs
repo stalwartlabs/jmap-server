@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use store::core::error::StoreError;
 use store::tracing::error;
 
@@ -5,7 +7,7 @@ use store::tracing::error;
 pub struct SetError<U> {
     #[serde(rename = "type")]
     pub type_: SetErrorType,
-    description: Option<String>,
+    description: Option<Cow<'static, str>>,
     properties: Option<Vec<U>>,
 }
 
@@ -95,7 +97,7 @@ impl<U> SetError<U> {
         }
     }
 
-    pub fn new(type_: SetErrorType, description: impl Into<String>) -> Self {
+    pub fn new(type_: SetErrorType, description: impl Into<Cow<'static, str>>) -> Self {
         SetError {
             type_,
             description: description.into().into(),
@@ -103,7 +105,7 @@ impl<U> SetError<U> {
         }
     }
 
-    pub fn invalid_property(property: U, description: impl Into<String>) -> Self {
+    pub fn invalid_property(property: U, description: impl Into<Cow<'static, str>>) -> Self {
         SetError {
             type_: SetErrorType::InvalidProperties,
             description: description.into().into(),
@@ -111,7 +113,7 @@ impl<U> SetError<U> {
         }
     }
 
-    pub fn forbidden(description: impl Into<String>) -> Self {
+    pub fn forbidden(description: impl Into<Cow<'static, str>>) -> Self {
         SetError {
             type_: SetErrorType::Forbidden,
             description: description.into().into(),

@@ -1,10 +1,12 @@
-use store::{roaring::RoaringBitmap, AccountId, DocumentId, JMAPStore, Store};
+use std::sync::Arc;
+
+use store::{core::acl::ACLToken, roaring::RoaringBitmap, AccountId, DocumentId, JMAPStore, Store};
 
 use crate::{
     error::method::MethodError,
     request::{
         get::{GetRequest, GetResponse},
-        ArgumentSerializer,
+        ACLEnforce, ArgumentSerializer,
     },
     types::jmap::JMAPId,
 };
@@ -18,6 +20,7 @@ where
 {
     pub store: &'y JMAPStore<T>,
     pub account_id: AccountId,
+    pub acl: Arc<ACLToken>,
     pub document_ids: RoaringBitmap,
     pub properties: Vec<O::Property>,
     pub request_ids: Vec<JMAPId>,
@@ -38,6 +41,7 @@ pub fn default_mapper(document_ids: Vec<DocumentId>) -> crate::Result<Vec<JMAPId
 }
 
 pub type IdMapper = fn(Vec<DocumentId>) -> crate::Result<Vec<JMAPId>>;
+pub type SharedDocsFnc = fn(AccountId, &[AccountId]) -> store::Result<Arc<Option<RoaringBitmap>>>;
 
 impl<'y, O, T> GetHelper<'y, O, T>
 where
@@ -48,9 +52,13 @@ where
         store: &'y JMAPStore<T>,
         mut request: GetRequest<O>,
         id_mapper: Option<impl FnMut(Vec<DocumentId>) -> crate::Result<Vec<JMAPId>>>,
+        shared_documents: Option<
+            impl FnOnce(AccountId, &[AccountId]) -> store::Result<Arc<Option<RoaringBitmap>>>,
+        >,
     ) -> crate::Result<Self> {
         let collection = O::collection();
         let validate_ids = id_mapper.is_some();
+        let acl = request.acl.take().unwrap();
         let properties: Vec<O::Property> = request
             .properties
             .take()
@@ -65,11 +73,20 @@ where
             })
             .unwrap_or_else(|| O::default_properties());
 
-        let account_id = request.account_id.as_ref().unwrap().get_document_id();
+        let account_id = request.account_id.get_document_id();
         let document_ids = if validate_ids {
-            store
-                .get_document_ids(account_id, collection)?
-                .unwrap_or_default()
+            match shared_documents {
+                Some(fnc) if acl.is_shared(account_id) => fnc(account_id, &acl.member_of)?
+                    .as_ref()
+                    .clone()
+                    .unwrap_or_default(),
+                _ => {
+                    debug_assert!(!acl.is_shared(account_id));
+                    store
+                        .get_document_ids(account_id, collection)?
+                        .unwrap_or_default()
+                }
+            }
         } else {
             RoaringBitmap::new()
         };
@@ -99,8 +116,9 @@ where
             } else {
                 O::default_properties()
             },
+            acl,
             response: GetResponse {
-                account_id: request.account_id,
+                account_id: request.account_id.into(),
                 state: store.get_state(account_id, collection)?,
                 list: Vec::with_capacity(request_ids.len()),
                 not_found: Vec::new(),

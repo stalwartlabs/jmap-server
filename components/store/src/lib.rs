@@ -7,7 +7,8 @@ pub mod read;
 pub mod serialize;
 pub mod write;
 
-use crate::core::{collection::Collection, error::StoreError};
+use crate::core::acl::ACL;
+use crate::core::{acl::ACLToken, collection::Collection, error::StoreError};
 use crate::nlp::Language;
 use blob::BlobStoreWrapper;
 use config::{env_settings::EnvSettings, jmap::JMAPConfig};
@@ -101,6 +102,7 @@ pub struct SharedResource {
     pub owner_id: AccountId,
     pub shared_to: AccountId,
     pub collection: Collection,
+    pub acl: ACL,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +121,7 @@ pub struct JMAPStore<T> {
 
     pub id_assigner: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
     pub shared_documents: Cache<SharedResource, Arc<Option<RoaringBitmap>>>,
-    pub member_of: Cache<AccountId, Arc<Vec<AccountId>>>,
+    pub acl_tokens: Cache<AccountId, Arc<ACLToken>>,
     pub recipients: Cache<String, Arc<RecipientType>>,
 
     pub raft_term: AtomicU64,
@@ -144,7 +146,7 @@ where
                 .initial_capacity(128)
                 .time_to_idle(FIVE_MINUTES_EXPIRY)
                 .build(),
-            member_of: Cache::builder()
+            acl_tokens: Cache::builder()
                 .initial_capacity(128)
                 .time_to_idle(ONE_HOUR_EXPIRY)
                 .build(),
@@ -182,11 +184,34 @@ where
 }
 
 impl SharedResource {
-    pub fn new(owner_id: AccountId, shared_to: AccountId, collection: Collection) -> Self {
+    pub fn new(
+        owner_id: AccountId,
+        shared_to: AccountId,
+        collection: Collection,
+        acl: ACL,
+    ) -> Self {
         Self {
             owner_id,
             shared_to,
             collection,
+            acl,
         }
+    }
+}
+
+pub trait SharedBitmap {
+    fn has_some_access(&self) -> bool;
+    fn has_access(&self, document_id: DocumentId) -> bool;
+}
+
+impl SharedBitmap for Arc<Option<RoaringBitmap>> {
+    fn has_some_access(&self) -> bool {
+        self.as_ref().as_ref().map_or(false, |b| !b.is_empty())
+    }
+
+    fn has_access(&self, document_id: DocumentId) -> bool {
+        self.as_ref()
+            .as_ref()
+            .map_or(false, |b| b.contains(document_id))
     }
 }

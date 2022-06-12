@@ -1,7 +1,12 @@
 use std::{collections::HashMap, fmt};
 
-use jmap::request::{ArgumentSerializer, MaybeIdReference};
+use jmap::{
+    orm::acl::ACLUpdate,
+    request::{ArgumentSerializer, MaybeIdReference},
+    types::{jmap::JMAPId, json_pointer::JSONPointer},
+};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
+use store::core::acl::ACL;
 
 use super::{
     schema::{Filter, Mailbox, Property, Value},
@@ -63,6 +68,7 @@ impl Serialize for Mailbox {
                 Value::IdReference { value } => {
                     map.serialize_entry(name, &format!("#{}", value))?
                 }
+                Value::ACL(value) => map.serialize_entry(name, &value.acl)?,
             }
         }
 
@@ -130,6 +136,17 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         },
                     );
                 }
+                "acl" => {
+                    properties.insert(
+                        Property::ACL,
+                        Value::ACL(ACLUpdate {
+                            acl: map
+                                .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
+                                .unwrap_or_default(),
+                            set: true,
+                        }),
+                    );
+                }
                 _ if key.starts_with('#') => {
                     if let Some(property) = key.get(1..) {
                         properties.insert(
@@ -140,7 +157,35 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         );
                     }
                 }
-                _ => (),
+                _ => match JSONPointer::parse(key) {
+                    Some(JSONPointer::Path(path))
+                        if path.len() == 2
+                            && path
+                                .get(0)
+                                .and_then(|p| p.to_string())
+                                .map(Property::parse)
+                                .unwrap_or(Property::Invalid)
+                                == Property::ACL =>
+                    {
+                        if let Some(id) = path
+                            .get(1)
+                            .and_then(|p| p.to_string())
+                            .and_then(JMAPId::parse)
+                        {
+                            properties.insert(
+                                Property::ACL,
+                                Value::ACL(ACLUpdate {
+                                    acl: HashMap::from_iter([(
+                                        id,
+                                        map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
+                                    )]),
+                                    set: false,
+                                }),
+                            );
+                        }
+                    }
+                    _ => (),
+                },
             }
         }
 

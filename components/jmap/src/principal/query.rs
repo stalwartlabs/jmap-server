@@ -1,4 +1,5 @@
 use crate::error::method::MethodError;
+use crate::jmap_store::get::SharedDocsFnc;
 use crate::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use crate::request::query::{QueryRequest, QueryResponse};
 
@@ -30,7 +31,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn principal_query(&self, request: QueryRequest<Principal>) -> crate::Result<QueryResponse> {
-        let mut helper = QueryHelper::new(self, request)?;
+        let mut helper = QueryHelper::new(self, request, None::<SharedDocsFnc>)?;
 
         helper.parse_filter(|filter| {
             Ok(match filter {

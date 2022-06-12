@@ -365,10 +365,12 @@ where
         })?;
 
         let account_id = JMAPId::from(helper.account_id);
+        let acl = helper.acl.clone();
         helper.into_response().map(|mut r| {
             if has_on_success && (!update_emails.is_empty() || !destroy_emails.is_empty()) {
                 r.next_call = SetRequest {
-                    account_id: account_id.into(),
+                    acl: acl.into(),
+                    account_id,
                     if_in_state: None,
                     create: None,
                     update: if !update_emails.is_empty() {

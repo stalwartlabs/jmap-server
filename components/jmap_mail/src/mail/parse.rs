@@ -15,13 +15,16 @@ use mail_parser::{
     parsers::preview::{preview_html, preview_text},
     Message, MessageAttachment, MessagePart, RfcHeader,
 };
-use std::{borrow::Cow, collections::HashMap};
-use store::{JMAPStore, Store};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use store::{core::acl::ACLToken, JMAPStore, Store};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EmailParseRequest {
+    #[serde(skip)]
+    pub acl: Option<Arc<ACLToken>>,
+
     #[serde(rename = "accountId")]
-    account_id: JMAPId,
+    pub account_id: JMAPId,
 
     #[serde(rename = "blobIds")]
     blob_ids: Vec<JMAPBlob>,

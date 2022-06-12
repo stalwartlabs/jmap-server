@@ -1,8 +1,15 @@
 use std::{collections::HashMap, fmt::Display};
 
-use jmap::{orm, request::ResultReference, types::jmap::JMAPId};
+use jmap::{
+    orm::{self, acl::ACLUpdate},
+    request::ResultReference,
+    types::jmap::JMAPId,
+};
 use serde::{Deserialize, Serialize};
-use store::FieldId;
+use store::{
+    core::{acl::ACL, bitmap::Bitmap},
+    FieldId,
+};
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct Mailbox {
@@ -18,6 +25,7 @@ pub enum Value {
     MailboxRights { value: MailboxRights },
     ResultReference { value: ResultReference },
     IdReference { value: String },
+    ACL(ACLUpdate),
     Null,
 }
 
@@ -134,7 +142,8 @@ pub enum Property {
     UnreadThreads = 8,
     MyRights = 9,
     IsSubscribed = 10,
-    Invalid = 11,
+    ACL = 11,
+    Invalid = 12,
 }
 
 impl Display for Property {
@@ -151,6 +160,7 @@ impl Display for Property {
             Property::UnreadThreads => write!(f, "unreadThreads"),
             Property::MyRights => write!(f, "myRights"),
             Property::IsSubscribed => write!(f, "isSubscribed"),
+            Property::ACL => write!(f, "acl"),
             Property::Invalid => Ok(()),
         }
     }
@@ -170,6 +180,7 @@ impl Property {
             "totalThreads" => Property::TotalThreads,
             "unreadThreads" => Property::UnreadThreads,
             "myRights" => Property::MyRights,
+            "acl" => Property::ACL,
             _ => Property::Invalid,
         }
     }
@@ -216,6 +227,7 @@ impl From<FieldId> for Property {
             8 => Property::UnreadThreads,
             9 => Property::MyRights,
             10 => Property::IsSubscribed,
+            11 => Property::ACL,
             _ => Property::Invalid,
         }
     }
@@ -228,6 +240,36 @@ impl TryFrom<&str> for Property {
         match Property::parse(value) {
             Property::Invalid => Err(()),
             property => Ok(property),
+        }
+    }
+}
+
+impl MailboxRights {
+    pub fn owner() -> Self {
+        MailboxRights {
+            may_read_items: true,
+            may_add_items: true,
+            may_remove_items: true,
+            may_set_seen: true,
+            may_set_keywords: true,
+            may_create_child: true,
+            may_rename: true,
+            may_delete: true,
+            may_submit: true,
+        }
+    }
+
+    pub fn shared(acl: Bitmap<ACL>) -> Self {
+        MailboxRights {
+            may_read_items: acl.contains(ACL::ReadItems),
+            may_add_items: acl.contains(ACL::AddItems),
+            may_remove_items: acl.contains(ACL::RemoveItems),
+            may_set_seen: acl.contains(ACL::SetSeen),
+            may_set_keywords: acl.contains(ACL::SetKeywords),
+            may_create_child: acl.contains(ACL::CreateChild),
+            may_rename: acl.contains(ACL::Modify),
+            may_delete: acl.contains(ACL::Delete),
+            may_submit: acl.contains(ACL::Submit),
         }
     }
 }

@@ -1,21 +1,20 @@
-use std::collections::{HashMap, HashSet};
-
+use super::schema::{Comparator, Filter, Mailbox, Property};
+use crate::mail::sharing::JMAPShareMail;
 use jmap::error::method::MethodError;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::query::{QueryRequest, QueryResponse};
 use jmap::types::jmap::JMAPId;
-
+use std::collections::{HashMap, HashSet};
+use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::read::comparator::{self, FieldComparator};
 use store::read::default_filter_mapper;
 use store::read::filter::{self, Query};
-use store::JMAPStore;
 use store::Store;
-
-use super::schema::{Comparator, Filter, Mailbox, Property};
+use store::{AccountId, JMAPStore};
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct QueryArguments {
@@ -45,7 +44,14 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mailbox_query(&self, request: QueryRequest<Mailbox>) -> jmap::Result<QueryResponse> {
-        let mut helper = QueryHelper::new(self, request)?;
+        let mut helper = QueryHelper::new(
+            self,
+            request,
+            (|account_id: AccountId, member_of: &[AccountId]| {
+                self.mail_shared_folders(account_id, member_of, ACL::ReadItems)
+            })
+            .into(),
+        )?;
         let account_id = helper.account_id;
         let sort_as_tree = helper.request.arguments.sort_as_tree.unwrap_or(false);
         let filter_as_tree = helper.request.arguments.filter_as_tree.unwrap_or(false);

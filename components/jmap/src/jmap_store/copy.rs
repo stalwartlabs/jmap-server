@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use store::{
-    core::{collection::Collection, document::Document},
+    core::{acl::ACLToken, collection::Collection, document::Document},
     log::changes::ChangeId,
     parking_lot::MutexGuard,
     roaring::RoaringBitmap,
@@ -30,6 +30,7 @@ where
     pub from_account_id: AccountId,
     pub document_ids: RoaringBitmap,
     pub account_id: AccountId,
+    pub acl: Arc<ACLToken>,
     pub collection: Collection,
 
     pub change_id: ChangeId,
@@ -66,6 +67,7 @@ where
             store,
             changes: WriteBatch::new(account_id),
             account_id,
+            acl: request.acl.take().unwrap(),
             from_account_id,
             collection,
             document_ids: store

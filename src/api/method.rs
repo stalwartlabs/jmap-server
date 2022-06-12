@@ -128,11 +128,7 @@ pub enum Response {
 }
 
 impl Request {
-    pub fn prepare_request(
-        &mut self,
-        account_id: AccountId,
-        response: &response::Response,
-    ) -> jmap::Result<()> {
+    pub fn prepare_request(&mut self, response: &response::Response) -> jmap::Result<()> {
         // Create JSON Pointer evaluation function
         let mut eval_result_ref = |rr: &ResultReference| -> Option<Vec<u64>> {
             for r in &response.method_responses {
@@ -238,12 +234,6 @@ impl Request {
             }
             Request::SetEmailSubmission(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
-            }
-            Request::GetPushSubscription(request) => {
-                request.account_id = JMAPId::new(1).into(); //TODO remove
-            }
-            Request::SetPushSubscription(request) => {
-                request.account_id = JMAPId::new(1).into(); //TODO remove
             }
             _ => (),
         }

@@ -7,6 +7,12 @@ pub struct JMAPId {
     id: u64,
 }
 
+impl Default for JMAPId {
+    fn default() -> Self {
+        JMAPId { id: u64::MAX }
+    }
+}
+
 impl JMAPId {
     pub fn new(id: u64) -> Self {
         Self { id }

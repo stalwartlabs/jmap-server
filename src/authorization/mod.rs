@@ -6,7 +6,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use store::AccountId;
+use store::{core::acl::ACLToken, AccountId};
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -15,11 +15,11 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(account_id: AccountId, member_of: &[AccountId], access_to: &[AccountId]) -> Self {
+    pub fn new(account_id: AccountId, acl_token: &ACLToken) -> Self {
         // Hash state
         let mut s = DefaultHasher::new();
-        member_of.hash(&mut s);
-        access_to.hash(&mut s);
+        acl_token.member_of.hash(&mut s);
+        acl_token.access_to.hash(&mut s);
 
         Self {
             account_id,

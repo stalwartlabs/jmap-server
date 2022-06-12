@@ -1,6 +1,7 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use serde::Deserialize;
+use store::core::acl::ACLToken;
 
 use crate::{
     error::method::MethodError,
@@ -13,7 +14,8 @@ use super::{ArgumentSerializer, MaybeResultReference, ResultReference};
 
 #[derive(Debug, Clone, Default)]
 pub struct GetRequest<O: GetObject> {
-    pub account_id: Option<JMAPId>,
+    pub acl: Option<Arc<ACLToken>>,
+    pub account_id: JMAPId,
     pub ids: Option<MaybeResultReference<Vec<JMAPId>>>,
     pub properties: Option<MaybeResultReference<Vec<O::Property>>>,
     pub arguments: O::GetArguments,
@@ -116,7 +118,8 @@ impl<'de, O: GetObject> serde::de::Visitor<'de> for GetRequestVisitor<O> {
         A: serde::de::MapAccess<'de>,
     {
         let mut request = GetRequest {
-            account_id: None,
+            acl: None,
+            account_id: JMAPId::default(),
             ids: None,
             properties: None,
             arguments: O::GetArguments::default(),

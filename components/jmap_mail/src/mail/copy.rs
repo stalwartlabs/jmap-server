@@ -222,10 +222,12 @@ where
             Ok((email, lock.into()))
         })?;
 
+        let acl = helper.acl.clone();
         helper.into_response().map(|mut r| {
             if on_success_delete && !destroy_ids.is_empty() {
                 r.next_call = SetRequest {
-                    account_id: r.from_account_id.into(),
+                    acl: acl.into(),
+                    account_id: r.from_account_id,
                     if_in_state: destroy_from_if_in_state,
                     create: None,
                     update: None,

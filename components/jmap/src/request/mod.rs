@@ -5,7 +5,66 @@ pub mod query;
 pub mod query_changes;
 pub mod set;
 
-use crate::{types::jmap::JMAPId, types::json_pointer::JSONPointer};
+use std::sync::Arc;
+
+use store::{
+    core::{acl::ACLToken, collection::Collection},
+    AccountId,
+};
+
+use crate::{
+    error::method::MethodError, types::jmap::JMAPId, types::json_pointer::JSONPointer, SUPERUSER_ID,
+};
+
+pub trait ACLEnforce: Sized {
+    fn has_access(&self, to_account_id: AccountId, to_collection: Collection) -> bool;
+    fn is_member(&self, account_id: AccountId) -> bool;
+    fn is_shared(&self, account_id: AccountId) -> bool;
+    fn assert_has_access(
+        self,
+        to_account_id: AccountId,
+        to_collection: Collection,
+    ) -> crate::Result<Self>;
+    fn assert_is_member(self, account_id: AccountId) -> crate::Result<Self>;
+}
+
+impl ACLEnforce for Arc<ACLToken> {
+    fn has_access(&self, to_account_id: AccountId, to_collection: Collection) -> bool {
+        self.member_of.contains(&to_account_id)
+            || self.access_to.iter().any(|(id, collections)| {
+                *id == to_account_id && collections.contains(to_collection)
+            })
+            || self.member_of.contains(&SUPERUSER_ID)
+    }
+
+    fn is_member(&self, account_id: AccountId) -> bool {
+        self.member_of.contains(&account_id) || self.member_of.contains(&SUPERUSER_ID)
+    }
+
+    fn is_shared(&self, account_id: AccountId) -> bool {
+        !self.is_member(account_id) && self.access_to.iter().any(|(id, _)| *id == account_id)
+    }
+
+    fn assert_has_access(
+        self,
+        to_account_id: AccountId,
+        to_collection: Collection,
+    ) -> crate::Result<Self> {
+        if self.has_access(to_account_id, to_collection) {
+            Ok(self)
+        } else {
+            Err(MethodError::Forbidden)
+        }
+    }
+
+    fn assert_is_member(self, account_id: AccountId) -> crate::Result<Self> {
+        if self.is_member(account_id) {
+            Ok(self)
+        } else {
+            Err(MethodError::Forbidden)
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ResultReference {

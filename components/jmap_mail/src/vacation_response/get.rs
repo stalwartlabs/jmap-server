@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper};
+use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper, SharedDocsFnc};
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
@@ -72,7 +72,7 @@ where
         &self,
         request: GetRequest<VacationResponse>,
     ) -> jmap::Result<GetResponse<VacationResponse>> {
-        let helper = GetHelper::new(self, request, None::<IdMapper>)?;
+        let helper = GetHelper::new(self, request, None::<IdMapper>, None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
 
         helper.get(|_id, properties| {

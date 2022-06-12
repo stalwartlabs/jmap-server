@@ -1,10 +1,15 @@
+use super::schema::{Property, Thread};
+use crate::mail::{sharing::JMAPShareMail, MessageField};
 use jmap::{
-    jmap_store::get::{GetHelper, GetObject, IdMapper},
-    request::get::{GetRequest, GetResponse},
+    jmap_store::get::{GetHelper, GetObject, IdMapper, SharedDocsFnc},
+    request::{
+        get::{GetRequest, GetResponse},
+        ACLEnforce,
+    },
     types::jmap::JMAPId,
 };
 use store::{
-    core::{collection::Collection, tag::Tag, JMAPIdPrefix},
+    core::{acl::ACL, collection::Collection, tag::Tag, JMAPIdPrefix},
     read::{
         comparator::{Comparator, FieldComparator},
         filter::Filter,
@@ -12,10 +17,6 @@ use store::{
     },
     JMAPStore, Store,
 };
-
-use crate::mail::MessageField;
-
-use super::schema::{Property, Thread};
 
 impl GetObject for Thread {
     type GetArguments = ();
@@ -45,17 +46,31 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn thread_get(&self, request: GetRequest<Thread>) -> jmap::Result<GetResponse<Thread>> {
-        let helper = GetHelper::new(self, request, None::<IdMapper>)?;
+        let helper = GetHelper::new(self, request, None::<IdMapper>, None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
+        let shared_messages = if helper.acl.is_shared(account_id) {
+            Some(self.mail_shared_messages(account_id, &helper.acl.member_of, ACL::ReadItems)?)
+        } else {
+            None
+        };
 
         let response = helper.get(|id, _properties| {
             let thread_id = id.get_document_id();
-            if let Some(doc_ids) = self.get_tag(
+            if let Some(mut doc_ids) = self.get_tag(
                 account_id,
                 Collection::Mail,
                 MessageField::ThreadId.into(),
                 Tag::Id(thread_id),
             )? {
+                // Filter out messages that were not shared
+                if let Some(shared_messages) = &shared_messages {
+                    if let Some(shared_messages) = shared_messages.as_ref() {
+                        doc_ids &= shared_messages;
+                    } else {
+                        doc_ids.clear();
+                    }
+                }
+
                 Ok(Some(Thread {
                     id,
                     email_ids: self

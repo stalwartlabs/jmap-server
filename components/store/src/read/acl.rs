@@ -13,8 +13,11 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn get_shared_accounts(&self, member_of: &[AccountId]) -> crate::Result<Vec<AccountId>> {
-        let mut shared_accounts = Vec::new();
+    pub fn get_shared_accounts(
+        &self,
+        member_of: &[AccountId],
+    ) -> crate::Result<Vec<(AccountId, Bitmap<Collection>)>> {
+        let mut shared_accounts: Vec<(AccountId, Bitmap<Collection>)> = Vec::new();
         for account_id in member_of {
             let prefix =
                 ValueKey::serialize_acl_prefix(*account_id, AccountId::MAX, Collection::None);
@@ -26,7 +29,7 @@ where
                     && key.len() > prefix.len() + 2
                     && key[prefix.len()] != u8::MAX
                 {
-                    let (to_account_id, _) = ValueKey::deserialize_acl_target(
+                    let (to_account_id, to_collection, _) = ValueKey::deserialize_acl_target(
                         &key[prefix.len() + 1..],
                     )
                     .ok_or_else(|| {
@@ -35,10 +38,26 @@ where
                     let acl = Bitmap::from(u64::deserialize(&value).ok_or_else(|| {
                         StoreError::InternalError(format!("Corrupted ACL value for [{:?}]", key))
                     })?);
-                    if !member_of.contains(&to_account_id)
-                        && (acl.contains(ACL::Read) || acl.contains(ACL::ReadItems))
-                    {
-                        shared_accounts.push(to_account_id);
+
+                    if !member_of.contains(&to_account_id) {
+                        let mut collections: Bitmap<Collection> = Bitmap::new();
+                        if acl.contains(ACL::Read) {
+                            collections.insert(to_collection);
+                        }
+                        if (acl.contains(ACL::ReadItems)) && to_collection == Collection::Mailbox {
+                            collections.insert(Collection::Mail);
+                        }
+
+                        if !collections.is_empty() {
+                            if let Some(sharing) = shared_accounts
+                                .iter_mut()
+                                .find(|(account_id, _)| *account_id == to_account_id)
+                            {
+                                sharing.1.union(&collections);
+                            } else {
+                                shared_accounts.push((to_account_id, collections));
+                            }
+                        }
                     }
                 } else {
                     break;
@@ -92,23 +111,29 @@ where
 
     pub fn get_acl(
         &self,
-        account_id: AccountId,
+        member_of: &[AccountId],
         to_account_id: AccountId,
         to_collection: Collection,
         to_document_id: DocumentId,
     ) -> crate::Result<Bitmap<ACL>> {
-        Ok(Bitmap::from(
-            self.db
-                .get(
+        let mut acl = Bitmap::new();
+        for account_id in member_of {
+            if let Some(item_acl) = self
+                .db
+                .get::<u64>(
                     ColumnFamily::Values,
                     &ValueKey::serialize_acl(
-                        account_id,
+                        *account_id,
                         to_account_id,
                         to_collection,
                         to_document_id,
                     ),
                 )?
-                .unwrap_or(0u64),
-        ))
+                .map(Bitmap::from)
+            {
+                acl.union(&item_acl);
+            }
+        }
+        Ok(acl)
     }
 }

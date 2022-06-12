@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use jmap::error::method::MethodError;
@@ -15,6 +16,7 @@ use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
 use store::blob::BlobId;
 use store::chrono::DateTime;
+use store::core::acl::ACLToken;
 use store::core::collection::Collection;
 use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
 use store::core::error::StoreError;
@@ -43,6 +45,9 @@ use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PART
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EmailImportRequest {
+    #[serde(skip)]
+    pub acl: Option<Arc<ACLToken>>,
+
     #[serde(rename = "accountId")]
     pub account_id: JMAPId,
 

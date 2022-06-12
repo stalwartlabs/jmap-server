@@ -3,7 +3,9 @@ use crate::{authorization::Session, services::email_delivery, JMAPServer};
 use actix_web::web;
 use jmap::{
     error::method::MethodError,
+    principal::account::JMAPAccountStore,
     push_subscription::{get::JMAPGetPushSubscription, set::JMAPSetPushSubscription},
+    request::ACLEnforce,
 };
 use jmap_mail::{
     email_submission::{
@@ -22,7 +24,7 @@ use jmap_mail::{
     thread::{changes::JMAPThreadChanges, get::JMAPGetThread},
     vacation_response::{get::JMAPGetVacationResponse, set::JMAPSetVacationResponse},
 };
-use store::{tracing::error, Store};
+use store::{core::collection::Collection, tracing::error, AccountId, Store};
 
 pub async fn handle_method_calls<T>(
     request: Request,
@@ -45,13 +47,13 @@ where
 
         loop {
             // Prepare request
-            if let Err(err) = call_method.prepare_request(session.account_id(), &response) {
+            if let Err(err) = call_method.prepare_request(&response) {
                 response.push_error(call_id, err);
                 break;
             }
 
             // Execute request
-            match handle_method_call(call_method, &core).await {
+            match handle_method_call(call_method, &core, session.account_id()).await {
                 Ok(mut method_response) => {
                     let next_call_method = match method_response.changes() {
                         method::Changes::Item {
@@ -158,6 +160,7 @@ where
 pub async fn handle_method_call<T>(
     call: method::Request,
     core: &web::Data<JMAPServer<T>>,
+    account_id: AccountId,
 ) -> jmap::Result<method::Response>
 where
     T: for<'x> Store<'x> + 'static,
@@ -165,87 +168,191 @@ where
     let store = core.store.clone();
     core.spawn_jmap_request(move || {
         Ok(match call {
-            method::Request::GetPushSubscription(request) => {
+            method::Request::GetPushSubscription(mut request) => {
+                request.account_id = account_id.into();
+                request.acl = store.get_acl_token(account_id)?.into();
                 method::Response::GetPushSubscription(store.push_subscription_get(request)?)
             }
-            method::Request::SetPushSubscription(request) => {
+            method::Request::SetPushSubscription(mut request) => {
+                request.account_id = account_id.into();
+                request.acl = store.get_acl_token(account_id)?.into();
                 method::Response::SetPushSubscription(store.push_subscription_set(request)?)
             }
-            method::Request::GetMailbox(request) => {
+            method::Request::GetMailbox(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mailbox)?
+                    .into();
                 method::Response::GetMailbox(store.mailbox_get(request)?)
             }
-            method::Request::ChangesMailbox(request) => {
+            method::Request::ChangesMailbox(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mailbox)?
+                    .into();
                 method::Response::ChangesMailbox(store.mailbox_changes(request)?)
             }
-            method::Request::QueryMailbox(request) => {
+            method::Request::QueryMailbox(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mailbox)?
+                    .into();
                 method::Response::QueryMailbox(store.mailbox_query(request)?)
             }
-            method::Request::QueryChangesMailbox(request) => {
+            method::Request::QueryChangesMailbox(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mailbox)?
+                    .into();
                 method::Response::QueryChangesMailbox(store.mailbox_query_changes(request)?)
             }
-            method::Request::SetMailbox(request) => {
+            method::Request::SetMailbox(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mailbox)?
+                    .into();
                 method::Response::SetMailbox(store.mailbox_set(request)?)
             }
-            method::Request::GetThread(request) => {
+            method::Request::GetThread(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::GetThread(store.thread_get(request)?)
             }
-            method::Request::ChangesThread(request) => {
+            method::Request::ChangesThread(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::ChangesThread(store.thread_changes(request)?)
             }
-            method::Request::GetEmail(request) => {
+            method::Request::GetEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::GetEmail(store.mail_get(request)?)
             }
-            method::Request::ChangesEmail(request) => {
+            method::Request::ChangesEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::ChangesEmail(store.mail_changes(request)?)
             }
-            method::Request::QueryEmail(request) => {
+            method::Request::QueryEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::QueryEmail(store.mail_query(request)?)
             }
-            method::Request::QueryChangesEmail(request) => {
+            method::Request::QueryChangesEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::QueryChangesEmail(store.mail_query_changes(request)?)
             }
-            method::Request::SetEmail(request) => {
+            method::Request::SetEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::SetEmail(store.mail_set(request)?)
             }
-            method::Request::CopyEmail(request) => {
+            method::Request::CopyEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::CopyEmail(store.mail_copy(request)?)
             }
-            method::Request::ImportEmail(request) => {
+            method::Request::ImportEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::ImportEmail(store.mail_import(request)?)
             }
-            method::Request::ParseEmail(request) => {
+            method::Request::ParseEmail(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
                 method::Response::ParseEmail(store.mail_parse(request)?)
             }
-            method::Request::GetIdentity(request) => {
+            method::Request::GetIdentity(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::GetIdentity(store.identity_get(request)?)
             }
-            method::Request::ChangesIdentity(request) => {
+            method::Request::ChangesIdentity(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::ChangesIdentity(store.identity_changes(request)?)
             }
-            method::Request::SetIdentity(request) => {
+            method::Request::SetIdentity(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::SetIdentity(store.identity_set(request)?)
             }
-            method::Request::GetEmailSubmission(request) => {
+            method::Request::GetEmailSubmission(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::GetEmailSubmission(store.email_submission_get(request)?)
             }
-            method::Request::ChangesEmailSubmission(request) => {
+            method::Request::ChangesEmailSubmission(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::ChangesEmailSubmission(store.email_submission_changes(request)?)
             }
-            method::Request::QueryEmailSubmission(request) => {
+            method::Request::QueryEmailSubmission(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::QueryEmailSubmission(store.email_submission_query(request)?)
             }
-            method::Request::QueryChangesEmailSubmission(request) => {
+            method::Request::QueryChangesEmailSubmission(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::QueryChangesEmailSubmission(
                     store.email_submission_query_changes(request)?,
                 )
             }
-            method::Request::SetEmailSubmission(request) => {
+            method::Request::SetEmailSubmission(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::SetEmailSubmission(store.email_submission_set(request)?)
             }
-            method::Request::GetVacationResponse(request) => {
+            method::Request::GetVacationResponse(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::GetVacationResponse(store.vacation_response_get(request)?)
             }
-            method::Request::SetVacationResponse(request) => {
+            method::Request::SetVacationResponse(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
                 method::Response::SetVacationResponse(store.vacation_response_set(request)?)
             }
             method::Request::Echo(payload) => method::Response::Echo(payload),
