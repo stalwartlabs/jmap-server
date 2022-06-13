@@ -1,24 +1,28 @@
-use crate::error::set::{SetError, SetErrorType};
-use crate::jmap_store::set::SetHelper;
-use crate::jmap_store::Object;
-use crate::orm::{serialize::JMAPOrm, TinyORM};
-use crate::principal::schema::Principal;
-use crate::request::set::SetResponse;
-use crate::request::ResultReference;
-use crate::types::jmap::JMAPId;
-use crate::{jmap_store::set::SetObject, request::set::SetRequest};
-use crate::{sanitize_domain, sanitize_email};
+use std::collections::HashSet;
+
+use jmap::error::set::{SetError, SetErrorType};
+use jmap::jmap_store::set::SetHelper;
+use jmap::jmap_store::Object;
+use jmap::orm::{serialize::JMAPOrm, TinyORM};
+use jmap::request::set::SetResponse;
+use jmap::request::ResultReference;
+use jmap::types::jmap::JMAPId;
+use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
+use jmap::{sanitize_domain, sanitize_email};
+use jmap_mail::mailbox::schema::Mailbox;
+use jmap_mail::mailbox::CreateMailbox;
 use scrypt::password_hash::rand_core::OsRng;
 use scrypt::password_hash::{PasswordHasher, SaltString};
 use scrypt::Scrypt;
 use store::core::collection::Collection;
+use store::core::document::Document;
 use store::parking_lot::MutexGuard;
 use store::read::comparator::Comparator;
 use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
-use store::{JMAPStore, Store};
+use store::{DocumentId, JMAPStore, Store};
 
-use super::schema::{Property, Type, Value};
+use super::schema::{Principal, Property, Type, Value};
 
 impl SetObject for Principal {
     type SetArguments = ();
@@ -33,10 +37,8 @@ pub trait JMAPSetPrincipal<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn principal_set(
-        &self,
-        request: SetRequest<Principal>,
-    ) -> crate::Result<SetResponse<Principal>>;
+    fn principal_set(&self, request: SetRequest<Principal>)
+        -> jmap::Result<SetResponse<Principal>>;
 }
 
 impl<T> JMAPSetPrincipal<T> for JMAPStore<T>
@@ -46,15 +48,14 @@ where
     fn principal_set(
         &self,
         request: SetRequest<Principal>,
-    ) -> crate::Result<SetResponse<Principal>> {
+    ) -> jmap::Result<SetResponse<Principal>> {
         let mut helper = SetHelper::new(self, request)?;
 
         helper.create(|_create_id, item, helper, document| {
             // Set values
-            let principal = TinyORM::<Principal>::new().principal_set(helper, item, None)?;
-
-            // Set parentId if the field is missing
-            principal.insert_validate(document)?;
+            TinyORM::<Principal>::new()
+                .principal_set(helper, item, None, document.document_id)?
+                .insert_validate(document)?;
 
             Ok((
                 Principal::new(document.document_id.into()),
@@ -71,6 +72,7 @@ where
                 helper,
                 item,
                 Some(&current_fields),
+                document.document_id,
             )?;
 
             // Merge changes
@@ -81,6 +83,7 @@ where
 
         helper.destroy(|_id, helper, document| {
             //TODO delete members
+            //TODO delete account messages
             if let Some(orm) = self.get_orm::<Principal>(helper.account_id, document.document_id)? {
                 orm.delete(document);
             }
@@ -100,7 +103,8 @@ where
         helper: &mut SetHelper<Principal, T>,
         principal: Principal,
         fields: Option<&TinyORM<Principal>>,
-    ) -> crate::error::set::Result<Self, Property>;
+        document_id: DocumentId,
+    ) -> jmap::error::set::Result<Self, Property>;
 }
 
 impl<T> PrincipalSet<T> for TinyORM<Principal>
@@ -112,7 +116,8 @@ where
         helper: &mut SetHelper<Principal, T>,
         mut principal: Principal,
         current_fields: Option<&TinyORM<Principal>>,
-    ) -> crate::error::set::Result<Self, Property> {
+        document_id: DocumentId,
+    ) -> jmap::error::set::Result<Self, Property> {
         // Obtain type
         let ptype = match if let Some(current_fields) = current_fields {
             current_fields.get(&Property::Type).cloned()
@@ -257,6 +262,7 @@ where
                     self.acl_update(value);
                     continue;
                 }
+                //TODO DKIM on mailsubmissions
                 (Property::DKIM, value @ Value::DKIM { .. }) if ptype == Type::Domain => value,
                 (Property::Quota, value @ (Value::Number { .. } | Value::Null)) => value,
                 (Property::Picture, value @ (Value::Blob { .. } | Value::Null)) => value,
@@ -300,8 +306,35 @@ where
         }
 
         // Validate e-mail addresses
-        if !validate_emails.is_empty()
-            && helper
+        if !validate_emails.is_empty() {
+            // Check that the domains exist
+            for domain in validate_emails
+                .iter()
+                .filter_map(|e| e.split_once('@')?.1.into())
+                .collect::<HashSet<_>>()
+            {
+                if helper
+                    .store
+                    .query_store::<FilterMapper>(
+                        helper.account_id,
+                        Collection::Principal,
+                        Filter::and(vec![
+                            Filter::eq(Property::Name.into(), Query::Index(domain.to_string())),
+                            Filter::eq(Property::Type.into(), Query::Keyword("d".to_string())),
+                        ]),
+                        Comparator::None,
+                    )?
+                    .is_empty()
+                {
+                    return Err(SetError::invalid_property(
+                        Property::Email,
+                        format!("Domain '{}' does not exist on this server.", domain),
+                    ));
+                }
+            }
+
+            // Check if the e-mail address is already in use
+            if helper
                 .store
                 .query_store::<FilterMapper>(
                     helper.account_id,
@@ -320,11 +353,13 @@ where
                     Comparator::None,
                 )?
                 .is_empty()
-        {
-            return Err(SetError::invalid_property(
-                Property::Email,
-                "One of the entered email addresses is linked to another principal.".to_string(),
-            ));
+            {
+                return Err(SetError::invalid_property(
+                    Property::Email,
+                    "One of the entered email addresses is linked to another principal."
+                        .to_string(),
+                ));
+            }
         }
 
         // Validate required fields
@@ -340,18 +375,6 @@ where
             ));
         }
 
-        if ptype == Type::Individual
-            && self
-                .get(&Property::Secret)
-                .or_else(|| current_fields.and_then(|f| f.get(&Property::Secret)))
-                .map_or(true, |v| !matches!(v, Value::Text { .. }))
-        {
-            return Err(SetError::invalid_property(
-                Property::Email,
-                "Missing 'secret' property.".to_string(),
-            ));
-        }
-
         if self
             .get(&Property::Name)
             .or_else(|| current_fields.and_then(|f| f.get(&Property::Name)))
@@ -361,6 +384,34 @@ where
                 Property::Email,
                 "Missing 'name' property.".to_string(),
             ));
+        }
+
+        if ptype == Type::Individual {
+            // Make sure the account has a password
+            if self
+                .get(&Property::Secret)
+                .or_else(|| current_fields.and_then(|f| f.get(&Property::Secret)))
+                .map_or(true, |v| !matches!(v, Value::Text { .. }))
+            {
+                return Err(SetError::invalid_property(
+                    Property::Email,
+                    "Missing 'secret' property.".to_string(),
+                ));
+            }
+
+            // Create default mailboxes in new accounts
+            if current_fields.is_none() {
+                for (name, role) in [("Inbox", "inbox"), ("Trash", "trash")] {
+                    let mut document = Document::new(
+                        Collection::Mailbox,
+                        helper
+                            .store
+                            .assign_document_id(document_id, Collection::Mailbox)?,
+                    );
+                    TinyORM::<Mailbox>::new_mailbox(name, role).insert(&mut document)?;
+                    helper.changes.insert_document(document);
+                }
+            }
         }
 
         Ok(self)

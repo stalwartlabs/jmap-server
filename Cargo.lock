@@ -1347,7 +1347,6 @@ name = "jmap"
 version = "0.1.0"
 dependencies = [
  "base64",
- "scrypt",
  "serde",
  "serde_json",
  "store",
@@ -1386,6 +1385,7 @@ dependencies = [
  "jmap",
  "jmap-client",
  "jmap_mail",
+ "jmap_sharing",
  "mail-send",
  "num_cpus",
  "rayon",
@@ -1409,6 +1409,18 @@ dependencies = [
  "jmap",
  "mail-builder 0.2.0",
  "mail-parser",
+ "serde",
+ "serde_json",
+ "store",
+]
+
+[[package]]
+name = "jmap_sharing"
+version = "0.1.0"
+dependencies = [
+ "jmap",
+ "jmap_mail",
+ "scrypt",
  "serde",
  "serde_json",
  "store",

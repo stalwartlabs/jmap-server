@@ -3,9 +3,9 @@ use crate::{authorization::Session, services::email_delivery, JMAPServer};
 use actix_web::web;
 use jmap::{
     error::method::MethodError,
-    principal::account::JMAPAccountStore,
     push_subscription::{get::JMAPGetPushSubscription, set::JMAPSetPushSubscription},
     request::ACLEnforce,
+    SUPERUSER_ID,
 };
 use jmap_mail::{
     email_submission::{
@@ -23,6 +23,10 @@ use jmap_mail::{
     },
     thread::{changes::JMAPThreadChanges, get::JMAPGetThread},
     vacation_response::{get::JMAPGetVacationResponse, set::JMAPSetVacationResponse},
+};
+use jmap_sharing::principal::{
+    account::JMAPAccountStore, get::JMAPGetPrincipal, query::JMAPPrincipalQuery,
+    set::JMAPSetPrincipal,
 };
 use store::{core::collection::Collection, tracing::error, AccountId, Store};
 
@@ -265,7 +269,8 @@ where
             method::Request::CopyEmail(mut request) => {
                 request.acl = store
                     .get_acl_token(account_id)?
-                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mailbox)?
+                    .assert_has_access(request.from_account_id.get_document_id(), Collection::Mail)?
                     .into();
                 method::Response::CopyEmail(store.mail_copy(request)?)
             }
@@ -354,6 +359,27 @@ where
                     .assert_is_member(request.account_id.get_document_id())?
                     .into();
                 method::Response::SetVacationResponse(store.vacation_response_set(request)?)
+            }
+            method::Request::GetPrincipal(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(SUPERUSER_ID)?
+                    .into();
+                method::Response::GetPrincipal(store.principal_get(request)?)
+            }
+            method::Request::QueryPrincipal(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(SUPERUSER_ID)?
+                    .into();
+                method::Response::QueryPrincipal(store.principal_query(request)?)
+            }
+            method::Request::SetPrincipal(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(SUPERUSER_ID)?
+                    .into();
+                method::Response::SetPrincipal(store.principal_set(request)?)
             }
             method::Request::Echo(payload) => method::Response::Echo(payload),
             method::Request::Error(err) => return Err(err),

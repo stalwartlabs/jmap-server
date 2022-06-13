@@ -1,7 +1,7 @@
-use crate::error::method::MethodError;
-use crate::jmap_store::get::SharedDocsFnc;
-use crate::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
-use crate::request::query::{QueryRequest, QueryResponse};
+use jmap::error::method::MethodError;
+use jmap::jmap_store::get::SharedDocsFnc;
+use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
+use jmap::request::query::{QueryRequest, QueryResponse};
 
 use store::read::comparator::{self, FieldComparator};
 use store::read::default_filter_mapper;
@@ -23,14 +23,14 @@ pub trait JMAPPrincipalQuery<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn principal_query(&self, request: QueryRequest<Principal>) -> crate::Result<QueryResponse>;
+    fn principal_query(&self, request: QueryRequest<Principal>) -> jmap::Result<QueryResponse>;
 }
 
 impl<T> JMAPPrincipalQuery<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn principal_query(&self, request: QueryRequest<Principal>) -> crate::Result<QueryResponse> {
+    fn principal_query(&self, request: QueryRequest<Principal>) -> jmap::Result<QueryResponse> {
         let mut helper = QueryHelper::new(self, request, None::<SharedDocsFnc>)?;
 
         helper.parse_filter(|filter| {

@@ -15,7 +15,7 @@ use jmap::{
     orm::serialize::JMAPOrm,
     request::{
         get::{GetRequest, GetResponse},
-        MaybeIdReference,
+        ACLEnforce, MaybeIdReference,
     },
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
@@ -23,8 +23,12 @@ use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
     HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
 };
-use std::{borrow::Cow, collections::HashMap};
-use store::{blob::BlobId, core::acl::ACL, AccountId, JMAPStore};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use store::{
+    blob::BlobId,
+    core::acl::{ACLToken, ACL},
+    AccountId, JMAPStore,
+};
 use store::{
     core::{collection::Collection, error::StoreError},
     serialize::StoreDeserialize,
@@ -107,13 +111,23 @@ impl Email {
     }
 }
 
+pub enum BlobResult {
+    Blob(Vec<u8>),
+    Unauthorized,
+    NotFound,
+}
+
 pub trait JMAPGetMail<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
     fn mail_get(&self, request: GetRequest<Email>) -> jmap::Result<GetResponse<Email>>;
-    fn mail_blob_get(&self, owner_id: AccountId, blob: &JMAPBlob)
-        -> store::Result<Option<Vec<u8>>>;
+    fn mail_blob_get(
+        &self,
+        account_id: AccountId,
+        acl: &Arc<ACLToken>,
+        blob: &JMAPBlob,
+    ) -> store::Result<BlobResult>;
 }
 
 impl<T> JMAPGetMail<T> for JMAPStore<T>
@@ -571,19 +585,38 @@ where
 
     fn mail_blob_get(
         &self,
-        owner_id: AccountId,
+        account_id: AccountId,
+        acl: &Arc<ACLToken>,
         blob: &JMAPBlob,
-    ) -> store::Result<Option<Vec<u8>>> {
-        Ok(if self.blob_account_has_access(&blob.id, owner_id)? {
-            let bytes = self.blob_get(&blob.id)?;
+    ) -> store::Result<BlobResult> {
+        if !acl.is_member(account_id) {
+            if let Some(shared_ids) = self
+                .mail_shared_messages(account_id, &acl.member_of, ACL::ReadItems)?
+                .as_ref()
+            {
+                if !self.blob_document_has_access(
+                    &blob.id,
+                    account_id,
+                    Collection::Mail,
+                    shared_ids,
+                )? {
+                    return Ok(BlobResult::Unauthorized);
+                }
+            } else {
+                return Ok(BlobResult::Unauthorized);
+            }
+        }
+
+        let bytes = self.blob_get(&blob.id)?;
+        Ok(
             if let (Some(bytes), Some(inner_id)) = (&bytes, blob.inner_id) {
                 get_message_part(bytes, inner_id).map(|bytes| bytes.into_owned())
             } else {
                 bytes
             }
-        } else {
-            None
-        })
+            .map(BlobResult::Blob)
+            .unwrap_or(BlobResult::NotFound),
+        )
     }
 }
 

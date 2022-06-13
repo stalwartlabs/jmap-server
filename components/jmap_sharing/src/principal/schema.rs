@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display};
 use serde::{Deserialize, Serialize};
 use store::FieldId;
 
-use crate::{
+use jmap::{
     orm::{self, acl::ACLUpdate},
     types::{blob::JMAPBlob, jmap::JMAPId},
 };

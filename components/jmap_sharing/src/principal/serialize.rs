@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::core::acl::ACL;
 
-use crate::{
+use jmap::{
     orm::acl::ACLUpdate,
     types::{blob::JMAPBlob, jmap::JMAPId, json_pointer::JSONPointer},
 };

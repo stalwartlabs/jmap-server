@@ -1,4 +1,4 @@
-use super::get::JMAPGetMail;
+use super::get::{BlobResult, JMAPGetMail};
 use super::schema::{
     BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
 };
@@ -23,12 +23,14 @@ use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
 use mail_parser::Message;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 use store::blob::BlobId;
-use store::core::acl::ACL;
+use store::core::acl::{ACLToken, ACL};
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::tracing::error;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
 use store::{AccountId, DocumentId, JMAPStore, SharedBitmap, Store};
@@ -211,7 +213,13 @@ where
                     (Property::TextBody, Value::BodyPartList { value }) => {
                         if let Some(body_part) = value.first() {
                             builder.text_body = body_part
-                                .parse(self, account_id, body_values, "text/plain".into())?
+                                .parse(
+                                    self,
+                                    &helper.acl,
+                                    account_id,
+                                    body_values,
+                                    "text/plain".into(),
+                                )?
                                 .0
                                 .into();
                         }
@@ -219,7 +227,13 @@ where
                     (Property::HtmlBody, Value::BodyPartList { value }) => {
                         if let Some(body_part) = value.first() {
                             builder.html_body = body_part
-                                .parse(self, account_id, body_values, "text/html".into())?
+                                .parse(
+                                    self,
+                                    &helper.acl,
+                                    account_id,
+                                    body_values,
+                                    "text/html".into(),
+                                )?
                                 .0
                                 .into();
                         }
@@ -227,14 +241,17 @@ where
                     (Property::Attachments, Value::BodyPartList { value }) => {
                         let mut attachments = Vec::with_capacity(value.len());
                         for attachment in value {
-                            attachments
-                                .push(attachment.parse(self, account_id, body_values, None)?.0);
+                            attachments.push(
+                                attachment
+                                    .parse(self, &helper.acl, account_id, body_values, None)?
+                                    .0,
+                            );
                         }
                         builder.attachments = attachments.into();
                     }
                     (Property::BodyStructure, Value::BodyPart { value }) => {
                         let (mut mime_part, sub_parts) =
-                            value.parse(self, account_id, body_values, None)?;
+                            value.parse(self, &helper.acl, account_id, body_values, None)?;
 
                         if let Some(sub_parts) = sub_parts {
                             let mut stack = Vec::new();
@@ -242,8 +259,13 @@ where
 
                             loop {
                                 while let Some(part) = it.next() {
-                                    let (sub_mime_part, sub_parts) =
-                                        part.parse(self, account_id, body_values, None)?;
+                                    let (sub_mime_part, sub_parts) = part.parse(
+                                        self,
+                                        &helper.acl,
+                                        account_id,
+                                        body_values,
+                                        None,
+                                    )?;
                                     if let Some(sub_parts) = sub_parts {
                                         stack.push((mime_part, it));
                                         mime_part = sub_mime_part;
@@ -719,6 +741,7 @@ impl EmailBodyPart {
     fn parse<'y, T>(
         &'y self,
         store: &JMAPStore<T>,
+        acl: &Arc<ACLToken>,
         account_id: AccountId,
         body_values: Option<&'y HashMap<String, EmailBodyValue>>,
         strict_type: Option<&'static str>,
@@ -768,20 +791,28 @@ impl EmailBodyPart {
                         .into(),
                 )
             } else if let Some(blob_id) = self.get_blob(BodyProperty::BlobId) {
-                BodyPart::Binary(
-                    store
-                        .mail_blob_get(account_id, blob_id)
-                        .map_err(|_| {
-                            SetError::new(SetErrorType::BlobNotFound, "Failed to fetch blob.")
-                        })?
-                        .ok_or_else(|| {
-                            SetError::new(
-                                SetErrorType::BlobNotFound,
-                                "blobId does not exist on this server.",
-                            )
-                        })?
-                        .into(),
-                )
+                BodyPart::Binary(match store.mail_blob_get(account_id, acl, blob_id) {
+                    Ok(BlobResult::Blob(bytes)) => bytes.into(),
+                    Ok(BlobResult::NotFound) => {
+                        return Err(SetError::new(
+                            SetErrorType::BlobNotFound,
+                            format!("blob {} does not exist on this server.", blob_id),
+                        ));
+                    }
+                    Ok(BlobResult::Unauthorized) => {
+                        return Err(SetError::new(
+                            SetErrorType::Forbidden,
+                            format!("You do not have access to blob {}.", blob_id),
+                        ));
+                    }
+                    Err(err) => {
+                        error!("Failed to retrieve blob: {}", err);
+                        return Err(SetError::new(
+                            SetErrorType::BlobNotFound,
+                            format!("Failed to retrieve blob {}.", blob_id),
+                        ));
+                    }
+                })
             } else {
                 return Err(SetError::new(
                     SetErrorType::InvalidProperties,

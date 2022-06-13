@@ -3,7 +3,6 @@ pub mod conv;
 pub mod copy;
 pub mod get;
 pub mod import;
-pub mod ingest;
 pub mod parse;
 pub mod query;
 pub mod raft;

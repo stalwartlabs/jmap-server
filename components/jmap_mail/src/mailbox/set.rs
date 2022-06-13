@@ -10,6 +10,7 @@ use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
+use jmap::SUPERUSER_ID;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::document::Document;
@@ -133,6 +134,16 @@ where
                 Some(&current_fields),
             )?;
 
+            // Role of internal folders cannot be modified
+            if (document_id == INBOX_ID || document_id == TRASH_ID)
+                && fields.has_property(&Property::Role)
+                && !helper.acl.is_member(SUPERUSER_ID)
+            {
+                return Err(SetError::forbidden(
+                    "You are not allowed to change the role of Inbox or Trash folders.",
+                ));
+            }
+
             // Check ACLs
             if helper.acl.is_shared(helper.account_id) {
                 if !helper
@@ -151,7 +162,7 @@ where
                         .mail_shared_folders(
                             helper.account_id,
                             &helper.acl.member_of,
-                            ACL::AddItems,
+                            ACL::Administer,
                         )?
                         .has_access(document_id)
                 {
@@ -171,7 +182,9 @@ where
             let document_id = id.get_document_id();
 
             // Internal folders cannot be deleted
-            if document_id == INBOX_ID || document_id == TRASH_ID {
+            if (document_id == INBOX_ID || document_id == TRASH_ID)
+                && !helper.acl.is_member(SUPERUSER_ID)
+            {
                 return Err(SetError::forbidden(
                     "You are not allowed to delete Inbox or Trash folders.",
                 ));

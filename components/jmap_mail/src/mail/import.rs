@@ -7,7 +7,7 @@ use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::Object;
 use jmap::orm::TinyORM;
-use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
+use jmap::request::{ACLEnforce, MaybeIdReference, MaybeResultReference, ResultReference};
 use jmap::types::blob::JMAPBlob;
 use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
@@ -16,7 +16,7 @@ use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
 use store::blob::BlobId;
 use store::chrono::DateTime;
-use store::core::acl::ACLToken;
+use store::core::acl::{ACLToken, ACL};
 use store::core::collection::Collection;
 use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
 use store::core::error::StoreError;
@@ -33,14 +33,15 @@ use store::serialize::StoreSerialize;
 use store::tracing::log::error;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
-use store::{AccountId, JMAPStore, Store, ThreadId};
+use store::{AccountId, JMAPStore, SharedBitmap, Store, ThreadId};
 use store::{DocumentId, Integer, LongInteger};
 
 use crate::mail::MessageField;
 
 use super::conv::HeaderValueInto;
-use super::get::JMAPGetMail;
+use super::get::{BlobResult, JMAPGetMail};
 use super::schema::{Email, Keyword, Property};
+use super::sharing::JMAPShareMail;
 use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PARTS};
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -139,6 +140,8 @@ where
         let mailbox_document_ids = self
             .get_document_ids(account_id, Collection::Mailbox)?
             .unwrap_or_default();
+        let acl = request.acl.unwrap();
+        let is_shared_account = acl.is_shared(account_id);
 
         let old_state = self.get_state(account_id, Collection::Mail)?;
         if let Some(if_in_state) = request.if_in_state {
@@ -164,7 +167,8 @@ where
                     .collect::<HashMap<JMAPId, bool>>();
 
                 for mailbox_id in mailbox_ids.keys() {
-                    if !mailbox_document_ids.contains(mailbox_id.get_document_id()) {
+                    let document_id = mailbox_id.get_document_id();
+                    if !mailbox_document_ids.contains(document_id) {
                         not_created.insert(
                             id,
                             SetError::invalid_property(
@@ -173,41 +177,66 @@ where
                             ),
                         );
                         continue 'outer;
+                    } else if is_shared_account
+                        && !self
+                            .mail_shared_folders(account_id, &acl.member_of, ACL::AddItems)?
+                            .has_access(document_id)
+                    {
+                        not_created.insert(
+                            id,
+                            SetError::forbidden(format!(
+                                "You are not allowed to import messages into mailbox {}.",
+                                mailbox_id
+                            )),
+                        );
+                        continue 'outer;
                     }
                 }
 
-                if let Some(blob) = self.mail_blob_get(account_id, &item.blob_id)? {
-                    created.insert(
-                        id,
-                        self.mail_import_item(
-                            account_id,
-                            item.blob_id.id,
-                            &blob,
-                            mailbox_ids
-                                .into_iter()
-                                .filter_map(|(id, set)| {
-                                    if set {
-                                        id.get_document_id().into()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect(),
-                            item.keywords
-                                .into_iter()
-                                .filter_map(|(k, set)| if set { k.tag.into() } else { None })
-                                .collect(),
-                            item.received_at.map(|t| t.timestamp()),
-                        )?,
-                    );
-                } else {
-                    not_created.insert(
-                        id,
-                        SetError::new(
-                            SetErrorType::BlobNotFound,
-                            format!("BlobId {} not found.", item.blob_id),
-                        ),
-                    );
+                match self.mail_blob_get(account_id, &acl, &item.blob_id)? {
+                    BlobResult::Blob(blob) => {
+                        created.insert(
+                            id,
+                            self.mail_import_item(
+                                account_id,
+                                item.blob_id.id,
+                                &blob,
+                                mailbox_ids
+                                    .into_iter()
+                                    .filter_map(|(id, set)| {
+                                        if set {
+                                            id.get_document_id().into()
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect(),
+                                item.keywords
+                                    .into_iter()
+                                    .filter_map(|(k, set)| if set { k.tag.into() } else { None })
+                                    .collect(),
+                                item.received_at.map(|t| t.timestamp()),
+                            )?,
+                        );
+                    }
+                    BlobResult::Unauthorized => {
+                        not_created.insert(
+                            id,
+                            SetError::new(
+                                SetErrorType::Forbidden,
+                                format!("You do not have access to blobId {}.", item.blob_id),
+                            ),
+                        );
+                    }
+                    BlobResult::NotFound => {
+                        not_created.insert(
+                            id,
+                            SetError::new(
+                                SetErrorType::BlobNotFound,
+                                format!("BlobId {} not found.", item.blob_id),
+                            ),
+                        );
+                    }
                 }
             } else {
                 not_created.insert(

@@ -18,7 +18,7 @@ pub enum MethodError {
     ServerUnavailable,
     ServerPartialFail,
     InvalidResultReference(String),
-    Forbidden,
+    Forbidden(String),
     AccountNotFound,
     AccountNotSupportedByMethod,
     AccountReadOnly,
@@ -50,7 +50,7 @@ impl Display for MethodError {
             MethodError::InvalidResultReference(err) => {
                 write!(f, "Invalid result reference: {}", err)
             }
-            MethodError::Forbidden => write!(f, "Forbidden"),
+            MethodError::Forbidden(err) => write!(f, "Forbidden: {}", err),
             MethodError::AccountNotFound => write!(f, "Account not found"),
             MethodError::AccountNotSupportedByMethod => {
                 write!(f, "Account not supported by method")
@@ -121,14 +121,7 @@ impl Serialize for MethodError {
             MethodError::InvalidResultReference(description) => {
                 ("invalidResultReference", description.as_str())
             }
-            MethodError::Forbidden => (
-                "forbidden",
-                concat!(
-                    "The method and arguments are valid, but executing the ",
-                    "method would violate an Access Control List (ACL) or ",
-                    "other permissions policy."
-                ),
-            ),
+            MethodError::Forbidden(description) => ("forbidden", description.as_str()),
             MethodError::AccountNotFound => (
                 "accountNotFound",
                 "The accountId does not correspond to a valid account",

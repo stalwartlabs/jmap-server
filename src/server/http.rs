@@ -1,11 +1,18 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
+use jmap::{
+    orm::{serialize::JMAPOrm, TinyORM},
+    SUPERUSER_ID,
+};
+use jmap_sharing::principal::{schema::Principal, CreateAccount};
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
+    core::{collection::Collection, document::Document},
     moka::future::Cache,
     tracing::info,
+    write::batch::WriteBatch,
     JMAPStore, Store,
 };
 
@@ -38,11 +45,48 @@ where
     // Build the JMAP server.
     let config = JMAPConfig::from(settings);
     let base_session = Session::new(settings, &config);
-    let store = JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
+    let store: Arc<JMAPStore<T>> =
+        JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
+
+    // Create admin user on first run.
+    if !store
+        .get_document_ids(SUPERUSER_ID, Collection::Principal)
+        .unwrap()
+        .map_or(true, |ids| !ids.contains(SUPERUSER_ID))
+    {
+        let mut document = Document::new(Collection::Principal, SUPERUSER_ID);
+        TinyORM::<Principal>::new_account(
+            "admin",
+            &settings
+                .get("set-admin-password")
+                .unwrap_or_else(|| "changeme".to_string()),
+            "Administrator",
+        )
+        .insert(&mut document)
+        .unwrap();
+        store
+            .write(WriteBatch::insert(SUPERUSER_ID, document))
+            .unwrap();
+    } else if let Some(secret) = settings.get("set-admin-password") {
+        // Reset admin password
+        let mut batch = WriteBatch::new(SUPERUSER_ID);
+        let mut document = Document::new(Collection::Principal, SUPERUSER_ID);
+        let admin = store
+            .get_orm::<Principal>(SUPERUSER_ID, SUPERUSER_ID)
+            .unwrap()
+            .unwrap();
+        let changes = TinyORM::track_changes(&admin).change_secret(&secret);
+        admin.merge(&mut document, changes).unwrap();
+        batch.update_document(document);
+        batch.log_update(Collection::Principal, SUPERUSER_ID);
+        store.write(batch).unwrap();
+        println!("Admin password successfully changed.");
+        std::process::exit(0);
+    }
+
     let (email_tx, email_rx) = init_email_delivery();
     let (change_tx, change_rx) = init_state_manager();
     let is_in_cluster = cluster.is_some();
-
     let server = web::Data::new(JMAPServer {
         base_session,
         store,

@@ -4,26 +4,17 @@ use crate::JMAPServer;
 use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{http::StatusCode, web, HttpResponse};
-use jmap::principal::account::JMAPAccountStore;
 use jmap::request::ACLEnforce;
 use jmap::types::blob::JMAPBlob;
 use jmap::types::jmap::JMAPId;
-use jmap_mail::mail::parse::get_message_part;
-use jmap_mail::mail::sharing::JMAPShareMail;
+use jmap_mail::mail::get::{BlobResult, JMAPGetMail};
+use jmap_sharing::principal::account::JMAPAccountStore;
 use reqwest::header::CONTENT_TYPE;
-use store::core::acl::ACL;
-use store::core::collection::Collection;
 use store::{tracing::error, Store};
 
 #[derive(serde::Deserialize)]
 pub struct Params {
     accept: String,
-}
-
-enum Response {
-    Blob(Vec<u8>),
-    Unauthorized,
-    NotFound,
 }
 
 pub async fn handle_jmap_download<T>(
@@ -42,39 +33,15 @@ where
     let store = core.store.clone();
     match core
         .spawn_worker(move || {
-            let acl = store.get_acl_token(session.account_id())?;
-            if !acl.is_member(account_id) {
-                if let Some(shared_ids) = store
-                    .mail_shared_messages(account_id, &acl.member_of, ACL::ReadItems)?
-                    .as_ref()
-                {
-                    if !store.blob_document_has_access(
-                        &blob_id.id,
-                        account_id,
-                        Collection::Mail,
-                        shared_ids,
-                    )? {
-                        return Ok(Response::Unauthorized);
-                    }
-                } else {
-                    return Ok(Response::Unauthorized);
-                }
-            }
-
-            let bytes = store.blob_get(&blob_id.id)?;
-            Ok(
-                if let (Some(bytes), Some(inner_id)) = (&bytes, blob_id.inner_id) {
-                    get_message_part(bytes, inner_id).map(|bytes| bytes.into_owned())
-                } else {
-                    bytes
-                }
-                .map(Response::Blob)
-                .unwrap_or(Response::NotFound),
+            store.mail_blob_get(
+                account_id,
+                &store.get_acl_token(session.account_id())?,
+                &blob_id,
             )
         })
         .await
     {
-        Ok(Response::Blob(bytes)) => {
+        Ok(BlobResult::Blob(bytes)) => {
             Ok(HttpResponse::build(StatusCode::OK)
                 .insert_header(("Content-Type", params.into_inner().accept))
                 .insert_header((
@@ -84,8 +51,8 @@ where
                 .insert_header(("Cache-Control", "private, immutable, max-age=31536000"))
                 .body(bytes))
         }
-        Ok(Response::NotFound) => Err(RequestError::not_found()),
-        Ok(Response::Unauthorized) => Err(RequestError::forbidden()),
+        Ok(BlobResult::NotFound) => Err(RequestError::not_found()),
+        Ok(BlobResult::Unauthorized) => Err(RequestError::forbidden()),
         Err(err) => {
             error!("Blob download failed: {:?}", err);
             Err(RequestError::internal_server_error())

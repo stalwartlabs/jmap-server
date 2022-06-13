@@ -1,6 +1,7 @@
 use super::{
     import::JMAPMailImport,
     schema::{Email, Property, Value},
+    sharing::JMAPShareMail,
     MessageData, MessageField,
 };
 use jmap::{
@@ -10,18 +11,18 @@ use jmap::{
     request::{
         copy::{CopyRequest, CopyResponse},
         set::SetRequest,
-        MaybeResultReference,
+        ACLEnforce, MaybeResultReference,
     },
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
-use store::serialize::leb128::Leb128;
 use store::{
     blob::BlobId,
     core::{collection::Collection, error::StoreError, tag::Tag},
     serialize::{StoreDeserialize, StoreSerialize},
     write::options::IndexOptions,
-    JMAPStore, Store,
+    JMAPStore, SharedBitmap, Store,
 };
+use store::{core::acl::ACL, serialize::leb128::Leb128};
 
 pub trait JMAPCopyMail<T>
 where
@@ -48,9 +49,27 @@ where
         let destroy_from_if_in_state = helper.request.destroy_from_if_in_state.take();
         let mut destroy_ids = Vec::new();
 
-        //TODO validate ACLs
+        let is_shared_source = helper.acl.is_shared(helper.from_account_id);
+        let is_shared_target = helper.acl.is_shared(helper.account_id);
 
         helper.create(|copy_id, item, helper, document| {
+            // Check ACL on source account
+            let document_id = copy_id.get_document_id();
+            if !is_shared_source
+                && !helper
+                    .store
+                    .mail_shared_messages(
+                        helper.from_account_id,
+                        &helper.acl.member_of,
+                        ACL::ReadItems,
+                    )?
+                    .has_access(document_id)
+            {
+                return Err(SetError::forbidden(
+                    "You do not have access to this message.",
+                ));
+            }
+
             // Update properties
             let mut fields = TinyORM::<Email>::new();
             let mut received_at = None;
@@ -133,8 +152,26 @@ where
                 ));
             }
 
+            // Check ACL on target account
+            if is_shared_target {
+                let allowed_folders = helper.store.mail_shared_folders(
+                    helper.account_id,
+                    &helper.acl.member_of,
+                    ACL::AddItems,
+                )?;
+
+                for mailbox in fields.get_tags(&Property::MailboxIds).unwrap() {
+                    let mailbox_id = mailbox.as_id();
+                    if !allowed_folders.has_access(mailbox_id) {
+                        return Err(SetError::forbidden(format!(
+                            "You are not allowed to add messages to folder {}.",
+                            JMAPId::from(mailbox_id)
+                        )));
+                    }
+                }
+            }
+
             // Fetch metadata
-            let document_id = copy_id.get_document_id();
             let mut metadata_blob_id = self
                 .get_document_value::<BlobId>(
                     helper.from_account_id,

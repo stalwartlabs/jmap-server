@@ -12,7 +12,8 @@ use actix_web::{
 };
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
-use jmap::{base64, principal::account::JMAPAccountStore, types::jmap::JMAPId};
+use jmap::{base64, types::jmap::JMAPId};
+use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     tracing::{debug, error},
     AccountId, Store,

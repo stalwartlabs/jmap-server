@@ -1,14 +1,9 @@
 use std::sync::Arc;
 
-use crate::{
-    orm::serialize::JMAPOrm,
-    principal::schema::{Principal, Property, Type, Value},
-    scrypt::{
-        password_hash::{PasswordHash, PasswordVerifier},
-        Scrypt,
-    },
-    types::jmap::JMAPId,
-    SUPERUSER_ID,
+use jmap::{orm::serialize::JMAPOrm, types::jmap::JMAPId, SUPERUSER_ID};
+use scrypt::{
+    password_hash::{PasswordHash, PasswordVerifier},
+    Scrypt,
 };
 use store::{
     core::{acl::ACLToken, collection::Collection, error::StoreError, JMAPIdPrefix},
@@ -18,8 +13,10 @@ use store::{
         FilterMapper,
     },
     tracing::debug,
-    AccountId, JMAPStore, Store,
+    AccountId, JMAPStore, RecipientType, Store,
 };
+
+use super::schema::{Principal, Property, Type, Value};
 
 pub trait JMAPAccountStore {
     fn find_individual(&self, email: &str) -> store::Result<Option<AccountId>>;
@@ -29,6 +26,7 @@ pub trait JMAPAccountStore {
         &self,
         account_id: AccountId,
     ) -> store::Result<Option<(String, String, Type)>>;
+    fn expand_rcpt(&self, email: String) -> store::Result<Arc<RecipientType>>;
 }
 
 impl<T> JMAPAccountStore for JMAPStore<T>
@@ -221,5 +219,66 @@ where
             );
             Ok(None)
         }
+    }
+
+    fn expand_rcpt(&self, email: String) -> store::Result<Arc<RecipientType>> {
+        self.recipients
+            .try_get_with::<_, StoreError>(email.clone(), || {
+                Ok(Arc::new(
+                    if let Some(account_id) = self
+                        .query_store::<FilterMapper>(
+                            SUPERUSER_ID,
+                            Collection::Principal,
+                            Filter::or(vec![
+                                Filter::eq(Property::Email.into(), Query::Index(email.clone())),
+                                Filter::eq(Property::Aliases.into(), Query::Index(email)),
+                            ]),
+                            Comparator::None,
+                        )?
+                        .into_iter()
+                        .next()
+                        .map(|id| id.get_document_id())
+                    {
+                        if let Some(mut fields) =
+                            self.get_orm::<Principal>(SUPERUSER_ID, account_id)?
+                        {
+                            match fields.get(&Property::Type) {
+                                Some(Value::Type { value: Type::List }) => {
+                                    if let Some(Value::Members { value }) =
+                                        fields.remove(&Property::Members)
+                                    {
+                                        if !value.is_empty() {
+                                            let mut list = Vec::with_capacity(value.len());
+                                            for id in value {
+                                                let account_id = id.get_document_id();
+                                                match self.get_account_details(account_id)? {
+                                                    Some((email, _, ptype))
+                                                        if ptype == Type::Individual =>
+                                                    {
+                                                        list.push((account_id, email));
+                                                    }
+                                                    _ => (),
+                                                }
+                                            }
+                                            return Ok(Arc::new(RecipientType::List(list)));
+                                        }
+                                    }
+                                    RecipientType::NotFound
+                                }
+                                _ => RecipientType::Individual(account_id),
+                            }
+                        } else {
+                            debug!(
+                                "Rcpt expand failed: ORM for account {} does not exist.",
+                                JMAPId::from(account_id)
+                            );
+                            RecipientType::NotFound
+                        }
+                    } else {
+                        RecipientType::NotFound
+                    },
+                ))
+            })
+            .map_err(|e| e.as_ref().clone())
     }
 }

@@ -1,6 +1,6 @@
 use super::{
     conv::IntoForm,
-    get::{AsBodyParts, JMAPGetMail},
+    get::{AsBodyParts, BlobResult, JMAPGetMail},
     schema::{BodyProperty, Email, HeaderForm, Property, Value},
     GetRawHeader,
 };
@@ -116,10 +116,10 @@ where
             max_body_value_bytes: request.max_body_value_bytes.unwrap_or(0),
         };
 
+        let acl = request.acl.unwrap();
+        let account_id = request.account_id.get_document_id();
         for blob_id in request.blob_ids {
-            if let Some(blob) =
-                self.mail_blob_get(request.account_id.get_document_id(), &blob_id)?
-            {
+            if let BlobResult::Blob(blob) = self.mail_blob_get(account_id, &acl, &blob_id)? {
                 if let Some(message) = Message::parse(&blob) {
                     let email = message.into_parsed_email(&parse_properties, &blob_id, &blob);
                     response.parsed.insert(blob_id, email);

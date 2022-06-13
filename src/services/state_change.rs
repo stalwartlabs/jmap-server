@@ -1,5 +1,6 @@
 use actix_web::web;
-use jmap::{principal::account::JMAPAccountStore, types::type_state::TypeState};
+use jmap::types::type_state::TypeState;
+use jmap_sharing::principal::account::JMAPAccountStore;
 use std::{
     collections::HashMap,
     time::{Duration, Instant, SystemTime},

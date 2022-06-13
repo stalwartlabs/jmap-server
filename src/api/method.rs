@@ -28,6 +28,7 @@ use jmap_mail::{
     thread::schema::Thread,
     vacation_response::schema::VacationResponse,
 };
+use jmap_sharing::principal::schema::Principal;
 use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
 use store::{log::changes::ChangeId, AccountId};
 
@@ -59,16 +60,22 @@ pub enum Changes {
 
 #[derive(Debug)]
 pub enum Request {
-    //CopyBlob(CopyBlobResponse),
+    // Push Subscription
     GetPushSubscription(GetRequest<PushSubscription>),
     SetPushSubscription(SetRequest<PushSubscription>),
+
+    // Mailbox
     GetMailbox(GetRequest<Mailbox>),
     ChangesMailbox(ChangesRequest),
     QueryMailbox(QueryRequest<Mailbox>),
     QueryChangesMailbox(QueryChangesRequest<Mailbox>),
     SetMailbox(SetRequest<Mailbox>),
+
+    // Thread
     GetThread(GetRequest<Thread>),
     ChangesThread(ChangesRequest),
+
+    // Email
     GetEmail(GetRequest<Email>),
     ChangesEmail(ChangesRequest),
     QueryEmail(QueryRequest<Email>),
@@ -78,32 +85,52 @@ pub enum Request {
     ImportEmail(EmailImportRequest),
     ParseEmail(EmailParseRequest),
     //GetSearchSnippet(SearchSnippetGetResponse),
+
+    // Identity
     GetIdentity(GetRequest<Identity>),
     ChangesIdentity(ChangesRequest),
     SetIdentity(SetRequest<Identity>),
+
+    // Email Submission
     GetEmailSubmission(GetRequest<EmailSubmission>),
     ChangesEmailSubmission(ChangesRequest),
     QueryEmailSubmission(QueryRequest<EmailSubmission>),
     QueryChangesEmailSubmission(QueryChangesRequest<EmailSubmission>),
     SetEmailSubmission(SetRequest<EmailSubmission>),
+
+    // Vacation Respone
     GetVacationResponse(GetRequest<VacationResponse>),
     SetVacationResponse(SetRequest<VacationResponse>),
+
+    // Principal
+    GetPrincipal(GetRequest<Principal>),
+    QueryPrincipal(QueryRequest<Principal>),
+    SetPrincipal(SetRequest<Principal>),
+
+    // Core methods
+    //CopyBlob(CopyBlobResponse),
     Echo(serde_json::Value),
     Error(MethodError),
 }
 
 #[derive(Debug)]
 pub enum Response {
-    //CopyBlob(CopyBlobResponse),
+    // Push Subscription
     GetPushSubscription(GetResponse<PushSubscription>),
     SetPushSubscription(SetResponse<PushSubscription>),
+
+    // Mailbox
     GetMailbox(GetResponse<Mailbox>),
     ChangesMailbox(ChangesResponse<Mailbox>),
     QueryMailbox(QueryResponse),
     QueryChangesMailbox(QueryChangesResponse),
     SetMailbox(SetResponse<Mailbox>),
+
+    // Thread
     GetThread(GetResponse<Thread>),
     ChangesThread(ChangesResponse<Thread>),
+
+    // Email
     GetEmail(GetResponse<Email>),
     ChangesEmail(ChangesResponse<Email>),
     QueryEmail(QueryResponse),
@@ -113,16 +140,30 @@ pub enum Response {
     ImportEmail(EmailImportResponse),
     ParseEmail(EmailParseResponse),
     //GetSearchSnippet(SearchSnippetGetResponse),
+
+    // Identity
     GetIdentity(GetResponse<Identity>),
     ChangesIdentity(ChangesResponse<Identity>),
     SetIdentity(SetResponse<Identity>),
+
+    // Email Submission
     GetEmailSubmission(GetResponse<EmailSubmission>),
     ChangesEmailSubmission(ChangesResponse<EmailSubmission>),
     QueryEmailSubmission(QueryResponse),
     QueryChangesEmailSubmission(QueryChangesResponse),
     SetEmailSubmission(SetResponse<EmailSubmission>),
+
+    // Vacation Response
     GetVacationResponse(GetResponse<VacationResponse>),
     SetVacationResponse(SetResponse<VacationResponse>),
+
+    // Principal
+    GetPrincipal(GetResponse<Principal>),
+    QueryPrincipal(QueryResponse),
+    SetPrincipal(SetResponse<Principal>),
+
+    // Core methods
+    //CopyBlob(CopyBlobResponse),
     Echo(serde_json::Value),
     Error(MethodError),
 }
@@ -566,6 +607,21 @@ where
                 .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
+        "Principal/get" => Request::GetPrincipal(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
+        "Principal/set" => Request::SetPrincipal(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
+        "Principal/query" => Request::QueryPrincipal(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
         /*"Blob/copy" => Request::CopyBlob(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
@@ -699,6 +755,18 @@ impl Serialize for Call<Response> {
             }
             Response::SetVacationResponse(response) => {
                 seq.serialize_element("VacationResponse/set")?;
+                seq.serialize_element(response)?;
+            }
+            Response::GetPrincipal(response) => {
+                seq.serialize_element("Principal/get")?;
+                seq.serialize_element(response)?;
+            }
+            Response::QueryPrincipal(response) => {
+                seq.serialize_element("Principal/query")?;
+                seq.serialize_element(response)?;
+            }
+            Response::SetPrincipal(response) => {
+                seq.serialize_element("Principal/set")?;
                 seq.serialize_element(response)?;
             }
             Response::Echo(response) => {

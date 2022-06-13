@@ -53,7 +53,10 @@ impl ACLEnforce for Arc<ACLToken> {
         if self.has_access(to_account_id, to_collection) {
             Ok(self)
         } else {
-            Err(MethodError::Forbidden)
+            Err(MethodError::Forbidden(format!(
+                "You do not have access to account {}",
+                JMAPId::from(to_account_id)
+            )))
         }
     }
 
@@ -61,7 +64,10 @@ impl ACLEnforce for Arc<ACLToken> {
         if self.is_member(account_id) {
             Ok(self)
         } else {
-            Err(MethodError::Forbidden)
+            Err(MethodError::Forbidden(format!(
+                "You are not an owner of account {}",
+                JMAPId::from(account_id)
+            )))
         }
     }
 }

@@ -6,10 +6,11 @@ pub mod schema;
 pub mod serialize;
 pub mod set;
 
-use jmap::jmap_store::Object;
 use jmap::types::jmap::JMAPId;
+use jmap::{jmap_store::Object, orm::TinyORM};
 
 use store::core::collection::Collection;
+use store::core::tag::Tag;
 use store::write::options::Options;
 
 use self::schema::{Mailbox, Property, Value};
@@ -51,5 +52,30 @@ impl Object for Mailbox {
         item.properties
             .insert(Property::Id, Value::Id { value: id });
         item
+    }
+}
+
+pub trait CreateMailbox: Sized {
+    fn new_mailbox(name: &str, role: &str) -> Self;
+}
+
+impl CreateMailbox for TinyORM<Mailbox> {
+    fn new_mailbox(name: &str, role: &str) -> Self {
+        let mut mailbox = TinyORM::<Mailbox>::new();
+        mailbox.set(
+            Property::Name,
+            Value::Text {
+                value: name.to_string(),
+            },
+        );
+        mailbox.set(
+            Property::Role,
+            Value::Text {
+                value: role.to_string(),
+            },
+        );
+        mailbox.tag(Property::Role, Tag::Default);
+        mailbox.set(Property::ParentId, Value::Id { value: 0u64.into() });
+        mailbox
     }
 }
