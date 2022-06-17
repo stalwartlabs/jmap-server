@@ -19,7 +19,7 @@ pub enum SetErrorType {
     OverQuota,
     #[serde(rename = "tooLarge")]
     TooLarge,
-    #[serde(rename = "rateLimit")] //TODO implement
+    #[serde(rename = "rateLimit")]
     RateLimit,
     #[serde(rename = "notFound")]
     NotFound,

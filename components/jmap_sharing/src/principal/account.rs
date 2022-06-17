@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
 use jmap::{orm::serialize::JMAPOrm, types::jmap::JMAPId, SUPERUSER_ID};
-use scrypt::{
-    password_hash::{PasswordHash, PasswordVerifier},
-    Scrypt,
-};
 use store::{
     core::{acl::ACLToken, collection::Collection, error::StoreError, JMAPIdPrefix},
     read::{
@@ -80,7 +76,18 @@ where
                         return Ok(None);
                     }
 
-                    if let Ok(password_hash) = PasswordHash::new(&password_hash) {
+                    if password_hash == password {
+                        Ok(Some(account_id))
+                    } else {
+                        debug!(
+                            "Login failed: Invalid password for account {}.",
+                            JMAPId::from(account_id)
+                        );
+
+                        Ok(None)
+                    }
+
+                    /*if let Ok(password_hash) = PasswordHash::new(&password_hash) {
                         if Scrypt
                             .verify_password(password.as_bytes(), &password_hash)
                             .is_ok()
@@ -99,7 +106,7 @@ where
                             JMAPId::from(account_id)
                         );
                         Ok(None)
-                    }
+                    }*/
                 } else {
                     debug!(
                         "Account {} has no email or secret",

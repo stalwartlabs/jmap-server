@@ -63,6 +63,13 @@ where
                     Query::LongInteger(value.map(|id| u64::from(id) + 1).unwrap_or(0)),
                 ),
                 Filter::Name { value } => {
+                    #[cfg(feature = "debug")]
+                    {
+                        // Used for concurrent requests tests
+                        if value == "__sleep" {
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                        }
+                    }
                     filter::Filter::eq(Property::Name.into(), Query::Tokenize(value.to_lowercase()))
                 }
                 Filter::Role { value } => {

@@ -55,7 +55,7 @@ where
         helper.create(|copy_id, item, helper, document| {
             // Check ACL on source account
             let document_id = copy_id.get_document_id();
-            if !is_shared_source
+            if is_shared_source
                 && !helper
                     .store
                     .mail_shared_messages(

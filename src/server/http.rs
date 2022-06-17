@@ -49,7 +49,7 @@ where
         JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
 
     // Create admin user on first run.
-    if !store
+    if store
         .get_document_ids(SUPERUSER_ID, Collection::Principal)
         .unwrap()
         .map_or(true, |ids| !ids.contains(SUPERUSER_ID))
@@ -64,6 +64,7 @@ where
         )
         .insert(&mut document)
         .unwrap();
+        #[cfg(not(test))]
         store
             .write(WriteBatch::insert(SUPERUSER_ID, document))
             .unwrap();

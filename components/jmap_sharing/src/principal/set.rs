@@ -11,9 +11,6 @@ use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use jmap::{sanitize_domain, sanitize_email};
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
-use scrypt::password_hash::rand_core::OsRng;
-use scrypt::password_hash::{PasswordHasher, SaltString};
-use scrypt::Scrypt;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::parking_lot::MutexGuard;
@@ -230,18 +227,18 @@ where
                     Value::TextList { value: aliases }
                 }
                 (Property::Secret, Value::Text { value })
-                    if !value.is_empty() && ptype == Type::Individual =>
+                    if !value.is_empty() && [Type::Individual, Type::Domain].contains(&ptype) =>
                 {
                     Value::Text {
-                        value: Scrypt
-                            .hash_password(value.as_bytes(), &SaltString::generate(&mut OsRng))
-                            .map_err(|_| {
-                                SetError::invalid_property(
-                                    property,
-                                    "Failed to hash password.".to_string(),
-                                )
-                            })?
-                            .to_string(),
+                        value: value.to_string(), /*Scrypt
+                                                  .hash_password(value.as_bytes(), &SaltString::generate(&mut OsRng))
+                                                  .map_err(|_| {
+                                                      SetError::invalid_property(
+                                                          property,
+                                                          "Failed to hash password.".to_string(),
+                                                      )
+                                                  })?
+                                                  .to_string()*/
                     }
                 }
                 (Property::Secret, Value::Text { value })
@@ -334,7 +331,7 @@ where
             }
 
             // Check if the e-mail address is already in use
-            if helper
+            if !helper
                 .store
                 .query_store::<FilterMapper>(
                     helper.account_id,
@@ -401,7 +398,7 @@ where
 
             // Create default mailboxes in new accounts
             if current_fields.is_none() {
-                for (name, role) in [("Inbox", "inbox"), ("Trash", "trash")] {
+                for (name, role) in [("Inbox", "inbox"), ("Deleted Items", "trash")] {
                     let mut document = Document::new(
                         Collection::Mailbox,
                         helper

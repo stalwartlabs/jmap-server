@@ -155,10 +155,11 @@ impl Session {
     pub fn set_primary_account(
         &mut self,
         account_id: JMAPId,
+        username: String,
         name: String,
         capabilities: Option<&[URI]>,
     ) {
-        self.username = name.to_string();
+        self.username = username;
 
         if let Some(capabilities) = capabilities {
             for capability in capabilities {
@@ -295,36 +296,36 @@ where
         .clone()
         .spawn_worker(move || {
             let mut response = core.base_session.clone();
-            response.set_primary_account(
-                session.account_id().into(),
-                store
-                    .get_account_details(session.account_id())?
-                    .map(|(name, email, _)| if !name.is_empty() { name } else { email })
-                    .unwrap_or_default(),
-                None,
-            );
+
             response.set_state(session.state());
 
             // Obtain member and shared accounts
             let acl = store.get_acl_token(session.account_id())?;
 
             // TODO set read only for shared accounts
-            for id in acl
+            for (pos, id) in acl
                 .member_of
                 .iter()
-                .skip(1)
                 .chain(acl.access_to.iter().map(|(id, _)| id))
+                .enumerate()
             {
-                let (name, email, ptype) = store
+                let (email, mut name, ptype) = store
                     .get_account_details(*id)?
                     .unwrap_or_else(|| ("".to_string(), "".to_string(), Type::Individual));
-                response.add_account(
-                    (*id).into(),
-                    if !name.is_empty() { name } else { email },
-                    matches!(ptype, Type::Individual),
-                    false,
-                    Some(&[URI::Core, URI::Mail]),
-                );
+                if pos == 0 {
+                    if name.is_empty() {
+                        name = email.clone();
+                    }
+                    response.set_primary_account(session.account_id().into(), email, name, None);
+                } else {
+                    response.add_account(
+                        (*id).into(),
+                        if !name.is_empty() { name } else { email },
+                        matches!(ptype, Type::Individual),
+                        false,
+                        Some(&[URI::Core, URI::Mail, URI::WebSocket]),
+                    );
+                }
             }
 
             Ok(response)

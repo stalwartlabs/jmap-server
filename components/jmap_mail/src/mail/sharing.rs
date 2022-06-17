@@ -62,41 +62,44 @@ where
         shared_to: &[AccountId],
         acl: ACL,
     ) -> store::Result<Arc<Option<RoaringBitmap>>> {
-        self.shared_documents
-            .try_get_with::<_, StoreError>(
-                SharedResource::new(
-                    owner_id,
-                    shared_to.first().copied().unwrap(),
-                    Collection::Mail,
-                    acl,
-                ),
-                || {
-                    Ok(Arc::new(
-                        if let Some(shared_folders) =
-                            self.mail_shared_folders(owner_id, shared_to, acl)?.as_ref()
-                        {
-                            let mut shared_messages = RoaringBitmap::new();
-                            for mailbox_id in shared_folders {
-                                if let Some(message_ids) = self.get_tag(
-                                    owner_id,
-                                    Collection::Mail,
-                                    MessageField::Mailbox.into(),
-                                    Tag::Id(mailbox_id),
-                                )? {
-                                    shared_messages |= message_ids;
-                                }
-                            }
-                            if !shared_messages.is_empty() {
-                                shared_messages.into()
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        },
-                    ))
+        let shared_resource = SharedResource::new(
+            owner_id,
+            shared_to.first().copied().unwrap(),
+            Collection::Mail,
+            acl,
+        );
+
+        if let Some(shared_documents) = self.shared_documents.get(&shared_resource) {
+            Ok(shared_documents)
+        } else {
+            // Avoid deadlocks
+            let shared_documents = Arc::new(
+                if let Some(shared_folders) =
+                    self.mail_shared_folders(owner_id, shared_to, acl)?.as_ref()
+                {
+                    let mut shared_messages = RoaringBitmap::new();
+                    for mailbox_id in shared_folders {
+                        if let Some(message_ids) = self.get_tag(
+                            owner_id,
+                            Collection::Mail,
+                            MessageField::Mailbox.into(),
+                            Tag::Id(mailbox_id),
+                        )? {
+                            shared_messages |= message_ids;
+                        }
+                    }
+                    if !shared_messages.is_empty() {
+                        shared_messages.into()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
                 },
-            )
-            .map_err(|e| e.as_ref().clone())
+            );
+            self.shared_documents
+                .insert(shared_resource, shared_documents.clone());
+            Ok(shared_documents)
+        }
     }
 }

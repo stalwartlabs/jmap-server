@@ -1,15 +1,19 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use jmap_client::client::Client;
+use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
+use jmap_client::client::{Client, Credentials};
+use store::core::acl::ACLToken;
 use store_rocksdb::RocksDB;
 
 use crate::{
     api::ingest::Dsn,
+    authorization::Session,
     server::http::{init_jmap_server, start_jmap_server},
 };
 
 use super::store::utils::{destroy_temp_dir, init_settings};
 
+pub mod authentication;
 pub mod email_changes;
 pub mod email_copy;
 pub mod email_get;
@@ -47,10 +51,31 @@ async fn jmap_tests() {
     // Wait for server to start
     tokio::time::sleep(Duration::from_millis(100)).await;
 
+    // Bypass authentication for the main client
+    let acl_token = Arc::new(ACLToken {
+        member_of: vec![SUPERUSER_ID],
+        access_to: vec![],
+    });
+    server
+        .sessions
+        .insert(
+            "DO_NOT_ATTEMPT_THIS_AT_HOME".to_string(),
+            Session::new(SUPERUSER_ID, acl_token.as_ref()),
+        )
+        .await;
+    server.store.acl_tokens.insert(SUPERUSER_ID, acl_token);
+
     // Create client
-    let mut client = Client::connect(&session_url).await.unwrap();
+    let mut client = Client::connect(
+        &session_url,
+        Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
+    )
+    .await
+    .unwrap();
+    client.set_default_account_id(JMAPId::new(1));
 
     // Run tests
+    authentication::test(server.clone(), &mut client).await;
     /*email_changes::test(server.clone(), &mut client).await;
     email_query_changes::test(server.clone(), &mut client).await;
     email_thread::test(server.clone(), &mut client).await;
@@ -58,14 +83,14 @@ async fn jmap_tests() {
     email_get::test(server.clone(), &mut client).await;
     email_parse::test(server.clone(), &mut client).await;
     email_set::test(server.clone(), &mut client).await;
-    email_query::test(server.clone(), &mut client).await;*/
+    email_query::test(server.clone(), &mut client).await;
     email_copy::test(server.clone(), &mut client).await;
-    //email_submission::test(server.clone(), &mut client).await;
-    //vacation_response::test(server.clone(), &mut client).await;
-    //mailbox::test(server.clone(), &mut client).await;
-    //event_source::test(server.clone(), &mut client).await;
-    //push_subscription::test(server.clone(), &mut client).await;
-    //websocket::test(server.clone(), &mut client).await;
+    email_submission::test(server.clone(), &mut client).await;
+    vacation_response::test(server.clone(), &mut client).await;
+    mailbox::test(server.clone(), &mut client).await;
+    event_source::test(server.clone(), &mut client).await;
+    push_subscription::test(server.clone(), &mut client).await;
+    websocket::test(server.clone(), &mut client).await;*/
 
     destroy_temp_dir(temp_dir);
 }

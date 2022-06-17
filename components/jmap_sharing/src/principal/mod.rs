@@ -1,6 +1,6 @@
-use scrypt::{
-    password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-    Scrypt,
+use argon2::{
+    password_hash::{rand_core::OsRng, SaltString},
+    Argon2, PasswordHasher,
 };
 use store::{core::collection::Collection, write::options::Options};
 
@@ -88,13 +88,15 @@ impl CreateAccount for TinyORM<Principal> {
                 value: email.to_string(),
             },
         );
+        //TODO scrypt performance
         account.set(
             Property::Secret,
             Value::Text {
-                value: Scrypt
-                    .hash_password(secret.as_bytes(), &SaltString::generate(&mut OsRng))
-                    .unwrap()
-                    .to_string(),
+                value: secret.to_string(),
+                /*value: Scrypt
+                .hash_password(secret.as_bytes(), &SaltString::generate(&mut OsRng))
+                .unwrap()
+                .to_string(),*/
             },
         );
         account.set(
@@ -110,7 +112,7 @@ impl CreateAccount for TinyORM<Principal> {
         self.set(
             Property::Secret,
             Value::Text {
-                value: Scrypt
+                value: Argon2::default()
                     .hash_password(secret.as_bytes(), &SaltString::generate(&mut OsRng))
                     .unwrap()
                     .to_string(),

@@ -1,3 +1,3 @@
 pub mod principal;
 
-pub use scrypt;
+pub use argon2;

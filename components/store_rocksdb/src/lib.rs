@@ -204,7 +204,7 @@ impl<'x> Store<'x> for RocksDB {
             let mut cf_opts = Options::default();
             //cf_opts.set_max_write_buffer_number(16);
             cf_opts.set_merge_operator_associative("merge", bitmap_merge);
-            cf_opts.set_compaction_filter("compact", bitmap_compact);
+            //cf_opts.set_compaction_filter("compact", bitmap_compact);
             ColumnFamilyDescriptor::new("bitmaps", cf_opts)
         };
 

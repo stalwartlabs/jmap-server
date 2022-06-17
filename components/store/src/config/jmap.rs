@@ -34,9 +34,9 @@ impl From<&EnvSettings> for JMAPConfig {
         JMAPConfig {
             api_key: settings.get("api-key").unwrap_or_default(),
             max_size_upload: 50000000,
-            max_concurrent_upload: 8,
+            max_concurrent_upload: 4, // 4 used in tests, move to init tests
+            max_concurrent_requests: 8, // 8 used in tests, move to init tests
             max_size_request: 10000000,
-            max_concurrent_requests: 8,
             max_calls_in_request: 32,
             max_objects_in_get: 500,
             max_objects_in_set: 100000, // Temporarily, for email_query tests
@@ -51,7 +51,7 @@ impl From<&EnvSettings> for JMAPConfig {
             mail_parse_max_items: 5,
             default_language: Language::English,
             rate_limit_authenticated: (1000, 60),
-            rate_limit_anonymous: (100, 60),
+            rate_limit_anonymous: (100, 60), // 100 is used on tests
             use_forwarded_header: false,
         }
     }

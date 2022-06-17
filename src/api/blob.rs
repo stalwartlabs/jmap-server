@@ -1,4 +1,5 @@
-use super::RequestError;
+use super::{RequestError, RequestLimitError};
+use crate::authorization::auth::RemoteAddress;
 use crate::authorization::Session;
 use crate::JMAPServer;
 use actix_web::http::header::ContentType;
@@ -83,6 +84,22 @@ where
 {
     let (id,) = path.into_inner();
     let account_id = id.get_document_id();
+
+    // Rate limit uploads
+    let _upload_req = core
+        .rate_limiters
+        .get(&RemoteAddress::AccountId(account_id))
+        .unwrap()
+        .is_upload_allowed(core.store.config.max_concurrent_upload)
+        .ok_or_else(|| RequestError::limit(RequestLimitError::Concurrent))?;
+
+    #[cfg(test)]
+    {
+        // Used for concurrent upload tests
+        if bytes == b"sleep"[..] {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
 
     let store = core.store.clone();
     let size = bytes.len();

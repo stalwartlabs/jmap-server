@@ -103,6 +103,12 @@ impl From<JMAPId> for u32 {
     }
 }
 
+impl From<JMAPId> for String {
+    fn from(id: JMAPId) -> Self {
+        id.to_string()
+    }
+}
+
 impl serde::Serialize for JMAPId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
