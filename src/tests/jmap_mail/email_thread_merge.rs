@@ -130,7 +130,7 @@ where
                 .set_default_account_id(JMAPId::new((base_test_num + test_num) as u64).to_string())
                 .email_query(
                     email::query::Filter::in_mailbox(mailbox_ids[test_num as usize].clone()).into(),
-                    None,
+                    None::<Vec<_>>,
                 )
                 .await
                 .unwrap();

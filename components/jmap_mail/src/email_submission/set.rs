@@ -21,7 +21,6 @@ use store::blob::BlobId;
 use store::chrono::{DateTime, Utc};
 use store::core::collection::Collection;
 use store::core::error::StoreError;
-use store::parking_lot::MutexGuard;
 use store::serialize::StoreSerialize;
 use store::write::options::{IndexOptions, Options};
 use store::{JMAPStore, Store};
@@ -310,10 +309,7 @@ where
                 }
             }
 
-            Ok((
-                EmailSubmission::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
+            Ok(EmailSubmission::new(document.document_id.into()))
         })?;
 
         helper.update(|id, mut item, helper, document| {

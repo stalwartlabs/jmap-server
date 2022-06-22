@@ -88,7 +88,7 @@ where
     // Rate limit uploads
     let _upload_req = core
         .rate_limiters
-        .get(&RemoteAddress::AccountId(account_id))
+        .get(&RemoteAddress::AccountId(session.account_id()))
         .unwrap()
         .is_upload_allowed(core.store.config.max_concurrent_upload)
         .ok_or_else(|| RequestError::limit(RequestLimitError::Concurrent))?;

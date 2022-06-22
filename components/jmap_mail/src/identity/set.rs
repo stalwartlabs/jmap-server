@@ -4,10 +4,15 @@ use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::SetResponse;
-use jmap::request::ResultReference;
+use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
-use store::parking_lot::MutexGuard;
+use jmap::{sanitize_email, SUPERUSER_ID};
+use store::core::collection::Collection;
+use store::core::JMAPIdPrefix;
+use store::read::comparator::Comparator;
+use store::read::filter::{Filter, Query};
+use store::read::FilterMapper;
 use store::{JMAPStore, Store};
 
 use super::schema::{Property, Value};
@@ -20,6 +25,9 @@ impl SetObject for Identity {
     fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
     fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
 }
+
+const P_EMAIL_ID: u8 = 4;
+const P_ALIASES_ID: u8 = 7;
 
 pub trait JMAPSetIdentity<T>
 where
@@ -35,7 +43,7 @@ where
     fn identity_set(&self, request: SetRequest<Identity>) -> jmap::Result<SetResponse<Identity>> {
         let mut helper = SetHelper::new(self, request)?;
 
-        helper.create(|_create_id, item, _helper, document| {
+        helper.create(|_create_id, item, helper, document| {
             let mut fields = TinyORM::<Identity>::new();
 
             for (property, value) in item.properties {
@@ -43,13 +51,39 @@ where
                     property,
                     match (property, value) {
                         (
-                            Property::Name
-                            | Property::Email
-                            | Property::TextSignature
-                            | Property::HtmlSignature,
+                            Property::Name | Property::TextSignature | Property::HtmlSignature,
                             value @ Value::Text { .. },
                         ) => value,
 
+                        (Property::Email, Value::Text { value }) => {
+                            let value = sanitize_email(&value).ok_or_else(|| {
+                                SetError::invalid_property(
+                                    Property::Email,
+                                    "Invalid e-mail address.".to_string(),
+                                )
+                            })?;
+                            if !helper.acl.is_member(SUPERUSER_ID)
+                                && !helper
+                                    .store
+                                    .query_store::<FilterMapper>(
+                                        SUPERUSER_ID,
+                                        Collection::Principal,
+                                        Filter::or(vec![
+                                            Filter::eq(P_EMAIL_ID, Query::Index(value.clone())),
+                                            Filter::eq(P_ALIASES_ID, Query::Index(value.clone())),
+                                        ]),
+                                        Comparator::None,
+                                    )?
+                                    .into_iter()
+                                    .any(|id| id.get_document_id() == helper.account_id)
+                            {
+                                return Err(SetError::invalid_property(
+                                    Property::Email,
+                                    "E-mail address not configured for this account.".to_string(),
+                                ));
+                            }
+                            Value::Text { value }
+                        }
                         (Property::ReplyTo | Property::Bcc, value @ Value::Addresses { .. }) => {
                             value
                         }
@@ -74,10 +108,7 @@ where
             // Validate fields
             fields.insert_validate(document)?;
 
-            Ok((
-                Identity::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
+            Ok(Identity::new(document.document_id.into()))
         })?;
 
         helper.update(|id, item, helper, document| {

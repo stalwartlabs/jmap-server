@@ -141,6 +141,10 @@ where
         self.iterators[0].remaining.len() as usize
     }
 
+    pub fn into_bitmap(mut self) -> RoaringBitmap {
+        self.iterators.swap_remove(0).remaining
+    }
+
     pub fn is_empty(&self) -> bool {
         self.iterators[0].remaining.is_empty()
     }

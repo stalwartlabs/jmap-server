@@ -11,7 +11,7 @@ use jmap_client::{
 use store::Store;
 
 use crate::{
-    tests::{jmap::email_get::all_headers, store::utils::StoreCompareWith},
+    tests::{jmap_mail::email_get::all_headers, store::utils::StoreCompareWith},
     JMAPServer,
 };
 

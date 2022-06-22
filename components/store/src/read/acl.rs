@@ -30,7 +30,7 @@ where
                     && key[prefix.len()] != u8::MAX
                 {
                     let (to_account_id, to_collection, _) = ValueKey::deserialize_acl_target(
-                        &key[prefix.len() + 1..],
+                        &key[prefix.len()..],
                     )
                     .ok_or_else(|| {
                         StoreError::InternalError(format!("Corrupted ACL key for [{:?}]", key))

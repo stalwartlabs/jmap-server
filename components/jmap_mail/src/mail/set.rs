@@ -109,6 +109,8 @@ where
             .unwrap_or_default();
         let account_id = helper.account_id;
 
+        helper.disable_write_batch();
+
         helper.create(|_create_id, item, helper, document| {
             let mut builder = MessageBuilder::new();
             let mut fields = TinyORM::<Email>::new();
@@ -430,9 +432,6 @@ where
             )?;
             fields.insert(document)?;
 
-            // Lock collection
-            let lock = self.lock_account(account_id, Collection::Mail);
-
             // Obtain thread Id
             let thread_id = self.mail_set_thread(&mut helper.changes, document)?;
 
@@ -446,7 +445,7 @@ where
             email.insert(Property::ThreadId, JMAPId::from(thread_id));
             email.insert(Property::Size, size);
 
-            Ok((email, lock.into()))
+            Ok(email)
         })?;
 
         helper.update(|id, item, helper, document| {

@@ -1,21 +1,25 @@
-use std::{sync::Arc, time::Duration};
+use std::{fmt::Debug, sync::Arc, time::Duration};
 
 use actix_web::web;
-use jmap::types::jmap::JMAPId;
+use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
 use jmap_client::{
     client::{Client, Credentials},
-    core::error::{MethodError, MethodErrorType, ProblemDetails},
+    core::{
+        error::{MethodError, MethodErrorType, ProblemDetails},
+        set::{SetError, SetErrorType},
+    },
     mailbox::{self},
 };
+use jmap_mail::{INBOX_ID, TRASH_ID};
 use store::Store;
 
-use crate::JMAPServer;
+use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, admin_client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    println!("Running Authentication tests...");
+    println!("Running Authorization tests...");
 
     // Create a domain name and a test account
     let domain_id = admin_client
@@ -29,6 +33,10 @@ where
         .await
         .unwrap()
         .unwrap_id();
+    admin_client
+        .principal_set_aliases(&account_id, ["john.doe@example.com"].into())
+        .await
+        .unwrap();
 
     // Incorrect passwords should be rejected with a 401 error
     assert!(matches!(
@@ -89,32 +97,38 @@ where
     assert!(client.session().account(&account_id).unwrap().is_personal());
 
     // Users should not be allowed to create, read, modify or delete principals
-    assert!(matches!(
+    assert_forbidden(
         client
             .individual_create("jane.doe@example.com", "0987654", "Jane Doe")
             .await,
-        Err(jmap_client::Error::Method(MethodError {
-            p_type: MethodErrorType::Forbidden
-        }))
-    ));
-    assert!(matches!(
-        client.principal_get(&domain_id, None::<Vec<_>>).await,
-        Err(jmap_client::Error::Method(MethodError {
-            p_type: MethodErrorType::Forbidden
-        }))
-    ));
-    assert!(matches!(
+    );
+    assert_forbidden(client.principal_get(&domain_id, None::<Vec<_>>).await);
+    assert_forbidden(
         client
             .principal_set_name(&domain_id, "otherdomain.com")
             .await,
-        Err(jmap_client::Error::Method(MethodError {
-            p_type: MethodErrorType::Forbidden
-        }))
-    ));
+    );
+    assert_forbidden(client.principal_destroy(&account_id).await);
+
+    // Users should be allowed to create identities only
+    // using email addresses associated to their principal
+    let identity_id = client
+        .identity_create("John Doe", "jdoe@example.com")
+        .await
+        .unwrap()
+        .unwrap_id();
+    let identity_id_2 = client
+        .identity_create("John Doe (secondary)", "john.doe@example.com")
+        .await
+        .unwrap()
+        .unwrap_id();
     assert!(matches!(
-        client.principal_destroy(&account_id).await,
-        Err(jmap_client::Error::Method(MethodError {
-            p_type: MethodErrorType::Forbidden
+        client
+            .identity_create("John the Spammer", "spammy@mcspamface.com")
+            .await,
+        Err(jmap_client::Error::Set(SetError {
+            type_: SetErrorType::InvalidProperties,
+            ..
         }))
     ));
 
@@ -164,4 +178,40 @@ where
             ..
         }))
     ));
+
+    // Destroy test accounts
+    //TODO remove mailbox/identity deletion
+    admin_client
+        .set_default_account_id(&account_id)
+        .mailbox_destroy(&JMAPId::new(INBOX_ID as u64).to_string(), true)
+        .await
+        .unwrap();
+    admin_client
+        .mailbox_destroy(&JMAPId::new(TRASH_ID as u64).to_string(), true)
+        .await
+        .unwrap();
+    client.identity_destroy(&identity_id).await.unwrap();
+    client.identity_destroy(&identity_id_2).await.unwrap();
+    // TODO remove till here
+    admin_client
+        .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
+        .principal_destroy(&account_id)
+        .await
+        .unwrap();
+    admin_client.principal_destroy(&domain_id).await.unwrap();
+    server.store.assert_is_empty();
+}
+
+pub fn assert_forbidden<T: Debug>(result: Result<T, jmap_client::Error>) {
+    if !matches!(
+        result,
+        Err(jmap_client::Error::Method(MethodError {
+            p_type: MethodErrorType::Forbidden
+        })) | Err(jmap_client::Error::Set(SetError {
+            type_: SetErrorType::Forbidden,
+            ..
+        }))
+    ) {
+        panic!("Expected forbidden, got {:?}", result);
+    }
 }

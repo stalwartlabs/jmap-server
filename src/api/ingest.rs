@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
@@ -38,15 +40,15 @@ pub struct Params {
     api_key: String,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Dsn {
-    to: String,
-    status: DeliveryStatus,
+    pub to: String,
+    pub status: DeliveryStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
+    pub reason: Option<String>,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DeliveryStatus {
     #[serde(rename = "success")]
     Success,
@@ -277,28 +279,33 @@ where
 
         // Deliver message to recipients
         let mut result = Vec::with_capacity(recipients.len());
+        let mut delivered_to = HashSet::with_capacity(recipients.len());
         for email in recipients {
             // Expand recipients
             match self.expand_rcpt(email.clone()) {
                 Ok(accounts) => match accounts.as_ref() {
                     RecipientType::Individual(account_id) => {
-                        self.mail_deliver_rcpt(
-                            &mut result,
-                            *account_id,
-                            email,
-                            &document,
-                            return_address.as_deref(),
-                        );
-                    }
-                    RecipientType::List(accounts) => {
-                        for (account_id, email) in accounts {
+                        if delivered_to.insert(*account_id) {
                             self.mail_deliver_rcpt(
                                 &mut result,
                                 *account_id,
-                                email.to_string(),
+                                email,
                                 &document,
                                 return_address.as_deref(),
                             );
+                        }
+                    }
+                    RecipientType::List(accounts) => {
+                        for (account_id, email) in accounts {
+                            if delivered_to.insert(*account_id) {
+                                self.mail_deliver_rcpt(
+                                    &mut result,
+                                    *account_id,
+                                    email.to_string(),
+                                    &document,
+                                    return_address.as_deref(),
+                                );
+                            }
                         }
                     }
                     RecipientType::NotFound => {

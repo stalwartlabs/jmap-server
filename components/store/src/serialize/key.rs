@@ -152,7 +152,9 @@ impl BlobKey {
         );
         key.extend_from_slice(&id.hash);
         id.size.to_leb128_bytes(&mut key);
-        account.to_leb128_bytes(&mut key);
+        if account != AccountId::MAX {
+            account.to_leb128_bytes(&mut key);
+        }
         key
     }
 

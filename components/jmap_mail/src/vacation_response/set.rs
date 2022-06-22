@@ -7,7 +7,6 @@ use jmap::request::set::SetResponse;
 use jmap::request::ResultReference;
 use jmap::types::jmap::JMAPId;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
-use store::parking_lot::MutexGuard;
 use store::{JMAPStore, Store};
 
 use super::schema::{Property, Value};
@@ -93,7 +92,7 @@ where
             // Validate fields
             fields.insert_validate(document)?;
 
-            Ok((VacationResponse::new(id), None::<MutexGuard<'_, ()>>))
+            Ok(VacationResponse::new(id))
         })?;
 
         helper.update(|id, item, helper, document| {

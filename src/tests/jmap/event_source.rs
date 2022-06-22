@@ -1,15 +1,15 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use actix_web::web;
 use futures::StreamExt;
 
 use jmap::types::jmap::JMAPId;
 use jmap_client::{client::Client, event_source::Changes, mailbox::Role, TypeState};
-use store::Store;
+use store::{RecipientType, Store};
 use tokio::sync::mpsc;
 
 use crate::{
-    tests::{jmap::ingest_message, store::utils::StoreCompareWith},
+    tests::{jmap_mail::ingest_message, store::utils::StoreCompareWith},
     JMAPServer,
 };
 
@@ -18,6 +18,12 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     println!("Running EventSource tests...");
+
+    // Create a domain name and a test account
+    server.store.recipients.insert(
+        "jdoe@example.com".to_string(),
+        Arc::new(RecipientType::Individual(1)),
+    );
 
     let mut changes = client
         .event_source(None::<Vec<_>>, false, 1.into(), None)

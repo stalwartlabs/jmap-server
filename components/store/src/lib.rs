@@ -178,6 +178,7 @@ where
         store
     }
 
+    #[inline(always)]
     pub fn lock_account(&self, account: AccountId, collection: Collection) -> MutexGuard<'_, ()> {
         self.account_lock.lock_hash((account, collection))
     }

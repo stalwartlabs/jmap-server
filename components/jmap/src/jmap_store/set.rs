@@ -37,12 +37,14 @@ where
     O: SetObject,
 {
     pub store: &'y JMAPStore<T>,
+    pub lock: MutexGuard<'y, ()>,
     pub changes: WriteBatch,
     pub document_ids: RoaringBitmap,
     pub account_id: AccountId,
     pub acl: Arc<ACLToken>,
     pub collection: Collection,
     pub will_destroy: Vec<JMAPId>,
+    pub batch_writes: bool,
 
     pub change_id: ChangeId,
     pub state_changes: Vec<(TypeState, ChangeId)>,
@@ -73,6 +75,7 @@ where
             .unwrap_or_default();
         Ok(SetHelper {
             store,
+            lock: store.lock_account(account_id, collection),
             changes: WriteBatch::new(account_id),
             document_ids: store
                 .get_document_ids(account_id, collection)?
@@ -82,6 +85,7 @@ where
             collection,
             change_id: ChangeId::MAX,
             state_changes: Vec::new(),
+            batch_writes: true,
             response: SetResponse {
                 account_id: request.account_id.into(),
                 new_state: old_state.clone().into(),
@@ -99,6 +103,10 @@ where
             will_destroy,
             request,
         })
+    }
+
+    pub fn disable_write_batch(&mut self) {
+        self.batch_writes = false;
     }
 
     fn map_id_reference(&self, create_id: &str) -> Option<JMAPId> {
@@ -144,10 +152,7 @@ where
             O,
             &mut Self,
             &mut Document,
-        ) -> crate::error::set::Result<
-            (O, Option<MutexGuard<'y, ()>>),
-            O::Property,
-        >,
+        ) -> crate::error::set::Result<O, O::Property>,
     ) -> crate::Result<()> {
         for (create_id, item) in self.request.create.take().unwrap_or_default() {
             let mut document = Document::new(
@@ -157,12 +162,12 @@ where
             );
 
             match create_fnc(&create_id, item, self, &mut document) {
-                Ok((result, lock)) => {
+                Ok(result) => {
                     self.document_ids.insert(document.document_id);
                     self.changes.insert_document(document);
                     self.changes
                         .log_insert(self.collection, result.id().unwrap());
-                    if lock.is_some() {
+                    if !self.batch_writes {
                         self.write()?;
                     }
                     self.response.created.insert(create_id, result);

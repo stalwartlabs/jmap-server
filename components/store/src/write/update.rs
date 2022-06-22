@@ -35,10 +35,29 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn write(&self, batch: WriteBatch) -> crate::Result<Option<Changes>> {
-        let mut write_batch = Vec::with_capacity(batch.documents.len());
+    pub fn write(&self, mut batch: WriteBatch) -> crate::Result<Option<Changes>> {
+        let mut ops = Vec::with_capacity(batch.documents.len());
+
+        // Prepare linked batch
+        if let Some(linked_batch) = batch.linked_batch.take() {
+            self.prepare_batch(&mut ops, *linked_batch)?;
+        }
+
+        // Prepare main batch
+        let changes = self.prepare_batch(&mut ops, batch)?;
+
+        // Submit write batch
+        self.db.write(ops)?;
+
+        Ok(changes)
+    }
+
+    fn prepare_batch(
+        &self,
+        ops: &mut Vec<WriteOperation>,
+        batch: WriteBatch,
+    ) -> crate::Result<Option<Changes>> {
         let mut bitmap_list = HashMap::new();
-        let mut changes = None;
 
         let tombstone_deletions = self
             .tombstone_deletions
@@ -202,13 +221,13 @@ where
                             field.field,
                         );
                         if !is_clear {
-                            write_batch.push(WriteOperation::set(
+                            ops.push(WriteOperation::set(
                                 ColumnFamily::Values,
                                 key,
                                 field.value.text.as_bytes().to_vec(),
                             ));
                         } else {
-                            write_batch.push(WriteOperation::delete(ColumnFamily::Values, key));
+                            ops.push(WriteOperation::delete(ColumnFamily::Values, key));
                         }
                     }
 
@@ -221,13 +240,9 @@ where
                             field.value.text.as_bytes(),
                         );
                         if !is_clear {
-                            write_batch.push(WriteOperation::set(
-                                ColumnFamily::Indexes,
-                                key,
-                                vec![],
-                            ));
+                            ops.push(WriteOperation::set(ColumnFamily::Indexes, key, vec![]));
                         } else {
-                            write_batch.push(WriteOperation::delete(ColumnFamily::Indexes, key));
+                            ops.push(WriteOperation::delete(ColumnFamily::Indexes, key));
                         }
                     }
                 }
@@ -239,7 +254,7 @@ where
                             StoreError::InternalError("Failed to serialize Term Index.".to_string())
                         })?)?;
 
-                    write_batch.push(WriteOperation::set(
+                    ops.push(WriteOperation::set(
                         ColumnFamily::Values,
                         ValueKey::serialize_term_index(
                             batch.account_id,
@@ -303,7 +318,7 @@ where
                     document.collection,
                     document.document_id,
                 );
-                write_batch.push(if !is_clear {
+                ops.push(if !is_clear {
                     WriteOperation::set(
                         ColumnFamily::Values,
                         term_index_key,
@@ -333,13 +348,13 @@ where
                         field.field,
                     );
                     if !field.is_clear() {
-                        write_batch.push(WriteOperation::set(
+                        ops.push(WriteOperation::set(
                             ColumnFamily::Values,
                             key,
                             field.value.serialize().unwrap(),
                         ));
                     } else {
-                        write_batch.push(WriteOperation::delete(ColumnFamily::Values, key));
+                        ops.push(WriteOperation::delete(ColumnFamily::Values, key));
                     }
                 }
 
@@ -352,9 +367,9 @@ where
                         &field.value.to_be_bytes(),
                     );
                     if !field.is_clear() {
-                        write_batch.push(WriteOperation::set(ColumnFamily::Indexes, key, vec![]));
+                        ops.push(WriteOperation::set(ColumnFamily::Indexes, key, vec![]));
                     } else {
-                        write_batch.push(WriteOperation::delete(ColumnFamily::Indexes, key));
+                        ops.push(WriteOperation::delete(ColumnFamily::Indexes, key));
                     }
                 }
             }
@@ -380,7 +395,7 @@ where
                     document.document_id,
                     field.get_field(),
                 );
-                write_batch.push(if !field.is_clear() {
+                ops.push(if !field.is_clear() {
                     WriteOperation::set(ColumnFamily::Values, key, field.value)
                 } else {
                     WriteOperation::delete(ColumnFamily::Values, key)
@@ -397,7 +412,7 @@ where
                     document.collection,
                     document.document_id,
                 );
-                write_batch.push(if is_set {
+                ops.push(if is_set {
                     WriteOperation::set(ColumnFamily::Blobs, key, vec![])
                 } else {
                     WriteOperation::delete(ColumnFamily::Blobs, key)
@@ -413,18 +428,27 @@ where
                     document.document_id,
                 );
                 if !options.is_clear() {
-                    write_batch.push(WriteOperation::Set {
+                    ops.push(WriteOperation::Set {
                         cf: ColumnFamily::Values,
                         key,
                         value: acl.acl.serialize().unwrap(),
                     });
                 } else {
-                    write_batch.push(WriteOperation::Delete {
+                    ops.push(WriteOperation::Delete {
                         cf: ColumnFamily::Values,
                         key,
                     });
                 }
             }
+        }
+
+        // Update bitmaps
+        for (key, doc_id_list) in bitmap_list {
+            ops.push(WriteOperation::merge(
+                ColumnFamily::Bitmaps,
+                key,
+                set_clear_bits(doc_id_list.into_iter()),
+            ));
         }
 
         // Serialize Raft and change log
@@ -435,7 +459,7 @@ where
             for (collection, log_entry) in batch.changes {
                 collections.insert(collection);
 
-                write_batch.push(WriteOperation::set(
+                ops.push(WriteOperation::set(
                     ColumnFamily::Logs,
                     LogKey::serialize_change(batch.account_id, collection, raft_id.index),
                     log_entry.serialize(),
@@ -449,20 +473,15 @@ where
             bytes.push(Change::ENTRY);
             bytes.extend_from_slice(&batch.account_id.to_le_bytes());
             bytes.extend_from_slice(&collections.to_le_bytes());
-            write_batch.push(WriteOperation::set(
+            ops.push(WriteOperation::set(
                 ColumnFamily::Logs,
                 LogKey::serialize_raft(&raft_id),
                 bytes,
             ));
-            changes = Changes {
-                collections,
-                change_id: raft_id.index,
-            }
-            .into();
 
             // Serialize raft tombstones
             if !tombstones.is_empty() {
-                write_batch.push(WriteOperation::set(
+                ops.push(WriteOperation::set(
                     ColumnFamily::Logs,
                     LogKey::serialize_tombstone(raft_id.index, batch.account_id),
                     bincode::serialize(&tombstones).map_err(|_| {
@@ -470,20 +489,14 @@ where
                     })?,
                 ));
             }
+
+            Ok(Changes {
+                collections,
+                change_id: raft_id.index,
+            }
+            .into())
+        } else {
+            Ok(None)
         }
-
-        // Update bitmaps
-        for (key, doc_id_list) in bitmap_list {
-            write_batch.push(WriteOperation::merge(
-                ColumnFamily::Bitmaps,
-                key,
-                set_clear_bits(doc_id_list.into_iter()),
-            ));
-        }
-
-        // Submit write batch
-        self.db.write(write_batch)?;
-
-        Ok(changes)
     }
 }

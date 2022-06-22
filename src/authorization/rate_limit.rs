@@ -16,6 +16,7 @@ use crate::{
 
 use super::auth::RemoteAddress;
 
+#[derive(Debug)]
 pub struct RateLimiter {
     max_requests: f64,
     max_interval: f64,

@@ -18,6 +18,7 @@ use jmap::{
         ACLEnforce, MaybeIdReference,
     },
     types::{blob::JMAPBlob, jmap::JMAPId},
+    SUPERUSER_ID,
 };
 use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
@@ -589,7 +590,8 @@ where
         acl: &Arc<ACLToken>,
         blob: &JMAPBlob,
     ) -> store::Result<BlobResult> {
-        if !acl.is_member(account_id) {
+        if !self.blob_account_has_access(&blob.id, &acl.member_of)? && !acl.is_member(SUPERUSER_ID)
+        {
             if let Some(shared_ids) = self
                 .mail_shared_messages(account_id, &acl.member_of, ACL::ReadItems)?
                 .as_ref()

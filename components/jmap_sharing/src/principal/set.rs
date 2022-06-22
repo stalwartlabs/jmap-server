@@ -13,10 +13,10 @@ use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
 use store::core::collection::Collection;
 use store::core::document::Document;
-use store::parking_lot::MutexGuard;
 use store::read::comparator::Comparator;
 use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
+use store::write::batch::WriteBatch;
 use store::{DocumentId, JMAPStore, Store};
 
 use super::schema::{Principal, Property, Type, Value};
@@ -54,10 +54,7 @@ where
                 .principal_set(helper, item, None, document.document_id)?
                 .insert_validate(document)?;
 
-            Ok((
-                Principal::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
+            Ok(Principal::new(document.document_id.into()))
         })?;
 
         helper.update(|id, item, helper, document| {
@@ -72,6 +69,26 @@ where
                 document.document_id,
             )?;
 
+            // Invalidate cache on mailing lists or email address changes
+            match (
+                fields.get(&Property::Email),
+                current_fields.get(&Property::Email),
+            ) {
+                (
+                    Some(Value::Text { value: new_email }),
+                    Some(Value::Text { value: old_email }),
+                ) if new_email != old_email => {
+                    helper.store.recipients.invalidate(old_email);
+                }
+                _ => (),
+            }
+            if let (Some(Value::Members { .. }), Some(Value::Text { value: email })) = (
+                fields.get(&Property::Members),
+                current_fields.get(&Property::Email),
+            ) {
+                helper.store.recipients.invalidate(email);
+            }
+
             // Merge changes
             current_fields.merge_validate(document, fields)?;
 
@@ -81,8 +98,14 @@ where
         helper.destroy(|_id, helper, document| {
             //TODO delete members
             //TODO delete account messages
-            if let Some(orm) = self.get_orm::<Principal>(helper.account_id, document.document_id)? {
-                orm.delete(document);
+            if let Some(fields) =
+                self.get_orm::<Principal>(helper.account_id, document.document_id)?
+            {
+                if let Some(Value::Text { value }) = fields.get(&Property::Email) {
+                    helper.store.recipients.invalidate(value);
+                }
+                helper.store.acl_tokens.invalidate(&document.document_id);
+                fields.delete(document);
             }
             Ok(())
         })?;
@@ -263,17 +286,56 @@ where
                 (Property::DKIM, value @ Value::DKIM { .. }) if ptype == Type::Domain => value,
                 (Property::Quota, value @ (Value::Number { .. } | Value::Null)) => value,
                 (Property::Picture, value @ (Value::Blob { .. } | Value::Null)) => value,
-                (Property::Members, Value::Members { value })
-                    if ![Type::Individual, Type::Domain].contains(&ptype) =>
-                {
-                    let mut new_members = Vec::with_capacity(value.len());
+                (Property::Members, Value::Members { value }) if ptype == Type::Group => {
+                    let current_members = current_fields.as_ref().and_then(|f| {
+                        f.get(&Property::Members).and_then(|current_members| {
+                            if let Value::Members {
+                                value: current_members,
+                            } = current_members
+                            {
+                                for id in current_members {
+                                    if !value.contains(id) {
+                                        helper.store.acl_tokens.invalidate(&id.get_document_id());
+                                    }
+                                }
+                                Some(current_members)
+                            } else {
+                                None
+                            }
+                        })
+                    });
                     for id in &value {
-                        if helper.document_ids.contains(id.get_document_id()) {
-                            new_members.push(id.get_document_id());
+                        let account_id = id.get_document_id();
+                        if helper.document_ids.contains(account_id) {
+                            if current_members.as_ref().map_or(true, |l| !l.contains(id)) {
+                                helper.store.acl_tokens.invalidate(&account_id);
+                            }
                         } else {
                             return Err(SetError::invalid_property(
                                 property,
-                                format!("Principal {} does not exist.", id),
+                                format!("Principal '{}' does not exist.", id),
+                            ));
+                        }
+                    }
+
+                    Value::Members { value }
+                }
+                (Property::Members, Value::Members { value }) if ptype == Type::List => {
+                    let individuals = helper
+                        .store
+                        .query_store::<FilterMapper>(
+                            helper.account_id,
+                            Collection::Principal,
+                            Filter::eq(Property::Type.into(), Query::Keyword("i".to_string())),
+                            Comparator::None,
+                        )?
+                        .into_bitmap();
+
+                    for id in &value {
+                        if !individuals.contains(id.get_document_id()) {
+                            return Err(SetError::invalid_property(
+                                property,
+                                format!("Principal '{}' is not an individual.", id),
                             ));
                         }
                     }
@@ -395,20 +457,23 @@ where
                     "Missing 'secret' property.".to_string(),
                 ));
             }
+        }
 
-            // Create default mailboxes in new accounts
-            if current_fields.is_none() {
-                for (name, role) in [("Inbox", "inbox"), ("Deleted Items", "trash")] {
-                    let mut document = Document::new(
-                        Collection::Mailbox,
-                        helper
-                            .store
-                            .assign_document_id(document_id, Collection::Mailbox)?,
-                    );
-                    TinyORM::<Mailbox>::new_mailbox(name, role).insert(&mut document)?;
-                    helper.changes.insert_document(document);
-                }
+        // Create default mailboxes in new accounts
+        if current_fields.is_none() && [Type::Individual, Type::Group].contains(&ptype) {
+            let mut batch = WriteBatch::new(document_id);
+            for (name, role) in [("Inbox", "inbox"), ("Deleted Items", "trash")] {
+                let mut document = Document::new(
+                    Collection::Mailbox,
+                    helper
+                        .store
+                        .assign_document_id(document_id, Collection::Mailbox)?,
+                );
+                TinyORM::<Mailbox>::new_mailbox(name, role).insert(&mut document)?;
+                batch.log_insert(Collection::Mailbox, document.document_id);
+                batch.insert_document(document);
             }
+            helper.changes.set_linked_batch(batch);
         }
 
         Ok(self)

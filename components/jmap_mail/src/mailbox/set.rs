@@ -17,11 +17,10 @@ use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::core::JMAPIdPrefix;
-use store::parking_lot::MutexGuard;
 use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
-use store::{DocumentId, JMAPStore, LongInteger};
+use store::{DocumentId, JMAPStore, LongInteger, SharedResource};
 use store::{SharedBitmap, Store};
 
 #[derive(Debug, Clone, Default)]
@@ -115,10 +114,7 @@ where
             }
             mailbox.insert_validate(document)?;
 
-            Ok((
-                Mailbox::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
+            Ok(Mailbox::new(document.document_id.into()))
         })?;
 
         helper.update(|id, mailbox, helper, document| {
@@ -362,6 +358,25 @@ where
                     Value::Null
                 }
                 (Property::SortOrder, value @ Value::Number { .. }) => value,
+                (Property::ACL, Value::ACL(value)) => {
+                    let principals = helper
+                        .store
+                        .get_document_ids(SUPERUSER_ID, Collection::Principal)?
+                        .unwrap_or_default();
+                    for id in value.acl.keys() {
+                        let shared_to = id.get_document_id();
+                        if !principals.contains(shared_to) {
+                            return Err(SetError::invalid_property(
+                                property,
+                                format!("Principal {} does not exist.", id),
+                            ));
+                        }
+                    }
+
+                    self.acl_update(value);
+                    //println!("acls new: {:?}", self.get_acls());
+                    continue;
+                }
                 (_, _) => {
                     return Err(SetError::invalid_property(
                         property,
@@ -487,6 +502,21 @@ where
                             SetErrorType::InvalidProperties,
                             format!("A mailbox with name '{}' already exists.", mailbox_name),
                         ));
+                    }
+                }
+            }
+        }
+
+        // Invalidate cache for changed ACLs
+        if let Some(permissions) = self.get_changed_acls(current_fields) {
+            for permission in permissions {
+                helper.store.acl_tokens.invalidate(&permission.id);
+                for acl in permission.acl {
+                    for collection in [Collection::Mail, Collection::Mailbox] {
+                        let key =
+                            SharedResource::new(helper.account_id, permission.id, collection, acl);
+                        //println!("invalidating {:?}", key);
+                        helper.store.shared_documents.invalidate(&key);
                     }
                 }
             }

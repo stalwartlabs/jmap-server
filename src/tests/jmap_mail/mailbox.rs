@@ -419,7 +419,7 @@ where
 
     // Verify that Trash folder and its contents are gone
     assert!(client
-        .mailbox_get(&id_map["trash"], None)
+        .mailbox_get(&id_map["trash"], None::<Vec<_>>)
         .await
         .unwrap()
         .is_none());

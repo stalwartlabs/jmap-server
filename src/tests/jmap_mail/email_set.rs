@@ -174,7 +174,7 @@ async fn update(client: &mut Client, root_mailbox_id: &str) {
     let mailbox = client
         .email_query(
             email::query::Filter::in_mailbox(root_mailbox_id).into(),
-            None,
+            None::<Vec<_>>,
         )
         .await
         .unwrap();

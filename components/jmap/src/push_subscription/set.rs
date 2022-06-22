@@ -8,7 +8,6 @@ use crate::request::ResultReference;
 use crate::types::jmap::JMAPId;
 use crate::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::chrono::Utc;
-use store::parking_lot::MutexGuard;
 use store::rand::distributions::Alphanumeric;
 use store::rand::{thread_rng, Rng};
 use store::{JMAPStore, Store};
@@ -127,10 +126,7 @@ where
             // Validate fields
             fields.insert_validate(document)?;
 
-            Ok((
-                PushSubscription::new(document.document_id.into()),
-                None::<MutexGuard<'_, ()>>,
-            ))
+            Ok(PushSubscription::new(document.document_id.into()))
         })?;
 
         helper.update(|id, item, helper, document| {

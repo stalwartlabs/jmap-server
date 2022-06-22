@@ -1,14 +1,16 @@
+use std::sync::Arc;
+
 use actix_web::web;
 use jmap::types::jmap::JMAPId;
 use jmap_client::{client::Client, mailbox::Role};
 use store::{
     chrono::{Duration, Utc},
-    Store,
+    RecipientType, Store,
 };
 
 use crate::{
     tests::{
-        jmap::{
+        jmap_mail::{
             email_submission::{
                 assert_message_delivery, expect_nothing, spawn_mock_smtp_server, MockMessage,
             },
@@ -32,6 +34,10 @@ where
         .await
         .unwrap()
         .unwrap_id();
+    server.store.recipients.insert(
+        "jdoe@example.com".to_string(),
+        Arc::new(RecipientType::Individual(1)),
+    );
 
     // Start mock SMTP server
     let (mut smtp_rx, smtp_settings) = spawn_mock_smtp_server();

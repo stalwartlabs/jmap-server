@@ -101,17 +101,28 @@ where
     pub fn blob_account_has_access(
         &self,
         blob_id: &BlobId,
-        account_id: AccountId,
+        account_ids: &[AccountId],
     ) -> crate::Result<bool> {
-        let prefix = BlobKey::serialize_prefix(blob_id, account_id);
+        let prefix = BlobKey::serialize_prefix(blob_id, AccountId::MAX);
 
-        if let Some((key, _)) = self
+        for (key, _) in self
             .db
             .iterator(ColumnFamily::Blobs, &prefix, Direction::Forward)?
-            .next()
         {
             if key.starts_with(&prefix) {
-                return Ok(true);
+                if key.len() > prefix.len() {
+                    if let Some((account_id, _)) =
+                        AccountId::from_leb128_bytes(&key[prefix.len()..])
+                    {
+                        if account_ids.contains(&account_id) {
+                            return Ok(true);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                break;
             }
         }
 

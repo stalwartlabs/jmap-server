@@ -771,7 +771,7 @@ async fn get_anchor(client: &mut Client, anchor: &str) -> Option<String> {
     client
         .email_query(
             email::query::Filter::header("Message-Id", anchor.into()).into(),
-            None,
+            None::<Vec<_>>,
         )
         .await
         .unwrap()

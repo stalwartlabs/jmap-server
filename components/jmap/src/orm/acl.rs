@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use serde::{Deserialize, Serialize};
 use store::{
@@ -75,5 +75,37 @@ where
             acls.insert(JMAPId::from(acl.id), acl.acl.clone().into_iter().collect());
         }
         acls
+    }
+
+    pub fn get_changed_acls(&self, changes: Option<&Self>) -> Option<Vec<Permission>> {
+        if let Some(changes) = changes {
+            if changes.acls != self.acls {
+                let mut acls: HashMap<AccountId, Bitmap<ACL>> = HashMap::new();
+                for (a, b) in [(&self.acls, &changes.acls), (&changes.acls, &self.acls)] {
+                    for p in a {
+                        if !b.contains(p) {
+                            match acls.entry(p.id) {
+                                Entry::Occupied(mut entry) => {
+                                    entry.get_mut().union(&p.acl);
+                                }
+                                Entry::Vacant(entry) => {
+                                    entry.insert(p.acl.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                acls.into_iter()
+                    .map(|(id, acl)| Permission { id, acl })
+                    .collect::<Vec<_>>()
+                    .into()
+            } else {
+                None
+            }
+        } else if !self.acls.is_empty() {
+            self.acls.clone().into()
+        } else {
+            None
+        }
     }
 }

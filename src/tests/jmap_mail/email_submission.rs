@@ -17,7 +17,7 @@ use tokio::{
 };
 
 use crate::{
-    tests::{jmap::email_set::assert_email_properties, store::utils::StoreCompareWith},
+    tests::{jmap_mail::email_set::assert_email_properties, store::utils::StoreCompareWith},
     JMAPServer,
 };
 

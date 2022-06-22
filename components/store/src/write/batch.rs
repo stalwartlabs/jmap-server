@@ -14,6 +14,7 @@ pub struct WriteBatch {
     pub account_id: AccountId,
     pub changes: HashMap<Collection, Change>,
     pub documents: Vec<WriteAction>,
+    pub linked_batch: Option<Box<WriteBatch>>,
 }
 
 #[derive(Default)]
@@ -30,6 +31,7 @@ impl WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: Vec::new(),
+            linked_batch: None,
         }
     }
 
@@ -38,6 +40,7 @@ impl WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: vec![WriteAction::Insert(document)],
+            linked_batch: None,
         }
     }
 
@@ -46,6 +49,7 @@ impl WriteBatch {
             account_id,
             changes: HashMap::new(),
             documents: vec![WriteAction::Delete(Document::new(collection, document_id))],
+            linked_batch: None,
         }
     }
 
@@ -113,7 +117,12 @@ impl WriteBatch {
             account_id: self.account_id,
             changes: std::mem::take(&mut self.changes),
             documents: std::mem::take(&mut self.documents),
+            linked_batch: self.linked_batch.take(),
         }
+    }
+
+    pub fn set_linked_batch(&mut self, batch: WriteBatch) {
+        self.linked_batch = Box::new(batch).into();
     }
 }
 
