@@ -590,12 +590,12 @@ where
                         if matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN) {
                             if !allowed_set_seen.has_access(document.document_id) {
                                 return Err(SetError::forbidden(
-                                    "You are not allowed to set the seen flag.",
+                                    "You are not allowed to change the $seen flag.",
                                 ));
                             }
                         } else if !allowed_set_keywords.has_access(document.document_id) {
                             return Err(SetError::forbidden(
-                                "You are not allowed to set the flagged flag.",
+                                "You are not allowed to set keywords.",
                             ));
                         }
                     }

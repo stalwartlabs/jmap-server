@@ -22,7 +22,7 @@ use jmap::{
 };
 use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
-    HeaderOffset, HeaderValue, MessageStructure, RfcHeader,
+    HeaderOffset, HeaderValue, Message, MessageStructure, RfcHeader,
 };
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 use store::{
@@ -610,15 +610,16 @@ where
         }
 
         let bytes = self.blob_get(&blob.id)?;
-        Ok(
-            if let (Some(bytes), Some(inner_id)) = (&bytes, blob.inner_id) {
-                get_message_part(bytes, inner_id).map(|bytes| bytes.into_owned())
-            } else {
-                bytes
-            }
-            .map(BlobResult::Blob)
-            .unwrap_or(BlobResult::NotFound),
-        )
+        Ok(if let (Some(message), Some(inner_id)) = (
+            bytes.as_ref().and_then(|b| Message::parse(b)),
+            blob.inner_id,
+        ) {
+            get_message_part(message, inner_id, false).map(|bytes| bytes.into_owned())
+        } else {
+            bytes
+        }
+        .map(BlobResult::Blob)
+        .unwrap_or(BlobResult::NotFound))
     }
 }
 

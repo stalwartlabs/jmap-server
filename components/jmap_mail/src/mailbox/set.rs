@@ -374,7 +374,6 @@ where
                     }
 
                     self.acl_update(value);
-                    //println!("acls new: {:?}", self.get_acls());
                     continue;
                 }
                 (_, _) => {
@@ -515,7 +514,6 @@ where
                     for collection in [Collection::Mail, Collection::Mailbox] {
                         let key =
                             SharedResource::new(helper.account_id, permission.id, collection, acl);
-                        //println!("invalidating {:?}", key);
                         helper.store.shared_documents.invalidate(&key);
                     }
                 }

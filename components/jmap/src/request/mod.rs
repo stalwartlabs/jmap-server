@@ -1,3 +1,4 @@
+pub mod blob;
 pub mod changes;
 pub mod copy;
 pub mod get;

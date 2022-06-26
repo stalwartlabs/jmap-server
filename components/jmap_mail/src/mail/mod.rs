@@ -7,6 +7,7 @@ pub mod parse;
 pub mod query;
 pub mod raft;
 pub mod schema;
+pub mod search_snippet;
 pub mod serialize;
 pub mod set;
 pub mod sharing;

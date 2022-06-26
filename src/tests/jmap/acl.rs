@@ -1,17 +1,20 @@
 use std::collections::HashMap;
 
 use actix_web::web;
-use jmap::types::jmap::JMAPId;
+use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
 use jmap_client::{
     client::{Client, Credentials},
     email::{import::EmailImportResponse, query::Filter, Property},
-    mailbox,
+    mailbox::{self, Role},
     principal::ACL,
 };
 use jmap_mail::{INBOX_ID, TRASH_ID};
 use store::Store;
 
-use crate::{tests::jmap::authorization::assert_forbidden, JMAPServer};
+use crate::{
+    tests::{jmap::authorization::assert_forbidden, store::utils::StoreCompareWith},
+    JMAPServer,
+};
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, admin_client: &mut Client)
 where
@@ -207,6 +210,37 @@ where
         .unwrap()
         .is_none());
 
+    // John should only be able to copy blobs he has access to
+    let blob_id = jane_client
+        .email_get(
+            email_ids.get("jane").unwrap().first().unwrap(),
+            [Property::BlobId].into(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_blob_id();
+    john_client
+        .set_default_account_id(&john_id)
+        .blob_copy(&jane_id, &blob_id)
+        .await
+        .unwrap();
+    let blob_id = jane_client
+        .email_get(
+            email_ids.get("jane").unwrap().last().unwrap(),
+            [Property::BlobId].into(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_blob_id();
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&john_id)
+            .blob_copy(&jane_id, &blob_id)
+            .await,
+    );
+
     // John only has ReadItems access to Inbox but no Read access
     assert_forbidden(
         john_client
@@ -214,8 +248,6 @@ where
             .mailbox_get(&inbox_id, [mailbox::Property::MyRights].into())
             .await,
     );
-
-    // Grant access and try again
     jane_client
         .mailbox_update_acl(&inbox_id, &john_id, [ACL::Read, ACL::ReadItems])
         .await
@@ -334,26 +366,405 @@ where
         "Owned by john in trash"
     );
 
-    // Try to remove items
-    // Try to set seen
-    // Try to set keywords
-    // Try to create child
-    // Try to rename
-    // Try to delete
-    // Try to change ACL
-
-    // TODO test groups
-    /*println!(
-        "{}",
-        serde_json::to_string_pretty(john_client.session()).unwrap()
-    );*/
-    /*assert_forbidden(
+    // Try removing items
+    assert_forbidden(
         john_client
-            .set_default_account_id(&sales_id)
+            .set_default_account_id(&jane_id)
+            .email_destroy(&email_id)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &inbox_id,
+            &john_id,
+            [ACL::Read, ACL::ReadItems, ACL::AddItems, ACL::RemoveItems],
+        )
+        .await
+        .unwrap();
+    john_client
+        .set_default_account_id(&jane_id)
+        .email_destroy(&email_id)
+        .await
+        .unwrap();
+
+    // Try to set the $seen flag
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .email_set_keyword(&email_id_2, "$seen", true)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &inbox_id,
+            &john_id,
+            [
+                ACL::Read,
+                ACL::ReadItems,
+                ACL::AddItems,
+                ACL::RemoveItems,
+                ACL::SetSeen,
+            ],
+        )
+        .await
+        .unwrap();
+    john_client
+        .set_default_account_id(&jane_id)
+        .email_set_keyword(&email_id_2, "$seen", true)
+        .await
+        .unwrap();
+
+    // Try to set keywords
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .email_set_keyword(&email_id_2, "my-keyword", true)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &inbox_id,
+            &john_id,
+            [
+                ACL::Read,
+                ACL::ReadItems,
+                ACL::AddItems,
+                ACL::RemoveItems,
+                ACL::SetSeen,
+                ACL::SetKeywords,
+            ],
+        )
+        .await
+        .unwrap();
+    john_client
+        .set_default_account_id(&jane_id)
+        .email_set_keyword(&email_id_2, "my-keyword", true)
+        .await
+        .unwrap();
+
+    // Try to create child
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .mailbox_create("John's mailbox", None::<&str>, Role::None)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &inbox_id,
+            &john_id,
+            [
+                ACL::Read,
+                ACL::ReadItems,
+                ACL::AddItems,
+                ACL::RemoveItems,
+                ACL::SetSeen,
+                ACL::SetKeywords,
+                ACL::CreateChild,
+            ],
+        )
+        .await
+        .unwrap();
+    let mailbox_id = john_client
+        .set_default_account_id(&jane_id)
+        .mailbox_create("John's mailbox", None::<&str>, Role::None)
+        .await
+        .unwrap()
+        .unwrap_id();
+
+    // Try renaming a mailbox
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .mailbox_rename(&mailbox_id, "John's private mailbox")
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &mailbox_id,
+            &john_id,
+            [ACL::Read, ACL::ReadItems, ACL::Modify],
+        )
+        .await
+        .unwrap();
+    john_client
+        .set_default_account_id(&jane_id)
+        .mailbox_rename(&mailbox_id, "John's private mailbox")
+        .await
+        .unwrap();
+
+    // Try moving a message
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .email_set_mailbox(&email_id_2, &mailbox_id, true)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &mailbox_id,
+            &john_id,
+            [ACL::Read, ACL::ReadItems, ACL::Modify, ACL::AddItems],
+        )
+        .await
+        .unwrap();
+    john_client
+        .set_default_account_id(&jane_id)
+        .email_set_mailbox(&email_id_2, &mailbox_id, true)
+        .await
+        .unwrap();
+
+    // Try deleting a mailbox
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .mailbox_destroy(&mailbox_id, true)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &mailbox_id,
+            &john_id,
+            [
+                ACL::Read,
+                ACL::ReadItems,
+                ACL::Modify,
+                ACL::AddItems,
+                ACL::Delete,
+            ],
+        )
+        .await
+        .unwrap();
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .mailbox_destroy(&mailbox_id, true)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &mailbox_id,
+            &john_id,
+            [
+                ACL::Read,
+                ACL::ReadItems,
+                ACL::Modify,
+                ACL::AddItems,
+                ACL::Delete,
+                ACL::RemoveItems,
+            ],
+        )
+        .await
+        .unwrap();
+    john_client
+        .set_default_account_id(&jane_id)
+        .mailbox_destroy(&mailbox_id, true)
+        .await
+        .unwrap();
+
+    // Try changing ACL
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
+            .mailbox_update_acl(&inbox_id, &bill_id, [ACL::Read, ACL::ReadItems])
+            .await,
+    );
+    assert_forbidden(
+        bill_client
+            .set_default_account_id(&jane_id)
+            .email_query(None::<Filter>, None::<Vec<_>>)
+            .await,
+    );
+    jane_client
+        .mailbox_update_acl(
+            &inbox_id,
+            &john_id,
+            [
+                ACL::Read,
+                ACL::ReadItems,
+                ACL::AddItems,
+                ACL::RemoveItems,
+                ACL::SetSeen,
+                ACL::SetKeywords,
+                ACL::CreateChild,
+                ACL::Modify,
+                ACL::Administer,
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        john_client
+            .set_default_account_id(&jane_id)
+            .mailbox_get(&inbox_id, [mailbox::Property::MyRights].into())
+            .await
+            .unwrap()
+            .unwrap()
+            .my_rights()
+            .unwrap()
+            .acl_list(),
+        vec![
+            ACL::ReadItems,
+            ACL::AddItems,
+            ACL::RemoveItems,
+            ACL::SetSeen,
+            ACL::SetKeywords,
+            ACL::CreateChild,
+            ACL::Modify
+        ]
+    );
+    john_client
+        .set_default_account_id(&jane_id)
+        .mailbox_update_acl(&inbox_id, &bill_id, [ACL::Read, ACL::ReadItems])
+        .await
+        .unwrap();
+    assert_eq!(
+        bill_client
+            .set_default_account_id(&jane_id)
+            .email_query(None::<Filter>, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .ids(),
+        [email_ids.get("jane").unwrap().first().unwrap().as_str()]
+    );
+
+    // Revoke all access to John
+    jane_client
+        .mailbox_update_acl(&inbox_id, &john_id, [])
+        .await
+        .unwrap();
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&jane_id)
             .email_get(
-                email_ids.get("sales").unwrap().first().unwrap(),
+                email_ids.get("jane").unwrap().first().unwrap(),
                 [Property::Subject].into(),
             )
             .await,
-    );*/
+    );
+    john_client.refresh_session().await.unwrap();
+    assert!(john_client.session().account(&jane_id).is_none());
+    assert_eq!(
+        bill_client
+            .set_default_account_id(&jane_id)
+            .email_get(
+                email_ids.get("jane").unwrap().first().unwrap(),
+                [Property::Subject].into(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .subject()
+            .unwrap(),
+        "Owned by jane in inbox"
+    );
+
+    // Add John and Jane to the Sales group
+    admin_client
+        .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64).to_string())
+        .principal_set_members(&sales_id, [&jane_id, &john_id].into())
+        .await
+        .unwrap();
+    john_client.refresh_session().await.unwrap();
+    jane_client.refresh_session().await.unwrap();
+    bill_client.refresh_session().await.unwrap();
+    assert_eq!(
+        john_client.session().account(&sales_id).unwrap().name(),
+        "Sales Group"
+    );
+    assert!(!john_client
+        .session()
+        .account(&sales_id)
+        .unwrap()
+        .is_personal());
+    assert_eq!(
+        jane_client.session().account(&sales_id).unwrap().name(),
+        "Sales Group"
+    );
+    assert!(bill_client.session().account(&sales_id).is_none());
+
+    // Insert a message in Sales's inbox
+    let blob_id = john_client
+        .set_default_account_id(&sales_id)
+        .upload(
+            concat!(
+                "From: acl_test@example.com\r\n",
+                "To: sales@example.com\r\n",
+                "Subject: Created by john in sales\r\n",
+                "\r\n",
+                "This message is owned by sales.",
+            )
+            .as_bytes()
+            .to_vec(),
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap_blob_id();
+    let mut request = john_client.build();
+    let email_id = request
+        .import_email()
+        .email(&blob_id)
+        .mailbox_ids([&inbox_id])
+        .create_id();
+    let email_id = request
+        .send_single::<EmailImportResponse>()
+        .await
+        .unwrap()
+        .created(&email_id)
+        .unwrap()
+        .unwrap_id();
+
+    // Both Jane and John should be able to see this message, but not Bill
+    assert_eq!(
+        john_client
+            .set_default_account_id(&sales_id)
+            .email_get(&email_id, [Property::Subject].into(),)
+            .await
+            .unwrap()
+            .unwrap()
+            .subject()
+            .unwrap(),
+        "Created by john in sales"
+    );
+    assert_eq!(
+        jane_client
+            .set_default_account_id(&sales_id)
+            .email_get(&email_id, [Property::Subject].into(),)
+            .await
+            .unwrap()
+            .unwrap()
+            .subject()
+            .unwrap(),
+        "Created by john in sales"
+    );
+    assert_forbidden(
+        bill_client
+            .set_default_account_id(&sales_id)
+            .email_get(&email_id, [Property::Subject].into())
+            .await,
+    );
+
+    // Remove John from the sales group
+    admin_client
+        .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64).to_string())
+        .principal_set_members(&sales_id, [&jane_id].into())
+        .await
+        .unwrap();
+    assert_forbidden(
+        john_client
+            .set_default_account_id(&sales_id)
+            .email_get(&email_id, [Property::Subject].into())
+            .await,
+    );
+
+    // Destroy test accounts
+    for user_id in [jane_id, john_id, bill_id, sales_id, domain_id] {
+        admin_client
+            .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
+            .principal_destroy(&user_id)
+            .await
+            .unwrap();
+    }
+    server.store.assert_is_empty();
 }

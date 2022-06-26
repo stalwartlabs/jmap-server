@@ -4,6 +4,7 @@ use jmap::{
     error::method::MethodError,
     push_subscription::schema::PushSubscription,
     request::{
+        blob::{CopyBlobRequest, CopyBlobResponse},
         changes::{ChangesRequest, ChangesResponse},
         copy::{CopyRequest, CopyResponse},
         get::{GetRequest, GetResponse},
@@ -23,6 +24,7 @@ use jmap_mail::{
         import::{EmailImportRequest, EmailImportResponse},
         parse::{EmailParseRequest, EmailParseResponse},
         schema::Email,
+        search_snippet::{SearchSnippetGetRequest, SearchSnippetGetResponse},
     },
     mailbox::schema::Mailbox,
     thread::schema::Thread,
@@ -84,7 +86,7 @@ pub enum Request {
     CopyEmail(CopyRequest<Email>),
     ImportEmail(EmailImportRequest),
     ParseEmail(EmailParseRequest),
-    //GetSearchSnippet(SearchSnippetGetResponse),
+    GetSearchSnippet(SearchSnippetGetRequest),
 
     // Identity
     GetIdentity(GetRequest<Identity>),
@@ -108,7 +110,7 @@ pub enum Request {
     SetPrincipal(SetRequest<Principal>),
 
     // Core methods
-    //CopyBlob(CopyBlobResponse),
+    CopyBlob(CopyBlobRequest),
     Echo(serde_json::Value),
     Error(MethodError),
 }
@@ -139,7 +141,7 @@ pub enum Response {
     CopyEmail(CopyResponse<Email>),
     ImportEmail(EmailImportResponse),
     ParseEmail(EmailParseResponse),
-    //GetSearchSnippet(SearchSnippetGetResponse),
+    GetSearchSnippet(SearchSnippetGetResponse),
 
     // Identity
     GetIdentity(GetResponse<Identity>),
@@ -163,7 +165,7 @@ pub enum Response {
     SetPrincipal(SetResponse<Principal>),
 
     // Core methods
-    //CopyBlob(CopyBlobResponse),
+    CopyBlob(CopyBlobResponse),
     Echo(serde_json::Value),
     Error(MethodError),
 }
@@ -269,6 +271,9 @@ impl Request {
             }
             Request::CopyEmail(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            Request::GetSearchSnippet(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
             }
             Request::SetIdentity(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
@@ -542,11 +547,11 @@ where
                 .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
-        /*"SearchSnippet/get" => Request::GetSearchSnippet(
+        "SearchSnippet/get" => Request::GetSearchSnippet(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
-                .ok_or( MatchError::Eof)?,
-        ),*/
+                .ok_or(MatchError::Eof)?,
+        ),
         "Identity/get" => Request::GetIdentity(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
@@ -622,11 +627,11 @@ where
                 .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
-        /*"Blob/copy" => Request::CopyBlob(
+        "Blob/copy" => Request::CopyBlob(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
-                .ok_or( MatchError::Eof)?,
-        ),*/
+                .ok_or(MatchError::Eof)?,
+        ),
         "Core/echo" => Request::Echo(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
@@ -717,6 +722,10 @@ impl Serialize for Call<Response> {
                 seq.serialize_element("Email/parse")?;
                 seq.serialize_element(response)?;
             }
+            Response::GetSearchSnippet(response) => {
+                seq.serialize_element("SearchSnippet/get")?;
+                seq.serialize_element(response)?;
+            }
             Response::GetIdentity(response) => {
                 seq.serialize_element("Identity/get")?;
                 seq.serialize_element(response)?;
@@ -767,6 +776,10 @@ impl Serialize for Call<Response> {
             }
             Response::SetPrincipal(response) => {
                 seq.serialize_element("Principal/set")?;
+                seq.serialize_element(response)?;
+            }
+            Response::CopyBlob(response) => {
+                seq.serialize_element("Blob/copy")?;
                 seq.serialize_element(response)?;
             }
             Response::Echo(response) => {

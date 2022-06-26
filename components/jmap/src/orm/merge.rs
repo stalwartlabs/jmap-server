@@ -257,6 +257,8 @@ where
                 }
             }
 
+            self.acls = changes.acls;
+
             if !has_changes {
                 has_changes = true;
             }

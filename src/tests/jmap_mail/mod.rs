@@ -16,6 +16,7 @@ pub mod email_submission;
 pub mod email_thread;
 pub mod email_thread_merge;
 pub mod mailbox;
+pub mod search_snippet;
 pub mod vacation_response;
 
 pub async fn ingest_message(raw_message: Vec<u8>, recipients: &[&str]) -> Vec<Dsn> {
@@ -43,7 +44,7 @@ async fn jmap_mail_tests() {
     let (server, mut client, temp_dir) = init_jmap_tests::<RocksDB>("jmap_mail_tests").await;
 
     // Run tests
-    email_changes::test(server.clone(), &mut client).await;
+    /*email_changes::test(server.clone(), &mut client).await;
     email_query_changes::test(server.clone(), &mut client).await;
     email_thread::test(server.clone(), &mut client).await;
     email_thread_merge::test(server.clone(), &mut client).await;
@@ -55,7 +56,8 @@ async fn jmap_mail_tests() {
     email_submission::test(server.clone(), &mut client).await;
     email_ingest::test(server.clone(), &mut client).await;
     vacation_response::test(server.clone(), &mut client).await;
-    mailbox::test(server.clone(), &mut client).await;
+    mailbox::test(server.clone(), &mut client).await;*/
+    search_snippet::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::{RequestError, RequestLimitError};
 use crate::authorization::auth::RemoteAddress;
 use crate::authorization::Session;
@@ -5,12 +7,19 @@ use crate::JMAPServer;
 use actix_web::http::header::ContentType;
 use actix_web::HttpRequest;
 use actix_web::{http::StatusCode, web, HttpResponse};
+use jmap::error::set::SetError;
+use jmap::request::blob::{CopyBlobRequest, CopyBlobResponse};
 use jmap::request::ACLEnforce;
 use jmap::types::blob::JMAPBlob;
 use jmap::types::jmap::JMAPId;
+use jmap::SUPERUSER_ID;
 use jmap_mail::mail::get::{BlobResult, JMAPGetMail};
+use jmap_mail::mail::sharing::JMAPShareMail;
 use jmap_sharing::principal::account::JMAPAccountStore;
 use reqwest::header::CONTENT_TYPE;
+use store::core::acl::ACL;
+use store::core::collection::Collection;
+use store::JMAPStore;
 use store::{tracing::error, Store};
 
 #[derive(serde::Deserialize)]
@@ -138,5 +147,72 @@ where
             error!("Blob upload failed: {:?}", err);
             Err(RequestError::internal_server_error())
         }
+    }
+}
+
+pub trait JMAPBlobCopy<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn copy_blob(&self, request: CopyBlobRequest) -> jmap::Result<CopyBlobResponse>;
+}
+
+impl<T> JMAPBlobCopy<T> for JMAPStore<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn copy_blob(&self, request: CopyBlobRequest) -> jmap::Result<CopyBlobResponse> {
+        let acl = request.acl.unwrap();
+        let account_id = request.account_id.get_document_id();
+        let from_account_id = request.from_account_id.get_document_id();
+        let mut copied = HashMap::with_capacity(request.blob_ids.len());
+        let mut not_copied = HashMap::new();
+
+        for blob_id in request.blob_ids {
+            if !self.blob_account_has_access(&blob_id.id, &acl.member_of)?
+                && !acl.is_member(SUPERUSER_ID)
+            {
+                if let Some(shared_ids) = self
+                    .mail_shared_messages(from_account_id, &acl.member_of, ACL::ReadItems)?
+                    .as_ref()
+                {
+                    if !self.blob_document_has_access(
+                        &blob_id.id,
+                        from_account_id,
+                        Collection::Mail,
+                        shared_ids,
+                    )? {
+                        not_copied.insert(
+                            blob_id,
+                            SetError::forbidden("You do not have access to this blobId."),
+                        );
+                        continue;
+                    }
+                } else {
+                    not_copied.insert(
+                        blob_id,
+                        SetError::forbidden("You do not have access to this blobId."),
+                    );
+                    continue;
+                }
+            }
+            self.blob_link_ephimeral(&blob_id.id, account_id)?;
+            copied.insert(blob_id.clone(), blob_id);
+        }
+
+        Ok(CopyBlobResponse {
+            from_account_id: request.from_account_id,
+            account_id: request.account_id,
+            copied: if !copied.is_empty() {
+                copied.into()
+            } else {
+                None
+            },
+            not_copied: if !not_copied.is_empty() {
+                not_copied.into()
+            } else {
+                None
+            },
+        })
     }
 }

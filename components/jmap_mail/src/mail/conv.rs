@@ -501,6 +501,13 @@ impl super::HeaderValue {
             _ => None,
         }
     }
+
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            super::HeaderValue::Text(text) => Some(text.as_str()),
+            _ => None,
+        }
+    }
 }
 
 pub trait IntoForm {

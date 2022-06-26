@@ -10,7 +10,6 @@ use jmap_client::{
     },
     mailbox::{self},
 };
-use jmap_mail::{INBOX_ID, TRASH_ID};
 use store::Store;
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
@@ -112,12 +111,12 @@ where
 
     // Users should be allowed to create identities only
     // using email addresses associated to their principal
-    let identity_id = client
+    client
         .identity_create("John Doe", "jdoe@example.com")
         .await
         .unwrap()
         .unwrap_id();
-    let identity_id_2 = client
+    client
         .identity_create("John Doe (secondary)", "john.doe@example.com")
         .await
         .unwrap()
@@ -180,19 +179,6 @@ where
     ));
 
     // Destroy test accounts
-    //TODO remove mailbox/identity deletion
-    admin_client
-        .set_default_account_id(&account_id)
-        .mailbox_destroy(&JMAPId::new(INBOX_ID as u64).to_string(), true)
-        .await
-        .unwrap();
-    admin_client
-        .mailbox_destroy(&JMAPId::new(TRASH_ID as u64).to_string(), true)
-        .await
-        .unwrap();
-    client.identity_destroy(&identity_id).await.unwrap();
-    client.identity_destroy(&identity_id_2).await.unwrap();
-    // TODO remove till here
     admin_client
         .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
         .principal_destroy(&account_id)

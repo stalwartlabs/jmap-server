@@ -1,4 +1,4 @@
-use super::{method, request::Request, response::Response};
+use super::{blob::JMAPBlobCopy, method, request::Request, response::Response};
 use crate::{authorization::Session, services::email_delivery, JMAPServer};
 use actix_web::web;
 use jmap::{
@@ -15,7 +15,8 @@ use jmap_mail::{
     identity::{changes::JMAPIdentityChanges, get::JMAPGetIdentity, set::JMAPSetIdentity},
     mail::{
         changes::JMAPMailChanges, copy::JMAPCopyMail, get::JMAPGetMail, import::JMAPMailImport,
-        parse::JMAPMailParse, query::JMAPMailQuery, set::JMAPSetMail,
+        parse::JMAPMailParse, query::JMAPMailQuery, search_snippet::JMAPMailSearchSnippet,
+        set::JMAPSetMail,
     },
     mailbox::{
         changes::JMAPMailboxChanges, get::JMAPGetMailbox, query::JMAPMailboxQuery,
@@ -172,6 +173,14 @@ where
     let store = core.store.clone();
     core.spawn_jmap_request(move || {
         Ok(match call {
+            method::Request::CopyBlob(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .assert_has_access(request.from_account_id.get_document_id(), Collection::Mail)?
+                    .into();
+                method::Response::CopyBlob(store.copy_blob(request)?)
+            }
             method::Request::GetPushSubscription(mut request) => {
                 request.account_id = account_id.into();
                 request.acl = store.get_acl_token(account_id)?.into();
@@ -287,6 +296,13 @@ where
                     .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
                     .into();
                 method::Response::ParseEmail(store.mail_parse(request)?)
+            }
+            method::Request::GetSearchSnippet(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_has_access(request.account_id.get_document_id(), Collection::Mail)?
+                    .into();
+                method::Response::GetSearchSnippet(store.mail_search_snippet(request)?)
             }
             method::Request::GetIdentity(mut request) => {
                 request.acl = store

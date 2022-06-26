@@ -500,7 +500,7 @@ where
                         field,
                         text,
                         Language::Unknown,
-                        IndexOptions::new().full_text(text_part_id as u32),
+                        IndexOptions::new().full_text((text_part_id + 1) as u32),
                     );
 
                     message_data.mime_parts.push(MimePart::new_html(
@@ -554,7 +554,7 @@ where
                         field,
                         text.body.into_owned(),
                         Language::Unknown,
-                        IndexOptions::new().full_text(part_id as u32),
+                        IndexOptions::new().full_text((part_id + 1) as u32),
                     );
                 }
                 MessagePart::Binary(binary) => {
@@ -595,7 +595,7 @@ where
 
                     let (blob_id, part_len) = match nested_message.body {
                         MessageAttachment::Parsed(mut message) => {
-                            document.add_message(&mut message, part_id as u32);
+                            document.add_message(&mut message, (part_id + 1) as u32);
                             (
                                 self.blob_store(message.raw_message.as_ref())?,
                                 message.raw_message.len(),
@@ -603,7 +603,7 @@ where
                         }
                         MessageAttachment::Raw(raw_message) => {
                             if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                document.add_message(message, part_id as u32);
+                                document.add_message(message, (part_id + 1) as u32);
                             }
 
                             (self.blob_store(raw_message.as_ref())?, raw_message.len())

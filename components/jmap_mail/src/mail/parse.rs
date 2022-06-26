@@ -498,18 +498,28 @@ impl IntoParsedEmail for Message<'_> {
     }
 }
 
-pub fn get_message_part(raw_message: &[u8], part_id: u32) -> Option<Cow<[u8]>> {
-    let mut message = Message::parse(raw_message)?;
+pub fn get_message_part(mut message: Message, part_id: u32, as_text: bool) -> Option<Cow<[u8]>> {
     let part_id = part_id as usize;
     let total_parts = message.parts.len();
 
     if part_id < total_parts {
         match message.parts.swap_remove(part_id) {
-            MessagePart::Text(part) | MessagePart::Html(part) => match part.body {
+            MessagePart::Text(part) => match part.body {
                 Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
                 Cow::Owned(text) => Cow::Owned(text.into_bytes()),
             }
             .into(),
+            MessagePart::Html(part) => {
+                if !as_text {
+                    match part.body {
+                        Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
+                        Cow::Owned(text) => Cow::Owned(text.into_bytes()),
+                    }
+                    .into()
+                } else {
+                    Some(html_to_text(part.body.as_ref()).into_bytes().into())
+                }
+            }
             MessagePart::Binary(binary) | MessagePart::InlineBinary(binary) => binary.body.into(),
             MessagePart::Message(nested_message) => match nested_message.body {
                 MessageAttachment::Parsed(message) => message.raw_message,
