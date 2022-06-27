@@ -6,9 +6,19 @@ fn escape_char(c: char, string: &mut String) {
         '<' => string.push_str("&lt;"),
         '>' => string.push_str("&gt;"),
         '"' => string.push_str("&quot;"),
-        '\r' => (),
-        '\n' => string.push(' '),
+        '\n' | '\r' => string.push(' '),
         _ => string.push(c),
+    }
+}
+
+fn escape_char_len(c: char) -> usize {
+    match c {
+        '&' => "&amp;".len(),
+        '<' => "&lt;".len(),
+        '>' => "&gt;".len(),
+        '"' => "&quot;".len(),
+        '\r' | '\n' => 1,
+        _ => c.len_utf8(),
     }
 }
 
@@ -19,14 +29,21 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
     if start_offset > 0 {
         let mut word_count = 0;
         let mut from_offset = 0;
+        let mut last_is_space = false;
+
         if text.len() > 240 {
             for (pos, char) in text.get(0..start_offset)?.char_indices().rev() {
                 // Add up to 2 words or 40 characters of context
                 if char.is_whitespace() {
-                    word_count += 1;
-                    if word_count == 3 {
-                        break;
+                    if !last_is_space {
+                        word_count += 1;
+                        if word_count == 3 {
+                            break;
+                        }
+                        last_is_space = true;
                     }
+                } else {
+                    last_is_space = false;
                 }
                 from_offset = pos;
                 if start_offset - from_offset >= 40 {
@@ -35,7 +52,16 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
             }
         }
 
+        last_is_space = false;
         for char in text.get(from_offset..start_offset)?.chars() {
+            if !char.is_whitespace() {
+                last_is_space = false;
+            } else {
+                if last_is_space {
+                    continue;
+                }
+                last_is_space = true;
+            }
             escape_char(char, &mut snippet);
         }
     }
@@ -43,6 +69,10 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
     let mut terms = terms.iter().peekable();
 
     'outer: while let Some(term) = terms.next() {
+        if snippet.len() + ("<mark>".len() * 2) + term.len as usize + 1 > 255 {
+            break;
+        }
+
         snippet.push_str("<mark>");
         snippet.push_str(text.get(term.offset as usize..term.offset as usize + term.len as usize)?);
         snippet.push_str("</mark>");
@@ -53,18 +83,25 @@ pub fn generate_snippet(terms: &[Term], text: &str) -> Option<String> {
             text.len()
         };
 
+        let mut last_is_space = false;
         for char in text
             .get(term.offset as usize + term.len as usize..next_offset)?
             .chars()
         {
-            if snippet.len() + 3 > 255 {
+            if !char.is_whitespace() {
+                last_is_space = false;
+            } else {
+                if last_is_space {
+                    continue;
+                }
+                last_is_space = true;
+            }
+
+            if snippet.len() + escape_char_len(char) <= 255 {
+                escape_char(char, &mut snippet);
+            } else {
                 break 'outer;
             }
-            escape_char(char, &mut snippet);
-        }
-
-        if snippet.len() + 3 > 255 {
-            break;
         }
     }
 

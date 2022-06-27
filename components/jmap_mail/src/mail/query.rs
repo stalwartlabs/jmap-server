@@ -163,10 +163,14 @@ where
                     filter::Filter::eq(RfcHeader::Bcc.into(), Query::Tokenize(value.clone())),
                     filter::Filter::eq(
                         RfcHeader::Subject.into(),
-                        Query::match_text(value.clone(), Language::English),
+                        Query::match_text(value.clone(), Language::English), //TODO detect language
                     ),
                     filter::Filter::eq(
                         MessageField::Body.into(),
+                        Query::match_text(value.clone(), Language::English), //TODO detect language
+                    ),
+                    filter::Filter::eq(
+                        MessageField::Attachment.into(),
                         Query::match_text(value, Language::English), //TODO detect language
                     ),
                 ]),
@@ -183,12 +187,12 @@ where
                     filter::Filter::eq(RfcHeader::Bcc.into(), Query::Tokenize(value))
                 }
                 Filter::Subject { value } => filter::Filter::eq(
-                    RfcHeader::Subject.into(), //TODO detect language
-                    Query::match_text(value, Language::English),
+                    RfcHeader::Subject.into(),
+                    Query::match_text(value, Language::English), //TODO detect language
                 ),
                 Filter::Body { value } => filter::Filter::eq(
                     MessageField::Body.into(),
-                    Query::match_text(value, Language::English),
+                    Query::match_text(value, Language::English), //TODO detect language
                 ),
                 Filter::Header { mut value } => {
                     let (value, header) = match value.len() {

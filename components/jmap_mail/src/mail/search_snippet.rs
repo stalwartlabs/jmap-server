@@ -20,7 +20,7 @@ use store::{
     },
     nlp::{search_snippet::generate_snippet, stemmer::Stemmer, tokenizers::Tokenizer, Language},
     read::filter::LogicalOperator,
-    tracing::{error, info},
+    tracing::error,
     JMAPStore, Store,
 };
 
@@ -257,8 +257,6 @@ where
                 }
             }
 
-            error!("TESTIN ERROR");
-            info!("TESTIN INGO");
             let mut subject = None;
             let mut preview = None;
 
@@ -277,8 +275,6 @@ where
                 })?
                 .unwrap_or_default()
             {
-                //println!("term group {:?}", term_group);
-
                 if term_group.part_id == 0 {
                     // Generate subject snippent
                     subject = generate_snippet(
@@ -293,7 +289,6 @@ where
                 } else if term_group.part_id < message_data.mime_parts.len() as u32 {
                     // Generate snippet of a body part
                     let part = &message_data.mime_parts[term_group.part_id as usize];
-                    println!("part: {:?}", part);
 
                     if let Some(blob_id) = &part.blob_id {
                         let mut text = String::from_utf8(
@@ -306,7 +301,6 @@ where
                         if part.mime_type == MimePartType::Html {
                             text = html_to_text(&text);
                         }
-                        println!("text: {}", text);
                         preview = generate_snippet(&term_group.terms, &text);
                     } else {
                         error!(
@@ -343,6 +337,7 @@ where
                                 );
                             }
                         } else {
+                            //TODO errors are not displayed from components (not just here)
                             error!(
                                 "Corrupted term index for email {}/{}: Could not find message attachment {}.",
                                 account_id, document_id, part_id

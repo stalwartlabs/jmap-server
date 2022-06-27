@@ -561,7 +561,7 @@ impl TermIndex {
                         'match_loop: for (match_pos, match_term) in match_terms.iter().enumerate() {
                             if match_term.id == term_id
                                 || match_term.id == term_id_stemmed
-                                || (match_term.id_stemmed > 0
+                                || ((match_term.id_stemmed != match_term.id)
                                     && (match_term.id_stemmed == term_id
                                         || match_term.id_stemmed == term_id_stemmed))
                             {
@@ -586,7 +586,7 @@ impl TermIndex {
                 }
             }
 
-            if !match_phrase && matched_mask == 0 {
+            if !match_phrase && !partial_match.is_empty() {
                 terms.append(&mut partial_match);
             }
 
