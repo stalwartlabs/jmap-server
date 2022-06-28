@@ -1292,6 +1292,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "imap"
+version = "0.1.0"
+dependencies = [
+ "jmap",
+ "mail-builder 0.2.0",
+ "mail-parser",
+ "serde",
+ "serde_json",
+ "store",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1383,6 +1395,7 @@ dependencies = [
  "futures",
  "futures-util",
  "gethostname",
+ "imap",
  "jmap",
  "jmap-client",
  "jmap_mail",

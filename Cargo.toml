@@ -10,6 +10,7 @@ store_rocksdb = { path = "components/store_rocksdb" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 jmap_sharing = { path = "components/jmap_sharing" }
+imap = { path = "components/imap" }
 mail-send = { path = "/home/vagrant/code/mail-send" } #TODO: remove local path
 tracing-subscriber = "0.2"
 actix = "0.13"
@@ -47,6 +48,7 @@ members = [
     "components/jmap",
     "components/jmap_mail",
     "components/jmap_sharing",
+    "components/imap",
 ]
 
 [profile.dev]
