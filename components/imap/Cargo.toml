@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 jmap = { path = "../jmap" }
+jmap_mail = { path = "../jmap_mail" }
 store = { path = "../store" }
 #mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" } TODO remove
 #mail-builder = { git = "https://github.com/stalwartlabs/mail-builder" }

@@ -129,7 +129,7 @@ impl SelectionOption {
             Ok(Self::RecursiveMatch)
         } else {
             Err(format!(
-                "Invalid selection option '{}'.",
+                "Invalid selection option {:?}.",
                 String::from_utf8_lossy(value)
             )
             .into())
@@ -146,7 +146,7 @@ impl ReturnOption {
         } else if value.eq_ignore_ascii_case(b"status") {
             Ok(Self::Status(Vec::with_capacity(2)))
         } else {
-            Err(format!("Invalid return option: {}", String::from_utf8_lossy(value)).into())
+            Err(format!("Invalid return option {:?}", String::from_utf8_lossy(value)).into())
         }
     }
 }

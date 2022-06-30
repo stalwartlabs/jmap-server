@@ -1296,6 +1296,7 @@ name = "imap"
 version = "0.1.0"
 dependencies = [
  "jmap",
+ "jmap_mail",
  "mail-builder 0.2.0",
  "mail-parser",
  "serde",

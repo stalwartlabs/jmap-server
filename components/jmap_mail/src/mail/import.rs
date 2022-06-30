@@ -30,7 +30,7 @@ use store::read::FilterMapper;
 use store::serialize::leb128::Leb128;
 use store::serialize::StoreSerialize;
 
-use store::tracing::log::error;
+use store::tracing::error;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
 use store::{AccountId, JMAPStore, SharedBitmap, Store, ThreadId};

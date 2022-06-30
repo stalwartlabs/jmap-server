@@ -11,6 +11,7 @@ pub enum Command {
     StartTls,
     Authenticate,
     Login,
+
     // Client Commands - Authenticated State
     Enable,
     Select,
@@ -25,14 +26,29 @@ pub enum Command {
     Status,
     Append,
     Idle,
+
     // Client Commands - Selected State
     Close,
     Unselect,
-    Expunge,
-    Search,
-    Fetch,
-    Store,
-    Copy,
-    Move,
-    Uid,
+    Expunge(bool),
+    Search(bool),
+    Fetch(bool),
+    Store(bool),
+    Copy(bool),
+    Move(bool),
+
+    // IMAP4rev1
+    Lsub,
+    Check,
+
+    // RFC5256
+    Sort(bool),
+    Thread(bool),
+}
+
+impl Command {
+    #[inline(always)]
+    pub fn is_fetch(&self) -> bool {
+        matches!(self, Command::Fetch(_))
+    }
 }

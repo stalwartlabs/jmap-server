@@ -97,6 +97,9 @@ impl Keyword {
     pub const PHISHING: u8 = 6;
     pub const JUNK: u8 = 7;
     pub const NOTJUNK: u8 = 8;
+    pub const DELETED: u8 = 9;
+    pub const FORWARDED: u8 = 10;
+    pub const MDN_SENT: u8 = 11;
 
     pub fn new(tag: Tag) -> Self {
         Self { tag }
@@ -115,6 +118,9 @@ impl Keyword {
                     "$phishing" => Tag::Static(Self::PHISHING),
                     "$junk" => Tag::Static(Self::JUNK),
                     "$notjunk" => Tag::Static(Self::NOTJUNK),
+                    "$deleted" => Tag::Static(Self::DELETED),
+                    "$forwarded" => Tag::Static(Self::FORWARDED),
+                    "$mdnsent" => Tag::Static(Self::MDN_SENT),
                     _ => Tag::Text(value.to_string()),
                 }
             } else {
@@ -149,7 +155,10 @@ impl Display for Keyword {
                 Self::PHISHING => write!(f, "$phishing"),
                 Self::JUNK => write!(f, "$junk"),
                 Self::NOTJUNK => write!(f, "$notjunk"),
-                9..=u8::MAX => Err(std::fmt::Error),
+                Self::DELETED => write!(f, "$deleted"),
+                Self::FORWARDED => write!(f, "$forwarded"),
+                Self::MDN_SENT => write!(f, "$mdnsent"),
+                12..=u8::MAX => Err(std::fmt::Error),
             },
             Tag::Text(value) => write!(f, "{}", value),
             _ => Err(std::fmt::Error),

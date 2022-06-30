@@ -23,12 +23,20 @@ pub enum Token {
     ParenthesisClose, // )
     BracketOpen,      // [
     BracketClose,     // ]
-    Comma,            // ,
-    Colon,            // :
-    Wildcard,         // %
-    WildcardAll,      // *
-    Marker,           // $
+    Lt,               // <
+    Gt,               // >
+    Dot,              // .
     Nil,              // NIL
+
+                      /*
+                          Comma,            // ,
+                      Colon,            // :
+                      Wildcard,         // %
+                      WildcardAll,      // *
+                      Marker,           // $
+
+
+                      */
 }
 
 impl Default for Request {
@@ -45,7 +53,7 @@ impl Default for Request {
 enum State {
     Start,
     Tag,
-    Command,
+    Command { is_uid: bool },
     Argument { last_ch: u8 },
     ArgumentQuoted { escaped: bool },
     Literal { non_sync: bool },
@@ -77,35 +85,11 @@ impl Receiver {
     }
 
     fn push_argument(&mut self, in_quote: bool) {
-        match self.buf.len() {
-            0 => {
-                if in_quote {
-                    self.request.tokens.push(Token::Nil);
-                }
-            }
-            1 if !in_quote => {
-                match self.buf[0] {
-                    b'*' => {
-                        self.request.tokens.push(Token::WildcardAll);
-                    }
-                    b'%' => {
-                        self.request.tokens.push(Token::Wildcard);
-                    }
-                    b'$' => {
-                        self.request.tokens.push(Token::Marker);
-                    }
-                    _ => {
-                        self.request.tokens.push(Token::Argument(self.buf.clone()));
-                    }
-                }
-                self.buf.clear();
-            }
-            _ => {
-                self.request.tokens.push(Token::Argument(std::mem::replace(
-                    &mut self.buf,
-                    Vec::with_capacity(20),
-                )));
-            }
+        if !self.buf.is_empty() {
+            self.request.tokens.push(Token::Argument(self.buf.clone()));
+            self.buf.clear();
+        } else if in_quote {
+            self.request.tokens.push(Token::Nil);
         }
     }
 
@@ -133,7 +117,7 @@ impl Receiver {
                                 self.reset();
                                 Error::err("Tag is not a valid UTF-8 string.")
                             })?;
-                            self.state = State::Command;
+                            self.state = State::Command { is_uid: false };
                         }
                     }
                     _ if !ch.is_ascii_whitespace() => {
@@ -149,7 +133,7 @@ impl Receiver {
                         return Err(Error::invalid_char(ch, "tag"));
                     }
                 },
-                State::Command => {
+                State::Command { is_uid } => {
                     if ch.is_ascii_alphanumeric() {
                         if self.buf.len() < 15 {
                             self.buf.push(ch.to_ascii_uppercase());
@@ -159,16 +143,24 @@ impl Receiver {
                         }
                     } else if ch.is_ascii_whitespace() {
                         if !self.buf.is_empty() {
-                            self.request.command = Command::parse(&self.buf).ok_or_else(|| {
-                                self.reset();
-                                Error::err("Unrecognized command.")
-                            })?;
-                            self.buf.clear();
-                            if ch != b'\n' {
-                                self.state = State::Argument { last_ch: b' ' };
+                            if !self.buf.eq_ignore_ascii_case(b"UID") {
+                                self.request.command = Command::parse(&self.buf, is_uid)
+                                    .ok_or_else(|| {
+                                        let command =
+                                            String::from_utf8_lossy(&self.buf).into_owned();
+                                        self.reset();
+                                        Error::err(format!("Unrecognized command '{}'.", command))
+                                    })?;
+                                self.buf.clear();
+                                if ch != b'\n' {
+                                    self.state = State::Argument { last_ch: b' ' };
+                                } else {
+                                    self.state = State::Start;
+                                    return Ok(Some(std::mem::take(&mut self.request)));
+                                }
                             } else {
-                                self.state = State::Start;
-                                return Ok(Some(std::mem::take(&mut self.request)));
+                                self.buf.clear();
+                                self.state = State::Command { is_uid: true };
                             }
                         }
                     } else {
@@ -193,22 +185,34 @@ impl Receiver {
                         self.push_argument(false);
                         self.request.tokens.push(Token::ParenthesisClose);
                     }
-                    b'[' => {
+                    b'[' if self.request.command.is_fetch() => {
                         self.push_argument(false);
                         self.request.tokens.push(Token::BracketOpen);
                     }
-                    b']' => {
+                    b']' if self.request.command.is_fetch() => {
                         self.push_argument(false);
                         self.request.tokens.push(Token::BracketClose);
                     }
-                    b':' => {
+                    b'<' if self.request.command.is_fetch() => {
+                        self.push_argument(false);
+                        self.request.tokens.push(Token::Lt);
+                    }
+                    b'>' if self.request.command.is_fetch() => {
+                        self.push_argument(false);
+                        self.request.tokens.push(Token::Gt);
+                    }
+                    b'.' if self.request.command.is_fetch() => {
+                        self.push_argument(false);
+                        self.request.tokens.push(Token::Dot);
+                    }
+                    /*b':' => {
                         self.push_argument(false);
                         self.request.tokens.push(Token::Colon);
                     }
                     b',' => {
                         self.push_argument(false);
                         self.request.tokens.push(Token::Comma);
-                    }
+                    }*/
                     b'\n' => {
                         self.push_argument(false);
                         self.state = State::Start;
@@ -364,17 +368,35 @@ impl Token {
             Token::ParenthesisClose => bytes.eq(b")"),
             Token::BracketOpen => bytes.eq(b"["),
             Token::BracketClose => bytes.eq(b"]"),
-            Token::Comma => bytes.eq(b","),
-            Token::Colon => bytes.eq(b":"),
-            Token::Wildcard => bytes.eq(b"%"),
-            Token::WildcardAll => bytes.eq(b"*"),
-            Token::Marker => bytes.eq(b"$"),
+            Token::Gt => bytes.eq(b">"),
+            Token::Lt => bytes.eq(b"<"),
+            Token::Dot => bytes.eq(b"."),
             Token::Nil => bytes.is_empty(),
         }
     }
 
     pub fn is_parenthesis_open(&self) -> bool {
         matches!(self, Token::ParenthesisOpen)
+    }
+
+    pub fn is_bracket_open(&self) -> bool {
+        matches!(self, Token::BracketOpen)
+    }
+
+    pub fn is_bracket_close(&self) -> bool {
+        matches!(self, Token::BracketClose)
+    }
+
+    pub fn is_dot(&self) -> bool {
+        matches!(self, Token::Dot)
+    }
+
+    pub fn is_lt(&self) -> bool {
+        matches!(self, Token::Lt)
+    }
+
+    pub fn is_gt(&self) -> bool {
+        matches!(self, Token::Gt)
     }
 }
 
@@ -386,11 +408,9 @@ impl Display for Token {
             Token::ParenthesisClose => write!(f, ")"),
             Token::BracketOpen => write!(f, "["),
             Token::BracketClose => write!(f, "]"),
-            Token::Comma => write!(f, ","),
-            Token::Colon => write!(f, ":"),
-            Token::Wildcard => write!(f, "%"),
-            Token::WildcardAll => write!(f, "*"),
-            Token::Marker => write!(f, "$"),
+            Token::Gt => write!(f, ">"),
+            Token::Lt => write!(f, "<"),
+            Token::Dot => write!(f, "."),
             Token::Nil => write!(f, ""),
         }
     }
@@ -420,6 +440,35 @@ impl Default for Receiver {
         }
     }
 }
+
+/*
+
+astring         = 1*ASTRING-CHAR / string
+
+string          = quoted / literal
+
+literal         = "{" number64 ["+"] "}" CRLF *CHAR8
+
+quoted          = DQUOTE *QUOTED-CHAR DQUOTE
+
+ASTRING-CHAR   = ATOM-CHAR / resp-specials
+
+atom            = 1*ATOM-CHAR
+
+ATOM-CHAR       = <any CHAR except atom-specials>
+
+atom-specials   = "(" / ")" / "{" / SP / CTL / list-wildcards /
+                  quoted-specials / resp-specials
+
+resp-specials   = "]"
+
+list-wildcards  = "%" / "*"
+
+quoted-specials = DQUOTE / "\"
+
+DQUOTE         =  %x22 ; " (Double Quote)
+
+*/
 
 #[cfg(test)]
 mod tests {
@@ -480,7 +529,7 @@ mod tests {
                 vec![Request {
                     id: "A682".to_string(),
                     command: Command::List,
-                    tokens: vec![Token::Nil, Token::WildcardAll],
+                    tokens: vec![Token::Nil, Token::Argument(b"*".to_vec())],
                 }],
             ),
             (
@@ -536,7 +585,7 @@ mod tests {
                     tokens: vec![
                         Token::Nil,
                         Token::ParenthesisOpen,
-                        Token::Wildcard,
+                        Token::Argument(b"%".to_vec()),
                         Token::Argument(b"music/rock".to_vec()),
                         Token::ParenthesisClose,
                     ],
@@ -549,7 +598,7 @@ mod tests {
                     command: Command::List,
                     tokens: vec![
                         Token::Nil,
-                        Token::Wildcard,
+                        Token::Argument(b"%".to_vec()),
                         Token::Argument(b"RETURN".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"STATUS".to_vec()),
@@ -568,7 +617,7 @@ mod tests {
                     command: Command::List,
                     tokens: vec![
                         Token::Nil,
-                        Token::Wildcard,
+                        Token::Argument(b"%".to_vec()),
                         Token::Argument(b"RETURN".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"STATUS".to_vec()),
@@ -591,7 +640,7 @@ mod tests {
                         Token::Argument(b"RECURSIVEMATCH".to_vec()),
                         Token::ParenthesisClose,
                         Token::Nil,
-                        Token::Wildcard,
+                        Token::Argument(b"%".to_vec()),
                         Token::Argument(b"RETURN".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"STATUS".to_vec()),
@@ -622,11 +671,9 @@ mod tests {
                 vec!["A004 COPY 2:4 meeting\r\n"],
                 vec![Request {
                     id: "A004".to_string(),
-                    command: Command::Copy,
+                    command: Command::Copy(false),
                     tokens: vec![
-                        Token::Argument(b"2".to_vec()),
-                        Token::Colon,
-                        Token::Argument(b"4".to_vec()),
+                        Token::Argument(b"2:4".to_vec()),
                         Token::Argument(b"meeting".to_vec()),
                     ],
                 }],
@@ -639,7 +686,7 @@ mod tests {
                 ],
                 vec![Request {
                     id: "A282".to_string(),
-                    command: Command::Search,
+                    command: Command::Search(false),
                     tokens: vec![
                         Token::Argument(b"RETURN".to_vec()),
                         Token::ParenthesisOpen,
@@ -656,12 +703,12 @@ mod tests {
                 }],
             ),
             (
-                vec!["F284 STORE $ +FLAGS.Silent (\\Deleted)\r\n"],
+                vec!["F284 UID STORE $ +FLAGS.Silent (\\Deleted)\r\n"],
                 vec![Request {
                     id: "F284".to_string(),
-                    command: Command::Store,
+                    command: Command::Store(true),
                     tokens: vec![
-                        Token::Marker,
+                        Token::Argument(b"$".to_vec()),
                         Token::Argument(b"+FLAGS.Silent".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"\\Deleted".to_vec()),
@@ -673,16 +720,16 @@ mod tests {
                 vec!["A654 FETCH 2:4 (FLAGS BODY[HEADER.FIELDS (DATE FROM)])\r\n"],
                 vec![Request {
                     id: "A654".to_string(),
-                    command: Command::Fetch,
+                    command: Command::Fetch(false),
                     tokens: vec![
-                        Token::Argument(b"2".to_vec()),
-                        Token::Colon,
-                        Token::Argument(b"4".to_vec()),
+                        Token::Argument(b"2:4".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"FLAGS".to_vec()),
                         Token::Argument(b"BODY".to_vec()),
                         Token::BracketOpen,
-                        Token::Argument(b"HEADER.FIELDS".to_vec()),
+                        Token::Argument(b"HEADER".to_vec()),
+                        Token::Dot,
+                        Token::Argument(b"FIELDS".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"DATE".to_vec()),
                         Token::Argument(b"FROM".to_vec()),
@@ -694,12 +741,12 @@ mod tests {
             ),
             (
                 vec![
-                    "B283 SEARCH RETURN (SAVE) CHARSET ",
+                    "B283 UID SEARCH RETURN (SAVE) CHARSET ",
                     "KOI8-R (OR $ 1,3000:3021) TEXT \"hello world\"\r\n",
                 ],
                 vec![Request {
                     id: "B283".to_string(),
-                    command: Command::Search,
+                    command: Command::Search(true),
                     tokens: vec![
                         Token::Argument(b"RETURN".to_vec()),
                         Token::ParenthesisOpen,
@@ -709,12 +756,8 @@ mod tests {
                         Token::Argument(b"KOI8-R".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"OR".to_vec()),
-                        Token::Marker,
-                        Token::Argument(b"1".to_vec()),
-                        Token::Comma,
-                        Token::Argument(b"3000".to_vec()),
-                        Token::Colon,
-                        Token::Argument(b"3021".to_vec()),
+                        Token::Argument(b"$".to_vec()),
+                        Token::Argument(b"1,3000:3021".to_vec()),
                         Token::ParenthesisClose,
                         Token::Argument(b"TEXT".to_vec()),
                         Token::Argument(b"hello world".to_vec()),
@@ -728,18 +771,14 @@ mod tests {
                 ],
                 vec![Request {
                     id: "P283".to_string(),
-                    command: Command::Search,
+                    command: Command::Search(false),
                     tokens: vec![
                         Token::Argument(b"CHARSET".to_vec()),
                         Token::Argument(b"UTF-8".to_vec()),
                         Token::ParenthesisOpen,
                         Token::Argument(b"OR".to_vec()),
-                        Token::Marker,
-                        Token::Argument(b"1".to_vec()),
-                        Token::Comma,
-                        Token::Argument(b"3000".to_vec()),
-                        Token::Colon,
-                        Token::Argument(b"3021".to_vec()),
+                        Token::Argument(b"$".to_vec()),
+                        Token::Argument(b"1,3000:3021".to_vec()),
                         Token::ParenthesisClose,
                         Token::Argument(b"TEXT".to_vec()),
                         Token::Argument("мать".to_string().into_bytes()),
