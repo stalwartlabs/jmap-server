@@ -2,6 +2,9 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 use std::vec::IntoIter;
 
+use jmap_mail::mail::HeaderName;
+use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
+
 use crate::protocol::fetch::{self, Attribute, Section};
 
 use super::receiver::Token;
@@ -149,7 +152,25 @@ pub fn parse_fetch(tokens: Vec<Token>) -> super::Result<fetch::Arguments> {
                                             match token {
                                                 Token::ParenthesisClose => break,
                                                 Token::Argument(value) => {
-                                                    fields.push(value.to_vec());
+                                                    fields.push(match parse_header_name(&value) {
+                                                        (
+                                                            _,
+                                                            HeaderParserResult::Rfc(rfc_header),
+                                                        ) => HeaderName::Rfc(rfc_header),
+                                                        (
+                                                            _,
+                                                            HeaderParserResult::Other(other_header),
+                                                        ) => HeaderName::Other(
+                                                            other_header.as_ref().to_owned(),
+                                                        ),
+                                                        _ => {
+                                                            return Err(format!(
+                                                                "Failed to parse header {:?}",
+                                                                String::from_utf8_lossy(&value)
+                                                            )
+                                                            .into())
+                                                        }
+                                                    });
                                                 }
                                                 _ => return Err("Expected field name.".into()),
                                             }
@@ -345,6 +366,9 @@ pub fn parse_partial(tokens: &mut Peekable<IntoIter<Token>>) -> super::Result<Op
 
 #[cfg(test)]
 mod tests {
+    use jmap_mail::mail::HeaderName;
+    use mail_parser::RfcHeader;
+
     use crate::{
         parser::receiver::Receiver,
         protocol::{
@@ -368,7 +392,10 @@ mod tests {
                             peek: false,
                             sections: vec![Section::HeaderFields {
                                 not: false,
-                                fields: vec![b"DATE".to_vec(), b"FROM".to_vec()],
+                                fields: vec![
+                                    HeaderName::Rfc(RfcHeader::Date),
+                                    HeaderName::Rfc(RfcHeader::From),
+                                ],
                             }],
                             partial: None,
                         },
@@ -405,7 +432,7 @@ mod tests {
                         peek: true,
                         sections: vec![Section::HeaderFields {
                             not: false,
-                            fields: vec![b"X-MAILER".to_vec()],
+                            fields: vec![HeaderName::Other("X-MAILER".to_string())],
                         }],
                         partial: None,
                     }],
@@ -419,7 +446,11 @@ mod tests {
                         peek: false,
                         sections: vec![Section::HeaderFields {
                             not: true,
-                            fields: vec![b"FROM".to_vec(), b"TO".to_vec(), b"SUBJECT".to_vec()],
+                            fields: vec![
+                                HeaderName::Rfc(RfcHeader::From),
+                                HeaderName::Rfc(RfcHeader::To),
+                                HeaderName::Rfc(RfcHeader::Subject),
+                            ],
                         }],
                         partial: None,
                     }],

@@ -1,6 +1,8 @@
 use jmap_mail::mail::schema::Keyword;
 use store::read::filter::LogicalOperator;
 
+use crate::StatusResponse;
+
 use super::{quoted_string, ImapResponse, ProtocolVersion, Sequence};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,11 +89,11 @@ impl Filter {
 }
 
 impl ImapResponse for Response {
-    fn serialize(&self, tag: &str, version: ProtocolVersion) -> Vec<u8> {
+    fn serialize(&self, tag: String, version: ProtocolVersion) -> Vec<u8> {
         let mut buf = Vec::with_capacity(64);
         if version == ProtocolVersion::Rev2 {
             buf.extend_from_slice(b"* ESEARCH (TAG ");
-            quoted_string(&mut buf, tag);
+            quoted_string(&mut buf, &tag);
             buf.extend_from_slice(b")");
             if let Some(count) = &self.count {
                 buf.extend_from_slice(b" COUNT ");
@@ -141,8 +143,7 @@ impl ImapResponse for Response {
             }
         }
         buf.extend_from_slice(b"\r\n");
-        buf.extend_from_slice(tag.as_bytes());
-        buf.extend_from_slice(b" OK completed\r\n");
+        StatusResponse::ok(tag.into(), None, "completed").serialize(&mut buf);
         buf
     }
 }
@@ -200,9 +201,11 @@ mod tests {
             ),
         ] {
             let response_v1 =
-                String::from_utf8(response.serialize(tag, ProtocolVersion::Rev1)).unwrap();
+                String::from_utf8(response.serialize(tag.to_string(), ProtocolVersion::Rev1))
+                    .unwrap();
             let response_v2 =
-                String::from_utf8(response.serialize(tag, ProtocolVersion::Rev2)).unwrap();
+                String::from_utf8(response.serialize(tag.to_string(), ProtocolVersion::Rev2))
+                    .unwrap();
 
             assert_eq!(response_v2, expected_v2);
             assert_eq!(response_v1, expected_v1);

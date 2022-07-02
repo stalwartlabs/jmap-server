@@ -93,33 +93,42 @@ pub enum ResponseCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error {
+pub struct StatusResponse {
     pub tag: Option<String>,
     pub code: Option<ResponseCode>,
     pub message: Cow<'static, str>,
-    pub bad: bool,
+    pub rtype: ResponseType,
 }
 
-impl Error {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseType {
+    Ok,
+    No,
+    Bad,
+    PreAuth,
+    Bye,
+}
+
+impl StatusResponse {
     pub fn bad(
         tag: Option<String>,
         code: Option<ResponseCode>,
         message: impl Into<Cow<'static, str>>,
     ) -> Self {
-        Error {
+        StatusResponse {
             tag,
             code,
             message: message.into(),
-            bad: true,
+            rtype: ResponseType::Bad,
         }
     }
 
     pub fn parse(tag: Option<String>, message: impl Into<Cow<'static, str>>) -> Self {
-        Error {
+        StatusResponse {
             tag,
             code: ResponseCode::Parse.into(),
             message: message.into(),
-            bad: true,
+            rtype: ResponseType::Bad,
         }
     }
 
@@ -128,13 +137,26 @@ impl Error {
         code: Option<ResponseCode>,
         message: impl Into<Cow<'static, str>>,
     ) -> Self {
-        Error {
+        StatusResponse {
             tag,
             code,
             message: message.into(),
-            bad: false,
+            rtype: ResponseType::No,
+        }
+    }
+
+    pub fn ok(
+        tag: Option<String>,
+        code: Option<ResponseCode>,
+        message: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        StatusResponse {
+            tag,
+            code,
+            message: message.into(),
+            rtype: ResponseType::Ok,
         }
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, StatusResponse>;

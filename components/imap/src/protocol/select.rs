@@ -1,3 +1,5 @@
+use crate::{ResponseCode, StatusResponse};
+
 use super::{
     list::ListItem,
     ImapResponse,
@@ -21,10 +23,11 @@ pub struct Response {
 }
 
 impl ImapResponse for Response {
-    fn serialize(&self, tag: &str, version: ProtocolVersion) -> Vec<u8> {
+    fn serialize(&self, tag: String, version: ProtocolVersion) -> Vec<u8> {
         let mut buf = Vec::with_capacity(100);
         if self.closed_previous {
-            buf.extend_from_slice(b"* OK [CLOSED] Closed previous mailbox\r\n");
+            StatusResponse::ok(None, ResponseCode::Closed.into(), "Closed previous mailbox")
+                .serialize(&mut buf);
         }
         buf.extend_from_slice(b"* ");
         buf.extend_from_slice(self.total_messages.to_string().as_bytes());
@@ -52,12 +55,19 @@ impl ImapResponse for Response {
         buf.extend_from_slice(b"]\r\n* OK [UIDNEXT ");
         buf.extend_from_slice(self.uid_next.to_string().as_bytes());
         buf.extend_from_slice(b"]\r\n");
-        buf.extend_from_slice(tag.as_bytes());
-        if !self.read_only {
-            buf.extend_from_slice(b" OK [READ-WRITE] completed\r\n");
-        } else {
-            buf.extend_from_slice(b" OK [READ-ONLY] completed\r\n");
-        }
+
+        StatusResponse::ok(
+            tag.into(),
+            if !self.read_only {
+                ResponseCode::ReadWrite
+            } else {
+                ResponseCode::ReadOnly
+            }
+            .into(),
+            "completed",
+        )
+        .serialize(&mut buf);
+
         buf
     }
 }
@@ -138,8 +148,8 @@ mod tests {
                 ),
             ),
         ] {
-            let response_v1 = String::from_utf8(response.serialize(tag, ProtocolVersion::Rev1)).unwrap();
-            let response_v2 = String::from_utf8(response.serialize(tag, ProtocolVersion::Rev2)).unwrap();
+            let response_v1 = String::from_utf8(response.serialize(tag.to_string(), ProtocolVersion::Rev1)).unwrap();
+            let response_v2 = String::from_utf8(response.serialize(tag.to_string(), ProtocolVersion::Rev2)).unwrap();
 
             assert_eq!(response_v2, expected_v2);
             assert_eq!(response_v1, expected_v1);

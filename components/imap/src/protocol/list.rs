@@ -1,3 +1,5 @@
+use crate::StatusResponse;
+
 use super::{
     quoted_string,
     status::{Status, StatusItem},
@@ -192,7 +194,7 @@ impl ListItem {
 }
 
 impl ImapResponse for Response {
-    fn serialize(&self, tag: &str, version: ProtocolVersion) -> Vec<u8> {
+    fn serialize(&self, tag: String, version: ProtocolVersion) -> Vec<u8> {
         let mut buf = Vec::with_capacity(100);
         for list_item in &self.list_items {
             list_item.serialize(&mut buf, version);
@@ -202,8 +204,7 @@ impl ImapResponse for Response {
                 status_item.serialize(&mut buf, version);
             }
         }
-        buf.extend_from_slice(tag.as_bytes());
-        buf.extend_from_slice(b" OK completed\r\n");
+        StatusResponse::ok(tag.into(), None, "completed").serialize(&mut buf);
         buf
     }
 }
@@ -319,9 +320,11 @@ mod tests {
             ),
         )] {
             let response_v1 =
-                String::from_utf8(response.serialize(tag, ProtocolVersion::Rev1)).unwrap();
+                String::from_utf8(response.serialize(tag.to_string(), ProtocolVersion::Rev1))
+                    .unwrap();
             let response_v2 =
-                String::from_utf8(response.serialize(tag, ProtocolVersion::Rev2)).unwrap();
+                String::from_utf8(response.serialize(tag.to_string(), ProtocolVersion::Rev2))
+                    .unwrap();
 
             assert_eq!(response_v2, expected_v2);
             assert_eq!(response_v1, expected_v1);

@@ -1,3 +1,5 @@
+use crate::StatusResponse;
+
 use super::{quoted_string, utf7::utf7_encode, ImapResponse, ProtocolVersion};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,11 +57,10 @@ impl StatusItem {
 }
 
 impl ImapResponse for Response {
-    fn serialize(&self, tag: &str, version: super::ProtocolVersion) -> Vec<u8> {
+    fn serialize(&self, tag: String, version: super::ProtocolVersion) -> Vec<u8> {
         let mut buf = Vec::with_capacity(64);
         self.status.serialize(&mut buf, version);
-        buf.extend_from_slice(tag.as_bytes());
-        buf.extend_from_slice(b" OK completed\r\n");
+        StatusResponse::ok(tag.into(), None, "completed").serialize(&mut buf);
         buf
     }
 }
@@ -80,7 +81,7 @@ mod tests {
                     items: vec![(Status::Messages, 231), (Status::UidNext, 44292)]
                 },
             }
-            .serialize("A042", ProtocolVersion::Rev2),
+            .serialize("A042".to_string(), ProtocolVersion::Rev2),
             concat!(
                 "* STATUS \"blurdybloop\" (MESSAGES 231 UIDNEXT 44292)\r\n",
                 "A042 OK completed\r\n"

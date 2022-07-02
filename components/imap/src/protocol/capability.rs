@@ -1,3 +1,5 @@
+use crate::StatusResponse;
+
 use super::{ImapResponse, ProtocolVersion};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +27,7 @@ impl Capability {
 }
 
 impl ImapResponse for Response {
-    fn serialize(&self, tag: &str, _imap_rev: ProtocolVersion) -> Vec<u8> {
+    fn serialize(&self, tag: String, _imap_rev: ProtocolVersion) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
             b"* CAPABILITY  \r\n".len()
                 + (self.capabilities.len() * 10)
@@ -38,8 +40,7 @@ impl ImapResponse for Response {
             buf.extend_from_slice(capability.to_buf());
         }
         buf.extend_from_slice(b"\r\n");
-        buf.extend_from_slice(tag.as_bytes());
-        buf.extend_from_slice(b" OK completed\r\n");
+        StatusResponse::ok(tag.into(), None, "completed").serialize(&mut buf);
         buf
     }
 }
@@ -61,7 +62,7 @@ mod tests {
                     Capability::LoginDisabled
                 ],
             }
-            .serialize("a003", ProtocolVersion::Rev2),
+            .serialize("a003".to_string(), ProtocolVersion::Rev2),
             concat!(
                 "* CAPABILITY IMAP4rev2 STARTTLS LOGINDISABLED\r\n",
                 "a003 OK completed\r\n"

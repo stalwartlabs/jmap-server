@@ -188,7 +188,17 @@ impl ImapFlag for Keyword {
                 Self::MDN_SENT => "$MDNSent".into(),
                 12..=u8::MAX => "".into(),
             },
-            Tag::Text(value) => value.to_string().into(),
+            Tag::Text(value) => {
+                let mut flag = String::with_capacity(value.len());
+                for c in value.chars() {
+                    if c.is_ascii_alphanumeric() {
+                        flag.push(c);
+                    } else {
+                        flag.push('_');
+                    }
+                }
+                flag.into()
+            }
             _ => "".into(),
         }
     }

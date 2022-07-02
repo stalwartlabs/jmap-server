@@ -1,4 +1,6 @@
-use crate::{Error, ResponseCode};
+use jmap::from_timestamp;
+
+use crate::{ResponseCode, ResponseType, StatusResponse};
 
 pub mod append;
 pub mod authenticate;
@@ -55,7 +57,7 @@ impl Sequence {
 }
 
 pub trait ImapResponse {
-    fn serialize(&self, tag: &str, version: ProtocolVersion) -> Vec<u8>;
+    fn serialize(&self, tag: String, version: ProtocolVersion) -> Vec<u8>;
 }
 
 pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
@@ -67,6 +69,35 @@ pub fn quoted_string(buf: &mut Vec<u8>, text: &str) {
         buf.push(c);
     }
     buf.push(b'"');
+}
+
+pub fn quoted_string_or_nil(buf: &mut Vec<u8>, text: Option<&str>) {
+    if let Some(text) = text {
+        quoted_string(buf, text);
+    } else {
+        buf.extend_from_slice(b"NIL");
+    }
+}
+
+pub fn literal_string(buf: &mut Vec<u8>, text: &str) {
+    buf.push(b'{');
+    buf.extend_from_slice(text.len().to_string().as_bytes());
+    buf.extend_from_slice(b"}\r\n");
+    buf.extend_from_slice(text.as_bytes());
+}
+
+pub fn quoted_timestamp(buf: &mut Vec<u8>, timestamp: i64) {
+    buf.push(b'"');
+    buf.extend_from_slice(from_timestamp(timestamp).to_rfc2822().as_bytes());
+    buf.push(b'"');
+}
+
+pub fn quoted_timestamp_or_nil(buf: &mut Vec<u8>, timestamp: Option<i64>) {
+    if let Some(timestamp) = timestamp {
+        quoted_timestamp(buf, timestamp);
+    } else {
+        buf.extend_from_slice(b"NIL");
+    }
 }
 
 impl ResponseCode {
@@ -96,31 +127,41 @@ impl ResponseCode {
             ResponseCode::Parse => b"PARSE",
             ResponseCode::PermanentFlags => b"PERMANENTFLAGS",
             ResponseCode::PrivacyRequired => b"PRIVACYREQUIRED",
-            ResponseCode::ReadOnly => b"READONLY",
-            ResponseCode::ReadWrite => b"READWRITE",
+            ResponseCode::ReadOnly => b"READ-ONLY",
+            ResponseCode::ReadWrite => b"READ-WRITE",
             ResponseCode::ServerBug => b"SERVERBUG",
             ResponseCode::TryCreate => b"TRYCREATE",
             ResponseCode::UidNext => b"UIDNEXT",
             ResponseCode::UidNotSticky => b"UIDNOTSTICKY",
             ResponseCode::UidValidity => b"UIDVALIDITY",
             ResponseCode::Unavailable => b"UNAVAILABLE",
-            ResponseCode::UnknownCte => b"UNKNOWNCTE",
+            ResponseCode::UnknownCte => b"UNKNOWN-CTE",
         });
     }
 }
 
-impl Error {
+impl ResponseType {
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(match self {
+            ResponseType::Ok => b"OK",
+            ResponseType::No => b"NO",
+            ResponseType::Bad => b"BAD",
+            ResponseType::PreAuth => b"PREAUTH",
+            ResponseType::Bye => b"BYE",
+        });
+    }
+}
+
+impl StatusResponse {
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         if let Some(tag) = &self.tag {
             buf.extend_from_slice(tag.as_bytes());
         } else {
             buf.push(b'*');
         }
-        if !self.bad {
-            buf.extend_from_slice(b" NO ");
-        } else {
-            buf.extend_from_slice(b" BAD ");
-        };
+        buf.push(b' ');
+        self.rtype.serialize(buf);
+        buf.push(b' ');
         if let Some(code) = &self.code {
             buf.push(b'[');
             code.serialize(buf);
