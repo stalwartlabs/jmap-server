@@ -300,7 +300,6 @@ where
         mailbox_id: Option<DocumentId>,
         current_fields: Option<&TinyORM<Mailbox>>,
     ) -> jmap::error::set::Result<Self, Property> {
-        //TODO implement isSubscribed
         // Set properties
         for (property, value) in mailbox.properties {
             let value = match (property, value) {
@@ -336,6 +335,52 @@ where
                     value: (u64::from(helper.get_id_reference(Property::ParentId, &value)?) + 1)
                         .into(),
                 },
+                (Property::IsSubscribed, Value::Bool { value: subscribe }) => {
+                    let account_id = helper.acl.primary_id();
+                    let mut new_value = None;
+                    if let Some(current_fields) = current_fields.as_ref() {
+                        if let Some(Value::Subscriptions { value }) =
+                            current_fields.get(&Property::IsSubscribed)
+                        {
+                            if subscribe {
+                                if !value.contains(&account_id) {
+                                    let mut current_subscriptions = value.clone();
+                                    current_subscriptions.push(account_id);
+                                    new_value = Value::Subscriptions {
+                                        value: current_subscriptions,
+                                    }
+                                    .into();
+                                } else {
+                                    continue;
+                                }
+                            } else if value.contains(&account_id) {
+                                if value.len() > 1 {
+                                    new_value = Value::Subscriptions {
+                                        value: value
+                                            .iter()
+                                            .filter(|&&id| id != account_id)
+                                            .cloned()
+                                            .collect(),
+                                    }
+                                    .into();
+                                } else {
+                                    new_value = Value::Null.into();
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+                    if let Some(new_value) = new_value {
+                        new_value
+                    } else if subscribe {
+                        Value::Subscriptions {
+                            value: vec![account_id],
+                        }
+                    } else {
+                        continue;
+                    }
+                }
                 (Property::ParentId, Value::Null) => Value::Id { value: 0u64.into() },
                 (Property::Role, Value::Text { value }) => {
                     let role = value.to_lowercase();

@@ -80,13 +80,16 @@ async fn create(client: &mut Client, mailbox_id: &str) {
             .unwrap();
 
         // Download raw message
-        let raw_message = client.download(created_email.blob_id()).await.unwrap();
+        let raw_message = client
+            .download(created_email.blob_id().unwrap())
+            .await
+            .unwrap();
 
         // Fetch message
         let mut request = client.build();
         request
             .get_email()
-            .ids([created_email.id()])
+            .ids([created_email.id().unwrap()])
             .properties([
                 email::Property::Id,
                 email::Property::BlobId,

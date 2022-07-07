@@ -48,6 +48,7 @@ where
     assert_eq!(request_id, response.request_id().unwrap());
     let mailbox_id = response
         .pop_method_response()
+        .unwrap()
         .unwrap_set_mailbox()
         .unwrap()
         .created(&create_id)
@@ -87,6 +88,7 @@ where
     expect_response(&mut stream_rx)
         .await
         .pop_method_response()
+        .unwrap()
         .unwrap_set_mailbox()
         .unwrap()
         .destroyed(&mailbox_id)

@@ -69,6 +69,7 @@ impl Serialize for Mailbox {
                     map.serialize_entry(name, &format!("#{}", value))?
                 }
                 Value::ACL(value) => map.serialize_entry(name, &value.acl)?,
+                Value::Subscriptions { .. } => (),
             }
         }
 
@@ -133,6 +134,14 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                             Value::Number { value }
                         } else {
                             Value::Null
+                        },
+                    );
+                }
+                "isSubscribed" => {
+                    properties.insert(
+                        Property::IsSubscribed,
+                        Value::Bool {
+                            value: map.next_value::<Option<bool>>()?.unwrap_or(false),
                         },
                     );
                 }

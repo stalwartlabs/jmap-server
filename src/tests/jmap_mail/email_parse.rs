@@ -50,7 +50,7 @@ where
             .unwrap();
 
         let blob_id = client
-            .email_get(email.id(), Some([email::Property::Attachments]))
+            .email_get(email.id().unwrap(), Some([email::Property::Attachments]))
             .await
             .unwrap()
             .unwrap()

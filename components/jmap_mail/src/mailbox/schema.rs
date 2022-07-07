@@ -8,7 +8,7 @@ use jmap::{
 use serde::{Deserialize, Serialize};
 use store::{
     core::{acl::ACL, bitmap::Bitmap},
-    FieldId,
+    AccountId, FieldId,
 };
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -22,6 +22,7 @@ pub enum Value {
     Text { value: String },
     Bool { value: bool },
     Number { value: u32 },
+    Subscriptions { value: Vec<AccountId> },
     MailboxRights { value: MailboxRights },
     ResultReference { value: ResultReference },
     IdReference { value: String },
@@ -41,6 +42,13 @@ impl orm::Value for Value {
             Value::Id { value } => u64::from(value).into(),
             Value::Text { value } => value.to_string().into(),
             Value::Number { value } => (*value).into(),
+            Value::Subscriptions { value } => {
+                if !value.is_empty() {
+                    value.to_vec().into()
+                } else {
+                    orm::Index::Null
+                }
+            }
             _ => orm::Index::Null,
         }
     }

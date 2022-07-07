@@ -1361,6 +1361,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures-util",
+ "parking_lot 0.12.0",
  "reqwest",
  "serde",
  "serde_json",

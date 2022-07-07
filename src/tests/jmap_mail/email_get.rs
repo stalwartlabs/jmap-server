@@ -53,7 +53,7 @@ where
         let mut request = client.build();
         request
             .get_email()
-            .ids([email.id()])
+            .ids([email.id().unwrap()])
             .properties([
                 email::Property::Id,
                 email::Property::BlobId,
@@ -134,7 +134,10 @@ where
         if is_headers_test {
             for property in all_headers() {
                 let mut request = client.build();
-                request.get_email().ids([email.id()]).properties([property]);
+                request
+                    .get_email()
+                    .ids([email.id().unwrap()])
+                    .properties([property]);
                 result.headers.extend(
                     request
                         .send_get_email()

@@ -101,7 +101,8 @@ where
                         )
                         .await
                         .unwrap()
-                        .id(),
+                        .id()
+                        .unwrap(),
                 )
                 .unwrap();
 

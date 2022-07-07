@@ -172,7 +172,17 @@ where
                             MailboxRights::owner()
                         },
                     },
-                    Property::IsSubscribed => Value::Bool { value: true }, //TODO implement
+                    Property::IsSubscribed => fields
+                        .as_ref()
+                        .unwrap()
+                        .get(property)
+                        .map(|parent_id| match parent_id {
+                            Value::Subscriptions { value } if value.contains(&acl.primary_id()) => {
+                                Value::Bool { value: true }
+                            }
+                            _ => Value::Bool { value: false },
+                        })
+                        .unwrap_or(Value::Bool { value: false }),
                     Property::ACL if acl.is_member(account_id) => Value::ACL(ACLUpdate {
                         acl: fields.as_ref().unwrap().get_acls(),
                         set: true,

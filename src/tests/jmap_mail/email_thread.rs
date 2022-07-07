@@ -32,7 +32,7 @@ where
             )
             .await
             .unwrap();
-        thread_id = email.thread_id().to_string();
+        thread_id = email.thread_id().unwrap().to_string();
         expected_result[num - 1] = email.unwrap_id();
     }
 

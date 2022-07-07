@@ -27,6 +27,7 @@ pub trait ACLEnforce: Sized {
         to_collection: Collection,
     ) -> crate::Result<Self>;
     fn assert_is_member(self, account_id: AccountId) -> crate::Result<Self>;
+    fn primary_id(&self) -> AccountId;
 }
 
 impl ACLEnforce for Arc<ACLToken> {
@@ -44,6 +45,10 @@ impl ACLEnforce for Arc<ACLToken> {
 
     fn is_shared(&self, account_id: AccountId) -> bool {
         !self.is_member(account_id) && self.access_to.iter().any(|(id, _)| *id == account_id)
+    }
+
+    fn primary_id(&self) -> AccountId {
+        *self.member_of.first().unwrap()
     }
 
     fn assert_has_access(

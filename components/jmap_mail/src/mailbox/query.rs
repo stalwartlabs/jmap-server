@@ -4,6 +4,7 @@ use jmap::error::method::MethodError;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::query::{QueryRequest, QueryResponse};
+use jmap::request::ACLEnforce;
 use jmap::types::jmap::JMAPId;
 use std::collections::{HashMap, HashSet};
 use store::core::acl::ACL;
@@ -53,6 +54,7 @@ where
             .into(),
         )?;
         let account_id = helper.account_id;
+        let primary_account_id = helper.request.acl.as_ref().unwrap().primary_id();
         let sort_as_tree = helper.request.arguments.sort_as_tree.unwrap_or(false);
         let filter_as_tree = helper.request.arguments.filter_as_tree.unwrap_or(false);
 
@@ -94,7 +96,17 @@ where
                         filter
                     }
                 }
-                Filter::IsSubscribed { value: _value } => todo!(), //TODO implement
+                Filter::IsSubscribed { value } => {
+                    let filter = filter::Filter::eq(
+                        Property::IsSubscribed.into(),
+                        Query::Integer(primary_account_id),
+                    );
+                    if !value {
+                        filter::Filter::not(vec![filter])
+                    } else {
+                        filter
+                    }
+                }
                 Filter::Unsupported { value } => {
                     return Err(MethodError::UnsupportedFilter(value));
                 }

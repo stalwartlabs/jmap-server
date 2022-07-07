@@ -205,7 +205,7 @@ where
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(email_submission.undo_status(), &UndoStatus::Final);
+    assert_eq!(email_submission.undo_status().unwrap(), &UndoStatus::Final);
     assert_eq!(
         email_submission.delivery_status().unwrap(),
         &HashMap::from_iter([
@@ -249,7 +249,7 @@ where
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(email_submission.undo_status(), &UndoStatus::Final);
+    assert_eq!(email_submission.undo_status().unwrap(), &UndoStatus::Final);
     assert_eq!(
         email_submission.delivery_status().unwrap(),
         &HashMap::from_iter([
@@ -298,7 +298,10 @@ where
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(email_submission.undo_status(), &UndoStatus::Canceled);
+    assert_eq!(
+        email_submission.undo_status().unwrap(),
+        &UndoStatus::Canceled
+    );
     assert_eq!(
         email_submission.delivery_status().unwrap(),
         &HashMap::from_iter([
@@ -357,7 +360,7 @@ where
         .unwrap()
         .unwrap();
     assert_eq!(
-        email_submission.send_at(),
+        email_submission.send_at().unwrap(),
         DateTime::parse_from_rfc3339("2079-11-20T05:00:00Z")
             .unwrap()
             .timestamp()
