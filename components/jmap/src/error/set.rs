@@ -124,6 +124,8 @@ impl<U> SetError<U> {
 
 impl<U> From<StoreError> for SetError<U> {
     fn from(error: StoreError) -> Self {
+        //TODO remove
+        println!("Failed store operation: {:?}", error);
         error!("Failed store operation: {:?}", error);
         SetError::new(
             SetErrorType::Forbidden,

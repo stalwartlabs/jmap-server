@@ -448,17 +448,26 @@ where
                     success = true;
                     break;
                 }
+                let parent_document_id = (mailbox_parent_id - 1).get_document_id();
 
-                mailbox_parent_id = helper
+                if let Some(fields) = helper
                     .store
-                    .get_orm::<Mailbox>(
-                        helper.account_id,
-                        (mailbox_parent_id - 1).get_document_id(),
-                    )?
-                    .ok_or_else(|| StoreError::InternalError("Mailbox data not found".to_string()))?
-                    .get(&Property::ParentId)
-                    .and_then(|v| v.as_id())
-                    .unwrap_or(0);
+                    .get_orm::<Mailbox>(helper.account_id, parent_document_id)?
+                {
+                    mailbox_parent_id = fields
+                        .get(&Property::ParentId)
+                        .and_then(|v| v.as_id())
+                        .unwrap_or(0);
+                } else if helper.document_ids.contains(parent_document_id) {
+                    // Parent mailbox is probably created within the same request
+                    success = true;
+                    break;
+                } else {
+                    return Err(SetError::new(
+                        SetErrorType::InvalidProperties,
+                        "Mailbox parent does not exist.",
+                    ));
+                }
             }
 
             if !success {
