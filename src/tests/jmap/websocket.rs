@@ -53,7 +53,7 @@ where
         .unwrap()
         .created(&create_id)
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Enable push notifications
     client

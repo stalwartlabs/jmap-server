@@ -36,12 +36,12 @@ where
         .domain_create("example.com")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let account_id_1 = client
         .individual_create("jdoe@example.com", "12345", "John Doe")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     client
         .principal_set_aliases(&account_id_1, ["john.doe@example.com"].into())
         .await
@@ -50,12 +50,12 @@ where
         .individual_create("jane@example.com", "abcdef", "Jane Smith")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let account_id_3 = client
         .individual_create("bill@example.com", "12345", "Bill Foobar")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     assert!(matches!(
         client
@@ -100,7 +100,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Delivering to individuals
     ingest_message(

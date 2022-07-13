@@ -32,7 +32,7 @@ where
         .mailbox_create("JMAP Parse", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Test parsing an email attachment
     for test_name in ["attachment.eml", "attachment_b64.eml"] {
@@ -153,10 +153,10 @@ where
     let mut test_file = test_dir;
     test_file.push("headers.eml");
     let blob_id = client
-        .upload(fs::read(&test_file).unwrap(), None)
+        .upload(None, fs::read(&test_file).unwrap(), None)
         .await
         .unwrap()
-        .unwrap_blob_id();
+        .take_blob_id();
 
     let mut email = client
         .email_parse(

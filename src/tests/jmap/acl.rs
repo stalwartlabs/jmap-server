@@ -30,27 +30,27 @@ where
         .domain_create("example.com")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let john_id = admin_client
         .individual_create("jdoe@example.com", "12345", "John Doe")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let jane_id = admin_client
         .individual_create("jane.smith@example.com", "abcde", "Jane Smith")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let bill_id = admin_client
         .individual_create("bill@example.com", "098765", "Bill Foobar")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let sales_id = admin_client
         .group_create("sales@example.com", "Sales Group", Vec::<String>::new())
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Authenticate all accounts
     let mut john_client = Client::connect(
@@ -104,7 +104,7 @@ where
                     )
                     .await
                     .unwrap()
-                    .unwrap_id(),
+                    .take_id(),
             );
         }
         email_ids.insert(name, ids);
@@ -219,7 +219,7 @@ where
         .await
         .unwrap()
         .unwrap()
-        .unwrap_blob_id();
+        .take_blob_id();
     john_client
         .set_default_account_id(&john_id)
         .blob_copy(&jane_id, &blob_id)
@@ -233,7 +233,7 @@ where
         .await
         .unwrap()
         .unwrap()
-        .unwrap_blob_id();
+        .take_blob_id();
     assert_forbidden(
         john_client
             .set_default_account_id(&john_id)
@@ -269,6 +269,7 @@ where
     let blob_id = john_client
         .set_default_account_id(&john_id)
         .upload(
+            &john_id,
             concat!(
                 "From: acl_test@example.com\r\n",
                 "To: jane.smith@example.com\r\n",
@@ -282,7 +283,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_blob_id();
+        .take_blob_id();
     let mut request = john_client.set_default_account_id(&jane_id).build();
     let email_id = request
         .import_email()
@@ -331,7 +332,7 @@ where
         .unwrap()
         .created(&email_id)
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let email_id_2 = john_client
         .set_default_account_id(&jane_id)
         .email_copy(
@@ -343,7 +344,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     assert_eq!(
         jane_client
@@ -470,7 +471,7 @@ where
         .mailbox_create("John's mailbox", None::<&str>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Try renaming a mailbox
     assert_forbidden(
@@ -687,6 +688,7 @@ where
     let blob_id = john_client
         .set_default_account_id(&sales_id)
         .upload(
+            &sales_id,
             concat!(
                 "From: acl_test@example.com\r\n",
                 "To: sales@example.com\r\n",
@@ -700,7 +702,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_blob_id();
+        .take_blob_id();
     let mut request = john_client.build();
     let email_id = request
         .import_email()
@@ -713,7 +715,7 @@ where
         .unwrap()
         .created(&email_id)
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Both Jane and John should be able to see this message, but not Bill
     assert_eq!(

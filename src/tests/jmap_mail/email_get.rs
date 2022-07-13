@@ -29,7 +29,7 @@ where
         .mailbox_create("JMAP Get", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     for file_name in fs::read_dir(&test_dir).unwrap() {
         let mut file_name = file_name.as_ref().unwrap().path();

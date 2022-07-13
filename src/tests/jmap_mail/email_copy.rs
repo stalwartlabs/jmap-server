@@ -17,7 +17,7 @@ where
         .mailbox_create("Copy Test Ac# 1", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Insert a message on account 1
     let ac1_email_id = client
@@ -38,7 +38,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Create a mailbox on account 2
     let ac2_mailbox_id = client
@@ -46,7 +46,7 @@ where
         .mailbox_create("Copy Test Ac# 2", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Copy the email and delete it from the first account
     let mut request = client.build();
@@ -66,7 +66,7 @@ where
         .unwrap()
         .created(&ac1_email_id)
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Check that the email was copied
     let email = client

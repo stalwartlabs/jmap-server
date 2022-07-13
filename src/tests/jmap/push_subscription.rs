@@ -70,7 +70,7 @@ where
         .push_subscription_create("123", "https://127.0.0.1:9000/push", None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Expect push verification
     let verification = expect_push(&mut event_rx).await.unwrap_verification();
@@ -88,7 +88,7 @@ where
         .mailbox_create("PushSubscription Test", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
 
@@ -111,7 +111,7 @@ where
         .push_subscription_create("invalid", "https://127.0.0.1:9000/push", None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     expect_nothing(&mut event_rx).await;
     client.push_subscription_destroy(&push_id).await.unwrap();
 
@@ -124,7 +124,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Expect push verification
     let verification = expect_push(&mut event_rx).await.unwrap_verification();

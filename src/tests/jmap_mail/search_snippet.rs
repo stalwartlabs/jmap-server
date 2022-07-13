@@ -18,7 +18,7 @@ where
         .mailbox_create("JMAP SearchSnippet", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     let mut email_ids = HashMap::new();
 
@@ -41,7 +41,7 @@ where
             )
             .await
             .unwrap()
-            .unwrap_id();
+            .take_id();
         email_ids.insert(email_name, email_id);
     }
 

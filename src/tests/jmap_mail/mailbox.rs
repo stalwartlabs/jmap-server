@@ -315,7 +315,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Only email properties must have changed
     let state = client.mailbox_changes(state, 0).await.unwrap();
@@ -533,7 +533,7 @@ async fn create_test_mailboxes(client: &mut Client) -> HashMap<String, String> {
     let mut result = request.send_set_mailbox().await.unwrap();
     let mut id_map = HashMap::with_capacity(mailbox_map.len());
     for (create_id, local_id) in mailbox_map {
-        let server_id = result.created(&create_id).unwrap().unwrap_id();
+        let server_id = result.created(&create_id).unwrap().take_id();
         id_map.insert(local_id.clone(), server_id.clone());
         id_map.insert(server_id, local_id);
     }

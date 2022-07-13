@@ -47,7 +47,7 @@ where
         .mailbox_create("EventSource Test", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     assert_state(&mut event_rx, &[TypeState::Mailbox]).await;
 
     // Multiple changes should be grouped and delivered in intervals

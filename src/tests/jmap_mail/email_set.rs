@@ -25,7 +25,7 @@ where
         .mailbox_create("JMAP Set", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     create(client, &mailbox_id).await;
     update(client, &mailbox_id).await;
@@ -57,10 +57,10 @@ async fn create(client: &mut Client, mailbox_id: &str) {
                 let blob_value = blob_value.replace("\\r", "\r").replace("\\n", "\n");
                 blob_ids.push(
                     client
-                        .upload(blob_value.into_bytes(), None)
+                        .upload(None, blob_value.into_bytes(), None)
                         .await
                         .unwrap()
-                        .unwrap_blob_id(),
+                        .take_blob_id(),
                 );
             }
             json_request = replace_values(json_request, &blob_values, &blob_ids);
@@ -188,13 +188,13 @@ async fn update(client: &mut Client, root_mailbox_id: &str) {
         .mailbox_create("Test 1", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let test_mailbox2_id = client
         .set_default_account_id(JMAPId::new(1).to_string())
         .mailbox_create("Test 2", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Set keywords and mailboxes
     let mut request = client.build();

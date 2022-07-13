@@ -64,19 +64,19 @@ where
         .mailbox_create("JMAP EmailSubmission", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let mailbox_id_2 = client
         .mailbox_create("JMAP EmailSubmission 2", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Create an identity
     let identity_id = client
         .identity_create("John Doe", "jdoe@example.com")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Import an email without any recipients
     let email_id = client
@@ -88,7 +88,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     // Submission without a valid emailId or identityId should fail
     assert!(matches!(
@@ -149,7 +149,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     client
         .email_submission_create(&email_id, &identity_id)
         .await
@@ -182,7 +182,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     assert_message_delivery(
         &mut smtp_rx,
@@ -235,7 +235,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     assert_message_delivery(
         &mut smtp_rx,
         MockMessage::new("<jdoe@example.com>", ["<tim@foobar.com>"], email_body),
@@ -288,7 +288,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     expect_nothing(&mut smtp_rx).await;
 
     // Confirm that all delivery failures were included
@@ -343,7 +343,7 @@ where
         )
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     assert_message_delivery(
         &mut smtp_rx,
         MockMessage::new(

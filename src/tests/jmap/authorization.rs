@@ -26,12 +26,12 @@ where
         .domain_create("example.com")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let account_id = admin_client
         .individual_create("jdoe@example.com", "12345", "John Doe")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     admin_client
         .principal_set_aliases(&account_id, ["john.doe@example.com"].into())
         .await
@@ -115,12 +115,12 @@ where
         .identity_create("John Doe", "jdoe@example.com")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     client
         .identity_create("John Doe (secondary)", "john.doe@example.com")
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     assert!(matches!(
         client
             .identity_create("John the Spammer", "spammy@mcspamface.com")
@@ -166,12 +166,12 @@ where
     for _ in 0..4 {
         let client_ = client.clone();
         tokio::spawn(async move {
-            client_.upload(b"sleep".to_vec(), None).await.unwrap();
+            client_.upload(None, b"sleep".to_vec(), None).await.unwrap();
         });
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(matches!(
-        client.upload(b"sleep".to_vec(), None).await,
+        client.upload(None, b"sleep".to_vec(), None).await,
         Err(jmap_client::Error::Problem(ProblemDetails {
             status: Some(400),
             ..

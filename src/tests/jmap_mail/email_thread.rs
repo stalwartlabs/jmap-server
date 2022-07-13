@@ -17,7 +17,7 @@ where
         .mailbox_create("JMAP Get", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     let mut expected_result = vec!["".to_string(); 5];
     let mut thread_id = "".to_string();
@@ -33,7 +33,7 @@ where
             .await
             .unwrap();
         thread_id = email.thread_id().unwrap().to_string();
-        expected_result[num - 1] = email.unwrap_id();
+        expected_result[num - 1] = email.take_id();
     }
 
     assert_eq!(

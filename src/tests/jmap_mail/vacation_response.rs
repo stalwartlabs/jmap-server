@@ -33,7 +33,7 @@ where
         .mailbox_create("Inbox", None::<String>, Role::Inbox)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     server.store.recipients.insert(
         "jdoe@example.com".to_string(),
         Arc::new(RecipientType::Individual(1)),

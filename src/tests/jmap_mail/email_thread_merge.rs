@@ -35,7 +35,7 @@ where
                     .mailbox_create("Thread nightmare", None::<String>, Role::None)
                     .await
                     .unwrap()
-                    .unwrap_id(),
+                    .take_id(),
             );
         }
 

@@ -31,12 +31,12 @@ where
         .mailbox_create("JMAP Changes 1", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
     let mailbox2_id = client
         .mailbox_create("JMAP Changes 2", None::<String>, Role::None)
         .await
         .unwrap()
-        .unwrap_id();
+        .take_id();
 
     let mut states = vec![JMAPState::Initial];
     let mut id_map = HashMap::new();
