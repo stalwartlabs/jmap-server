@@ -170,7 +170,7 @@
     "type": "multipart/alternative",
     "subParts": [
       {
-        "partId": "0",
+        "partId": "1",
         "blobId": "b29233a034f7e657139de5be7444de0815ba4fb884fc575d1bf94ca6f08cc1f2051",
         "size": 81,
         "headers": [
@@ -202,7 +202,7 @@
         ]
       },
       {
-        "partId": "1",
+        "partId": "2",
         "blobId": "bf878352c610324110e10f1d1a54c0ad50fb237f234cca80a44a13ef18f192ca5da01",
         "size": 218,
         "headers": [
@@ -227,12 +227,12 @@
     ]
   },
   "bodyValues": {
-    "0": {
+    "1": {
       "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
       "isEncodingProblem": false,
       "isTruncated": false
     },
-    "1": {
+    "2": {
       "value": "<!DOCTYPE html><html><head><title></title><style type=\"text/css\">div{font-size:16px}</style>...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -240,7 +240,7 @@
   },
   "textBody": [
     {
-      "partId": "0",
+      "partId": "1",
       "blobId": "b29233a034f7e657139de5be7444de0815ba4fb884fc575d1bf94ca6f08cc1f2051",
       "size": 81,
       "headers": [
@@ -274,7 +274,7 @@
   ],
   "htmlBody": [
     {
-      "partId": "1",
+      "partId": "2",
       "blobId": "bf878352c610324110e10f1d1a54c0ad50fb237f234cca80a44a13ef18f192ca5da01",
       "size": 218,
       "headers": [

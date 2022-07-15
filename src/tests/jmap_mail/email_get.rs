@@ -126,7 +126,7 @@ where
             .send_get_email()
             .await
             .unwrap()
-            .unwrap_list()
+            .take_list()
             .pop()
             .unwrap()
             .into_test();
@@ -143,7 +143,7 @@ where
                         .send_get_email()
                         .await
                         .unwrap()
-                        .unwrap_list()
+                        .take_list()
                         .pop()
                         .unwrap()
                         .into_test()

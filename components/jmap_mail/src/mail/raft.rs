@@ -4,7 +4,7 @@ use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::core::JMAPIdPrefix;
-use store::serialize::StoreSerialize;
+use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::write::options::{IndexOptions, Options};
 use store::{
     core::collection::Collection, write::batch::WriteBatch, AccountId, DocumentId, JMAPId,
@@ -12,8 +12,8 @@ use store::{
 };
 
 use super::schema::Email;
-use super::MessageData;
 use super::MessageField;
+use super::{MessageData, MimePartType};
 
 impl<T> RaftObject<T> for Email
 where
@@ -36,7 +36,7 @@ where
             })?;
 
             // Build index from message metadata
-            MessageData::from_metadata(&store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
+            MessageData::deserialize(&store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
                 StoreError::InternalError(format!(
                     "Could not find message metadata blob for {}.",
                     document.document_id
@@ -140,23 +140,25 @@ where
                     document_id
                 ))
             })?];
-        let message_data = MessageData::from_metadata(
-            &store.blob_get(blobs.last().unwrap())?.ok_or_else(|| {
+        let message_data =
+            MessageData::deserialize(&store.blob_get(blobs.last().unwrap())?.ok_or_else(|| {
                 StoreError::InternalError(format!(
                     "Failed to get message metadata blob for {}.",
                     document_id
                 ))
-            })?,
-        )
-        .ok_or_else(|| {
-            StoreError::InternalError(format!(
-                "Failed to get deserialize message data for {}.",
-                document_id
-            ))
-        })?;
+            })?)
+            .ok_or_else(|| {
+                StoreError::InternalError(format!(
+                    "Failed to get deserialize message data for {}.",
+                    document_id
+                ))
+            })?;
         blobs.push(message_data.raw_message);
         for mime_part in message_data.mime_parts {
-            if let Some(blob_id) = mime_part.blob_id {
+            if let MimePartType::Text { blob_id }
+            | MimePartType::Html { blob_id }
+            | MimePartType::Other { blob_id } = mime_part.mime_type
+            {
                 blobs.push(blob_id);
             }
         }

@@ -8,7 +8,7 @@ use super::{
     sharing::JMAPShareMail,
     GetRawHeader,
 };
-use crate::mail::{HeaderName, MessageData, MessageField, MessageOutline, MimePart, MimePartType};
+use crate::mail::{HeaderName, MessageData, MessageField, MimePart, MimePartType};
 use jmap::{
     from_timestamp,
     jmap_store::get::{GetHelper, GetObject},
@@ -22,9 +22,10 @@ use jmap::{
 };
 use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
-    HeaderOffset, HeaderValue, Message, MessageStructure, RfcHeader,
+    HeaderValue, Message, RfcHeader,
 };
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use store::tracing::error;
 use store::{
     blob::BlobId,
     core::acl::{ACLToken, ACL},
@@ -34,7 +35,6 @@ use store::{
     core::{collection::Collection, error::StoreError},
     serialize::StoreDeserialize,
 };
-use store::{serialize::leb128::Leb128, tracing::error};
 use store::{DocumentId, Store};
 
 enum FetchRaw {
@@ -240,79 +240,41 @@ where
                     StoreError::DataCorruption
                 })?;
 
-            let (message_data_len, read_bytes) = usize::from_leb128_bytes(&message_data_bytes[..])
-                .ok_or_else(|| {
+            // Deserialize message data
+            let mut message_data =
+                MessageData::deserialize(&message_data_bytes).ok_or_else(|| {
                     error!(
-                        "Failed to deserialize email metadata position for {}/{}",
+                        "Failed to deserialize email metadata for {}/{}",
                         account_id, document_id
                     );
                     StoreError::DataCorruption
                 })?;
 
-            // Deserialize message data
-            let mut message_data = MessageData::deserialize(
-                &message_data_bytes[read_bytes..read_bytes + message_data_len],
-            )
-            .ok_or_else(|| {
-                error!(
-                    "Failed to deserialize email metadata for {}/{}",
-                    account_id, document_id
-                );
-                StoreError::DataCorruption
-            })?;
-
             // Fetch raw message only if needed
-            let (raw_message, message_outline) = match &fetch_raw {
-                FetchRaw::All => (
+            let raw_message = match &fetch_raw {
+                FetchRaw::All => {
                     Some(self.blob_get(&message_data.raw_message)?.ok_or_else(|| {
                         error!(
                             "Raw email message not found for {}/{}.",
                             account_id, document_id
                         );
                         StoreError::DataCorruption
-                    })?),
-                    Some(
-                        MessageOutline::deserialize(
-                            &message_data_bytes[read_bytes + message_data_len..],
-                        )
-                        .ok_or_else(|| {
-                            error!(
-                                "Failed to deserialize email outline for {}/{}.",
-                                account_id, document_id
-                            );
-                            StoreError::DataCorruption
-                        })?,
-                    ),
-                ),
-                FetchRaw::Header => {
-                    let message_outline = MessageOutline::deserialize(
-                        &message_data_bytes[read_bytes + message_data_len..],
-                    )
+                    })?)
+                }
+                FetchRaw::Header => Some(
+                    self.blob_get_range(
+                        &message_data.raw_message,
+                        0..message_data.body_offset as u32,
+                    )?
                     .ok_or_else(|| {
                         error!(
-                            "Failed to deserialize email outline for {}/{}.",
+                            "Raw email message not found for {}/{}.",
                             account_id, document_id
                         );
                         StoreError::DataCorruption
-                    })?;
-                    (
-                        Some(
-                            self.blob_get_range(
-                                &message_data.raw_message,
-                                0..message_outline.body_offset as u32,
-                            )?
-                            .ok_or_else(|| {
-                                error!(
-                                    "Raw email message not found for {}/{}.",
-                                    account_id, document_id
-                                );
-                                StoreError::DataCorruption
-                            })?,
-                        ),
-                        Some(message_outline),
-                    )
-                }
-                FetchRaw::None => (None, None),
+                    })?,
+                ),
+                FetchRaw::None => None,
             };
 
             // Fetch ORM
@@ -388,23 +350,21 @@ where
                     }
                     .into(),
                     Property::Header(header) => {
-                        match (&header.header, &header.form, &message_outline, &raw_message) {
+                        match (&header.header, &header.form, &raw_message) {
                             (
                                 header_name @ HeaderName::Other(_),
                                 header_form,
-                                Some(message_outline),
                                 Some(raw_message),
                             )
                             | (
                                 header_name @ HeaderName::Rfc(_),
                                 header_form @ HeaderForm::Raw,
-                                Some(message_outline),
                                 Some(raw_message),
                             ) => {
-                                if let Some(offsets) = message_outline
-                                    .headers
+                                if let Some(offsets) = message_data
+                                    .mime_parts
                                     .get(0)
-                                    .and_then(|h| h.get_header(header_name))
+                                    .and_then(|h| h.raw_headers.get_header(header_name))
                                 {
                                     header_form
                                         .parse_offsets(&offsets, raw_message, header.all)
@@ -413,7 +373,7 @@ where
                                     None
                                 }
                             }
-                            (HeaderName::Rfc(header_name), header_form, _, _) => {
+                            (HeaderName::Rfc(header_name), header_form, _) => {
                                 message_data.header(header_name, header_form, header.all)
                             }
                             _ => None,
@@ -438,7 +398,7 @@ where
                                         self.blob_get(
                                             parts
                                                 .get(0)
-                                                .and_then(|p| message_data.mime_parts.get(p + 1))
+                                                .and_then(|p| message_data.mime_parts.get(*p))
                                                 .ok_or_else(|| {
                                                     error!(
                                                         "Missing message part for {}/{}",
@@ -446,8 +406,8 @@ where
                                                     );
                                                     StoreError::DataCorruption
                                                 })?
-                                                .blob_id
-                                                .as_ref()
+                                                .mime_type
+                                                .blob_id()
                                                 .ok_or_else(|| {
                                                     error!(
                                                         "Message part blobId not found for {}/{}.",
@@ -482,18 +442,16 @@ where
                     }
                     Property::BodyValues => {
                         let mut body_values = HashMap::new();
-                        for (part_id, mime_part) in
-                            message_data.mime_parts.iter().skip(1).enumerate()
-                        {
-                            if ((MimePartType::Html == mime_part.mime_type
+                        for (part_id, mime_part) in message_data.mime_parts.iter().enumerate() {
+                            if ((mime_part.mime_type.is_html()
                                 && (fetch_all_body_values || fetch_html_body_values))
-                                || (MimePartType::Text == mime_part.mime_type
+                                || (mime_part.mime_type.is_text()
                                     && (fetch_all_body_values || fetch_text_body_values)))
                                 && (message_data.text_body.contains(&part_id)
                                     || message_data.html_body.contains(&part_id))
                             {
                                 let blob = self
-                                    .blob_get(mime_part.blob_id.as_ref().ok_or_else(|| {
+                                    .blob_get(mime_part.mime_type.blob_id().ok_or_else(|| {
                                         error!(
                                             "BodyValue blobId not found for {}/{}.",
                                             account_id, document_id
@@ -535,7 +493,6 @@ where
                                 &message_data.text_body,
                                 &body_properties,
                                 raw_message.as_deref(),
-                                message_outline.as_ref(),
                                 None,
                             )
                             .into(),
@@ -547,7 +504,6 @@ where
                                 &message_data.html_body,
                                 &body_properties,
                                 raw_message.as_deref(),
-                                message_outline.as_ref(),
                                 None,
                             )
                             .into(),
@@ -559,20 +515,13 @@ where
                                 &message_data.attachments,
                                 &body_properties,
                                 raw_message.as_deref(),
-                                message_outline.as_ref(),
                                 None,
                             )
                             .into(),
                     ),
-                    Property::BodyStructure => message_outline
-                        .as_ref()
-                        .unwrap()
-                        .as_body_structure(
-                            &message_data.mime_parts,
-                            &body_properties,
-                            raw_message.as_deref(),
-                            None,
-                        )
+                    Property::BodyStructure => message_data
+                        .mime_parts
+                        .as_body_structure(&body_properties, raw_message.as_deref(), None)
                         .map(|b| b.into()),
                     Property::Invalid(_) => None,
                 };
@@ -626,53 +575,41 @@ where
 impl MimePart {
     pub fn as_body_part(
         &self,
-        part_id: Option<usize>,
+        part_id: usize,
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        headers_raw: Option<&Vec<(HeaderName, HeaderOffset)>>,
         base_blob_id: Option<&BlobId>,
     ) -> EmailBodyPart {
         let mut body_part = HashMap::with_capacity(properties.len());
+        let blob_id = self.mime_type.blob_id();
 
         for property in properties {
             match property {
-                BodyProperty::PartId => {
-                    if let Some(part_id) = part_id {
-                        body_part.insert(
-                            BodyProperty::PartId,
-                            Value::Text {
-                                value: part_id.to_string(),
-                            },
-                        );
-                    }
-                }
-                BodyProperty::BlobId if part_id.is_some() => {
-                    if let Some(blob_id) = &self.blob_id {
-                        body_part.insert(
-                            BodyProperty::BlobId,
-                            Value::Blob {
-                                value: if let Some(base_blob_id) = base_blob_id {
-                                    JMAPBlob::new_inner(
-                                        base_blob_id.clone(),
-                                        *part_id.as_ref().unwrap() as u32,
-                                    )
-                                } else {
-                                    JMAPBlob::from(blob_id)
-                                },
-                            },
-                        );
-                    }
-                }
-                BodyProperty::Size if part_id.is_some() => {
+                BodyProperty::PartId if blob_id.is_some() => {
                     body_part.insert(
-                        BodyProperty::Size,
-                        Value::Size {
-                            value: self.headers.size,
+                        BodyProperty::PartId,
+                        Value::Text {
+                            value: part_id.to_string(),
                         },
                     );
                 }
+                BodyProperty::BlobId if blob_id.is_some() => {
+                    body_part.insert(
+                        BodyProperty::BlobId,
+                        Value::Blob {
+                            value: if let Some(base_blob_id) = base_blob_id {
+                                JMAPBlob::new_inner(base_blob_id.clone(), part_id as u32)
+                            } else {
+                                JMAPBlob::from(*blob_id.as_ref().unwrap())
+                            },
+                        },
+                    );
+                }
+                BodyProperty::Size if blob_id.is_some() => {
+                    body_part.insert(BodyProperty::Size, Value::Size { value: self.size });
+                }
                 BodyProperty::Name => {
-                    if let Some(name) = &self.headers.name {
+                    if let Some(name) = &self.name {
                         body_part.insert(
                             BodyProperty::Name,
                             Value::Text {
@@ -682,7 +619,7 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Type => {
-                    if let Some(mime_type) = &self.headers.type_ {
+                    if let Some(mime_type) = &self.type_ {
                         body_part.insert(
                             BodyProperty::Type,
                             Value::Text {
@@ -692,7 +629,7 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Charset => {
-                    if let Some(charset) = &self.headers.charset {
+                    if let Some(charset) = &self.charset {
                         body_part.insert(
                             BodyProperty::Charset,
                             Value::Text {
@@ -702,7 +639,7 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Disposition => {
-                    if let Some(disposition) = &self.headers.disposition {
+                    if let Some(disposition) = &self.disposition {
                         body_part.insert(
                             BodyProperty::Disposition,
                             Value::Text {
@@ -712,7 +649,7 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Cid => {
-                    if let Some(cid) = &self.headers.cid {
+                    if let Some(cid) = &self.cid {
                         body_part.insert(
                             BodyProperty::Cid,
                             Value::Text {
@@ -722,7 +659,7 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Language => {
-                    if let Some(language) = &self.headers.language {
+                    if let Some(language) = &self.language {
                         body_part.insert(
                             BodyProperty::Language,
                             Value::TextList {
@@ -732,7 +669,7 @@ impl MimePart {
                     }
                 }
                 BodyProperty::Location => {
-                    if let Some(location) = &self.headers.location {
+                    if let Some(location) = &self.location {
                         body_part.insert(
                             BodyProperty::Location,
                             Value::Text {
@@ -741,8 +678,8 @@ impl MimePart {
                         );
                     }
                 }
-                BodyProperty::Header(header) if headers_raw.is_some() => {
-                    if let Some(offsets) = headers_raw.unwrap().get_header(&header.header) {
+                BodyProperty::Header(header) if message_raw.is_some() => {
+                    if let Some(offsets) = self.raw_headers.get_header(&header.header) {
                         if let Some(value) = header
                             .form
                             .parse_offsets(&offsets, message_raw.unwrap(), header.all)
@@ -752,12 +689,12 @@ impl MimePart {
                         }
                     }
                 }
-                BodyProperty::Headers if headers_raw.is_some() => {
-                    let headers_raw = headers_raw.unwrap();
-                    let mut headers = Vec::with_capacity(headers_raw.len());
-                    for (header, value) in headers_raw {
+                BodyProperty::Headers if message_raw.is_some() && !self.raw_headers.is_empty() => {
+                    let raw_message = message_raw.unwrap();
+                    let mut headers = Vec::with_capacity(self.raw_headers.len());
+                    for (header, value) in &self.raw_headers {
                         if let HeaderValue::Collection(values) =
-                            HeaderForm::Raw.parse_offsets(&[value], message_raw.unwrap(), true)
+                            HeaderForm::Raw.parse_offsets(&[value], raw_message, true)
                         {
                             for value in values {
                                 if let HeaderValue::Text(value) = value {
@@ -786,7 +723,7 @@ impl MimePart {
             is_truncated: (max_body_value > 0 && body_value.len() > max_body_value).into(),
             value: if max_body_value == 0 || body_value.len() <= max_body_value {
                 body_value
-            } else if matches!(&self.mime_type, MimePartType::Html) {
+            } else if matches!(&self.mime_type, MimePartType::Html { .. }) {
                 truncate_html(body_value.into(), max_body_value).to_string()
             } else {
                 truncate_text(body_value.into(), max_body_value).to_string()
@@ -801,7 +738,6 @@ pub trait AsBodyParts {
         parts: &[usize],
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        message_outline: Option<&MessageOutline>,
         base_blob_id: Option<&BlobId>,
     ) -> Vec<EmailBodyPart>;
 }
@@ -812,17 +748,15 @@ impl AsBodyParts for Vec<MimePart> {
         parts: &[usize],
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        message_outline: Option<&MessageOutline>,
         base_blob_id: Option<&BlobId>,
     ) -> Vec<EmailBodyPart> {
         parts
             .iter()
             .filter_map(|part_id| {
-                Some(self.get(part_id + 1)?.as_body_part(
-                    (*part_id).into(),
+                Some(self.get(*part_id)?.as_body_part(
+                    *part_id,
                     properties,
                     message_raw,
-                    message_outline.and_then(|m| m.headers.get(part_id + 1)),
                     base_blob_id,
                 ))
             })
@@ -830,110 +764,73 @@ impl AsBodyParts for Vec<MimePart> {
     }
 }
 
-impl MessageOutline {
-    pub fn as_body_structure(
+pub trait AsBodyStructure {
+    fn as_body_structure(
         &self,
-        mime_parts: &[MimePart],
+        properties: &[BodyProperty],
+        message_raw: Option<&[u8]>,
+        base_blob_id: Option<&BlobId>,
+    ) -> Option<EmailBodyPart>;
+}
+
+impl AsBodyStructure for Vec<MimePart> {
+    fn as_body_structure(
+        &self,
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
         base_blob_id: Option<&BlobId>,
     ) -> Option<EmailBodyPart> {
-        let mut parts_stack = Vec::with_capacity(5);
         let mut stack = Vec::new();
-        let part_list = match &self.body_structure {
-            MessageStructure::Part(part_id) => {
-                return mime_parts
-                    .get(part_id + 1)?
-                    .as_body_part(
-                        (*part_id).into(),
+        let root_part = self.get(0)?;
+        let mut body_structure = root_part.as_body_part(0, properties, message_raw, base_blob_id);
+
+        if let MimePartType::MultiPart {
+            subparts: part_list,
+        } = &root_part.mime_type
+        {
+            let mut subparts = Vec::with_capacity(part_list.len());
+            let mut part_list_iter = part_list.iter();
+
+            loop {
+                while let Some(part_id) = part_list_iter.next() {
+                    let subpart = self.get(*part_id)?;
+
+                    subparts.push(self.get(*part_id)?.as_body_part(
+                        *part_id,
                         properties,
                         message_raw,
-                        self.headers.get(0),
                         base_blob_id,
-                    )
-                    .into();
-            }
-            MessageStructure::List(part_list) => {
-                parts_stack.push(mime_parts.get(0)?.as_body_part(
-                    None,
-                    properties,
-                    message_raw,
-                    self.headers.get(0),
-                    base_blob_id,
-                ));
-                part_list
-            }
-            MessageStructure::MultiPart((part_id, part_list)) => {
-                parts_stack.push(mime_parts.get(0)?.as_body_part(
-                    None,
-                    properties,
-                    message_raw,
-                    self.headers.get(0),
-                    base_blob_id,
-                ));
-                parts_stack.push(mime_parts.get(part_id + 1)?.as_body_part(
-                    None,
-                    properties,
-                    message_raw,
-                    self.headers.get(part_id + 1),
-                    base_blob_id,
-                ));
-                stack.push(([].iter(), vec![]));
-                part_list
-            }
-        };
+                    ));
 
-        let mut subparts = Vec::with_capacity(part_list.len());
-        let mut part_list_iter = part_list.iter();
-
-        loop {
-            while let Some(part) = part_list_iter.next() {
-                match part {
-                    MessageStructure::Part(part_id) => {
-                        subparts.push(mime_parts.get(part_id + 1)?.as_body_part(
-                            (*part_id).into(),
-                            properties,
-                            message_raw,
-                            self.headers.get(part_id + 1),
-                            base_blob_id,
-                        ))
-                    }
-                    MessageStructure::MultiPart((part_id, next_part_list)) => {
-                        parts_stack.push(mime_parts.get(part_id + 1)?.as_body_part(
-                            None,
-                            properties,
-                            message_raw,
-                            self.headers.get(part_id + 1),
-                            base_blob_id,
-                        ));
+                    if let MimePartType::MultiPart {
+                        subparts: part_list,
+                    } = &subpart.mime_type
+                    {
                         stack.push((part_list_iter, subparts));
-                        part_list_iter = next_part_list.iter();
+                        part_list_iter = part_list.iter();
                         subparts = Vec::with_capacity(part_list.len());
                     }
-                    MessageStructure::List(_) => (),
+                }
+
+                if let Some((prev_part_list_iter, mut prev_subparts)) = stack.pop() {
+                    let prev_part = prev_subparts.last_mut().unwrap();
+                    prev_part.properties.insert(
+                        BodyProperty::Subparts,
+                        Value::BodyPartList { value: subparts },
+                    );
+                    part_list_iter = prev_part_list_iter;
+                    subparts = prev_subparts;
+                } else {
+                    break;
                 }
             }
 
-            if let Some((prev_part_list_iter, mut prev_subparts)) = stack.pop() {
-                let mut prev_part = parts_stack.pop().unwrap();
-                prev_part.properties.insert(
-                    BodyProperty::Subparts,
-                    Value::BodyPartList { value: subparts },
-                );
-                prev_subparts.push(prev_part);
-                part_list_iter = prev_part_list_iter;
-                subparts = prev_subparts;
-            } else {
-                break;
-            }
+            body_structure.properties.insert(
+                BodyProperty::Subparts,
+                Value::BodyPartList { value: subparts },
+            );
         }
 
-        let mut root_part = parts_stack.pop().unwrap();
-        root_part.properties.insert(
-            BodyProperty::Subparts,
-            Value::BodyPartList { value: subparts },
-        );
-
-        root_part.into()
+        body_structure.into()
     }
 }

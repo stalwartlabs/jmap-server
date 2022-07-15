@@ -21,7 +21,7 @@ use store::blob::BlobId;
 use store::chrono::{DateTime, Utc};
 use store::core::collection::Collection;
 use store::core::error::StoreError;
-use store::serialize::StoreSerialize;
+use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::write::options::{IndexOptions, Options};
 use store::{JMAPStore, Store};
 
@@ -211,7 +211,7 @@ where
             fields.set(Property::SendAt, Value::DateTime { value: send_at });
 
             // Fetch message data
-            let mut message_data = MessageData::from_metadata(
+            let mut message_data = MessageData::deserialize(
                 &helper
                     .store
                     .blob_get(

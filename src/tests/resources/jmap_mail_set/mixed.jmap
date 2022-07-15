@@ -72,7 +72,7 @@
         "type": "multipart/alternative",
         "subParts": [
           {
-            "partId": "1",
+            "partId": "2",
             "blobId": "bb1f3e8adde0ce6870eff3579b2d5fa4907089fd1b757c1f293947da9ad53586d8101",
             "size": 129,
             "headers": [
@@ -95,7 +95,7 @@
             ]
           },
           {
-            "partId": "2",
+            "partId": "3",
             "blobId": "bc68c92b63f8ded4901373055cbe46a77fa17d61543242093e8291d6710f6878caf01",
             "size": 175,
             "headers": [
@@ -120,7 +120,7 @@
         ]
       },
       {
-        "partId": "3",
+        "partId": "4",
         "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
         "size": 37,
         "headers": [
@@ -141,7 +141,7 @@
         "cid": "cid:1234-5678-9012-3456"
       },
       {
-        "partId": "4",
+        "partId": "5",
         "blobId": "b87c8dda104d5bb89e0dbd24ed7ff67d81d5e327e6e1ad3bf9428a256044339437f",
         "size": 127,
         "headers": [
@@ -165,12 +165,12 @@
     ]
   },
   "bodyValues": {
-    "1": {
+    "2": {
       "value": "I was thinking about quitting the “exporting” to focus just on the “importing”,\nbut then ...",
       "isEncodingProblem": false,
       "isTruncated": true
     },
-    "2": {
+    "3": {
       "value": "<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus just on the &ldquo;im...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -178,7 +178,7 @@
   },
   "textBody": [
     {
-      "partId": "1",
+      "partId": "2",
       "blobId": "bb1f3e8adde0ce6870eff3579b2d5fa4907089fd1b757c1f293947da9ad53586d8101",
       "size": 129,
       "headers": [
@@ -201,7 +201,7 @@
       ]
     },
     {
-      "partId": "3",
+      "partId": "4",
       "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
       "size": 37,
       "headers": [
@@ -224,7 +224,7 @@
   ],
   "htmlBody": [
     {
-      "partId": "2",
+      "partId": "3",
       "blobId": "bc68c92b63f8ded4901373055cbe46a77fa17d61543242093e8291d6710f6878caf01",
       "size": 175,
       "headers": [
@@ -247,7 +247,7 @@
       ]
     },
     {
-      "partId": "3",
+      "partId": "4",
       "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
       "size": 37,
       "headers": [
@@ -270,7 +270,7 @@
   ],
   "attachments": [
     {
-      "partId": "3",
+      "partId": "4",
       "blobId": "be79c8850a5a7a55448a894d20b69c0fe2b83f8fcfb705faec2c8a7563fc4364b25",
       "size": 37,
       "headers": [
@@ -291,7 +291,7 @@
       "cid": "cid:1234-5678-9012-3456"
     },
     {
-      "partId": "4",
+      "partId": "5",
       "blobId": "b87c8dda104d5bb89e0dbd24ed7ff67d81d5e327e6e1ad3bf9428a256044339437f",
       "size": 127,
       "headers": [

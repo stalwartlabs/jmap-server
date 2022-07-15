@@ -14,7 +14,7 @@ use mail_parser::{
 
 use super::{
     schema::{HeaderForm, Value},
-    MessageData, MimeHeaders,
+    HeaderName, MessageData, MimePart, MimePartType,
 };
 
 impl TryFrom<mail_parser::Addr<'_>> for super::EmailAddress {
@@ -353,8 +353,14 @@ impl HeaderValueInto for mail_parser::HeaderValue<'_> {
     }
 }
 
-impl MimeHeaders {
-    pub fn from_headers(rfc_headers: RfcHeaders, size: usize) -> Self {
+impl MimePart {
+    pub fn from_headers(
+        rfc_headers: RfcHeaders,
+        raw_headers: Vec<(HeaderName, HeaderOffset)>,
+        mime_type: MimePartType,
+        is_encoding_problem: bool,
+        size: usize,
+    ) -> Self {
         let mut headers = Self {
             type_: None,
             charset: None,
@@ -364,6 +370,9 @@ impl MimeHeaders {
             language: None,
             cid: None,
             size,
+            mime_type,
+            is_encoding_problem,
+            raw_headers,
         };
 
         for (header, value) in rfc_headers {
@@ -373,7 +382,7 @@ impl MimeHeaders {
         headers
     }
 
-    pub fn empty(is_html: bool, size: usize) -> Self {
+    /*pub fn empty(is_html: bool, size: usize) -> Self {
         Self {
             type_: if is_html {
                 "text/html".to_string()
@@ -389,7 +398,7 @@ impl MimeHeaders {
             cid: None,
             size,
         }
-    }
+    }*/
 
     pub fn add_header(&mut self, header: RfcHeader, value: HeaderValue) {
         match header {

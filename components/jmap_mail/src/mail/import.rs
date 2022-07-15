@@ -13,7 +13,7 @@ use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use mail_parser::decoders::html::{html_to_text, text_to_html};
 use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::{HeaderValue, Message, MessageAttachment, MessagePart, RfcHeader};
+use mail_parser::{HeaderValue, Message, MessageAttachment, PartType, RfcHeader};
 use store::blob::BlobId;
 use store::chrono::DateTime;
 use store::core::acl::{ACLToken, ACL};
@@ -27,7 +27,6 @@ use store::nlp::Language;
 use store::read::comparator::Comparator;
 use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
-use store::serialize::leb128::Leb128;
 use store::serialize::StoreSerialize;
 
 use store::tracing::error;
@@ -42,7 +41,7 @@ use super::conv::HeaderValueInto;
 use super::get::{BlobResult, JMAPGetMail};
 use super::schema::{Email, Keyword, Property};
 use super::sharing::JMAPShareMail;
-use super::{MessageData, MessageOutline, MimeHeaders, MimePart, MAX_MESSAGE_PARTS};
+use super::{MessageData, MimePart, MimePartType, MAX_MESSAGE_PARTS};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EmailImportRequest {
@@ -336,13 +335,15 @@ where
         &self,
         document: &mut Document,
         blob_id: BlobId,
-        message: Message,
+        mut message: Message,
         received_at: Option<i64>,
     ) -> store::Result<()> {
         let mut total_parts = message.parts.len();
+        let root_part = message.get_root_part();
         let mut message_data = MessageData {
-            headers: HashMap::with_capacity(message.headers_rfc.len()),
-            mime_parts: Vec::with_capacity(total_parts + 1),
+            headers: HashMap::with_capacity(root_part.headers_rfc.len()),
+            body_offset: root_part.offset_body,
+            mime_parts: Vec::with_capacity(total_parts),
             html_body: message.html_body,
             text_body: message.text_body,
             attachments: message.attachments,
@@ -356,11 +357,6 @@ where
             }),
             has_attachments: false,
         };
-        let mut message_outline = MessageOutline {
-            body_offset: message.offset_body,
-            body_structure: message.structure,
-            headers: Vec::with_capacity(total_parts + 1),
-        };
         let mut has_attachments = false;
 
         if message.parts.len() > MAX_MESSAGE_PARTS {
@@ -369,10 +365,9 @@ where
             ));
         }
 
-        let mut mime_headers = MimeHeaders::default();
-
         // Build JMAP headers
-        for (header_name, header_value) in message.headers_rfc {
+        let mut mime_headers = HashMap::with_capacity(5);
+        for (header_name, header_value) in std::mem::take(&mut message.parts[0].headers_rfc) {
             match header_name {
                 RfcHeader::MessageId
                 | RfcHeader::InReplyTo
@@ -448,7 +443,7 @@ where
                 | RfcHeader::ContentId
                 | RfcHeader::ContentLanguage
                 | RfcHeader::ContentLocation => {
-                    mime_headers.add_header(header_name, header_value);
+                    mime_headers.insert(header_name, header_value);
                 }
                 RfcHeader::ContentTransferEncoding
                 | RfcHeader::ContentDescription
@@ -457,36 +452,29 @@ where
                 | RfcHeader::ReturnPath => (),
             }
         }
-
-        // Add main headers as a MimePart
-        message_data
-            .mime_parts
-            .push(MimePart::new_part(mime_headers));
-        message_outline.headers.push(
-            message
-                .headers_raw
-                .into_iter()
-                .map(|(k, v)| (k.into(), v))
-                .collect(),
-        );
+        message.parts[0].headers_rfc = mime_headers;
 
         let mut extra_mime_parts = Vec::new();
 
         for (part_id, part) in message.parts.into_iter().enumerate() {
-            match part {
-                MessagePart::Html(html) => {
-                    let text = html_to_text(html.body.as_ref());
+            let (mime_type, part_size) = match part.body {
+                PartType::Html(html) => {
+                    let text = html_to_text(html.as_ref());
                     let text_len = text.len();
-                    let html_len = html.body.len();
+                    let html_len = html.len();
                     let (text_part_id, field) = if let Some(pos) =
                         message_data.text_body.iter().position(|&p| p == part_id)
                     {
                         message_data.text_body[pos] = total_parts;
-                        extra_mime_parts.push(MimePart::new_text(
-                            MimeHeaders::empty(false, text_len),
-                            self.blob_store(text.as_bytes())?,
-                            false,
-                        ));
+                        extra_mime_parts.push(MimePart {
+                            mime_type: MimePartType::Text {
+                                blob_id: self.blob_store(text.as_bytes())?,
+                            },
+                            is_encoding_problem: false,
+                            type_: "text/plain".to_string().into(),
+                            size: text_len,
+                            ..Default::default()
+                        });
                         total_parts += 1;
                         (total_parts - 1, MessageField::Body)
                     } else if message_data.html_body.contains(&part_id) {
@@ -503,31 +491,30 @@ where
                         IndexOptions::new().full_text((text_part_id + 1) as u32),
                     );
 
-                    message_data.mime_parts.push(MimePart::new_html(
-                        MimeHeaders::from_headers(html.headers_rfc, html_len),
-                        self.blob_store(html.body.as_bytes())?,
-                        html.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        html.headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
+                    (
+                        MimePartType::Html {
+                            blob_id: self.blob_store(html.as_bytes())?,
+                        },
+                        html_len,
+                    )
                 }
-                MessagePart::Text(text) => {
-                    let text_len = text.body.len();
+                PartType::Text(text) => {
+                    let text_len = text.len();
                     let field = if let Some(pos) =
                         message_data.html_body.iter().position(|&p| p == part_id)
                     {
-                        let html = text_to_html(text.body.as_ref());
+                        let html = text_to_html(text.as_ref());
                         let html_len = html.len();
 
-                        extra_mime_parts.push(MimePart::new_html(
-                            MimeHeaders::empty(true, html_len),
-                            self.blob_store(html.as_bytes())?,
-                            false,
-                        ));
+                        extra_mime_parts.push(MimePart {
+                            mime_type: MimePartType::Html {
+                                blob_id: self.blob_store(html.as_bytes())?,
+                            },
+                            is_encoding_problem: false,
+                            type_: "text/html".to_string().into(),
+                            size: html_len,
+                            ..Default::default()
+                        });
                         message_data.html_body[pos] = total_parts;
                         total_parts += 1;
                         MessageField::Body
@@ -538,64 +525,40 @@ where
                         MessageField::Attachment
                     };
 
-                    message_data.mime_parts.push(MimePart::new_text(
-                        MimeHeaders::from_headers(text.headers_rfc, text_len),
-                        self.blob_store(text.body.as_bytes())?,
-                        text.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        text.headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-
+                    let blob_id = self.blob_store(text.as_bytes())?;
                     document.text(
                         field,
-                        text.body.into_owned(),
+                        text.into_owned(),
                         Language::Unknown,
                         IndexOptions::new().full_text((part_id + 1) as u32),
                     );
+                    (MimePartType::Text { blob_id }, text_len)
                 }
-                MessagePart::Binary(binary) => {
+                PartType::Binary(binary) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
-                    message_data.mime_parts.push(MimePart::new_binary(
-                        MimeHeaders::from_headers(binary.headers_rfc, binary.body.len()),
-                        self.blob_store(binary.body.as_ref())?,
-                        binary.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        binary
-                            .headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
+                    (
+                        MimePartType::Other {
+                            blob_id: self.blob_store(binary.as_ref())?,
+                        },
+                        binary.len(),
+                    )
                 }
-                MessagePart::InlineBinary(binary) => {
-                    message_data.mime_parts.push(MimePart::new_binary(
-                        MimeHeaders::from_headers(binary.headers_rfc, binary.body.len()),
-                        self.blob_store(binary.body.as_ref())?,
-                        binary.is_encoding_problem,
-                    ));
-                    message_outline.headers.push(
-                        binary
-                            .headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-                }
-                MessagePart::Message(nested_message) => {
+                PartType::InlineBinary(binary) => (
+                    MimePartType::Other {
+                        blob_id: self.blob_store(binary.as_ref())?,
+                    },
+                    binary.len(),
+                ),
+                PartType::Message(nested_message) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
 
-                    let (blob_id, part_len) = match nested_message.body {
+                    let (blob_id, part_len) = match nested_message {
                         MessageAttachment::Parsed(mut message) => {
-                            document.add_message(&mut message, (part_id + 1) as u32);
+                            document.add_message(&mut message, (part_id) as u32);
                             (
                                 self.blob_store(message.raw_message.as_ref())?,
                                 message.raw_message.len(),
@@ -603,42 +566,28 @@ where
                         }
                         MessageAttachment::Raw(raw_message) => {
                             if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                document.add_message(message, (part_id + 1) as u32);
+                                document.add_message(message, (part_id) as u32);
                             }
 
                             (self.blob_store(raw_message.as_ref())?, raw_message.len())
                         }
                     };
 
-                    message_data.mime_parts.push(MimePart::new_binary(
-                        MimeHeaders::from_headers(nested_message.headers_rfc, part_len),
-                        blob_id,
-                        false,
-                    ));
-
-                    message_outline.headers.push(
-                        nested_message
-                            .headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
+                    (MimePartType::Other { blob_id }, part_len)
                 }
-                MessagePart::Multipart(part) => {
-                    message_data
-                        .mime_parts
-                        .push(MimePart::new_part(MimeHeaders::from_headers(
-                            part.headers_rfc,
-                            0,
-                        )));
-                    message_outline.headers.push(
-                        part.headers_raw
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v))
-                            .collect(),
-                    );
-                }
+                PartType::Multipart(subparts) => (MimePartType::MultiPart { subparts }, 0),
             };
+
+            message_data.mime_parts.push(MimePart::from_headers(
+                part.headers_rfc,
+                part.headers_raw
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v))
+                    .collect(),
+                mime_type,
+                part.is_encoding_problem,
+                part_size,
+            ));
         }
 
         // Add any HTML/text part conversions
@@ -651,22 +600,10 @@ where
             message_data.has_attachments = true;
         }
 
-        // Serialize message data and outline
-        let mut message_data_bytes = message_data
-            .serialize()
-            .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
-        let mut message_outline_bytes = message_outline.serialize().ok_or_else(|| {
-            StoreError::SerializeError("Failed to serialize message outline".into())
-        })?;
-        let mut metadata = Vec::with_capacity(
-            message_data_bytes.len() + message_outline_bytes.len() + std::mem::size_of::<usize>(),
-        );
-        message_data_bytes.len().to_leb128_bytes(&mut metadata);
-        metadata.append(&mut message_data_bytes);
-        metadata.append(&mut message_outline_bytes);
-
         // Link blob and set message data field
-        let metadata_blob_id = self.blob_store(&metadata)?;
+        let metadata_blob_id = self.blob_store(&message_data.serialize().ok_or_else(|| {
+            StoreError::SerializeError("Failed to serialize message data".into())
+        })?)?;
         document.binary(
             MessageField::Metadata,
             metadata_blob_id.serialize().unwrap(),
@@ -917,7 +854,13 @@ trait AddMessage {
 
 impl AddMessage for Document {
     fn add_message(&mut self, message: &mut Message, part_id: u32) {
-        if let Some(HeaderValue::Text(subject)) = message.headers_rfc.remove(&RfcHeader::Subject) {
+        if let Some(HeaderValue::Text(subject)) = message
+            .parts
+            .get_mut(0)
+            .unwrap()
+            .headers_rfc
+            .remove(&RfcHeader::Subject)
+        {
             self.text(
                 MessageField::Attachment,
                 subject.into_owned(),
@@ -926,19 +869,19 @@ impl AddMessage for Document {
             );
         }
         for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
-            match sub_part {
-                MessagePart::Text(text) => {
+            match sub_part.body {
+                PartType::Text(text) => {
                     self.text(
                         MessageField::Attachment,
-                        text.body.into_owned(),
+                        text.into_owned(),
                         Language::Unknown,
                         IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
                     );
                 }
-                MessagePart::Html(html) => {
+                PartType::Html(html) => {
                     self.text(
                         MessageField::Attachment,
-                        html_to_text(&html.body),
+                        html_to_text(&html),
                         Language::Unknown,
                         IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
                     );
@@ -1137,7 +1080,10 @@ impl MessageData {
         // Link/unlink blobs
         document.blob(self.raw_message, IndexOptions::new() | options);
         for mime_part in self.mime_parts {
-            if let Some(blob_id) = mime_part.blob_id {
+            if let MimePartType::Text { blob_id }
+            | MimePartType::Html { blob_id }
+            | MimePartType::Other { blob_id } = mime_part.mime_type
+            {
                 document.blob(blob_id, IndexOptions::new() | options);
             }
         }

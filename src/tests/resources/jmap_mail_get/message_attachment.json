@@ -42,7 +42,7 @@
     "type": "multipart/mixed",
     "subParts": [
       {
-        "partId": "0",
+        "partId": "1",
         "blobId": "b0855eff89e41a035bcba5e95630bf0a2c04db40393cef1a6bfb33c5765fbf8773d",
         "size": 61,
         "headers": [
@@ -59,7 +59,7 @@
         "charset": "us-ascii"
       },
       {
-        "partId": "1",
+        "partId": "2",
         "blobId": "be9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f",
         "size": 1980,
         "headers": [
@@ -82,12 +82,12 @@
     ]
   },
   "bodyValues": {
-    "0": {
+    "1": {
       "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
       "isEncodingProblem": false,
       "isTruncated": false
     },
-    "2": {
+    "3": {
       "value": "<html><body>Fred,<br/><br/>Fire up Air Force One!  We're going South!<br/><br/>Thanks,<br/>Al...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -95,7 +95,7 @@
   },
   "textBody": [
     {
-      "partId": "0",
+      "partId": "1",
       "blobId": "b0855eff89e41a035bcba5e95630bf0a2c04db40393cef1a6bfb33c5765fbf8773d",
       "size": 61,
       "headers": [
@@ -114,7 +114,7 @@
   ],
   "htmlBody": [
     {
-      "partId": "2",
+      "partId": "3",
       "blobId": "bc42fd3622fe117b228fc56f1b9c545bbdd08ecf805a42dbac340059223fb6e3d6b",
       "size": 107,
       "type": "text/html"
@@ -122,7 +122,7 @@
   ],
   "attachments": [
     {
-      "partId": "1",
+      "partId": "2",
       "blobId": "be9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f",
       "size": 1980,
       "headers": [

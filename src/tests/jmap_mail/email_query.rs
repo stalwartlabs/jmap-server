@@ -353,7 +353,7 @@ pub async fn query(client: &mut Client) {
                 .unwrap()
                 .unwrap_get_email()
                 .unwrap()
-                .unwrap_list()
+                .take_list()
                 .into_iter()
                 .map(|e| e.message_id().unwrap().first().unwrap().to_string())
                 .collect::<Vec<_>>(),
@@ -624,7 +624,7 @@ pub async fn query_options(client: &mut Client) {
                         .unwrap()
                         .unwrap_get_email()
                         .unwrap()
-                        .unwrap_list()
+                        .take_list()
                         .into_iter()
                         .map(|e| e.message_id().unwrap().first().unwrap().to_string())
                         .collect::<Vec<_>>(),
@@ -775,7 +775,7 @@ async fn get_anchor(client: &mut Client, anchor: &str) -> Option<String> {
         )
         .await
         .unwrap()
-        .unwrap_ids()
+        .take_ids()
         .pop()
         .unwrap()
         .into()

@@ -64,8 +64,8 @@
     "type": "multipart/mixed",
     "subParts": [
       {
-        "partId": "0",
-        "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f00",
+        "partId": "1",
+        "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
         "size": 355,
         "headers": [
           {
@@ -81,8 +81,8 @@
         "charset": "us-ascii"
       },
       {
-        "partId": "1",
-        "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+        "partId": "2",
+        "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f02",
         "size": 288,
         "headers": [
           {
@@ -105,12 +105,12 @@
     ]
   },
   "bodyValues": {
-    "0": {
+    "1": {
       "value": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au...",
       "isEncodingProblem": false,
       "isTruncated": true
     },
-    "2": {
+    "3": {
       "value": "<html><body>Hi A1,<br/><br/>I finally figured out this MIME thing.  Pretty cool.  I'll send you...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -118,8 +118,8 @@
   },
   "textBody": [
     {
-      "partId": "0",
-      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f00",
+      "partId": "1",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
       "size": 355,
       "headers": [
         {
@@ -135,8 +135,8 @@
       "charset": "us-ascii"
     },
     {
-      "partId": "1",
-      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "partId": "2",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f02",
       "size": 288,
       "headers": [
         {
@@ -159,14 +159,14 @@
   ],
   "htmlBody": [
     {
-      "partId": "2",
-      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f02",
+      "partId": "3",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f03",
       "size": 429,
       "type": "text/html"
     },
     {
-      "partId": "1",
-      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "partId": "2",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f02",
       "size": 288,
       "headers": [
         {
@@ -189,8 +189,8 @@
   ],
   "attachments": [
     {
-      "partId": "1",
-      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "partId": "2",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f02",
       "size": 288,
       "headers": [
         {

@@ -269,7 +269,7 @@ where
     let blob_id = john_client
         .set_default_account_id(&john_id)
         .upload(
-            &john_id,
+            Some(&john_id),
             concat!(
                 "From: acl_test@example.com\r\n",
                 "To: jane.smith@example.com\r\n",
@@ -688,7 +688,7 @@ where
     let blob_id = john_client
         .set_default_account_id(&sales_id)
         .upload(
-            &sales_id,
+            Some(&sales_id),
             concat!(
                 "From: acl_test@example.com\r\n",
                 "To: sales@example.com\r\n",

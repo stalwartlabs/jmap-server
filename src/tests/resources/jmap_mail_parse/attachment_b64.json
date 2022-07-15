@@ -59,8 +59,8 @@
     ],
     "subParts": [
       {
-        "partId": "0",
-        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80600",
+        "partId": "1",
+        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
         "size": 30,
         "headers": [
           {
@@ -76,8 +76,8 @@
         "charset": "utf-8"
       },
       {
-        "partId": "1",
-        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
+        "partId": "2",
+        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80602",
         "size": 173,
         "headers": [
           {
@@ -95,12 +95,12 @@
     ]
   },
   "bodyValues": {
-    "0": {
+    "1": {
       "value": "This is an *HTML* test message",
       "isEncodingProblem": false,
       "isTruncated": false
     },
-    "1": {
+    "2": {
       "value": "<html>\r\n  <head>\r\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\r\n  ...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -108,8 +108,8 @@
   },
   "textBody": [
     {
-      "partId": "0",
-      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80600",
+      "partId": "1",
+      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
       "size": 30,
       "headers": [
         {
@@ -127,8 +127,8 @@
   ],
   "htmlBody": [
     {
-      "partId": "1",
-      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
+      "partId": "2",
+      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80602",
       "size": 173,
       "headers": [
         {

@@ -87,6 +87,22 @@
         {
           "name": "Content-Type",
           "value": "text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Date",
+          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        },
+        {
+          "name": "From",
+          "value": "\"Joe Bloggs\" <joe@example.com>"
+        },
+        {
+          "name": "Message-ID",
+          "value": "<my-message-id>"
+        },
+        {
+          "name": "Subject",
+          "value": "World domination"
         }
       ],
       "type": "text/plain",

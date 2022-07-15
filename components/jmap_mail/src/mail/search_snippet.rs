@@ -9,7 +9,6 @@ use jmap::{
     types::jmap::JMAPId,
 };
 use mail_parser::{decoders::html::html_to_text, Message, RfcHeader};
-use serde::{Deserialize, Serialize};
 use store::{
     blob::BlobId,
     core::{
@@ -20,6 +19,7 @@ use store::{
     },
     nlp::{search_snippet::generate_snippet, stemmer::Stemmer, tokenizers::Tokenizer, Language},
     read::filter::LogicalOperator,
+    serialize::StoreDeserialize,
     tracing::error,
     JMAPStore, Store,
 };
@@ -28,7 +28,7 @@ use super::{
     parse::get_message_part, sharing::JMAPShareMail, MessageData, MessageField, MimePartType,
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct SearchSnippetGetRequest {
     #[serde(skip)]
     pub acl: Option<Arc<ACLToken>>,
@@ -44,7 +44,7 @@ pub struct SearchSnippetGetRequest {
     pub email_ids: MaybeResultReference<Vec<JMAPId>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchSnippetGetResponse {
     #[serde(rename = "accountId")]
     pub account_id: JMAPId,
@@ -57,7 +57,7 @@ pub struct SearchSnippetGetResponse {
     pub not_found: Option<Vec<JMAPId>>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(serde::Serialize, Clone, Debug)]
 pub struct SearchSnippet {
     #[serde(rename = "emailId")]
     pub email_id: JMAPId,
@@ -209,7 +209,7 @@ where
             }
 
             // Fetch message data
-            let message_data = MessageData::from_metadata(
+            let message_data = MessageData::deserialize(
                 &self
                     .blob_get(
                         &self
@@ -286,11 +286,14 @@ where
                             .and_then(|value| value.as_text())
                             .unwrap_or(""),
                     );
-                } else if term_group.part_id < message_data.mime_parts.len() as u32 {
+                } else if term_group.part_id <= message_data.mime_parts.len() as u32 {
                     // Generate snippet of a body part
-                    let part = &message_data.mime_parts[term_group.part_id as usize];
+                    let part = &message_data.mime_parts[(term_group.part_id - 1) as usize];
 
-                    if let Some(blob_id) = &part.blob_id {
+                    if let MimePartType::Text { blob_id }
+                    | MimePartType::Html { blob_id }
+                    | MimePartType::Other { blob_id } = &part.mime_type
+                    {
                         let mut text = String::from_utf8(
                             self.blob_get(blob_id)?.ok_or(StoreError::DataCorruption)?,
                         )
@@ -298,7 +301,7 @@ where
                             |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
                             |s| s,
                         );
-                        if part.mime_type == MimePartType::Html {
+                        if part.mime_type.is_html() {
                             text = html_to_text(&text);
                         }
                         preview = generate_snippet(&term_group.terms, &text);
@@ -314,7 +317,11 @@ where
                     let subpart_id = term_group.part_id & (u16::MAX as u32);
 
                     if part_id < message_data.mime_parts.len() as u32 {
-                        if let Some(blob_id) = &message_data.mime_parts[part_id as usize].blob_id {
+                        if let MimePartType::Text { blob_id }
+                        | MimePartType::Html { blob_id }
+                        | MimePartType::Other { blob_id } =
+                            &message_data.mime_parts[part_id as usize].mime_type
+                        {
                             let blob = self.blob_get(blob_id)?.ok_or(StoreError::DataCorruption)?;
                             let message =
                                 Message::parse(&blob).ok_or(StoreError::DataCorruption)?;

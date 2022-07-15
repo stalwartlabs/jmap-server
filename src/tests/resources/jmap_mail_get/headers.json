@@ -76,14 +76,14 @@
     "type": "multipart/mixed",
     "subParts": [
       {
-        "partId": "0",
+        "partId": "1",
         "size": 175,
         "type": "text/html",
         "charset": "us-ascii",
         "header:X-Custom-Header": "123"
       },
       {
-        "partId": "1",
+        "partId": "2",
         "size": 724,
         "type": "message/rfc822",
         "header:X-Custom-Header-2": "345"
@@ -91,12 +91,12 @@
     ]
   },
   "bodyValues": {
-    "0": {
+    "1": {
       "value": "<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus just on the &ldquo;im...",
       "isEncodingProblem": false,
       "isTruncated": true
     },
-    "2": {
+    "3": {
       "value": "I was thinking about quitting the “exporting” to focus just on the “importing”,\nbut then ...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -104,14 +104,14 @@
   },
   "textBody": [
     {
-      "partId": "2",
+      "partId": "3",
       "size": 129,
       "type": "text/plain"
     }
   ],
   "htmlBody": [
     {
-      "partId": "0",
+      "partId": "1",
       "size": 175,
       "type": "text/html",
       "charset": "us-ascii",
@@ -120,7 +120,7 @@
   ],
   "attachments": [
     {
-      "partId": "1",
+      "partId": "2",
       "size": 724,
       "type": "message/rfc822",
       "header:X-Custom-Header-2": "345"

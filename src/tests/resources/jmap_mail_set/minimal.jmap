@@ -57,6 +57,14 @@
         {
           "name": "Content-Type",
           "value": "text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Date",
+          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        },
+        {
+          "name": "Message-ID",
+          "value": "<my-message-id>"
         }
       ],
       "type": "text/plain",

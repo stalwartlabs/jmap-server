@@ -88,7 +88,7 @@
             "type": "multipart/alternative",
             "subParts": [
               {
-                "partId": "2",
+                "partId": "3",
                 "blobId": "bbb25cb6e9c15bac303b98e8c5612e05e0c56396502023253da61623a519079ce8b06",
                 "size": 779,
                 "headers": [
@@ -105,7 +105,7 @@
                 "charset": "iso-8859-1"
               },
               {
-                "partId": "3",
+                "partId": "4",
                 "blobId": "bcc641a6263b305330407145b9c5b49109a6983e8f83224daaf6cfad823d784308209",
                 "size": 1154,
                 "headers": [
@@ -124,7 +124,7 @@
             ]
           },
           {
-            "partId": "4",
+            "partId": "5",
             "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
             "size": 1325,
             "headers": [
@@ -151,7 +151,7 @@
             "cid": "4.2.0.58.20000519003556.00a918e0@pop.example.com.2"
           },
           {
-            "partId": "5",
+            "partId": "6",
             "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
             "size": 1453,
             "headers": [
@@ -180,7 +180,7 @@
         ]
       },
       {
-        "partId": "6",
+        "partId": "7",
         "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
         "size": 1325,
         "headers": [
@@ -202,7 +202,7 @@
         "disposition": "attachment"
       },
       {
-        "partId": "7",
+        "partId": "8",
         "blobId": "b258bcdd418e60b1f2dd911c83133e7aa07dd3d87ff09708384aba85e06f80e34920a",
         "size": 1298,
         "headers": [
@@ -226,12 +226,12 @@
     ]
   },
   "bodyValues": {
-    "2": {
+    "3": {
       "value": "Die Hasen und die Frösche\n\nDie Hasen klagten einst über ihre mißliche Lage; \"wir leben\", sprac...",
       "isEncodingProblem": false,
       "isTruncated": true
     },
-    "3": {
+    "4": {
       "value": "<html>\n<font face=\"Arial, Helvetica\" size=5 color=\"#0000FF\"><b>Die Hasen und die\nFrösche<br>\n...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -239,7 +239,7 @@
   },
   "textBody": [
     {
-      "partId": "2",
+      "partId": "3",
       "blobId": "bbb25cb6e9c15bac303b98e8c5612e05e0c56396502023253da61623a519079ce8b06",
       "size": 779,
       "headers": [
@@ -258,7 +258,7 @@
   ],
   "htmlBody": [
     {
-      "partId": "3",
+      "partId": "4",
       "blobId": "bcc641a6263b305330407145b9c5b49109a6983e8f83224daaf6cfad823d784308209",
       "size": 1154,
       "headers": [
@@ -277,7 +277,7 @@
   ],
   "attachments": [
     {
-      "partId": "4",
+      "partId": "5",
       "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
@@ -304,7 +304,7 @@
       "cid": "4.2.0.58.20000519003556.00a918e0@pop.example.com.2"
     },
     {
-      "partId": "5",
+      "partId": "6",
       "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
       "size": 1453,
       "headers": [
@@ -331,7 +331,7 @@
       "cid": "4.2.0.58.20000519003556.00a918e0@pop.example.com.3"
     },
     {
-      "partId": "6",
+      "partId": "7",
       "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
@@ -353,7 +353,7 @@
       "disposition": "attachment"
     },
     {
-      "partId": "7",
+      "partId": "8",
       "blobId": "b258bcdd418e60b1f2dd911c83133e7aa07dd3d87ff09708384aba85e06f80e34920a",
       "size": 1298,
       "headers": [

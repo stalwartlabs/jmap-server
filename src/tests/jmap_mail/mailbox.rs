@@ -513,7 +513,7 @@ where
 
     let mut request = client.build();
     request.query_mailbox().arguments().sort_as_tree(true);
-    let mut ids = request.send_query_mailbox().await.unwrap().unwrap_ids();
+    let mut ids = request.send_query_mailbox().await.unwrap().take_ids();
     ids.reverse();
     for id in ids {
         client.mailbox_destroy(&id, true).await.unwrap();

@@ -16,7 +16,7 @@ use jmap::{jmap_store::Object, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
-use mail_parser::{HeaderOffset, MessagePartId, MessageStructure, RfcHeader};
+use mail_parser::{HeaderOffset, MessagePartId, RfcHeader};
 
 use store::{
     bincode,
@@ -74,18 +74,7 @@ pub struct MessageData {
     pub size: usize,
     pub received_at: i64,
     pub has_attachments: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct MimeHeaders {
-    type_: Option<String>,
-    charset: Option<String>,
-    name: Option<String>,
-    disposition: Option<String>,
-    location: Option<String>,
-    language: Option<Vec<String>>,
-    cid: Option<String>,
-    size: usize,
+    pub body_offset: usize,
 }
 
 impl StoreSerialize for MessageData {
@@ -98,13 +87,6 @@ impl StoreDeserialize for MessageData {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
         bincode::deserialize_from(bytes).ok()
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MessageOutline {
-    pub body_offset: usize,
-    pub body_structure: MessageStructure,
-    pub headers: Vec<Vec<(HeaderName, HeaderOffset)>>,
 }
 
 pub trait GetRawHeader {
@@ -122,18 +104,6 @@ impl GetRawHeader for Vec<(HeaderName, HeaderOffset)> {
         } else {
             None
         }
-    }
-}
-
-impl StoreSerialize for MessageOutline {
-    fn serialize(&self) -> Option<Vec<u8>> {
-        bincode::serialize(self).ok()
-    }
-}
-
-impl StoreDeserialize for MessageOutline {
-    fn deserialize(bytes: &[u8]) -> Option<Self> {
-        bincode::deserialize_from(bytes).ok()
     }
 }
 
@@ -188,55 +158,53 @@ impl Display for HeaderName {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum MimePartType {
-    Text,
-    Html,
-    Other,
+    Text { blob_id: BlobId },
+    Html { blob_id: BlobId },
+    Other { blob_id: BlobId },
+    MultiPart { subparts: Vec<MessagePartId> },
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+impl Default for MimePartType {
+    fn default() -> Self {
+        MimePartType::MultiPart {
+            subparts: Vec::new(),
+        }
+    }
+}
+
+impl MimePartType {
+    pub fn is_html(&self) -> bool {
+        matches!(self, MimePartType::Html { .. })
+    }
+
+    pub fn is_text(&self) -> bool {
+        matches!(self, MimePartType::Text { .. })
+    }
+
+    pub fn blob_id(&self) -> Option<&BlobId> {
+        match self {
+            MimePartType::Text { blob_id } => Some(blob_id),
+            MimePartType::Html { blob_id } => Some(blob_id),
+            MimePartType::Other { blob_id } => Some(blob_id),
+            MimePartType::MultiPart { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct MimePart {
-    pub headers: MimeHeaders,
-    pub blob_id: Option<BlobId>,
-    pub is_encoding_problem: bool,
     pub mime_type: MimePartType,
-}
-
-impl MimePart {
-    pub fn new_html(headers: MimeHeaders, blob_id: BlobId, is_encoding_problem: bool) -> Self {
-        MimePart {
-            headers,
-            blob_id: blob_id.into(),
-            is_encoding_problem,
-            mime_type: MimePartType::Html,
-        }
-    }
-
-    pub fn new_text(headers: MimeHeaders, blob_id: BlobId, is_encoding_problem: bool) -> Self {
-        MimePart {
-            headers,
-            blob_id: blob_id.into(),
-            is_encoding_problem,
-            mime_type: MimePartType::Text,
-        }
-    }
-
-    pub fn new_binary(headers: MimeHeaders, blob_id: BlobId, is_encoding_problem: bool) -> Self {
-        MimePart {
-            headers,
-            blob_id: blob_id.into(),
-            is_encoding_problem,
-            mime_type: MimePartType::Other,
-        }
-    }
-
-    pub fn new_part(headers: MimeHeaders) -> Self {
-        MimePart {
-            headers,
-            blob_id: None,
-            is_encoding_problem: false,
-            mime_type: MimePartType::Other,
-        }
-    }
+    pub is_encoding_problem: bool,
+    pub raw_headers: Vec<(HeaderName, HeaderOffset)>,
+    // Headers
+    pub type_: Option<String>,
+    pub charset: Option<String>,
+    pub name: Option<String>,
+    pub disposition: Option<String>,
+    pub location: Option<String>,
+    pub language: Option<Vec<String>>,
+    pub cid: Option<String>,
+    pub size: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -265,18 +233,6 @@ impl From<MessageField> for FieldId {
 impl Display for MessageField {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(())
-    }
-}
-
-impl MessageData {
-    pub fn from_metadata(bytes: &[u8]) -> Option<Self> {
-        use store::serialize::leb128::Leb128;
-
-        let (message_data_len, read_bytes) = usize::from_leb128_bytes(bytes)?;
-
-        <MessageData as StoreDeserialize>::deserialize(
-            bytes.get(read_bytes..read_bytes + message_data_len)?,
-        )
     }
 }
 

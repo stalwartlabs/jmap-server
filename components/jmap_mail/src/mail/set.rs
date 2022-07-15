@@ -30,6 +30,7 @@ use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::serialize::StoreDeserialize;
 use store::tracing::error;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
@@ -678,7 +679,7 @@ where
         };
 
         // Remove index entries
-        MessageData::from_metadata(
+        MessageData::deserialize(
             &self
                 .blob_get(&metadata_blob_id)?
                 .ok_or(StoreError::DataCorruption)?,

@@ -23,7 +23,7 @@ where
     let mut thread_id = "".to_string();
 
     for num in [5, 3, 1, 2, 4] {
-        let email = client
+        let mut email = client
             .email_import(
                 format!("Subject: test\nReferences: <1234>\n\n{}", num).into_bytes(),
                 [&mailbox_id],

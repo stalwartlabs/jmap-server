@@ -44,20 +44,20 @@ async fn jmap_mail_tests() {
     let (server, mut client, temp_dir) = init_jmap_tests::<RocksDB>("jmap_mail_tests").await;
 
     // Run tests
-    /*email_changes::test(server.clone(), &mut client).await;
-    email_query_changes::test(server.clone(), &mut client).await;
-    email_thread::test(server.clone(), &mut client).await;
-    email_thread_merge::test(server.clone(), &mut client).await;
-    email_get::test(server.clone(), &mut client).await;
-    email_parse::test(server.clone(), &mut client).await;
+    //email_changes::test(server.clone(), &mut client).await;
+    //email_query_changes::test(server.clone(), &mut client).await;
+    //email_thread::test(server.clone(), &mut client).await;
+    //email_thread_merge::test(server.clone(), &mut client).await;
+    //email_get::test(server.clone(), &mut client).await;
+    //email_parse::test(server.clone(), &mut client).await;
     email_set::test(server.clone(), &mut client).await;
-    email_query::test(server.clone(), &mut client).await;
+    /*email_query::test(server.clone(), &mut client).await;
     email_copy::test(server.clone(), &mut client).await;
     email_submission::test(server.clone(), &mut client).await;
     email_ingest::test(server.clone(), &mut client).await;
     vacation_response::test(server.clone(), &mut client).await;
     mailbox::test(server.clone(), &mut client).await;*/
-    search_snippet::test(server.clone(), &mut client).await;
+    //search_snippet::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

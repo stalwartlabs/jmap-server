@@ -87,7 +87,7 @@
         "type": "multipart/alternative",
         "subParts": [
           {
-            "partId": "1",
+            "partId": "2",
             "blobId": "b266c83a89aac2c140806b2f544b284952c38cb56dfc642c7c369b745be65fc4ef905",
             "size": 761,
             "headers": [
@@ -104,7 +104,7 @@
             "charset": "iso-8859-1"
           },
           {
-            "partId": "2",
+            "partId": "3",
             "blobId": "bb67d2aab9df45ae64313cbc22409f9cca3ada3cb397829137079b7a8544025c5a20b",
             "size": 1442,
             "headers": [
@@ -123,7 +123,7 @@
         ]
       },
       {
-        "partId": "3",
+        "partId": "4",
         "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
         "size": 1325,
         "headers": [
@@ -145,7 +145,7 @@
         "cid": "823504223@17052000-0f8d"
       },
       {
-        "partId": "4",
+        "partId": "5",
         "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
         "size": 1453,
         "headers": [
@@ -169,12 +169,12 @@
     ]
   },
   "bodyValues": {
-    "1": {
+    "2": {
       "value": "\nThe Hare and the Tortoise \n \nA HARE one day ridiculed the short feet and slow pace of the Tortoi...",
       "isEncodingProblem": false,
       "isTruncated": true
     },
-    "2": {
+    "3": {
       "value": "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\">\n<HTML><HEAD>\n...",
       "isEncodingProblem": false,
       "isTruncated": true
@@ -182,7 +182,7 @@
   },
   "textBody": [
     {
-      "partId": "1",
+      "partId": "2",
       "blobId": "b266c83a89aac2c140806b2f544b284952c38cb56dfc642c7c369b745be65fc4ef905",
       "size": 761,
       "headers": [
@@ -201,7 +201,7 @@
   ],
   "htmlBody": [
     {
-      "partId": "2",
+      "partId": "3",
       "blobId": "bb67d2aab9df45ae64313cbc22409f9cca3ada3cb397829137079b7a8544025c5a20b",
       "size": 1442,
       "headers": [
@@ -220,7 +220,7 @@
   ],
   "attachments": [
     {
-      "partId": "3",
+      "partId": "4",
       "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
       "size": 1325,
       "headers": [
@@ -242,7 +242,7 @@
       "cid": "823504223@17052000-0f8d"
     },
     {
-      "partId": "4",
+      "partId": "5",
       "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
       "size": 1453,
       "headers": [
