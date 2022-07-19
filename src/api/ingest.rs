@@ -146,23 +146,15 @@ where
                 change_id = changes.change_id;
 
                 // Publish state change
+                let mut types = changes
+                    .collections
+                    .into_iter()
+                    .filter_map(|c| Some((TypeState::try_from(c).ok()?, change_id)))
+                    .collect::<Vec<_>>();
+                types.push((TypeState::EmailDelivery, change_id));
+
                 if let Err(err) = core
-                    .publish_state_change(StateChange::new(
-                        account_id,
-                        changes
-                            .collections
-                            .into_iter()
-                            .filter_map(|c| {
-                                Some((
-                                    match TypeState::try_from(c).ok()? {
-                                        TypeState::Email => TypeState::EmailDelivery,
-                                        ts => ts,
-                                    },
-                                    change_id,
-                                ))
-                            })
-                            .collect(),
-                    ))
+                    .publish_state_change(StateChange::new(account_id, types))
                     .await
                 {
                     error!("Failed to publish state change: {}", err);

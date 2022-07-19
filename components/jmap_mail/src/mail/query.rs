@@ -15,8 +15,8 @@ use store::core::tag::Tag;
 use store::nlp::Language;
 use store::read::comparator::{self, DocumentSetComparator, FieldComparator};
 use store::read::filter::{self, Query};
-use store::LongInteger;
 use store::{roaring::RoaringBitmap, AccountId, JMAPStore, Store};
+use store::{Integer, LongInteger};
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct QueryArguments {
@@ -60,6 +60,7 @@ where
         )?;
         let account_id = helper.account_id;
         let collapse_threads = helper.request.arguments.collapse_threads.unwrap_or(false);
+        let mut document_ids = None;
         let mut is_immutable_filter = true;
         let mut is_immutable_sort = true;
 
@@ -98,14 +99,12 @@ where
                     MessageField::ReceivedAt.into(),
                     Query::LongInteger(value.timestamp() as LongInteger),
                 ),
-                Filter::MinSize { value } => filter::Filter::ge(
-                    MessageField::Size.into(),
-                    Query::LongInteger(value as LongInteger),
-                ),
-                Filter::MaxSize { value } => filter::Filter::le(
-                    MessageField::Size.into(),
-                    Query::LongInteger(value as LongInteger),
-                ),
+                Filter::MinSize { value } => {
+                    filter::Filter::ge(MessageField::Size.into(), Query::Integer(value as Integer))
+                }
+                Filter::MaxSize { value } => {
+                    filter::Filter::le(MessageField::Size.into(), Query::Integer(value as Integer))
+                }
                 Filter::AllInThreadHaveKeyword { value } => {
                     if is_immutable_filter {
                         is_immutable_filter = false;
@@ -224,6 +223,34 @@ where
                         )
                     }
                 }
+
+                // Non-standard
+                Filter::Id { value } => {
+                    let mut set = RoaringBitmap::new();
+                    let document_ids = document_ids.get_or_insert_with(|| {
+                        self.get_document_ids(account_id, Collection::Mail)
+                            .unwrap_or(None)
+                    });
+                    if let Some(document_ids) = &document_ids {
+                        for jmap_id in value {
+                            let id = jmap_id.get_document_id();
+                            if document_ids.contains(id) {
+                                set.insert(id);
+                            }
+                        }
+                    }
+
+                    filter::Filter::DocumentSet(set)
+                }
+                Filter::SentBefore { value } => filter::Filter::lt(
+                    RfcHeader::Date.into(),
+                    Query::LongInteger(value.timestamp() as LongInteger),
+                ),
+                Filter::SentAfter { value } => filter::Filter::gt(
+                    RfcHeader::Date.into(),
+                    Query::LongInteger(value.timestamp() as LongInteger),
+                ),
+
                 Filter::Unsupported { value } => {
                     return Err(MethodError::UnsupportedFilter(value));
                 }
@@ -290,6 +317,12 @@ where
                         ascending: comparator.is_ascending,
                     })
                 }
+
+                // Non-standard
+                Comparator::Cc => comparator::Comparator::Field(FieldComparator {
+                    field: RfcHeader::Cc.into(),
+                    ascending: comparator.is_ascending,
+                }),
             })
         })?;
 

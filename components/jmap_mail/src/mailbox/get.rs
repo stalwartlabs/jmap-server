@@ -260,7 +260,7 @@ where
                                 Ok(None)
                             }
                         }
-                        Ok(None) => Ok(None),
+                        Ok(None) => Ok(mailbox.into()),
                         Err(e) => Err(e),
                     }
                 }

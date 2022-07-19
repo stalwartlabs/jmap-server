@@ -785,6 +785,18 @@ impl<'de> serde::de::Visitor<'de> for FilterVisitor {
                 "header" => Filter::Header {
                     value: map.next_value()?,
                 },
+
+                // Non-standard
+                "id" => Filter::Id {
+                    value: map.next_value()?,
+                },
+                "sentBefore" => Filter::SentBefore {
+                    value: map.next_value()?,
+                },
+                "sentAfter" => Filter::SentAfter {
+                    value: map.next_value()?,
+                },
+
                 unsupported => Filter::Unsupported {
                     value: unsupported.to_string(),
                 },

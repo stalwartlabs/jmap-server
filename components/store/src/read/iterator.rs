@@ -46,6 +46,18 @@ where
     None,
 }
 
+impl<'x, T> IndexType<'x, T>
+where
+    T: Store<'x>,
+{
+    pub fn has_prev_item(&self) -> bool {
+        match self {
+            IndexType::DB(index) => index.prev_item.is_some(),
+            _ => false,
+        }
+    }
+}
+
 struct IndexIterator<'x, T>
 where
     T: Store<'x>,
@@ -174,18 +186,25 @@ where
                     (&mut self.iterators[self.current], None)
                 };
 
-                if it_opts.remaining.is_empty() {
-                    if self.current > 0 {
-                        self.current -= 1;
-                        continue 'inner;
-                    } else {
-                        return None;
+                if !it_opts.index.has_prev_item() {
+                    if it_opts.remaining.is_empty() {
+                        if self.current > 0 {
+                            self.current -= 1;
+                            continue 'inner;
+                        } else {
+                            return None;
+                        }
+                    } else if it_opts.remaining.len() == 1 || it_opts.eof {
+                        doc_id = it_opts.remaining.min().unwrap();
+                        it_opts.remaining.remove(doc_id);
+                        break 'inner;
                     }
-                } else if it_opts.remaining.len() == 1 || it_opts.eof {
-                    doc_id = it_opts.remaining.min().unwrap();
-                    it_opts.remaining.remove(doc_id);
-                    break 'inner;
                 }
+                /*println!(
+                    "first {:?} {:?}",
+                    it_opts.remaining,
+                    next_it_opts.as_ref().map(|x| &x.remaining)
+                );*/
 
                 match &mut it_opts.index {
                     IndexType::DB(index) => {
@@ -225,41 +244,70 @@ where
                             }
                         }
 
-                        while let Some((key, _)) = it.next() {
-                            if !key.starts_with(&index.prefix) {
-                                index.prev_key = None;
+                        let mut is_eof = false;
+                        loop {
+                            if let Some((key, _)) = it.next() {
+                                if !key.starts_with(&index.prefix) {
+                                    index.prev_key = None;
+                                    is_eof = true;
+                                    break;
+                                }
+
+                                doc_id = IndexKey::deserialize_document_id(&key)?;
+                                if it_opts.remaining.contains(doc_id) {
+                                    it_opts.remaining.remove(doc_id);
+
+                                    if let Some(next_it_opts) = &mut next_it_opts {
+                                        if let Some(prev_key) = &index.prev_key {
+                                            if key.len() != prev_key.len()
+                                                || !key.starts_with(prev_key_prefix)
+                                            {
+                                                index.prev_item = Some(doc_id);
+                                                index.prev_key = Some(key);
+                                                break;
+                                            }
+                                        } else {
+                                            index.prev_key = Some(key);
+                                            prev_key_prefix =
+                                                index.prev_key.as_ref().and_then(|key| {
+                                                    key.get(
+                                                        ..key.len()
+                                                            - std::mem::size_of::<DocumentId>(),
+                                                    )
+                                                })?;
+                                        }
+
+                                        next_it_opts.remaining.insert(doc_id);
+                                    } else {
+                                        // doc id found
+                                        break 'inner;
+                                    }
+                                }
+                            } else {
+                                is_eof = true;
                                 break;
                             }
+                        }
 
-                            doc_id = IndexKey::deserialize_document_id(&key)?;
-                            if it_opts.remaining.contains(doc_id) {
-                                it_opts.remaining.remove(doc_id);
-
-                                if let Some(next_it_opts) = &mut next_it_opts {
-                                    if let Some(prev_key) = &index.prev_key {
-                                        if key.len() != prev_key.len()
-                                            || !key.starts_with(prev_key_prefix)
-                                        {
-                                            index.prev_item = Some(doc_id);
-                                            index.prev_key = Some(key);
-                                            break;
-                                        }
-                                    } else {
-                                        index.prev_key = Some(key);
-                                        prev_key_prefix =
-                                            index.prev_key.as_ref().and_then(|key| {
-                                                key.get(
-                                                    ..key.len() - std::mem::size_of::<DocumentId>(),
-                                                )
-                                            })?;
-                                    }
-
-                                    next_it_opts.remaining.insert(doc_id);
-                                } else {
-                                    // doc id found
-                                    break 'inner;
+                        if is_eof {
+                            /*println!(
+                                "eof reached with {:?} {:?}",
+                                it_opts.remaining,
+                                next_it_opts.as_ref().map(|x| &x.remaining)
+                            );*/
+                            if let Some(next_it_opts) = &mut next_it_opts {
+                                if !it_opts.remaining.is_empty() {
+                                    next_it_opts.remaining |= &it_opts.remaining;
+                                    it_opts.remaining.clear();
                                 }
+                                index.prev_key = None;
+                                it_opts.eof = true;
                             }
+                            /*println!(
+                                "eof then with {:?} {:?}",
+                                it_opts.remaining,
+                                next_it_opts.as_ref().map(|x| &x.remaining)
+                            );*/
                         }
                     }
                     IndexType::DocumentSet(index) => {
@@ -306,6 +354,7 @@ where
                 };
 
                 if let Some(next_it_opts) = next_it_opts {
+                    //println!("{:?} {:?}", it_opts.remaining, next_it_opts.remaining);
                     if !next_it_opts.remaining.is_empty() {
                         if next_it_opts.remaining.len() == 1 {
                             doc_id = next_it_opts.remaining.min().unwrap();

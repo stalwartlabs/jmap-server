@@ -149,7 +149,7 @@ where
 
         let mut new_state = JMAPState::Initial;
         for (test_num, state) in (&states).iter().enumerate() {
-            let changes = client.email_changes(state.to_string(), 0).await.unwrap();
+            let changes = client.email_changes(state.to_string(), None).await.unwrap();
 
             assert_eq!(
                 expected_changelog[test_num],
@@ -191,7 +191,7 @@ where
 
                 for _ in 0..100 {
                     let changes = client
-                        .email_changes(int_state.to_string(), max_changes)
+                        .email_changes(int_state.to_string(), max_changes.into())
                         .await
                         .unwrap();
 
@@ -251,7 +251,7 @@ where
     assert_compaction(&server.store, 1);
 
     let changes = client
-        .email_changes(JMAPState::Initial.to_string(), 0)
+        .email_changes(JMAPState::Initial.to_string(), 0.into())
         .await
         .unwrap();
 

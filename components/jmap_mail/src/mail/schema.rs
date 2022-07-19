@@ -721,6 +721,11 @@ pub enum Filter {
     Body { value: String },
     Header { value: Vec<String> },
     Unsupported { value: String },
+
+    // Non-standard
+    Id { value: Vec<JMAPId> },
+    SentBefore { value: DateTime<Utc> },
+    SentAfter { value: DateTime<Utc> },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -744,4 +749,8 @@ pub enum Comparator {
     AllInThreadHaveKeyword { keyword: Keyword },
     #[serde(rename = "someInThreadHaveKeyword")]
     SomeInThreadHaveKeyword { keyword: Keyword },
+
+    // Non-standard
+    #[serde(rename = "cc")]
+    Cc,
 }

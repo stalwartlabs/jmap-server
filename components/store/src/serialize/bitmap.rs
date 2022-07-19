@@ -67,6 +67,11 @@ pub fn bitmap_op<'x>(
     mut src: Option<RoaringBitmap>,
     not_mask: &'x RoaringBitmap,
 ) {
+    /*print!(
+        "op: {:?}, dest: {:?}, src: {:?}, not_mask: {:?}",
+        op, dest, src, not_mask
+    );*/
+
     if let Some(dest) = dest {
         match op {
             LogicalOperator::And => {
@@ -84,6 +89,7 @@ pub fn bitmap_op<'x>(
             LogicalOperator::Not => {
                 if let Some(mut src) = src {
                     src.bitxor_assign(not_mask);
+                    //print!(", xor: {:?}", src);
                     dest.bitand_assign(src);
                 }
             }
@@ -93,9 +99,13 @@ pub fn bitmap_op<'x>(
             src_.bitxor_assign(not_mask);
         }
         *dest = src;
+    } else if let LogicalOperator::Not = op {
+        *dest = Some(not_mask.clone());
     } else {
         *dest = Some(RoaringBitmap::new());
     }
+
+    //println!(", result: {:?}", dest);
 }
 
 macro_rules! impl_bit {

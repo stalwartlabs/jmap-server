@@ -317,6 +317,50 @@ where
         .unwrap()
         .take_id();
 
+    // Inbox's total and unread count should have increased
+    let inbox = client
+        .mailbox_get(
+            &id_map["inbox"],
+            [
+                mailbox::Property::TotalEmails,
+                mailbox::Property::UnreadEmails,
+                mailbox::Property::TotalThreads,
+                mailbox::Property::UnreadThreads,
+            ]
+            .into(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(inbox.total_emails(), 1);
+    assert_eq!(inbox.unread_emails(), 1);
+    assert_eq!(inbox.total_threads(), 1);
+    assert_eq!(inbox.unread_threads(), 1);
+
+    // Set email to read and fetch properties again
+    client
+        .email_set_keyword(&mail_id, "$seen", true)
+        .await
+        .unwrap();
+    let inbox = client
+        .mailbox_get(
+            &id_map["inbox"],
+            [
+                mailbox::Property::TotalEmails,
+                mailbox::Property::UnreadEmails,
+                mailbox::Property::TotalThreads,
+                mailbox::Property::UnreadThreads,
+            ]
+            .into(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(inbox.total_emails(), 1);
+    assert_eq!(inbox.unread_emails(), 0);
+    assert_eq!(inbox.total_threads(), 1);
+    assert_eq!(inbox.unread_threads(), 0);
+
     // Only email properties must have changed
     let state = client.mailbox_changes(state, 0).await.unwrap();
     assert_eq!(state.created().len(), 0);
