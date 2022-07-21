@@ -69,7 +69,7 @@ pub enum Value {
     Type { value: Type },
     DKIM { value: DKIM },
     Members { value: Vec<JMAPId> },
-    ACL(ACLUpdate),
+    ACL(Vec<ACLUpdate>),
     Null,
 }
 

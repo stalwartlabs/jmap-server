@@ -15,6 +15,7 @@ use jmap::{
     },
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
+use store::core::acl::ACL;
 use store::{
     blob::BlobId,
     core::{collection::Collection, error::StoreError, tag::Tag},
@@ -22,7 +23,6 @@ use store::{
     write::options::IndexOptions,
     JMAPStore, SharedBitmap, Store,
 };
-use store::{core::acl::ACL, serialize::leb128::Leb128};
 
 pub trait JMAPCopyMail<T>
 where
@@ -180,16 +180,13 @@ where
                     MessageField::Metadata.into(),
                 )?
                 .ok_or(StoreError::DataCorruption)?;
-            let metadata_bytes = helper.store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
-                StoreError::InternalError(format!(
-                    "Could not find message metadata blob for {}.",
-                    document.document_id
-                ))
-            })?;
-            let (message_data_len, read_bytes) =
-                usize::from_leb128_bytes(&metadata_bytes[..]).ok_or(StoreError::DataCorruption)?;
             let mut message_data = MessageData::deserialize(
-                &metadata_bytes[read_bytes..read_bytes + message_data_len],
+                &helper.store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
+                    StoreError::InternalError(format!(
+                        "Could not find message metadata blob for {}.",
+                        document.document_id
+                    ))
+                })?,
             )
             .ok_or_else(|| {
                 StoreError::InternalError(format!(
@@ -200,23 +197,14 @@ where
 
             // Set receivedAt
             if let Some(received_at) = received_at {
+                // Serialize message data and outline
                 message_data.received_at = received_at;
 
-                // Serialize message data and outline
-                let mut message_data_bytes = message_data.serialize().ok_or_else(|| {
-                    StoreError::SerializeError("Failed to serialize message data".into())
-                })?;
-                let mut metadata = Vec::with_capacity(
-                    message_data_bytes.len()
-                        + (metadata_bytes.len() - (read_bytes + message_data_len))
-                        + std::mem::size_of::<usize>(),
-                );
-                message_data_bytes.len().to_leb128_bytes(&mut metadata);
-                metadata.append(&mut message_data_bytes);
-                metadata.extend_from_slice(&metadata_bytes[read_bytes + message_data_len..]);
-
                 // Link blob and set message data field
-                metadata_blob_id = self.blob_store(&metadata)?;
+                metadata_blob_id =
+                    self.blob_store(&message_data.serialize().ok_or_else(|| {
+                        StoreError::SerializeError("Failed to serialize message data".into())
+                    })?)?;
             }
 
             // Copy properties and build index

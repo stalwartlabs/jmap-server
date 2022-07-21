@@ -26,7 +26,7 @@ pub enum Value {
     MailboxRights { value: MailboxRights },
     ResultReference { value: ResultReference },
     IdReference { value: String },
-    ACL(ACLUpdate),
+    ACL(Vec<ACLUpdate>),
     Null,
 }
 

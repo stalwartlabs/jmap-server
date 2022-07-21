@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{borrow::Cow, fmt, sync::Arc};
 
 use serde::Deserialize;
 use store::core::acl::ACLToken;
@@ -125,8 +125,8 @@ impl<'de, O: GetObject> serde::de::Visitor<'de> for GetRequestVisitor<O> {
             arguments: O::GetArguments::default(),
         };
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "accountId" => {
                     request.account_id = map.next_value()?;
                 }
@@ -148,7 +148,7 @@ impl<'de, O: GetObject> serde::de::Visitor<'de> for GetRequestVisitor<O> {
                 }
                 _ => {
                     if let Err(err) =
-                        O::GetArguments::deserialize(&mut request.arguments, key, &mut map)
+                        O::GetArguments::deserialize(&mut request.arguments, key.as_ref(), &mut map)
                     {
                         return Err(serde::de::Error::custom(err));
                     }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::{borrow::Cow, collections::HashMap, fmt};
 
 use jmap::{
     request::{ArgumentSerializer, MaybeIdReference},
@@ -68,8 +68,8 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
     {
         let mut properties: HashMap<Property, Value> = HashMap::new();
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "keywords" => {
                     if let Some(value) = map.next_value::<Option<HashMap<Keyword, bool>>>()? {
                         properties.insert(Property::Keywords, Value::Keywords { value, set: true });
@@ -224,7 +224,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                     }
                 }
                 _ if key.starts_with("header:") => {
-                    if let Some(header) = HeaderProperty::parse(key) {
+                    if let Some(header) = HeaderProperty::parse(key.as_ref()) {
                         let header_value = match header.form {
                             HeaderForm::Raw | HeaderForm::Text => {
                                 if header.all {
@@ -286,7 +286,7 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                     }
                 }
                 _ => {
-                    if let Some(pointer) = JSONPointer::parse(key) {
+                    if let Some(pointer) = JSONPointer::parse(key.as_ref()) {
                         match pointer {
                             JSONPointer::Path(path) if path.len() == 2 => {
                                 if let (
@@ -396,8 +396,8 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
     {
         let mut properties: HashMap<BodyProperty, Value> = HashMap::new();
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "partId" => {
                     if let Some(value) = map.next_value::<Option<String>>()? {
                         properties.insert(BodyProperty::PartId, Value::Text { value });
@@ -459,7 +459,7 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
                     }
                 }
                 _ if key.starts_with("header:") => {
-                    if let Some(header) = HeaderProperty::parse(key) {
+                    if let Some(header) = HeaderProperty::parse(key.as_ref()) {
                         let header_value = match header.form {
                             HeaderForm::Raw | HeaderForm::Text => {
                                 if header.all {
@@ -679,9 +679,9 @@ impl<'de> Deserialize<'de> for Keyword {
 
 // Argument serializers
 impl ArgumentSerializer for GetArguments {
-    fn deserialize<'x: 'y, 'y>(
+    fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
-        property: &'x str,
+        property: &'z str,
         value: &mut impl serde::de::MapAccess<'x>,
     ) -> Result<(), String> {
         match property {

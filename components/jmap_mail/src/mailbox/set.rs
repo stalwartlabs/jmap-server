@@ -6,6 +6,7 @@ use crate::{INBOX_ID, TRASH_ID};
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
+use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::{ACLEnforce, ResultReference};
@@ -408,13 +409,27 @@ where
                         .store
                         .get_document_ids(SUPERUSER_ID, Collection::Principal)?
                         .unwrap_or_default();
-                    for id in value.acl.keys() {
-                        let shared_to = id.get_document_id();
-                        if !principals.contains(shared_to) {
-                            return Err(SetError::invalid_property(
-                                property,
-                                format!("Principal {} does not exist.", id),
-                            ));
+                    for acl_update in &value {
+                        match acl_update {
+                            ACLUpdate::Replace { acls } => {
+                                for account_id in acls.keys() {
+                                    if !principals.contains(account_id.get_document_id()) {
+                                        return Err(SetError::invalid_property(
+                                            property,
+                                            format!("Principal {} does not exist.", account_id),
+                                        ));
+                                    }
+                                }
+                            }
+                            ACLUpdate::Update { account_id, .. }
+                            | ACLUpdate::Set { account_id, .. } => {
+                                if !principals.contains(account_id.get_document_id()) {
+                                    return Err(SetError::invalid_property(
+                                        property,
+                                        format!("Principal {} does not exist.", account_id),
+                                    ));
+                                }
+                            }
                         }
                     }
 

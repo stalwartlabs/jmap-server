@@ -86,6 +86,7 @@ pub struct ResultReference {
     pub path: JSONPointer,
 }
 
+// Todo remove all untagged and HashMaps
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 pub enum MaybeResultReference<T> {
@@ -249,17 +250,17 @@ impl<'de> serde::Deserialize<'de> for MaybeIdReference {
 }
 
 pub trait ArgumentSerializer {
-    fn deserialize<'x: 'y, 'y>(
+    fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
-        property: &'x str,
+        property: &'z str,
         value: &mut impl serde::de::MapAccess<'x>,
     ) -> Result<(), String>;
 }
 
 impl ArgumentSerializer for () {
-    fn deserialize<'x: 'y, 'y>(
+    fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
-        _property: &'x str,
+        _property: &'z str,
         _value: &mut impl serde::de::MapAccess<'x>,
     ) -> Result<(), String> {
         Ok(())

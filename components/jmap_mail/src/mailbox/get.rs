@@ -14,7 +14,7 @@ use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::roaring::RoaringBitmap;
-use store::{AccountId, JMAPStore};
+use store::{AccountId, JMAPStore, SharedBitmap};
 use store::{DocumentId, Store};
 
 impl GetObject for Mailbox {
@@ -135,7 +135,7 @@ where
                             .unwrap_or(0),
                     },
                     Property::UnreadEmails => Value::Number {
-                        value: self //TODO check unread counts everywhere
+                        value: self //TODO do not count messages in Trash
                             .mailbox_unread_tags(
                                 account_id,
                                 document_id,
@@ -183,10 +183,16 @@ where
                             _ => Value::Bool { value: false },
                         })
                         .unwrap_or(Value::Bool { value: false }),
-                    Property::ACL if acl.is_member(account_id) => Value::ACL(ACLUpdate {
-                        acl: fields.as_ref().unwrap().get_acls(),
-                        set: true,
-                    }),
+                    Property::ACL
+                        if acl.is_member(account_id)
+                            || self
+                                .mail_shared_folders(account_id, &acl.member_of, ACL::Administer)?
+                                .has_access(document_id) =>
+                    {
+                        Value::ACL(vec![ACLUpdate::Replace {
+                            acls: fields.as_ref().unwrap().get_acls(),
+                        }])
+                    }
                     _ => Value::Null,
                 };
 

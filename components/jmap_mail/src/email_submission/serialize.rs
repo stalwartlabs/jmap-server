@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::{borrow::Cow, collections::HashMap, fmt};
 
 use jmap::request::{ArgumentSerializer, MaybeIdReference};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
@@ -87,8 +87,8 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
     {
         let mut properties: HashMap<Property, Value> = HashMap::new();
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "emailId" => {
                     properties.insert(
                         Property::EmailId,
@@ -154,9 +154,9 @@ impl<'de> Deserialize<'de> for EmailSubmission {
 
 // Argument serializer
 impl ArgumentSerializer for SetArguments {
-    fn deserialize<'x: 'y, 'y>(
+    fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
-        property: &'x str,
+        property: &'z str,
         value: &mut impl serde::de::MapAccess<'x>,
     ) -> Result<(), String> {
         if property == "onSuccessUpdateEmail" {

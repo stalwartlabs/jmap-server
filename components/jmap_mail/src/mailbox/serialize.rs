@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::{borrow::Cow, collections::HashMap, fmt};
 
 use jmap::{
     orm::acl::ACLUpdate,
@@ -68,7 +68,11 @@ impl Serialize for Mailbox {
                 Value::IdReference { value } => {
                     map.serialize_entry(name, &format!("#{}", value))?
                 }
-                Value::ACL(value) => map.serialize_entry(name, &value.acl)?,
+                Value::ACL(value) => {
+                    if let Some(value) = value.last() {
+                        map.serialize_entry(name, &value.get_acls())?
+                    }
+                }
                 Value::Subscriptions { .. } => (),
             }
         }
@@ -91,9 +95,10 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
         A: serde::de::MapAccess<'de>,
     {
         let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut acls = Vec::new();
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "name" => {
                     properties.insert(
                         Property::Name,
@@ -146,15 +151,11 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                     );
                 }
                 "acl" => {
-                    properties.insert(
-                        Property::ACL,
-                        Value::ACL(ACLUpdate {
-                            acl: map
-                                .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
-                                .unwrap_or_default(),
-                            set: true,
-                        }),
-                    );
+                    acls.push(ACLUpdate::Replace {
+                        acls: map
+                            .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
+                            .unwrap_or_default(),
+                    });
                 }
                 _ if key.starts_with('#') => {
                     if let Some(property) = key.get(1..) {
@@ -166,9 +167,9 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         );
                     }
                 }
-                _ => match JSONPointer::parse(key) {
+                key => match JSONPointer::parse(key) {
                     Some(JSONPointer::Path(path))
-                        if path.len() == 2
+                        if path.len() >= 2
                             && path
                                 .get(0)
                                 .and_then(|p| p.to_string())
@@ -176,26 +177,40 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                                 .unwrap_or(Property::Invalid)
                                 == Property::ACL =>
                     {
-                        if let Some(id) = path
+                        if let Some(account_id) = path
                             .get(1)
                             .and_then(|p| p.to_string())
                             .and_then(JMAPId::parse)
                         {
-                            properties.insert(
-                                Property::ACL,
-                                Value::ACL(ACLUpdate {
-                                    acl: HashMap::from_iter([(
-                                        id,
-                                        map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
-                                    )]),
-                                    set: false,
-                                }),
-                            );
+                            if path.len() > 2 {
+                                if let Some(acl) =
+                                    path.get(2).and_then(|p| p.to_string()).map(ACL::parse)
+                                {
+                                    if acl != ACL::None_ {
+                                        acls.push(ACLUpdate::Set {
+                                            account_id,
+                                            acl,
+                                            is_set: map
+                                                .next_value::<Option<bool>>()?
+                                                .unwrap_or(false),
+                                        });
+                                    }
+                                }
+                            } else {
+                                acls.push(ACLUpdate::Update {
+                                    account_id,
+                                    acls: map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
+                                });
+                            }
                         }
                     }
                     _ => (),
                 },
             }
+        }
+
+        if !acls.is_empty() {
+            properties.insert(Property::ACL, Value::ACL(acls));
         }
 
         Ok(Mailbox { properties })
@@ -213,9 +228,9 @@ impl<'de> Deserialize<'de> for Mailbox {
 
 // Argument serializer
 impl ArgumentSerializer for SetArguments {
-    fn deserialize<'x: 'y, 'y>(
+    fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
-        property: &'x str,
+        property: &'z str,
         value: &mut impl serde::de::MapAccess<'x>,
     ) -> Result<(), String> {
         if property == "onDestroyRemoveEmails" {

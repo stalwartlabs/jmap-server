@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::{borrow::Cow, collections::HashMap, fmt};
 
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::core::acl::ACL;
@@ -64,7 +64,11 @@ impl Serialize for Principal {
                 Value::Members { value } => map.serialize_entry(name, value)?,
                 Value::Blob { value } => map.serialize_entry(name, value)?,
                 Value::DKIM { value } => map.serialize_entry(name, value)?,
-                Value::ACL(value) => map.serialize_entry(name, &value.acl)?,
+                Value::ACL(value) => {
+                    if let Some(value) = value.last() {
+                        map.serialize_entry(name, &value.get_acls())?
+                    }
+                }
             }
         }
 
@@ -86,9 +90,10 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
         A: serde::de::MapAccess<'de>,
     {
         let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut acls = Vec::new();
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "name" => {
                     properties.insert(
                         Property::Name,
@@ -210,19 +215,15 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "acl" => {
-                    properties.insert(
-                        Property::ACL,
-                        Value::ACL(ACLUpdate {
-                            acl: map
-                                .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
-                                .unwrap_or_default(),
-                            set: true,
-                        }),
-                    );
+                    acls.push(ACLUpdate::Replace {
+                        acls: map
+                            .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
+                            .unwrap_or_default(),
+                    });
                 }
-                _ => match JSONPointer::parse(key) {
+                key => match JSONPointer::parse(key) {
                     Some(JSONPointer::Path(path))
-                        if path.len() == 2
+                        if path.len() >= 2
                             && path
                                 .get(0)
                                 .and_then(|p| p.to_string())
@@ -230,26 +231,40 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                                 .unwrap_or(Property::Invalid)
                                 == Property::ACL =>
                     {
-                        if let Some(id) = path
+                        if let Some(account_id) = path
                             .get(1)
                             .and_then(|p| p.to_string())
                             .and_then(JMAPId::parse)
                         {
-                            properties.insert(
-                                Property::ACL,
-                                Value::ACL(ACLUpdate {
-                                    acl: HashMap::from_iter([(
-                                        id,
-                                        map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
-                                    )]),
-                                    set: false,
-                                }),
-                            );
+                            if path.len() > 2 {
+                                if let Some(acl) =
+                                    path.get(2).and_then(|p| p.to_string()).map(ACL::parse)
+                                {
+                                    if acl != ACL::None_ {
+                                        acls.push(ACLUpdate::Set {
+                                            account_id,
+                                            acl,
+                                            is_set: map
+                                                .next_value::<Option<bool>>()?
+                                                .unwrap_or(false),
+                                        });
+                                    }
+                                }
+                            } else {
+                                acls.push(ACLUpdate::Update {
+                                    account_id,
+                                    acls: map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
+                                });
+                            }
                         }
                     }
                     _ => (),
                 },
             }
+        }
+
+        if !acls.is_empty() {
+            properties.insert(Property::ACL, Value::ACL(acls));
         }
 
         Ok(Principal { properties })

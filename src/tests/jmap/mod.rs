@@ -77,7 +77,7 @@ where
 }
 
 #[actix_web::test]
-async fn jmap_tests() {
+async fn jmap_core_tests() {
     let (server, mut client, temp_dir) = init_jmap_tests::<RocksDB>("jmap_tests").await;
 
     // Run tests

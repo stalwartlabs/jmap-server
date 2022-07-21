@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
+use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::SetResponse;
 use jmap::request::ResultReference;
@@ -270,12 +271,27 @@ where
                     Value::Text { value }
                 }
                 (Property::ACL, Value::ACL(value)) => {
-                    for id in value.acl.keys() {
-                        if !helper.document_ids.contains(id.get_document_id()) {
-                            return Err(SetError::invalid_property(
-                                property,
-                                format!("Principal {} does not exist.", id),
-                            ));
+                    for acl_update in &value {
+                        match acl_update {
+                            ACLUpdate::Replace { acls } => {
+                                for account_id in acls.keys() {
+                                    if !helper.document_ids.contains(account_id.get_document_id()) {
+                                        return Err(SetError::invalid_property(
+                                            property,
+                                            format!("Principal {} does not exist.", account_id),
+                                        ));
+                                    }
+                                }
+                            }
+                            ACLUpdate::Update { account_id, .. }
+                            | ACLUpdate::Set { account_id, .. } => {
+                                if !helper.document_ids.contains(account_id.get_document_id()) {
+                                    return Err(SetError::invalid_property(
+                                        property,
+                                        format!("Principal {} does not exist.", account_id),
+                                    ));
+                                }
+                            }
                         }
                     }
 

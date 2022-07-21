@@ -8,6 +8,7 @@ use crate::jmap_store::set::SetObject;
 use crate::types::jmap::JMAPId;
 use crate::types::state::JMAPState;
 use crate::types::type_state::TypeState;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 
@@ -224,8 +225,8 @@ impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
             arguments: O::SetArguments::default(),
         };
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "accountId" => {
                     request.account_id = map.next_value()?;
                 }
@@ -248,7 +249,7 @@ impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
                 "#destroy" => {
                     request.destroy = MaybeResultReference::Reference(map.next_value()?).into();
                 }
-                _ => {
+                key => {
                     if let Err(err) = request.arguments.deserialize(key, &mut map) {
                         return Err(serde::de::Error::custom(err));
                     }

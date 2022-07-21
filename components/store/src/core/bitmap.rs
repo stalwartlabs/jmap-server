@@ -44,6 +44,12 @@ impl<T: BitmapItem> Bitmap<T> {
     }
 
     #[inline(always)]
+    pub fn remove(&mut self, item: T) {
+        debug_assert!(item.is_valid());
+        self.bitmap ^= 1 << item.into();
+    }
+
+    #[inline(always)]
     pub fn pop(&mut self) -> Option<T> {
         if self.bitmap != 0 {
             let item = 63 - self.bitmap.leading_zeros();

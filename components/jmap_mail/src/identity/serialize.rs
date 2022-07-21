@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::{borrow::Cow, collections::HashMap, fmt};
 
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 
@@ -78,8 +78,8 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
     {
         let mut properties: HashMap<Property, Value> = HashMap::new();
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
                 "name" => {
                     properties.insert(
                         Property::Name,

@@ -61,10 +61,10 @@ where
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },
-                        Property::ACL => Value::ACL(ACLUpdate {
-                            acl: fields.get_acls(),
-                            set: true,
-                        }),
+                        Property::ACL => Value::ACL(vec![ACLUpdate::Replace {
+                            acls: fields.get_acls(),
+                        }]),
+
                         Property::Secret => Value::Null,
                         _ => fields.remove(property).unwrap_or_default(),
                     },
