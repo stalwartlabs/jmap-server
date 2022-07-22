@@ -7,7 +7,7 @@ use actix_web::{
 use jmap::{
     orm::TinyORM,
     sanitize_email,
-    types::{jmap::JMAPId, type_state::TypeState},
+    types::{jmap::JMAPId, principal::Type, type_state::TypeState},
 };
 use jmap_mail::{
     mail::{
@@ -18,7 +18,7 @@ use jmap_mail::{
     vacation_response::get::{JMAPGetVacationResponse, VacationMessage},
     INBOX_ID,
 };
-use jmap_sharing::principal::{account::JMAPAccountStore, schema::Type};
+use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     core::{collection::Collection, document::Document, tag::Tag},
     log::changes::ChangeId,

@@ -9,21 +9,21 @@ use store::{
     AccountId,
 };
 
-use crate::{jmap_store::Object, types::jmap::JMAPId};
+use crate::jmap_store::Object;
 
 use super::TinyORM;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ACLUpdate {
     Replace {
-        acls: HashMap<JMAPId, Vec<ACL>>,
+        acls: HashMap<String, Vec<ACL>>,
     },
     Update {
-        account_id: JMAPId,
+        account_id: String,
         acls: Vec<ACL>,
     },
     Set {
-        account_id: JMAPId,
+        account_id: String,
         acl: ACL,
         is_set: bool,
     },
@@ -39,7 +39,7 @@ where
         }
     }
 
-    pub fn acl_set_all(&mut self, account_id: AccountId, acl: impl Into<Bitmap<ACL>>) {
+    pub fn acl_update(&mut self, account_id: AccountId, acl: impl Into<Bitmap<ACL>>) {
         let acl = acl.into();
         if !acl.is_empty() {
             if let Some(permission) = self.acls.iter_mut().find(|p| p.id == account_id) {
@@ -58,48 +58,31 @@ where
     }
 
     pub fn acl_set(&mut self, account_id: AccountId, acl: ACL, is_set: bool) {
-        if let Some(permission) = self.acls.iter_mut().find(|p| p.id == account_id) {
-            if is_set {
-                permission.acl.insert(acl);
-            } else {
-                permission.acl.remove(acl);
-                if permission.acl.is_empty() {
-                    self.acl_revoke(account_id);
+        if acl != ACL::None_ {
+            if let Some(permission) = self.acls.iter_mut().find(|p| p.id == account_id) {
+                if is_set {
+                    permission.acl.insert(acl);
+                } else {
+                    permission.acl.remove(acl);
+                    if permission.acl.is_empty() {
+                        self.acl_revoke(account_id);
+                    }
                 }
+            } else if is_set {
+                self.acls.push(Permission {
+                    id: account_id,
+                    acl: acl.into(),
+                });
             }
-        } else if is_set {
-            self.acls.push(Permission {
-                id: account_id,
-                acl: acl.into(),
-            });
         }
     }
 
-    pub fn acl_update(&mut self, updates: Vec<ACLUpdate>) {
-        for update in updates {
-            match update {
-                ACLUpdate::Replace { acls } => {
-                    self.acls.clear();
-                    for (id, acl) in acls {
-                        self.acls.push(Permission {
-                            id: id.get_document_id(),
-                            acl: acl.into(),
-                        });
-                    }
-                    self.acls.sort_unstable();
-                }
-                ACLUpdate::Update { account_id, acls } => {
-                    self.acl_set_all(account_id.get_document_id(), acls);
-                }
-                ACLUpdate::Set {
-                    account_id,
-                    acl,
-                    is_set,
-                } => {
-                    self.acl_set(account_id.get_document_id(), acl, is_set);
-                }
-            }
-        }
+    pub fn acl_clear(&mut self) {
+        self.acls.clear();
+    }
+
+    pub fn acl_finish(&mut self) {
+        self.acls.sort_unstable();
     }
 
     pub fn acl_check(&self, account_id: AccountId, acl: ACL) -> bool {
@@ -109,12 +92,10 @@ where
             .map_or(false, |p| p.acl.contains(acl))
     }
 
-    pub fn get_acls(&self) -> HashMap<JMAPId, Vec<ACL>> {
-        let mut acls = HashMap::with_capacity(self.acls.len());
-        for acl in &self.acls {
-            acls.insert(JMAPId::from(acl.id), acl.acl.clone().into_iter().collect());
-        }
-        acls
+    pub fn get_acls(&self) -> impl Iterator<Item = (AccountId, Vec<ACL>)> + '_ {
+        self.acls
+            .iter()
+            .map(|acl| (acl.id, acl.acl.clone().into_iter().collect()))
     }
 
     pub fn get_changed_acls(&self, changes: Option<&Self>) -> Option<Vec<Permission>> {
@@ -146,15 +127,6 @@ where
             self.acls.clone().into()
         } else {
             None
-        }
-    }
-}
-
-impl ACLUpdate {
-    pub fn get_acls(&self) -> &HashMap<JMAPId, Vec<ACL>> {
-        match self {
-            ACLUpdate::Replace { acls } => acls,
-            _ => unreachable!(),
         }
     }
 }

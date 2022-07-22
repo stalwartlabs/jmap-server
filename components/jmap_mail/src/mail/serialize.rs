@@ -796,6 +796,9 @@ impl<'de> serde::de::Visitor<'de> for FilterVisitor {
                 "sentAfter" => Filter::SentAfter {
                     value: map.next_value()?,
                 },
+                "inThread" => Filter::InThread {
+                    value: map.next_value()?,
+                },
 
                 unsupported => Filter::Unsupported {
                     value: unsupported.to_string(),

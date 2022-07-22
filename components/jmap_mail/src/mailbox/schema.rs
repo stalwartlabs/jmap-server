@@ -26,7 +26,8 @@ pub enum Value {
     MailboxRights { value: MailboxRights },
     ResultReference { value: ResultReference },
     IdReference { value: String },
-    ACL(Vec<ACLUpdate>),
+    ACLSet(Vec<ACLUpdate>),
+    ACLGet(HashMap<String, Vec<ACL>>),
     Null,
 }
 
@@ -272,8 +273,8 @@ impl MailboxRights {
             may_read_items: acl.contains(ACL::ReadItems),
             may_add_items: acl.contains(ACL::AddItems),
             may_remove_items: acl.contains(ACL::RemoveItems),
-            may_set_seen: acl.contains(ACL::SetSeen),
-            may_set_keywords: acl.contains(ACL::SetKeywords),
+            may_set_seen: acl.contains(ACL::ModifyItems),
+            may_set_keywords: acl.contains(ACL::ModifyItems),
             may_create_child: acl.contains(ACL::CreateChild),
             may_rename: acl.contains(ACL::Modify),
             may_delete: acl.contains(ACL::Delete),

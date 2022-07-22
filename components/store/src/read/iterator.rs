@@ -157,6 +157,14 @@ where
         self.iterators.swap_remove(0).remaining
     }
 
+    pub fn get_min(&self) -> Option<DocumentId> {
+        self.iterators.get(0).and_then(|i| i.remaining.min())
+    }
+
+    pub fn get_max(&self) -> Option<DocumentId> {
+        self.iterators.get(0).and_then(|i| i.remaining.max())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.iterators[0].remaining.is_empty()
     }

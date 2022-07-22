@@ -5,8 +5,11 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::{types::jmap::JMAPId, URI};
-use jmap_sharing::principal::{account::JMAPAccountStore, schema::Type};
+use jmap::{
+    types::{jmap::JMAPId, principal::Type},
+    URI,
+};
+use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     Store,

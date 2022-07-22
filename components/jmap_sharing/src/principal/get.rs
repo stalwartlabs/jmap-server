@@ -1,34 +1,13 @@
 use std::collections::HashMap;
 
-use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
-use jmap::orm::acl::ACLUpdate;
+use jmap::jmap_store::get::{default_mapper, GetHelper, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
-use jmap::types::jmap::JMAPId;
 
+use jmap::types::principal::{JMAPPrincipals, Principal, Property, Value};
 use store::core::error::StoreError;
 use store::JMAPStore;
 use store::Store;
-
-use super::schema::{Principal, Property, Value};
-
-impl GetObject for Principal {
-    type GetArguments = ();
-
-    fn default_properties() -> Vec<Self::Property> {
-        vec![
-            Property::Id,
-            Property::Name,
-            Property::Email,
-            Property::Type,
-            Property::Description,
-        ]
-    }
-
-    fn get_as_id(&self, _property: &Self::Property) -> Option<Vec<JMAPId>> {
-        None
-    }
-}
 
 pub trait JMAPGetPrincipal<T>
 where
@@ -61,9 +40,15 @@ where
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },
-                        Property::ACL => Value::ACL(vec![ACLUpdate::Replace {
-                            acls: fields.get_acls(),
-                        }]),
+                        Property::ACL => {
+                            let mut acl_get = HashMap::new();
+                            for (account_id, acls) in fields.get_acls() {
+                                if let Some(email) = self.principal_to_email(account_id)? {
+                                    acl_get.insert(email, acls);
+                                }
+                            }
+                            Value::ACLGet(acl_get)
+                        }
 
                         Property::Secret => Value::Null,
                         _ => fields.remove(property).unwrap_or_default(),

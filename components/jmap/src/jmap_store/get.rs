@@ -75,16 +75,21 @@ where
 
         let account_id = request.account_id.get_document_id();
         let document_ids = if validate_ids {
+            let mut document_ids = store
+                .get_document_ids(account_id, collection)?
+                .unwrap_or_default();
             match shared_documents {
-                Some(fnc) if acl.is_shared(account_id) => fnc(account_id, &acl.member_of)?
-                    .as_ref()
-                    .clone()
-                    .unwrap_or_default(),
+                Some(fnc) if acl.is_shared(account_id) => {
+                    if let Some(shared_ids) = fnc(account_id, &acl.member_of)?.as_ref() {
+                        document_ids &= shared_ids;
+                        document_ids
+                    } else {
+                        RoaringBitmap::new()
+                    }
+                }
                 _ => {
                     debug_assert!(!acl.is_shared(account_id));
-                    store
-                        .get_document_ids(account_id, collection)?
-                        .unwrap_or_default()
+                    document_ids
                 }
             }
         } else {

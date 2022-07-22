@@ -163,7 +163,7 @@ where
 
     // Jane grants Inbox ReadItems access to John
     jane_client
-        .mailbox_update_acl(&inbox_id, &john_id, [ACL::ReadItems])
+        .mailbox_update_acl(&inbox_id, "jdoe@example.com", [ACL::ReadItems])
         .await
         .unwrap();
 
@@ -249,7 +249,7 @@ where
             .await,
     );
     jane_client
-        .mailbox_update_acl(&inbox_id, &john_id, [ACL::Read, ACL::ReadItems])
+        .mailbox_update_acl(&inbox_id, "jdoe@example.com", [ACL::Read, ACL::ReadItems])
         .await
         .unwrap();
     assert_eq!(
@@ -314,7 +314,7 @@ where
     jane_client
         .mailbox_update_acl(
             &inbox_id,
-            &john_id,
+            "jdoe@example.com",
             [ACL::Read, ACL::ReadItems, ACL::AddItems],
         )
         .await
@@ -377,7 +377,7 @@ where
     jane_client
         .mailbox_update_acl(
             &inbox_id,
-            &john_id,
+            "jdoe@example.com",
             [ACL::Read, ACL::ReadItems, ACL::AddItems, ACL::RemoveItems],
         )
         .await
@@ -388,7 +388,7 @@ where
         .await
         .unwrap();
 
-    // Try to set the $seen flag
+    // Try to set keywords
     assert_forbidden(
         john_client
             .set_default_account_id(&jane_id)
@@ -398,13 +398,13 @@ where
     jane_client
         .mailbox_update_acl(
             &inbox_id,
-            &john_id,
+            "jdoe@example.com",
             [
                 ACL::Read,
                 ACL::ReadItems,
                 ACL::AddItems,
                 ACL::RemoveItems,
-                ACL::SetSeen,
+                ACL::ModifyItems,
             ],
         )
         .await
@@ -412,29 +412,6 @@ where
     john_client
         .set_default_account_id(&jane_id)
         .email_set_keyword(&email_id_2, "$seen", true)
-        .await
-        .unwrap();
-
-    // Try to set keywords
-    assert_forbidden(
-        john_client
-            .set_default_account_id(&jane_id)
-            .email_set_keyword(&email_id_2, "my-keyword", true)
-            .await,
-    );
-    jane_client
-        .mailbox_update_acl(
-            &inbox_id,
-            &john_id,
-            [
-                ACL::Read,
-                ACL::ReadItems,
-                ACL::AddItems,
-                ACL::RemoveItems,
-                ACL::SetSeen,
-                ACL::SetKeywords,
-            ],
-        )
         .await
         .unwrap();
     john_client
@@ -453,14 +430,13 @@ where
     jane_client
         .mailbox_update_acl(
             &inbox_id,
-            &john_id,
+            "jdoe@example.com",
             [
                 ACL::Read,
                 ACL::ReadItems,
                 ACL::AddItems,
                 ACL::RemoveItems,
-                ACL::SetSeen,
-                ACL::SetKeywords,
+                ACL::ModifyItems,
                 ACL::CreateChild,
             ],
         )
@@ -483,7 +459,7 @@ where
     jane_client
         .mailbox_update_acl(
             &mailbox_id,
-            &john_id,
+            "jdoe@example.com",
             [ACL::Read, ACL::ReadItems, ACL::Modify],
         )
         .await
@@ -504,7 +480,7 @@ where
     jane_client
         .mailbox_update_acl(
             &mailbox_id,
-            &john_id,
+            "jdoe@example.com",
             [ACL::Read, ACL::ReadItems, ACL::Modify, ACL::AddItems],
         )
         .await
@@ -525,7 +501,7 @@ where
     jane_client
         .mailbox_update_acl(
             &mailbox_id,
-            &john_id,
+            "jdoe@example.com",
             [
                 ACL::Read,
                 ACL::ReadItems,
@@ -545,7 +521,7 @@ where
     jane_client
         .mailbox_update_acl(
             &mailbox_id,
-            &john_id,
+            "jdoe@example.com",
             [
                 ACL::Read,
                 ACL::ReadItems,
@@ -567,7 +543,7 @@ where
     assert_forbidden(
         john_client
             .set_default_account_id(&jane_id)
-            .mailbox_update_acl(&inbox_id, &bill_id, [ACL::Read, ACL::ReadItems])
+            .mailbox_update_acl(&inbox_id, "bill@example.com", [ACL::Read, ACL::ReadItems])
             .await,
     );
     assert_forbidden(
@@ -579,14 +555,13 @@ where
     jane_client
         .mailbox_update_acl(
             &inbox_id,
-            &john_id,
+            "jdoe@example.com",
             [
                 ACL::Read,
                 ACL::ReadItems,
                 ACL::AddItems,
                 ACL::RemoveItems,
-                ACL::SetSeen,
-                ACL::SetKeywords,
+                ACL::ModifyItems,
                 ACL::CreateChild,
                 ACL::Modify,
                 ACL::Administer,
@@ -608,15 +583,14 @@ where
             ACL::ReadItems,
             ACL::AddItems,
             ACL::RemoveItems,
-            ACL::SetSeen,
-            ACL::SetKeywords,
+            ACL::ModifyItems,
             ACL::CreateChild,
             ACL::Modify
         ]
     );
     john_client
         .set_default_account_id(&jane_id)
-        .mailbox_update_acl(&inbox_id, &bill_id, [ACL::Read, ACL::ReadItems])
+        .mailbox_update_acl(&inbox_id, "bill@example.com", [ACL::Read, ACL::ReadItems])
         .await
         .unwrap();
     assert_eq!(
@@ -631,7 +605,7 @@ where
 
     // Revoke all access to John
     jane_client
-        .mailbox_update_acl(&inbox_id, &john_id, [])
+        .mailbox_update_acl(&inbox_id, "jdoe@example.com", [])
         .await
         .unwrap();
     assert_forbidden(

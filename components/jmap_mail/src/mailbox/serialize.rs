@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashMap, fmt};
 use jmap::{
     orm::acl::ACLUpdate,
     request::{ArgumentSerializer, MaybeIdReference},
-    types::{jmap::JMAPId, json_pointer::JSONPointer},
+    types::json_pointer::JSONPointer,
 };
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::core::acl::ACL;
@@ -68,12 +68,8 @@ impl Serialize for Mailbox {
                 Value::IdReference { value } => {
                     map.serialize_entry(name, &format!("#{}", value))?
                 }
-                Value::ACL(value) => {
-                    if let Some(value) = value.last() {
-                        map.serialize_entry(name, &value.get_acls())?
-                    }
-                }
-                Value::Subscriptions { .. } => (),
+                Value::ACLGet(value) => map.serialize_entry(name, value)?,
+                Value::Subscriptions { .. } | Value::ACLSet(_) => (),
             }
         }
 
@@ -153,7 +149,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                 "acl" => {
                     acls.push(ACLUpdate::Replace {
                         acls: map
-                            .next_value::<Option<HashMap<JMAPId, Vec<ACL>>>>()?
+                            .next_value::<Option<HashMap<String, Vec<ACL>>>>()?
                             .unwrap_or_default(),
                     });
                 }
@@ -180,7 +176,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                         if let Some(account_id) = path
                             .get(1)
                             .and_then(|p| p.to_string())
-                            .and_then(JMAPId::parse)
+                            .map(|p| p.to_string())
                         {
                             if path.len() > 2 {
                                 if let Some(acl) =
@@ -210,7 +206,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
         }
 
         if !acls.is_empty() {
-            properties.insert(Property::ACL, Value::ACL(acls));
+            properties.insert(Property::ACL, Value::ACLSet(acls));
         }
 
         Ok(Mailbox { properties })

@@ -19,10 +19,8 @@ pub enum ACL {
     RemoveItems = 6,
     CreateChild = 7,
     Administer = 8,
-    SetSeen = 9,
-    SetKeywords = 10,
-    Submit = 11,
-    None_ = 12,
+    Submit = 9,
+    None_ = 10,
 }
 
 #[derive(
@@ -51,8 +49,6 @@ impl ACL {
             "removeItems" => ACL::RemoveItems,
             "createChild" => ACL::CreateChild,
             "administer" => ACL::Administer,
-            "setSeen" => ACL::SetSeen,
-            "setKeywords" => ACL::SetKeywords,
             "submit" => ACL::Submit,
             _ => ACL::None_,
         }
@@ -87,9 +83,7 @@ impl From<u64> for ACL {
             6 => ACL::RemoveItems,
             7 => ACL::CreateChild,
             8 => ACL::Administer,
-            9 => ACL::SetSeen,
-            10 => ACL::SetKeywords,
-            11 => ACL::Submit,
+            9 => ACL::Submit,
             _ => {
                 debug_assert!(false, "Invalid ACL value: {}", value);
                 ACL::None_
@@ -110,8 +104,6 @@ impl Display for ACL {
             ACL::RemoveItems => write!(f, "removeItems"),
             ACL::CreateChild => write!(f, "createChild"),
             ACL::Administer => write!(f, "administer"),
-            ACL::SetSeen => write!(f, "setSeen"),
-            ACL::SetKeywords => write!(f, "setKeywords"),
             ACL::Submit => write!(f, "submit"),
             ACL::None_ => Ok(()),
         }

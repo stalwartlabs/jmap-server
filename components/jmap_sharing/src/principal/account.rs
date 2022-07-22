@@ -1,6 +1,13 @@
 use std::sync::Arc;
 
-use jmap::{orm::serialize::JMAPOrm, types::jmap::JMAPId, SUPERUSER_ID};
+use jmap::{
+    orm::serialize::JMAPOrm,
+    types::{
+        jmap::JMAPId,
+        principal::{Principal, Property, Type, Value},
+    },
+    SUPERUSER_ID,
+};
 use store::{
     core::{acl::ACLToken, collection::Collection, error::StoreError, JMAPIdPrefix},
     read::{
@@ -11,8 +18,6 @@ use store::{
     tracing::debug,
     AccountId, JMAPStore, RecipientType, Store,
 };
-
-use super::schema::{Principal, Property, Type, Value};
 
 pub trait JMAPAccountStore {
     fn find_individual(&self, email: &str) -> store::Result<Option<AccountId>>;

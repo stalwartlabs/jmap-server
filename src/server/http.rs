@@ -4,9 +4,10 @@ use actix_cors::Cors;
 use actix_web::{middleware, web, App, HttpServer};
 use jmap::{
     orm::{serialize::JMAPOrm, TinyORM},
+    types::principal::Principal,
     SUPERUSER_ID,
 };
-use jmap_sharing::principal::{schema::Principal, CreateAccount};
+use jmap_sharing::principal::CreateAccount;
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     core::{collection::Collection, document::Document},

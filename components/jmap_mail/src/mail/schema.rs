@@ -726,6 +726,7 @@ pub enum Filter {
     Id { value: Vec<JMAPId> },
     SentBefore { value: DateTime<Utc> },
     SentAfter { value: DateTime<Utc> },
+    InThread { value: JMAPId },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

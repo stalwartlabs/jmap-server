@@ -575,31 +575,19 @@ where
                 }
 
                 // Enforce setSeen and setKeywords
-                if !changed_tags.is_empty() {
-                    let allowed_set_seen = helper.store.mail_shared_messages(
-                        helper.account_id,
-                        &helper.acl.member_of,
-                        ACL::SetSeen,
-                    )?;
-                    let allowed_set_keywords = helper.store.mail_shared_messages(
-                        helper.account_id,
-                        &helper.acl.member_of,
-                        ACL::SetKeywords,
-                    )?;
-
-                    for keyword in changed_tags.iter() {
-                        if matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN) {
-                            if !allowed_set_seen.has_access(document.document_id) {
-                                return Err(SetError::forbidden(
-                                    "You are not allowed to change the $seen flag.",
-                                ));
-                            }
-                        } else if !allowed_set_keywords.has_access(document.document_id) {
-                            return Err(SetError::forbidden(
-                                "You are not allowed to set keywords.",
-                            ));
-                        }
-                    }
+                if !changed_tags.is_empty()
+                    && !helper
+                        .store
+                        .mail_shared_messages(
+                            helper.account_id,
+                            &helper.acl.member_of,
+                            ACL::ModifyItems,
+                        )?
+                        .has_access(document.document_id)
+                {
+                    return Err(SetError::forbidden(
+                        "You are not allowed to change keywords.",
+                    ));
                 }
             }
 

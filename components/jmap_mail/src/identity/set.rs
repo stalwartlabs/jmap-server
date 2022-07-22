@@ -6,6 +6,7 @@ use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::SetResponse;
 use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
+use jmap::types::principal;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use jmap::{sanitize_email, SUPERUSER_ID};
 use store::core::collection::Collection;
@@ -25,9 +26,6 @@ impl SetObject for Identity {
     fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
     fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
 }
-
-const P_EMAIL_ID: u8 = 4;
-const P_ALIASES_ID: u8 = 7;
 
 pub trait JMAPSetIdentity<T>
 where
@@ -69,8 +67,14 @@ where
                                         SUPERUSER_ID,
                                         Collection::Principal,
                                         Filter::or(vec![
-                                            Filter::eq(P_EMAIL_ID, Query::Index(value.clone())),
-                                            Filter::eq(P_ALIASES_ID, Query::Index(value.clone())),
+                                            Filter::eq(
+                                                principal::Property::Email.into(),
+                                                Query::Index(value.clone()),
+                                            ),
+                                            Filter::eq(
+                                                principal::Property::Aliases.into(),
+                                                Query::Index(value.clone()),
+                                            ),
                                         ]),
                                         Comparator::None,
                                     )?

@@ -250,6 +250,15 @@ where
                     RfcHeader::Date.into(),
                     Query::LongInteger(value.timestamp() as LongInteger),
                 ),
+                Filter::InThread { value } => {
+                    if is_immutable_filter {
+                        is_immutable_filter = false;
+                    }
+                    filter::Filter::eq(
+                        MessageField::Thread.into(),
+                        Query::Tag(Tag::Id(value.get_document_id())),
+                    )
+                }
 
                 Filter::Unsupported { value } => {
                     return Err(MethodError::UnsupportedFilter(value));

@@ -5,10 +5,9 @@ use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
+use jmap::request::set::SetRequest;
 use jmap::request::set::SetResponse;
-use jmap::request::ResultReference;
-use jmap::types::jmap::JMAPId;
-use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
+use jmap::types::principal::{JMAPPrincipals, Principal, Property, Type, Value};
 use jmap::{sanitize_domain, sanitize_email};
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
@@ -19,17 +18,6 @@ use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
 use store::write::batch::WriteBatch;
 use store::{DocumentId, JMAPStore, Store};
-
-use super::schema::{Principal, Property, Type, Value};
-
-impl SetObject for Principal {
-    type SetArguments = ();
-
-    type NextCall = ();
-
-    fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
-    fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
-}
 
 pub trait JMAPSetPrincipal<T>
 where
@@ -253,6 +241,7 @@ where
                 (Property::Secret, Value::Text { value })
                     if !value.is_empty() && [Type::Individual, Type::Domain].contains(&ptype) =>
                 {
+                    //TODO Scrypt is too slow
                     Value::Text {
                         value: value.to_string(), /*Scrypt
                                                   .hash_password(value.as_bytes(), &SaltString::generate(&mut OsRng))
@@ -270,32 +259,35 @@ where
                 {
                     Value::Text { value }
                 }
-                (Property::ACL, Value::ACL(value)) => {
+                (Property::ACL, Value::ACLSet(value)) => {
                     for acl_update in &value {
                         match acl_update {
                             ACLUpdate::Replace { acls } => {
-                                for account_id in acls.keys() {
-                                    if !helper.document_ids.contains(account_id.get_document_id()) {
-                                        return Err(SetError::invalid_property(
-                                            property,
-                                            format!("Principal {} does not exist.", account_id),
-                                        ));
-                                    }
+                                self.acl_clear();
+                                for (account_id, acls) in acls {
+                                    self.acl_update(
+                                        helper.store.principal_to_id(account_id)?,
+                                        acls,
+                                    );
                                 }
                             }
-                            ACLUpdate::Update { account_id, .. }
-                            | ACLUpdate::Set { account_id, .. } => {
-                                if !helper.document_ids.contains(account_id.get_document_id()) {
-                                    return Err(SetError::invalid_property(
-                                        property,
-                                        format!("Principal {} does not exist.", account_id),
-                                    ));
-                                }
+                            ACLUpdate::Update { account_id, acls } => {
+                                self.acl_update(helper.store.principal_to_id(account_id)?, acls);
+                            }
+                            ACLUpdate::Set {
+                                account_id,
+                                acl,
+                                is_set,
+                            } => {
+                                self.acl_set(
+                                    helper.store.principal_to_id(account_id)?,
+                                    *acl,
+                                    *is_set,
+                                );
                             }
                         }
                     }
-
-                    self.acl_update(value);
+                    self.acl_finish();
                     continue;
                 }
                 //TODO DKIM on mailsubmissions
@@ -438,7 +430,7 @@ where
         }
 
         // Validate required fields
-        if [Type::Individual, Type::List].contains(&ptype)
+        if [Type::Individual, Type::List, Type::Group].contains(&ptype)
             && self
                 .get(&Property::Email)
                 .or_else(|| current_fields.and_then(|f| f.get(&Property::Email)))

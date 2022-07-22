@@ -11,6 +11,7 @@ use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
+use jmap::types::principal::JMAPPrincipals;
 use jmap::SUPERUSER_ID;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
@@ -404,36 +405,35 @@ where
                     Value::Null
                 }
                 (Property::SortOrder, value @ Value::Number { .. }) => value,
-                (Property::ACL, Value::ACL(value)) => {
-                    let principals = helper
-                        .store
-                        .get_document_ids(SUPERUSER_ID, Collection::Principal)?
-                        .unwrap_or_default();
+                (Property::ACL, Value::ACLSet(value)) => {
                     for acl_update in &value {
                         match acl_update {
                             ACLUpdate::Replace { acls } => {
-                                for account_id in acls.keys() {
-                                    if !principals.contains(account_id.get_document_id()) {
-                                        return Err(SetError::invalid_property(
-                                            property,
-                                            format!("Principal {} does not exist.", account_id),
-                                        ));
-                                    }
+                                self.acl_clear();
+                                for (account_id, acls) in acls {
+                                    self.acl_update(
+                                        helper.store.principal_to_id(account_id)?,
+                                        acls,
+                                    );
                                 }
                             }
-                            ACLUpdate::Update { account_id, .. }
-                            | ACLUpdate::Set { account_id, .. } => {
-                                if !principals.contains(account_id.get_document_id()) {
-                                    return Err(SetError::invalid_property(
-                                        property,
-                                        format!("Principal {} does not exist.", account_id),
-                                    ));
-                                }
+                            ACLUpdate::Update { account_id, acls } => {
+                                self.acl_update(helper.store.principal_to_id(account_id)?, acls);
+                            }
+                            ACLUpdate::Set {
+                                account_id,
+                                acl,
+                                is_set,
+                            } => {
+                                self.acl_set(
+                                    helper.store.principal_to_id(account_id)?,
+                                    *acl,
+                                    *is_set,
+                                );
                             }
                         }
                     }
-
-                    self.acl_update(value);
+                    self.acl_finish();
                     continue;
                 }
                 (_, _) => {

@@ -1,23 +1,14 @@
 use jmap::error::method::MethodError;
 use jmap::jmap_store::get::SharedDocsFnc;
-use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
+use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper};
 use jmap::request::query::{QueryRequest, QueryResponse};
 
+use jmap::types::principal::{Comparator, Filter, Principal, Property, Type};
 use store::read::comparator::{self, FieldComparator};
 use store::read::default_filter_mapper;
 use store::read::filter::{self, Query};
 use store::JMAPStore;
 use store::Store;
-
-use super::schema::{Comparator, Filter, Principal, Property, Type};
-
-impl QueryObject for Principal {
-    type QueryArguments = ();
-
-    type Filter = Filter;
-
-    type Comparator = Comparator;
-}
 
 pub trait JMAPPrincipalQuery<T>
 where

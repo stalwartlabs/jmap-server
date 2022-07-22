@@ -14,7 +14,7 @@ use jmap::{
         Method, ResultReference,
     },
     types::jmap::JMAPId,
-    types::{json_pointer::JSONPointerEval, type_state::TypeState},
+    types::{json_pointer::JSONPointerEval, principal::Principal, type_state::TypeState},
 };
 
 use jmap_mail::{
@@ -30,7 +30,6 @@ use jmap_mail::{
     thread::schema::Thread,
     vacation_response::schema::VacationResponse,
 };
-use jmap_sharing::principal::schema::Principal;
 use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
 use store::{log::changes::ChangeId, AccountId};
 

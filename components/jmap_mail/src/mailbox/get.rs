@@ -3,11 +3,11 @@ use crate::mail::schema::Keyword;
 use crate::mail::sharing::JMAPShareMail;
 use crate::mail::MessageField;
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject};
-use jmap::orm::acl::ACLUpdate;
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::request::ACLEnforce;
 use jmap::types::jmap::JMAPId;
+use jmap::types::principal::JMAPPrincipals;
 use std::collections::{HashMap, HashSet};
 use store::core::acl::ACL;
 use store::core::collection::Collection;
@@ -189,9 +189,13 @@ where
                                 .mail_shared_folders(account_id, &acl.member_of, ACL::Administer)?
                                 .has_access(document_id) =>
                     {
-                        Value::ACL(vec![ACLUpdate::Replace {
-                            acls: fields.as_ref().unwrap().get_acls(),
-                        }])
+                        let mut acl_get = HashMap::new();
+                        for (account_id, acls) in fields.as_ref().unwrap().get_acls() {
+                            if let Some(email) = self.principal_to_email(account_id)? {
+                                acl_get.insert(email, acls);
+                            }
+                        }
+                        Value::ACLGet(acl_get)
                     }
                     _ => Value::Null,
                 };
