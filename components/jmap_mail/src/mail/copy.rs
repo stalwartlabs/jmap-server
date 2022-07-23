@@ -179,7 +179,12 @@ where
                     document_id,
                     MessageField::Metadata.into(),
                 )?
-                .ok_or(StoreError::DataCorruption)?;
+                .ok_or_else(|| {
+                    StoreError::DataCorruption(format!(
+                        "Message data for {}:{} not found.",
+                        helper.account_id, document_id
+                    ))
+                })?;
             let mut message_data = MessageData::deserialize(
                 &helper.store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
                     StoreError::InternalError(format!(

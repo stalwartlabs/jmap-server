@@ -25,7 +25,6 @@ use mail_parser::{
     HeaderValue, Message, RfcHeader,
 };
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use store::tracing::error;
 use store::{
     blob::BlobId,
     core::acl::{ACLToken, ACL},
@@ -225,40 +224,36 @@ where
                             MessageField::Metadata.into(),
                         )?
                         .ok_or_else(|| {
-                            error!(
+                            StoreError::DataCorruption(format!(
                                 "Email metadata blobId for {}/{} does not exist.",
                                 account_id, document_id
-                            );
-                            StoreError::DataCorruption
+                            ))
                         })?,
                 )?
                 .ok_or_else(|| {
-                    error!(
+                    StoreError::DataCorruption(format!(
                         "Email metadata blob linked to {}/{} does not exist.",
                         account_id, document_id
-                    );
-                    StoreError::DataCorruption
+                    ))
                 })?;
 
             // Deserialize message data
             let mut message_data =
                 MessageData::deserialize(&message_data_bytes).ok_or_else(|| {
-                    error!(
+                    StoreError::DataCorruption(format!(
                         "Failed to deserialize email metadata for {}/{}",
                         account_id, document_id
-                    );
-                    StoreError::DataCorruption
+                    ))
                 })?;
 
             // Fetch raw message only if needed
             let raw_message = match &fetch_raw {
                 FetchRaw::All => {
                     Some(self.blob_get(&message_data.raw_message)?.ok_or_else(|| {
-                        error!(
+                        StoreError::DataCorruption(format!(
                             "Raw email message not found for {}/{}.",
                             account_id, document_id
-                        );
-                        StoreError::DataCorruption
+                        ))
                     })?)
                 }
                 FetchRaw::Header => Some(
@@ -267,11 +262,10 @@ where
                         0..message_data.body_offset as u32,
                     )?
                     .ok_or_else(|| {
-                        error!(
+                        StoreError::DataCorruption(format!(
                             "Raw email message not found for {}/{}.",
                             account_id, document_id
-                        );
-                        StoreError::DataCorruption
+                        ))
                     })?,
                 ),
                 FetchRaw::None => None,
@@ -400,29 +394,26 @@ where
                                                 .get(0)
                                                 .and_then(|p| message_data.mime_parts.get(*p))
                                                 .ok_or_else(|| {
-                                                    error!(
+                                                    StoreError::DataCorruption(format!(
                                                         "Missing message part for {}/{}",
                                                         account_id, document_id
-                                                    );
-                                                    StoreError::DataCorruption
+                                                    ))
                                                 })?
                                                 .mime_type
                                                 .blob_id()
                                                 .ok_or_else(|| {
-                                                    error!(
+                                                    StoreError::DataCorruption(format!(
                                                         "Message part blobId not found for {}/{}.",
                                                         account_id, document_id
-                                                    );
-                                                    StoreError::DataCorruption
+                                                    ))
                                                 })?,
                                         )?
                                         .ok_or_else(
                                             || {
-                                                error!(
+                                                StoreError::DataCorruption(format!(
                                                     "Message part blob not found for {}/{}.",
                                                     account_id, document_id
-                                                );
-                                                StoreError::DataCorruption
+                                                ))
                                             },
                                         )?,
                                     )
@@ -452,18 +443,16 @@ where
                             {
                                 let blob = self
                                     .blob_get(mime_part.mime_type.blob_id().ok_or_else(|| {
-                                        error!(
+                                        StoreError::DataCorruption(format!(
                                             "BodyValue blobId not found for {}/{}.",
                                             account_id, document_id
-                                        );
-                                        StoreError::DataCorruption
+                                        ))
                                     })?)?
                                     .ok_or_else(|| {
-                                        error!(
+                                        StoreError::DataCorruption(format!(
                                             "BodyValue blob not found for {}/{}.",
                                             account_id, document_id
-                                        );
-                                        StoreError::DataCorruption
+                                        ))
                                     })?;
 
                                 body_values.insert(

@@ -7,7 +7,7 @@ pub enum StoreError {
     DeserializeError(String),
     InvalidArguments(String),
     AnchorNotFound,
-    DataCorruption,
+    DataCorruption(String),
 }
 
 impl StoreError {
@@ -24,7 +24,7 @@ impl Display for StoreError {
             StoreError::DeserializeError(s) => write!(f, "Deserialization error: {}", s),
             StoreError::InvalidArguments(s) => write!(f, "Invalid arguments: {}", s),
             StoreError::AnchorNotFound => write!(f, "Anchor not found."),
-            StoreError::DataCorruption => write!(f, "Data corruption."),
+            StoreError::DataCorruption(s) => write!(f, "Data corruption: {}", s),
         }
     }
 }

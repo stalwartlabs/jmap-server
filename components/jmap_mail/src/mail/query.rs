@@ -255,7 +255,7 @@ where
                         is_immutable_filter = false;
                     }
                     filter::Filter::eq(
-                        MessageField::Thread.into(),
+                        MessageField::ThreadId.into(),
                         Query::Tag(Tag::Id(value.get_document_id())),
                     )
                 }

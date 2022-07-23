@@ -97,6 +97,8 @@ impl Serialize for MethodError {
             }
             MethodError::UnsupportedSort(description) => ("unsupportedSort", description.as_str()),
             MethodError::ServerFail(e) => ("serverFail", {
+                //TODO remove
+                println!("JMAP request failed: {:?}", e);
                 error!("JMAP request failed: {:?}", e);
                 concat!(
                     "An unexpected error occurred while processing ",

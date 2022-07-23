@@ -219,11 +219,26 @@ where
                                 document_id,
                                 MessageField::Metadata.into(),
                             )?
-                            .ok_or(StoreError::DataCorruption)?,
+                            .ok_or_else(|| {
+                                StoreError::DataCorruption(format!(
+                                    "Message data blobId for {}:{} not found.",
+                                    account_id, document_id
+                                ))
+                            })?,
                     )?
-                    .ok_or(StoreError::DataCorruption)?,
+                    .ok_or_else(|| {
+                        StoreError::DataCorruption(format!(
+                            "Message data blob for {}:{} not found.",
+                            account_id, document_id
+                        ))
+                    })?,
             )
-            .ok_or(StoreError::DataCorruption)?;
+            .ok_or_else(|| {
+                StoreError::DataCorruption(format!(
+                    "Failed to deserialize message data for {}:{} not found.",
+                    account_id, document_id
+                ))
+            })?;
 
             // Fetch term index
             let term_index = self
@@ -294,13 +309,17 @@ where
                     | MimePartType::Html { blob_id }
                     | MimePartType::Other { blob_id } = &part.mime_type
                     {
-                        let mut text = String::from_utf8(
-                            self.blob_get(blob_id)?.ok_or(StoreError::DataCorruption)?,
-                        )
-                        .map_or_else(
-                            |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
-                            |s| s,
-                        );
+                        let mut text =
+                            String::from_utf8(self.blob_get(blob_id)?.ok_or_else(|| {
+                                StoreError::DataCorruption(format!(
+                                    "Failed to fetch blobId {:?}.",
+                                    blob_id
+                                ))
+                            })?)
+                            .map_or_else(
+                                |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                                |s| s,
+                            );
                         if part.mime_type.is_html() {
                             text = html_to_text(&text);
                         }
@@ -322,9 +341,18 @@ where
                         | MimePartType::Other { blob_id } =
                             &message_data.mime_parts[part_id as usize].mime_type
                         {
-                            let blob = self.blob_get(blob_id)?.ok_or(StoreError::DataCorruption)?;
-                            let message =
-                                Message::parse(&blob).ok_or(StoreError::DataCorruption)?;
+                            let blob = self.blob_get(blob_id)?.ok_or_else(|| {
+                                StoreError::DataCorruption(format!(
+                                    "Blob {:?} not found while generating snippet.",
+                                    blob_id
+                                ))
+                            })?;
+                            let message = Message::parse(&blob).ok_or_else(|| {
+                                StoreError::DataCorruption(format!(
+                                    "Failed to parse nested message in blob {:?}.",
+                                    blob
+                                ))
+                            })?;
                             if subpart_id == 0 {
                                 preview = generate_snippet(
                                     &term_group.terms,

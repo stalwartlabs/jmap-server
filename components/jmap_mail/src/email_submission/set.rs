@@ -227,9 +227,21 @@ where
                                 SetError::invalid_property(Property::EmailId, "Email not found.")
                             })?,
                     )?
-                    .ok_or(StoreError::DataCorruption)?,
+                    .ok_or_else(|| {
+                        StoreError::DataCorruption(format!(
+                            "Message data for {}:{} not found.",
+                            helper.account_id,
+                            email_id.get_document_id()
+                        ))
+                    })?,
             )
-            .ok_or(StoreError::DataCorruption)?;
+            .ok_or_else(|| {
+                StoreError::DataCorruption(format!(
+                    "Failed to deserialize Message data for {:}:{}",
+                    helper.account_id,
+                    email_id.get_document_id()
+                ))
+            })?;
 
             // Obtain recipients from e-mail if missing
             if envelope.rcpt_to.is_empty() {
@@ -336,7 +348,12 @@ where
             // Fetch ORM
             let email_submission = self
                 .get_orm::<EmailSubmission>(helper.account_id, document_id)?
-                .ok_or(StoreError::DataCorruption)?;
+                .ok_or_else(|| {
+                    StoreError::DataCorruption(format!(
+                        "EmailSubmission ORM data for {}:{} not found.",
+                        helper.account_id, document_id
+                    ))
+                })?;
 
             // Delete ORM
             email_submission.delete(document);
@@ -356,7 +373,11 @@ where
                 );
                 Ok(())
             } else {
-                Err(StoreError::DataCorruption.into())
+                Err(StoreError::DataCorruption(format!(
+                    "EmailSubmission Blob for {}:{} not found.",
+                    helper.account_id, document_id
+                ))
+                .into())
             }
         })?;
 

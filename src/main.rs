@@ -17,7 +17,12 @@ use cluster::{
 use authorization::{auth::RemoteAddress, rate_limit::RateLimiter};
 use server::http::{init_jmap_server, start_jmap_server};
 use services::{email_delivery, state_change};
-use store::{config::env_settings::EnvSettings, moka::future::Cache, tracing::info, JMAPStore};
+use store::{
+    config::env_settings::EnvSettings,
+    moka::future::Cache,
+    tracing::{self, info},
+    JMAPStore,
+};
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
 
@@ -41,7 +46,8 @@ pub struct JMAPServer<T> {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new())
+        .expect("Failed to set global default subscriber");
 
     // Read configuration parameters
     let mut settings = EnvSettings::new();

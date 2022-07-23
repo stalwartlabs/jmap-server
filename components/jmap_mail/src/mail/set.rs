@@ -667,12 +667,18 @@ where
         };
 
         // Remove index entries
-        MessageData::deserialize(
-            &self
-                .blob_get(&metadata_blob_id)?
-                .ok_or(StoreError::DataCorruption)?,
-        )
-        .ok_or(StoreError::DataCorruption)?
+        MessageData::deserialize(&self.blob_get(&metadata_blob_id)?.ok_or_else(|| {
+            StoreError::DataCorruption(format!(
+                "Message data blob for {}:{} not found.",
+                account_id, document_id
+            ))
+        })?)
+        .ok_or_else(|| {
+            StoreError::DataCorruption(format!(
+                "Failed to deserialize message data for {}:{}.",
+                account_id, document_id
+            ))
+        })?
         .build_index(document, false)?;
 
         // Remove thread related data
@@ -683,7 +689,12 @@ where
                 document_id,
                 MessageField::ThreadId.into(),
             )?
-            .ok_or(StoreError::DataCorruption)?;
+            .ok_or_else(|| {
+                StoreError::DataCorruption(format!(
+                    "Failed to fetch threadId for {}:{}.",
+                    account_id, document_id
+                ))
+            })?;
         document.tag(
             MessageField::ThreadId,
             Tag::Id(thread_id),
@@ -706,7 +717,12 @@ where
         // Fetch ORM
         let fields = self
             .get_orm::<Email>(account_id, document_id)?
-            .ok_or(StoreError::DataCorruption)?;
+            .ok_or_else(|| {
+                StoreError::DataCorruption(format!(
+                    "Failed to fetch Email ORM for {}:{}.",
+                    account_id, document_id
+                ))
+            })?;
 
         // Log thread and mailbox changes
         if let Some(batch) = batch {
