@@ -1,3 +1,4 @@
+use serde::de::IgnoredAny;
 use serde::Deserialize;
 use store::AccountId;
 use store::{core::acl::ACLToken, log::changes::ChangeId};
@@ -154,7 +155,7 @@ impl<O: SetObject> SetRequest<O> {
         }
 
         if let Some(items) = self.destroy.as_mut() {
-            if let MaybeResultReference::Reference(rr) = items {
+            if let Some(rr) = items.result_reference()? {
                 if let Some(ids) = result_map_fnc(rr) {
                     *items = MaybeResultReference::Value(ids.into_iter().map(Into::into).collect());
                 } else {
@@ -242,12 +243,22 @@ impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
                         .map(|v| v.into_iter().collect());
                 }
                 "destroy" => {
-                    request.destroy = map
-                        .next_value::<Option<Vec<JMAPId>>>()?
-                        .map(MaybeResultReference::Value);
+                    request.destroy = if request.destroy.is_none() {
+                        map.next_value::<Option<Vec<JMAPId>>>()?
+                            .map(MaybeResultReference::Value)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'destroy' property.".into()).into()
+                    };
                 }
                 "#destroy" => {
-                    request.destroy = MaybeResultReference::Reference(map.next_value()?).into();
+                    request.destroy = if request.destroy.is_none() {
+                        MaybeResultReference::Reference(map.next_value()?)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'destroy' property.".into())
+                    }
+                    .into();
                 }
                 key => {
                     if let Err(err) = request.arguments.deserialize(key, &mut map) {

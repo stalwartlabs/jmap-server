@@ -62,15 +62,7 @@ where
         let properties: Vec<O::Property> = request
             .properties
             .take()
-            .and_then(|p| {
-                let p = p.unwrap_value()?;
-
-                if !p.is_empty() {
-                    Some(p)
-                } else {
-                    None
-                }
-            })
+            .and_then(|p| p.unwrap_value())
             .unwrap_or_else(|| O::default_properties());
 
         let account_id = request.account_id.get_document_id();
@@ -116,11 +108,7 @@ where
 
         Ok(GetHelper {
             store,
-            properties: if !properties.is_empty() {
-                properties
-            } else {
-                O::default_properties()
-            },
+            properties,
             acl,
             response: GetResponse {
                 account_id: request.account_id.into(),

@@ -46,8 +46,10 @@ pub struct JMAPServer<T> {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new())
-        .expect("Failed to set global default subscriber");
+    //TODO logging
+    tracing_subscriber::fmt::init();
+    //tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new())
+    //    .expect("Failed to set global default subscriber");
 
     // Read configuration parameters
     let mut settings = EnvSettings::new();

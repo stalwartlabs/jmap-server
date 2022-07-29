@@ -24,6 +24,7 @@ pub struct CopyRequest<T: SetObject> {
     pub if_from_in_state: Option<JMAPState>,
 
     #[serde(rename = "accountId")]
+    #[serde(default)] //TODO remove
     pub account_id: JMAPId,
 
     #[serde(rename = "ifInState")]

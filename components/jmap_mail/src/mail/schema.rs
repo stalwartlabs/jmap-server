@@ -193,6 +193,7 @@ pub enum Property {
     HtmlBody,
     Attachments,
     BodyStructure,
+    Headers,
     Header(HeaderProperty),
     Invalid(String),
 }
@@ -225,6 +226,7 @@ impl Property {
             "htmlBody" => Property::HtmlBody,
             "attachments" => Property::Attachments,
             "bodyStructure" => Property::BodyStructure,
+            "headers" => Property::Headers,
             _ if value.starts_with("header:") => {
                 if let Some(header) = HeaderProperty::parse(value) {
                     Property::Header(header)
@@ -286,6 +288,7 @@ impl Display for Property {
             Property::HtmlBody => write!(f, "htmlBody"),
             Property::Attachments => write!(f, "attachments"),
             Property::BodyStructure => write!(f, "bodyStructure"),
+            Property::Headers => write!(f, "headers"),
             Property::Header(header) => header.fmt(f),
             Property::Invalid(value) => write!(f, "{}", value),
         }
@@ -448,6 +451,7 @@ impl HeaderForm {
             "asMessageIds" => Some(HeaderForm::MessageIds),
             "asDate" => Some(HeaderForm::Date),
             "asURLs" => Some(HeaderForm::URLs),
+            "asRaw" => Some(HeaderForm::Raw),
             _ => None,
         }
     }
@@ -648,8 +652,9 @@ impl From<Property> for FieldId {
             Property::HtmlBody => 19,
             Property::Attachments => 20,
             Property::BodyStructure => 21,
-            Property::Header(_) => 22,
-            Property::Invalid(_) => 23,
+            Property::Headers => 22,
+            Property::Header(_) => 23,
+            Property::Invalid(_) => 24,
         }
     }
 }
@@ -679,6 +684,7 @@ impl From<FieldId> for Property {
             19 => Property::HtmlBody,
             20 => Property::Attachments,
             21 => Property::BodyStructure,
+            22 => Property::Headers,
             136 => Property::ThreadId,
             137 => Property::MailboxIds,
             132 => Property::Keywords,

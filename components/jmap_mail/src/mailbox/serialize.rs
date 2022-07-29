@@ -5,7 +5,7 @@ use jmap::{
     request::{ArgumentSerializer, MaybeIdReference},
     types::json_pointer::JSONPointer,
 };
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::core::acl::ACL;
 
 use super::{
@@ -231,6 +231,10 @@ impl ArgumentSerializer for SetArguments {
     ) -> Result<(), String> {
         if property == "onDestroyRemoveEmails" {
             self.on_destroy_remove_emails = value.next_value().map_err(|err| err.to_string())?;
+        } else {
+            value
+                .next_value::<IgnoredAny>()
+                .map_err(|err| err.to_string())?;
         }
         Ok(())
     }

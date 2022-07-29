@@ -11,7 +11,7 @@ use jmap::request::{ACLEnforce, MaybeIdReference, MaybeResultReference, ResultRe
 use jmap::types::blob::JMAPBlob;
 use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
-use mail_parser::decoders::html::{html_to_text, text_to_html};
+use mail_parser::decoders::html::html_to_text;
 use mail_parser::parsers::fields::thread::thread_name;
 use mail_parser::{HeaderValue, Message, MessageAttachment, PartType, RfcHeader};
 use store::blob::BlobId;
@@ -49,6 +49,7 @@ pub struct EmailImportRequest {
     pub acl: Option<Arc<ACLToken>>,
 
     #[serde(rename = "accountId")]
+    #[serde(default)] //TODO remove
     pub account_id: JMAPId,
 
     #[serde(rename = "ifInState")]
@@ -58,20 +59,11 @@ pub struct EmailImportRequest {
     pub emails: HashMap<String, EmailImport>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct EmailImport {
-    #[serde(rename = "blobId")]
     pub blob_id: JMAPBlob,
-
-    #[serde(rename = "mailboxIds", alias = "#mailboxIds")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub mailbox_ids: Option<MaybeResultReference<HashMap<MaybeIdReference, bool>>>,
-
-    #[serde(rename = "keywords")]
-    pub keywords: HashMap<Keyword, bool>,
-
-    #[serde(rename = "receivedAt")]
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<HashMap<Keyword, bool>>,
     pub received_at: Option<DateTime<store::chrono::Utc>>,
 }
 
@@ -211,9 +203,15 @@ where
                                     })
                                     .collect(),
                                 item.keywords
-                                    .into_iter()
-                                    .filter_map(|(k, set)| if set { k.tag.into() } else { None })
-                                    .collect(),
+                                    .map(|keywords| {
+                                        keywords
+                                            .into_iter()
+                                            .filter_map(
+                                                |(k, set)| if set { k.tag.into() } else { None },
+                                            )
+                                            .collect()
+                                    })
+                                    .unwrap_or_default(),
                                 item.received_at.map(|t| t.timestamp()),
                             )?,
                         );
@@ -338,12 +336,11 @@ where
         mut message: Message,
         received_at: Option<i64>,
     ) -> store::Result<()> {
-        let mut total_parts = message.parts.len();
         let root_part = message.get_root_part();
         let mut message_data = MessageData {
             headers: HashMap::with_capacity(root_part.headers_rfc.len()),
             body_offset: root_part.offset_body,
-            mime_parts: Vec::with_capacity(total_parts),
+            mime_parts: Vec::with_capacity(message.parts.len()),
             html_body: message.html_body,
             text_body: message.text_body,
             attachments: message.attachments,
@@ -454,77 +451,43 @@ where
         }
         message.parts[0].headers_rfc = mime_headers;
 
-        let mut extra_mime_parts = Vec::new();
-
         for (part_id, part) in message.parts.into_iter().enumerate() {
             let (mime_type, part_size) = match part.body {
                 PartType::Html(html) => {
-                    let text = html_to_text(html.as_ref());
-                    let text_len = text.len();
-                    let html_len = html.len();
-                    let (text_part_id, field) = if let Some(pos) =
-                        message_data.text_body.iter().position(|&p| p == part_id)
+                    let field = if message_data.text_body.contains(&part_id)
+                        || message_data.html_body.contains(&part_id)
                     {
-                        message_data.text_body[pos] = total_parts;
-                        extra_mime_parts.push(MimePart {
-                            mime_type: MimePartType::Text {
-                                blob_id: self.blob_store(text.as_bytes())?,
-                            },
-                            is_encoding_problem: false,
-                            type_: "text/plain".to_string().into(),
-                            size: text_len,
-                            ..Default::default()
-                        });
-                        total_parts += 1;
-                        (total_parts - 1, MessageField::Body)
-                    } else if message_data.html_body.contains(&part_id) {
-                        (part_id, MessageField::Body)
-                    } else {
-                        has_attachments = true;
-                        (part_id, MessageField::Attachment)
-                    };
-
-                    document.text(
-                        field,
-                        text,
-                        Language::Unknown,
-                        IndexOptions::new().full_text((text_part_id + 1) as u32),
-                    );
-
-                    (
-                        MimePartType::Html {
-                            blob_id: self.blob_store(html.as_bytes())?,
-                        },
-                        html_len,
-                    )
-                }
-                PartType::Text(text) => {
-                    let text_len = text.len();
-                    let field = if let Some(pos) =
-                        message_data.html_body.iter().position(|&p| p == part_id)
-                    {
-                        let html = text_to_html(text.as_ref());
-                        let html_len = html.len();
-
-                        extra_mime_parts.push(MimePart {
-                            mime_type: MimePartType::Html {
-                                blob_id: self.blob_store(html.as_bytes())?,
-                            },
-                            is_encoding_problem: false,
-                            type_: "text/html".to_string().into(),
-                            size: html_len,
-                            ..Default::default()
-                        });
-                        message_data.html_body[pos] = total_parts;
-                        total_parts += 1;
-                        MessageField::Body
-                    } else if message_data.text_body.contains(&part_id) {
                         MessageField::Body
                     } else {
                         has_attachments = true;
                         MessageField::Attachment
                     };
 
+                    document.text(
+                        field,
+                        html_to_text(html.as_ref()),
+                        Language::Unknown,
+                        IndexOptions::new().full_text((part_id + 1) as u32),
+                    );
+
+                    (
+                        MimePartType::Html {
+                            blob_id: self.blob_store(html.as_bytes())?,
+                        },
+                        html.len(),
+                    )
+                }
+                PartType::Text(text) => {
+                    let field = if message_data.text_body.contains(&part_id)
+                        || message_data.html_body.contains(&part_id)
+                    {
+                        MessageField::Body
+                    } else {
+                        has_attachments = true;
+                        MessageField::Attachment
+                    };
+
+                    let text_len = text.len();
                     let blob_id = self.blob_store(text.as_bytes())?;
                     document.text(
                         field,
@@ -588,11 +551,6 @@ where
                 part.is_encoding_problem,
                 part_size,
             ));
-        }
-
-        // Add any HTML/text part conversions
-        if !extra_mime_parts.is_empty() {
-            message_data.mime_parts.append(&mut extra_mime_parts);
         }
 
         // Set attachment properties
@@ -816,7 +774,7 @@ impl EmailImport {
         mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
     ) -> jmap::Result<()> {
         if let Some(items) = self.mailbox_ids.as_mut() {
-            if let MaybeResultReference::Reference(rr) = items {
+            if let Some(rr) = items.result_reference()? {
                 if let Some(ids) = fnc(rr) {
                     *items = MaybeResultReference::Value(
                         ids.into_iter()
@@ -985,7 +943,8 @@ impl MessageData {
                                 }
                             }
 
-                            if is_addr {
+                            //TODO review this
+                            /*if is_addr {
                                 if value.len() <= MAX_ID_LENGTH {
                                     document.text(
                                         header_name,
@@ -995,13 +954,13 @@ impl MessageData {
                                     );
                                 }
                             } else {
-                                document.text(
-                                    header_name,
-                                    value,
-                                    Language::Unknown,
-                                    IndexOptions::new().tokenize() | options,
-                                );
-                            }
+                            }*/
+                            document.text(
+                                header_name,
+                                value,
+                                Language::Unknown,
+                                IndexOptions::new().tokenize() | options,
+                            );
 
                             true
                         });

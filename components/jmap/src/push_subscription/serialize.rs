@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, fmt};
 
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
 
 use crate::types::type_state::TypeState;
@@ -142,7 +142,9 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                         },
                     );
                 }
-                _ => (),
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
             }
         }
 

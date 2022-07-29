@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, fmt};
 
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 
 use crate::mail::schema::EmailAddress;
 
@@ -140,7 +140,9 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
                         },
                     );
                 }
-                _ => (),
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
             }
         }
 

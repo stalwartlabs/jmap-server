@@ -17,6 +17,7 @@ pub struct CopyBlobRequest {
     pub from_account_id: JMAPId,
 
     #[serde(rename = "accountId")]
+    #[serde(default)] //TODO remove
     pub account_id: JMAPId,
 
     #[serde(rename = "blobIds")]

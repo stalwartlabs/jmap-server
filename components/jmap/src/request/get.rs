@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt, sync::Arc};
 
-use serde::Deserialize;
+use serde::{de::IgnoredAny, Deserialize};
 use store::core::acl::ACLToken;
 
 use crate::{
@@ -41,7 +41,7 @@ impl<O: GetObject> GetRequest<O> {
         mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
     ) -> crate::Result<()> {
         if let Some(items) = self.ids.as_mut() {
-            if let MaybeResultReference::Reference(rr) = items {
+            if let Some(rr) = items.result_reference()? {
                 if let Some(ids) = fnc(rr) {
                     *items = MaybeResultReference::Value(ids.into_iter().map(Into::into).collect());
                 } else {
@@ -53,7 +53,7 @@ impl<O: GetObject> GetRequest<O> {
         }
 
         if let Some(items) = self.properties.as_mut() {
-            if let MaybeResultReference::Reference(rr) = items {
+            if let Some(rr) = items.result_reference()? {
                 if let Some(property_ids) = fnc(rr) {
                     *items = MaybeResultReference::Value(
                         property_ids
@@ -131,20 +131,41 @@ impl<'de, O: GetObject> serde::de::Visitor<'de> for GetRequestVisitor<O> {
                     request.account_id = map.next_value()?;
                 }
                 "ids" => {
-                    request.ids = map
-                        .next_value::<Option<Vec<JMAPId>>>()?
-                        .map(MaybeResultReference::Value);
+                    request.ids = if request.ids.is_none() {
+                        map.next_value::<Option<Vec<JMAPId>>>()?
+                            .map(MaybeResultReference::Value)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'ids' property.".into()).into()
+                    };
                 }
                 "#ids" => {
-                    request.ids = MaybeResultReference::Reference(map.next_value()?).into();
+                    request.ids = if request.ids.is_none() {
+                        MaybeResultReference::Reference(map.next_value()?)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'ids' property.".into())
+                    }
+                    .into();
                 }
                 "properties" => {
-                    request.properties = map
-                        .next_value::<Option<Vec<O::Property>>>()?
-                        .map(MaybeResultReference::Value);
+                    request.properties = if request.properties.is_none() {
+                        map.next_value::<Option<Vec<O::Property>>>()?
+                            .map(MaybeResultReference::Value)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'properties' property.".into())
+                            .into()
+                    }
                 }
                 "#properties" => {
-                    request.properties = MaybeResultReference::Reference(map.next_value()?).into();
+                    request.properties = if request.properties.is_none() {
+                        MaybeResultReference::Reference(map.next_value()?)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'properties' property.".into())
+                    }
+                    .into();
                 }
                 _ => {
                     if let Err(err) =

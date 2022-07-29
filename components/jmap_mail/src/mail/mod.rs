@@ -95,9 +95,16 @@ pub trait GetRawHeader {
 
 impl GetRawHeader for Vec<(HeaderName, HeaderOffset)> {
     fn get_header(&self, name: &HeaderName) -> Option<Vec<&HeaderOffset>> {
+        let name = name.as_str();
         let offsets = self
             .iter()
-            .filter_map(|(k, v)| if k == name { Some(v) } else { None })
+            .filter_map(|(k, v)| {
+                if k.as_str().eq_ignore_ascii_case(name) {
+                    Some(v)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
         if !offsets.is_empty() {
             Some(offsets)

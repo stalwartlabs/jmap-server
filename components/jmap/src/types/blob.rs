@@ -62,6 +62,15 @@ impl From<BlobId> for JMAPBlob {
     }
 }
 
+impl Default for JMAPBlob {
+    fn default() -> Self {
+        Self {
+            id: 0.into(),
+            inner_id: None,
+        }
+    }
+}
+
 impl serde::Serialize for JMAPBlob {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -84,8 +93,7 @@ impl<'de> serde::de::Visitor<'de> for JMAPBlobVisitor {
     where
         E: serde::de::Error,
     {
-        JMAPBlob::parse(v)
-            .ok_or_else(|| serde::de::Error::custom(format!("Failed to parse JMAP state '{}'", v)))
+        Ok(JMAPBlob::parse(v).unwrap_or_default())
     }
 }
 

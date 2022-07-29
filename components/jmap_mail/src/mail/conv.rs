@@ -617,7 +617,13 @@ impl IntoForm for Vec<super::HeaderValue> {
 
 impl MessageData {
     pub fn header(&mut self, header: &RfcHeader, form: &HeaderForm, all: bool) -> Option<Value> {
-        self.headers.remove(header)?.into_form(form, all)
+        if let Some(header) = self.headers.remove(header) {
+            header.into_form(form, all)
+        } else if all {
+            Value::TextList { value: Vec::new() }.into()
+        } else {
+            None
+        }
     }
 }
 
@@ -641,8 +647,8 @@ impl HeaderForm {
                     .map_or(HeaderValue::Empty, |bytes| match self {
                         HeaderForm::Raw => {
                             HeaderValue::Text(std::str::from_utf8(bytes).map_or_else(
-                                |_| String::from_utf8_lossy(bytes).trim().to_string().into(),
-                                |str| str.trim().to_string().into(),
+                                |_| String::from_utf8_lossy(bytes).trim_end().to_string().into(),
+                                |str| str.trim_end().to_string().into(),
                             ))
                         }
                         HeaderForm::Text => parse_unstructured(&mut MessageStream::new(bytes)),
@@ -657,6 +663,7 @@ impl HeaderForm {
                 .into_owned()
             })
             .collect();
+
         if all {
             HeaderValue::Collection(header_values)
         } else {

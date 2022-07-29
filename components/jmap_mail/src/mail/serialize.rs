@@ -1,19 +1,21 @@
 use std::{borrow::Cow, collections::HashMap, fmt};
 
 use jmap::{
-    request::{ArgumentSerializer, MaybeIdReference},
+    request::{ArgumentSerializer, MaybeIdReference, MaybeResultReference},
     types::json_pointer::JSONPointer,
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
 
 use super::{
     get::GetArguments,
+    import::EmailImport,
     schema::{
         BodyProperty, Email, EmailAddress, EmailBodyPart, EmailHeader, Filter, HeaderForm,
         HeaderProperty, Keyword, Property, Value,
     },
+    search_snippet::SearchSnippetGetRequest,
 };
 
 // Email de/serialization
@@ -213,6 +215,11 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                         },
                     );
                 }
+                "headers" => {
+                    if let Some(value) = map.next_value::<Option<Vec<EmailHeader>>>()? {
+                        properties.insert(Property::Headers, Value::Headers { value });
+                    }
+                }
                 _ if key.starts_with('#') => {
                     if let Some(property) = key.get(1..) {
                         properties.insert(
@@ -320,11 +327,15 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                                 .unwrap()
                                                 .insert(Keyword::parse(id), value);
                                         }
-                                        _ => (),
+                                        _ => {
+                                            map.next_value::<IgnoredAny>()?;
+                                        }
                                     }
                                 }
                             }
-                            _ => (),
+                            _ => {
+                                map.next_value::<IgnoredAny>()?;
+                            }
                         }
                     }
                 }
@@ -520,7 +531,9 @@ impl<'de> serde::de::Visitor<'de> for EmailBodyPartVisitor {
                         properties.insert(BodyProperty::Header(header), header_value);
                     }
                 }
-                _ => (),
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
             }
         }
 
@@ -686,21 +699,25 @@ impl ArgumentSerializer for GetArguments {
     ) -> Result<(), String> {
         match property {
             "bodyProperties" => {
-                self.body_properties = value.next_value().map_err(|err| err.to_string())?;
+                self.body_properties = value.next_value().unwrap_or_default();
             }
             "fetchTextBodyValues" => {
-                self.fetch_text_body_values = value.next_value().map_err(|err| err.to_string())?;
+                self.fetch_text_body_values = value.next_value().unwrap_or_default();
             }
             "fetchHTMLBodyValues" => {
-                self.fetch_html_body_values = value.next_value().map_err(|err| err.to_string())?;
+                self.fetch_html_body_values = value.next_value().unwrap_or_default();
             }
             "fetchAllBodyValues" => {
-                self.fetch_all_body_values = value.next_value().map_err(|err| err.to_string())?;
+                self.fetch_all_body_values = value.next_value().unwrap_or_default();
             }
             "maxBodyValueBytes" => {
-                self.max_body_value_bytes = value.next_value().map_err(|err| err.to_string())?;
+                self.max_body_value_bytes = value.next_value().unwrap_or_default();
             }
-            _ => (),
+            _ => {
+                value
+                    .next_value::<IgnoredAny>()
+                    .map_err(|err| err.to_string())?;
+            }
         }
         Ok(())
     }
@@ -814,5 +831,139 @@ impl<'de> Deserialize<'de> for Filter {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_map(FilterVisitor)
+    }
+}
+
+// EmailImport Deserialize
+struct EmailImportVisitor;
+
+impl<'de> serde::de::Visitor<'de> for EmailImportVisitor {
+    type Value = EmailImport;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP get request")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut request = EmailImport {
+            blob_id: JMAPBlob::default(),
+            mailbox_ids: None,
+            keywords: None,
+            received_at: None,
+        };
+
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
+                "blobId" => {
+                    request.blob_id = map.next_value()?;
+                }
+                "keywords" => {
+                    request.keywords = map.next_value()?;
+                }
+                "receivedAt" => {
+                    request.received_at = map.next_value()?;
+                }
+                "mailboxIds" => {
+                    request.mailbox_ids = if request.mailbox_ids.is_none() {
+                        map.next_value::<Option<HashMap<MaybeIdReference, bool>>>()?
+                            .map(MaybeResultReference::Value)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'mailboxIds' property.".into())
+                            .into()
+                    };
+                }
+                "#mailboxIds" => {
+                    request.mailbox_ids = if request.mailbox_ids.is_none() {
+                        MaybeResultReference::Reference(map.next_value()?)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'mailboxIds' property.".into())
+                    }
+                    .into();
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+
+        Ok(request)
+    }
+}
+
+impl<'de> Deserialize<'de> for EmailImport {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(EmailImportVisitor {})
+    }
+}
+
+// SearchSnippetGetRequest Deserialize
+struct SearchSnippetGetRequestVisitor;
+
+impl<'de> serde::de::Visitor<'de> for SearchSnippetGetRequestVisitor {
+    type Value = SearchSnippetGetRequest;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP get request")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut request = SearchSnippetGetRequest {
+            acl: None,
+            account_id: JMAPId::default(),
+            filter: None,
+            email_ids: MaybeResultReference::Error("Missing emailIds field.".into()),
+        };
+
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
+                "accountId" => {
+                    request.account_id = map.next_value()?;
+                }
+                "filter" => {
+                    request.filter = map.next_value()?;
+                }
+                "emailIds" => {
+                    request.email_ids = if let MaybeResultReference::Error(_) = &request.email_ids {
+                        MaybeResultReference::Value(map.next_value()?)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'emailIds' property.".into())
+                    };
+                }
+                "#emailIds" => {
+                    request.email_ids = if let MaybeResultReference::Error(_) = &request.email_ids {
+                        MaybeResultReference::Reference(map.next_value()?)
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                        MaybeResultReference::Error("Duplicate 'emailIds' property.".into())
+                    };
+                }
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
+            }
+        }
+
+        Ok(request)
+    }
+}
+
+impl<'de> Deserialize<'de> for SearchSnippetGetRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(SearchSnippetGetRequestVisitor {})
     }
 }

@@ -1,10 +1,10 @@
 use super::{
     conv::IntoForm,
-    get::{AsBodyParts, AsBodyStructure, BlobResult, JMAPGetMail},
+    get::{AsBodyParts, AsBodyStructure, AsEmailHeaders, BlobResult, JMAPGetMail},
     schema::{BodyProperty, Email, HeaderForm, Property, Value},
     GetRawHeader,
 };
-use crate::mail::{HeaderName, MimePart, MimePartType};
+use crate::mail::{MimePart, MimePartType};
 use jmap::{
     error::method::MethodError,
     jmap_store::get::GetObject,
@@ -329,24 +329,29 @@ impl IntoParsedEmail for Message<'_> {
                 Property::SentAt => headers_rfc
                     .remove(&RfcHeader::Date)
                     .and_then(|p| p.into_form(&HeaderForm::Date, false)),
-                Property::Header(header) => match (&header.header, &header.form) {
-                    (header_name @ HeaderName::Other(_), header_form)
-                    | (header_name @ HeaderName::Rfc(_), header_form @ HeaderForm::Raw) => {
-                        if let Some(offsets) = mime_parts
-                            .get(0)
-                            .and_then(|h| h.raw_headers.get_header(header_name))
-                        {
-                            header_form
-                                .parse_offsets(&offsets, raw_message, header.all)
-                                .into_form(header_form, header.all)
-                        } else {
-                            None
-                        }
+                Property::Headers => Value::Headers {
+                    value: if let Some(root_part) = mime_parts.get(0) {
+                        root_part.as_email_headers(raw_message)
+                    } else {
+                        Vec::new()
+                    },
+                }
+                .into(),
+                Property::Header(header) => {
+                    if let Some(offsets) = mime_parts
+                        .get(0)
+                        .and_then(|h| h.raw_headers.get_header(&header.header))
+                    {
+                        header
+                            .form
+                            .parse_offsets(&offsets, raw_message, header.all)
+                            .into_form(&header.form, header.all)
+                    } else if header.all {
+                        Value::TextList { value: Vec::new() }.into()
+                    } else {
+                        None
                     }
-                    (HeaderName::Rfc(header_name), header_form) => headers_rfc
-                        .remove(header_name)
-                        .and_then(|p| p.into_form(header_form, header.all)),
-                },
+                }
                 Property::HasAttachment => Some(has_attachments.into()),
                 Property::Preview => {
                     if !text_body.is_empty() || !html_body.is_empty() {

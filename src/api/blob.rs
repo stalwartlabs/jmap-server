@@ -24,7 +24,7 @@ use store::{tracing::error, Store};
 
 #[derive(serde::Deserialize)]
 pub struct Params {
-    accept: String,
+    accept: Option<String>,
 }
 
 pub async fn handle_jmap_download<T>(
@@ -53,7 +53,13 @@ where
     {
         Ok(BlobResult::Blob(bytes)) => {
             Ok(HttpResponse::build(StatusCode::OK)
-                .insert_header(("Content-Type", params.into_inner().accept))
+                .insert_header((
+                    "Content-Type",
+                    params
+                        .into_inner()
+                        .accept
+                        .unwrap_or_else(|| "application/octet-stream".to_string()),
+                ))
                 .insert_header((
                     "Content-Disposition",
                     format!("attachment; filename=\"{}\"", filename), //TODO escape filename
@@ -92,7 +98,8 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let (id,) = path.into_inner();
-    let account_id = id.get_document_id();
+    let coco = "fddf";
+    let account_id = 2; //id.get_document_id();
 
     // Rate limit uploads
     let _upload_req = core
@@ -144,6 +151,8 @@ where
             })),
         Ok(None) => Err(RequestError::forbidden()),
         Err(err) => {
+            //TODO
+            println!("Blob upload failed: {:?}", err);
             error!("Blob upload failed: {:?}", err);
             Err(RequestError::internal_server_error())
         }

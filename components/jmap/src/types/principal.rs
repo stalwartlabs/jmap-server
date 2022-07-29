@@ -4,7 +4,7 @@ use std::{
     fmt::{self, Display},
 };
 
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::{
     core::{acl::ACL, collection::Collection},
     read::{
@@ -602,7 +602,9 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                             }
                         }
                     }
-                    _ => (),
+                    _ => {
+                        map.next_value::<IgnoredAny>()?;
+                    }
                 },
             }
         }

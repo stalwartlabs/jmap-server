@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, fmt};
 
 use jmap::request::{ArgumentSerializer, MaybeIdReference};
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 
 use super::{
     schema::{EmailSubmission, Envelope, Filter, Property, Value},
@@ -133,9 +133,13 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
                                 value: map.next_value()?,
                             },
                         );
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
                     }
                 }
-                _ => (),
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
+                }
             }
         }
 
@@ -163,6 +167,10 @@ impl ArgumentSerializer for SetArguments {
             self.on_success_update_email = value.next_value().map_err(|err| err.to_string())?;
         } else if property == "onSuccessDestroyEmail" {
             self.on_success_destroy_email = value.next_value().map_err(|err| err.to_string())?;
+        } else {
+            value
+                .next_value::<IgnoredAny>()
+                .map_err(|err| err.to_string())?;
         }
         Ok(())
     }

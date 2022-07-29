@@ -14,6 +14,7 @@ pub struct QueryRequest<O: QueryObject> {
     pub acl: Option<Arc<ACLToken>>,
 
     #[serde(rename = "accountId")]
+    #[serde(default)] //TODO remove
     pub account_id: JMAPId,
 
     #[serde(rename = "filter")]

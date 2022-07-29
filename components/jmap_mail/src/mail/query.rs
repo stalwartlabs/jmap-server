@@ -103,7 +103,7 @@ where
                     filter::Filter::ge(MessageField::Size.into(), Query::Integer(value as Integer))
                 }
                 Filter::MaxSize { value } => {
-                    filter::Filter::le(MessageField::Size.into(), Query::Integer(value as Integer))
+                    filter::Filter::lt(MessageField::Size.into(), Query::Integer(value as Integer))
                 }
                 Filter::AllInThreadHaveKeyword { value } => {
                     if is_immutable_filter {

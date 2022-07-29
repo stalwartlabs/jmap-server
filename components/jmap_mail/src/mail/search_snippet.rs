@@ -28,19 +28,11 @@ use super::{
     parse::get_message_part, sharing::JMAPShareMail, MessageData, MessageField, MimePartType,
 };
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SearchSnippetGetRequest {
-    #[serde(skip)]
     pub acl: Option<Arc<ACLToken>>,
-
-    #[serde(rename = "accountId")]
     pub account_id: JMAPId,
-
-    #[serde(rename = "filter")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter<super::schema::Filter>>,
-
-    #[serde(rename = "emailIds", alias = "#emailIds")]
     pub email_ids: MaybeResultReference<Vec<JMAPId>>,
 }
 
@@ -84,7 +76,7 @@ impl SearchSnippetGetRequest {
         &mut self,
         mut fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
     ) -> jmap::Result<()> {
-        if let MaybeResultReference::Reference(rr) = &self.email_ids {
+        if let Some(rr) = self.email_ids.result_reference()? {
             if let Some(ids) = fnc(rr) {
                 self.email_ids =
                     MaybeResultReference::Value(ids.into_iter().map(Into::into).collect());
@@ -113,6 +105,7 @@ where
     ) -> jmap::Result<SearchSnippetGetResponse>;
 }
 
+//TODO check snippets on HTML parts that were indexed as text/plain
 impl<T> JMAPMailSearchSnippet<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
