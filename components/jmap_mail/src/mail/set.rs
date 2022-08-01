@@ -3,7 +3,7 @@ use super::schema::{
     BodyProperty, Email, EmailBodyPart, EmailBodyValue, HeaderForm, Keyword, Property, Value,
 };
 use super::sharing::JMAPShareMail;
-use super::{MessageData, MessageField};
+use super::{HeaderName, MessageData, MessageField};
 use crate::mail::import::JMAPMailImport;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::{SetHelper, SetObject};
@@ -21,15 +21,16 @@ use mail_builder::headers::text::Text;
 use mail_builder::headers::url::URL;
 use mail_builder::mime::{BodyPart, MimePart};
 use mail_builder::MessageBuilder;
-use mail_parser::Message;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use mail_parser::{Message, RfcHeader};
 use std::sync::Arc;
+use store::ahash::AHashSet;
 use store::blob::BlobId;
 use store::core::acl::{ACLToken, ACL};
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::core::vec_map::VecMap;
 use store::serialize::StoreDeserialize;
 use store::tracing::error;
 use store::write::batch::WriteBatch;
@@ -49,16 +50,16 @@ impl SetObject for Email {
                 .keys()
                 .any(|k| matches!(k, MaybeIdReference::Reference(_)))
             {
-                let mut new_values = HashMap::with_capacity(value.len());
+                let mut new_values = VecMap::with_capacity(value.len());
 
                 for (id, value) in std::mem::take(value).into_iter() {
                     if let MaybeIdReference::Reference(id) = &id {
                         if let Some(id) = fnc(id) {
-                            new_values.insert(MaybeIdReference::Value(id), value);
+                            new_values.append(MaybeIdReference::Value(id), value);
                             continue;
                         }
                     }
-                    new_values.insert(id, value);
+                    new_values.append(id, value);
                 }
 
                 *value = new_values;
@@ -214,6 +215,18 @@ where
                         builder = builder.date(value);
                     }
                     (Property::TextBody, Value::BodyPartList { value }) => {
+                        if item.properties.contains_key(&Property::BodyStructure) {
+                            return Err(SetError::invalid_properties(
+                                [Property::TextBody, Property::BodyStructure],
+                                "Cannot set both \"textBody\" and \"bodyStructure\".",
+                            ));
+                        } else if value.len() > 1 {
+                            return Err(SetError::invalid_property(
+                                Property::TextBody,
+                                "Only one \"textBody\" part is allowed.",
+                            ));
+                        }
+
                         if let Some(body_part) = value.first() {
                             builder.text_body = body_part
                                 .parse(
@@ -228,6 +241,18 @@ where
                         }
                     }
                     (Property::HtmlBody, Value::BodyPartList { value }) => {
+                        if item.properties.contains_key(&Property::BodyStructure) {
+                            return Err(SetError::invalid_properties(
+                                [Property::HtmlBody, Property::BodyStructure],
+                                "Cannot set both \"htmlBody\" and \"bodyStructure\".",
+                            ));
+                        } else if value.len() > 1 {
+                            return Err(SetError::invalid_property(
+                                Property::HtmlBody,
+                                "Only one \"htmlBody\" part is allowed.",
+                            ));
+                        }
+
                         if let Some(body_part) = value.first() {
                             builder.html_body = body_part
                                 .parse(
@@ -242,6 +267,13 @@ where
                         }
                     }
                     (Property::Attachments, Value::BodyPartList { value }) => {
+                        if item.properties.contains_key(&Property::BodyStructure) {
+                            return Err(SetError::invalid_properties(
+                                [Property::Attachments, Property::BodyStructure],
+                                "Cannot set both \"attachments\" and \"bodyStructure\".",
+                            ));
+                        }
+
                         let mut attachments = Vec::with_capacity(value.len());
                         for attachment in value {
                             attachments.push(
@@ -403,6 +435,17 @@ where
                     SetErrorType::InvalidProperties,
                     "Message has to have at least one header or body part.",
                 ));
+            }
+
+            // In test, sort headers to avoid randomness
+            #[cfg(feature = "debug")]
+            {
+                builder
+                    .headers
+                    .sort_unstable_by(|a, b| match a.0.cmp(&b.0) {
+                        std::cmp::Ordering::Equal => a.1.cmp(&b.1),
+                        ord => ord,
+                    });
             }
 
             // Store blob
@@ -592,7 +635,7 @@ where
             }
 
             // Set all current mailboxes as changed if the Seen tag changed
-            let mut changed_mailboxes = HashSet::new();
+            let mut changed_mailboxes = AHashSet::default();
             if changed_tags
                 .iter()
                 .any(|keyword| matches!(keyword, Tag::Static(k_id) if k_id == &Keyword::SEEN))
@@ -726,7 +769,20 @@ where
 
         // Log thread and mailbox changes
         if let Some(batch) = batch {
-            batch.log_child_update(Collection::Thread, thread_id);
+            if let Some(message_doc_ids) = self.get_tag(
+                account_id,
+                Collection::Mail,
+                MessageField::ThreadId.into(),
+                Tag::Id(thread_id),
+            )? {
+                if message_doc_ids.len() > 1 {
+                    batch.log_child_update(Collection::Thread, thread_id);
+                } else {
+                    batch.log_delete(Collection::Thread, thread_id);
+                }
+            } else {
+                batch.log_child_update(Collection::Thread, thread_id);
+            }
             if let Some(mailbox_ids) = fields.get_tags(&Property::MailboxIds) {
                 for mailbox_id in mailbox_ids {
                     batch.log_child_update(Collection::Mailbox, mailbox_id.as_id());
@@ -747,7 +803,7 @@ impl EmailBodyPart {
         store: &JMAPStore<T>,
         acl: &Arc<ACLToken>,
         account_id: AccountId,
-        body_values: Option<&'y HashMap<String, EmailBodyValue>>,
+        body_values: Option<&'y VecMap<String, EmailBodyValue>>,
         strict_type: Option<&'static str>,
     ) -> jmap::error::set::Result<(MimePart<'y>, Option<&'y Vec<EmailBodyPart>>), Property>
     where
@@ -770,10 +826,21 @@ impl EmailBodyPart {
 
         let is_multipart = content_type.starts_with("multipart/");
         let mut mime_part = MimePart {
-            headers: BTreeMap::new(),
+            headers: Vec::new(),
             contents: if is_multipart {
                 BodyPart::Multipart(vec![])
             } else if let Some(part_id) = self.get_text(BodyProperty::PartId) {
+                if self.properties.contains_key(&BodyProperty::BlobId) {
+                    return Err(SetError::new(
+                        SetErrorType::InvalidProperties,
+                        "Cannot specify both \"partId\" and \"bodyValues\".".to_string(),
+                    ));
+                } else if self.properties.contains_key(&BodyProperty::Charset) {
+                    return Err(SetError::new(
+                        SetErrorType::InvalidProperties,
+                        "Cannot specify a character set when providing a \"partId\".".to_string(),
+                    ));
+                }
                 BodyPart::Text(
                     body_values
                         .as_ref()
@@ -831,11 +898,11 @@ impl EmailBodyPart {
                 if matches!(mime_part.contents, BodyPart::Text(_)) {
                     content_type
                         .attributes
-                        .insert("charset".into(), "utf-8".into());
+                        .push(("charset".into(), "utf-8".into()));
                 } else if let Some(charset) = self.get_text(BodyProperty::Charset) {
                     content_type
                         .attributes
-                        .insert("charset".into(), charset.into());
+                        .push(("charset".into(), charset.into()));
                 };
             }
 
@@ -844,23 +911,23 @@ impl EmailBodyPart {
                 self.get_text(BodyProperty::Name),
             ) {
                 (Some(disposition), Some(filename)) => {
-                    mime_part.headers.insert(
+                    mime_part.headers.push((
                         "Content-Disposition".into(),
                         ContentType::new(disposition)
                             .attribute("filename", filename)
                             .into(),
-                    );
+                    ));
                 }
                 (Some(disposition), None) => {
-                    mime_part.headers.insert(
+                    mime_part.headers.push((
                         "Content-Disposition".into(),
                         ContentType::new(disposition).into(),
-                    );
+                    ));
                 }
                 (None, Some(filename)) => {
                     content_type
                         .attributes
-                        .insert("name".into(), filename.into());
+                        .push(("name".into(), filename.into()));
                 }
                 (None, None) => (),
             };
@@ -868,55 +935,83 @@ impl EmailBodyPart {
 
         mime_part
             .headers
-            .insert("Content-Type".into(), content_type.into());
+            .push(("Content-Type".into(), content_type.into()));
 
         let mut sub_parts = None;
 
         for (property, value) in self.properties.iter() {
             match (property, value) {
                 (BodyProperty::Language, Value::TextList { value }) if !is_multipart => {
-                    mime_part.headers.insert(
+                    mime_part.headers.push((
                         "Content-Language".into(),
                         Text::new(value.join(", ")).into(),
-                    );
+                    ));
                 }
                 (BodyProperty::Cid, Value::Text { value }) if !is_multipart => {
                     mime_part
                         .headers
-                        .insert("Content-ID".into(), MessageId::new(value).into());
+                        .push(("Content-ID".into(), MessageId::new(value).into()));
                 }
                 (BodyProperty::Location, Value::Text { value }) if !is_multipart => {
                     mime_part
                         .headers
-                        .insert("Content-Location".into(), Text::new(value).into());
+                        .push(("Content-Location".into(), Text::new(value).into()));
                 }
-                (BodyProperty::Headers, Value::Headers { value }) => {
-                    for header in value {
-                        mime_part
-                            .headers
-                            .insert(header.name.as_str().into(), Raw::from(&header.value).into());
-                    }
+                (BodyProperty::Headers, Value::Headers { .. }) => {
+                    return Err(SetError::new(
+                        SetErrorType::InvalidProperties,
+                        "Headers have to be set individually.",
+                    ));
                 }
-                (BodyProperty::Header(header), value) => match value {
-                    Value::Text { value } => {
-                        mime_part
-                            .headers
-                            .insert(header.header.as_str().into(), Raw::from(value).into());
-                    }
-                    Value::TextList { value } => {
-                        for value in value {
-                            mime_part
-                                .headers
-                                .insert(header.header.as_str().into(), Raw::from(value).into());
+                (BodyProperty::Header(header), value) => {
+                    if header.header != HeaderName::Rfc(RfcHeader::ContentTransferEncoding) {
+                        match value {
+                            Value::Text { value } => {
+                                mime_part
+                                    .headers
+                                    .push((header.header.as_str().into(), Raw::from(value).into()));
+                            }
+                            Value::TextList { value } => {
+                                for value in value {
+                                    mime_part.headers.push((
+                                        header.header.as_str().into(),
+                                        Raw::from(value).into(),
+                                    ));
+                                }
+                            }
+                            _ => (),
                         }
+                    } else {
+                        return Err(SetError::new(
+                            SetErrorType::InvalidProperties,
+                            "Cannot specify Content-Transfer-Encoding header.",
+                        ));
                     }
-                    _ => (),
-                },
+                }
+                (BodyProperty::Size, _) => {
+                    if self.properties.contains_key(&BodyProperty::PartId) {
+                        return Err(SetError::new(
+                            SetErrorType::InvalidProperties,
+                            "Cannot specify \"size\" when providing a \"partId\".",
+                        ));
+                    }
+                }
                 (BodyProperty::Subparts, Value::BodyPartList { value }) => {
                     sub_parts = Some(value);
                 }
                 _ => (),
             }
+        }
+
+        // In test, sort headers to avoid randomness
+        #[cfg(feature = "debug")]
+        {
+            mime_part
+                .headers
+                .sort_unstable_by(|a, b| match a.0.cmp(&b.0) {
+                    std::cmp::Ordering::Equal => a.1.cmp(&b.1),
+                    ord => ord,
+                });
         }
 
         Ok((mime_part, if is_multipart { sub_parts } else { None }))

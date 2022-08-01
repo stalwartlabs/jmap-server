@@ -1,7 +1,4 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::Instant,
-};
+use std::{collections::hash_map::Entry, time::Instant};
 
 use actix_web::web;
 
@@ -13,6 +10,7 @@ use jmap_client::{
 };
 use jmap_mail::mail_parser::RfcHeader;
 use store::{
+    ahash::AHashMap,
     core::collection::Collection,
     serialize::{
         bitmap::{clear_bits, set_bits},
@@ -596,8 +594,10 @@ pub async fn query_options(client: &mut Client) {
                 .query_email()
                 .sort(query.sort.clone())
                 .position(query.position)
-                .limit(query.limit)
                 .calculate_total(true);
+            if query.limit > 0 {
+                query_request.limit(query.limit);
+            }
             if let Some(filter) = query.filter.as_ref() {
                 query_request.filter(filter.clone());
             }
@@ -645,15 +645,15 @@ pub async fn query_options(client: &mut Client) {
 
 pub async fn create(client: &mut Client) {
     let now = Instant::now();
-    let mut fields = HashMap::new();
+    let mut fields = AHashMap::default();
     for (field_num, field) in FIELDS.iter().enumerate() {
         fields.insert(field.to_string(), field_num);
     }
 
     let mut total_messages = 0;
     let mut total_threads = 0;
-    let mut thread_count = HashMap::new();
-    let mut artist_count = HashMap::new();
+    let mut thread_count = AHashMap::default();
+    let mut artist_count = AHashMap::default();
 
     'outer: for record in csv::ReaderBuilder::new()
         .has_headers(true)
@@ -661,8 +661,8 @@ pub async fn create(client: &mut Client) {
         .records()
     {
         let record = record.unwrap();
-        let mut values_str = HashMap::new();
-        let mut values_int = HashMap::new();
+        let mut values_str = AHashMap::default();
+        let mut values_int = AHashMap::default();
 
         for field_name in [
             "year",

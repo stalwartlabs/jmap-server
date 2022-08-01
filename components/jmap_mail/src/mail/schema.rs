@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use jmap::{
     request::{MaybeIdReference, ResultReference},
@@ -12,7 +12,7 @@ use mail_parser::{
 use store::{
     blob::BlobId,
     chrono::{DateTime, Utc},
-    core::tag::Tag,
+    core::{tag::Tag, vec_map::VecMap},
     FieldId,
 };
 
@@ -20,18 +20,18 @@ use super::{HeaderName, MessageField};
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct Email {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 impl Email {
     pub fn insert(&mut self, property: Property, value: impl Into<Value>) {
-        self.properties.insert(property, value.into());
+        self.properties.append(property, value.into());
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EmailBodyPart {
-    pub properties: HashMap<BodyProperty, Value>,
+    pub properties: VecMap<BodyProperty, Value>,
 }
 
 impl EmailBodyPart {
@@ -108,23 +108,35 @@ impl Keyword {
     pub fn parse(value: &str) -> Self {
         Keyword {
             tag: if value.starts_with('$') {
-                match value {
-                    "$seen" => Tag::Static(Self::SEEN),
-                    "$draft" => Tag::Static(Self::DRAFT),
-                    "$flagged" => Tag::Static(Self::FLAGGED),
-                    "$answered" => Tag::Static(Self::ANSWERED),
-                    "$recent" => Tag::Static(Self::RECENT),
-                    "$important" => Tag::Static(Self::IMPORTANT),
-                    "$phishing" => Tag::Static(Self::PHISHING),
-                    "$junk" => Tag::Static(Self::JUNK),
-                    "$notjunk" => Tag::Static(Self::NOTJUNK),
-                    "$deleted" => Tag::Static(Self::DELETED),
-                    "$forwarded" => Tag::Static(Self::FORWARDED),
-                    "$mdnsent" => Tag::Static(Self::MDN_SENT),
-                    _ => Tag::Text(value.to_string()),
+                if value.eq_ignore_ascii_case("$seen") {
+                    Tag::Static(Self::SEEN)
+                } else if value.eq_ignore_ascii_case("$draft") {
+                    Tag::Static(Self::DRAFT)
+                } else if value.eq_ignore_ascii_case("$flagged") {
+                    Tag::Static(Self::FLAGGED)
+                } else if value.eq_ignore_ascii_case("$answered") {
+                    Tag::Static(Self::ANSWERED)
+                } else if value.eq_ignore_ascii_case("$recent") {
+                    Tag::Static(Self::RECENT)
+                } else if value.eq_ignore_ascii_case("$important") {
+                    Tag::Static(Self::IMPORTANT)
+                } else if value.eq_ignore_ascii_case("$phishing") {
+                    Tag::Static(Self::PHISHING)
+                } else if value.eq_ignore_ascii_case("$junk") {
+                    Tag::Static(Self::JUNK)
+                } else if value.eq_ignore_ascii_case("$notjunk") {
+                    Tag::Static(Self::NOTJUNK)
+                } else if value.eq_ignore_ascii_case("$deleted") {
+                    Tag::Static(Self::DELETED)
+                } else if value.eq_ignore_ascii_case("$forwarded") {
+                    Tag::Static(Self::FORWARDED)
+                } else if value.eq_ignore_ascii_case("$mdnsent") {
+                    Tag::Static(Self::MDN_SENT)
+                } else {
+                    Tag::Text(value.to_lowercase())
                 }
             } else {
-                Tag::Text(value.to_string())
+                Tag::Text(value.to_lowercase())
             },
         }
     }
@@ -486,11 +498,11 @@ pub enum Value {
         value: bool,
     },
     Keywords {
-        value: HashMap<Keyword, bool>,
+        value: VecMap<Keyword, bool>,
         set: bool,
     },
     MailboxIds {
-        value: HashMap<MaybeIdReference, bool>,
+        value: VecMap<MaybeIdReference, bool>,
         set: bool,
     },
     ResultReference {
@@ -503,7 +515,7 @@ pub enum Value {
         value: Vec<EmailBodyPart>,
     },
     BodyValues {
-        value: HashMap<String, EmailBodyValue>,
+        value: VecMap<String, EmailBodyValue>,
     },
     Text {
         value: String,
@@ -609,14 +621,14 @@ impl From<usize> for Value {
 }
 
 impl Value {
-    pub fn get_mailbox_ids(&mut self) -> Option<&mut HashMap<MaybeIdReference, bool>> {
+    pub fn get_mailbox_ids(&mut self) -> Option<&mut VecMap<MaybeIdReference, bool>> {
         match self {
             Value::MailboxIds { value, .. } => Some(value),
             _ => None,
         }
     }
 
-    pub fn get_keywords(&mut self) -> Option<&mut HashMap<Keyword, bool>> {
+    pub fn get_keywords(&mut self) -> Option<&mut VecMap<Keyword, bool>> {
         match self {
             Value::Keywords { value, .. } => Some(value),
             _ => None,

@@ -22,30 +22,31 @@
   "subject": "A multipart example",
   "sentAt": "1994-10-07T23:15:05Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/mixed;\n            boundary=unique-boundary-1"
-      },
-      {
-        "name": "Date",
-        "value": "Fri, 07 Oct 1994 16:15:05 -0700 (PDT)"
+        "name": "MIME-Version",
+        "value": " 1.0"
       },
       {
         "name": "From",
-        "value": "Nathaniel Borenstein <nsb@nsb.fv.com>"
-      },
-      {
-        "name": "MIME-Version",
-        "value": "1.0"
-      },
-      {
-        "name": "Subject",
-        "value": "A multipart example"
+        "value": " Nathaniel Borenstein <nsb@nsb.fv.com>"
       },
       {
         "name": "To",
-        "value": "Ned Freed <ned@innosoft.com>"
+        "value": " Ned Freed <ned@innosoft.com>"
+      },
+      {
+        "name": "Date",
+        "value": " Fri, 07 Oct 1994 16:15:05 -0700 (PDT)"
+      },
+      {
+        "name": "Subject",
+        "value": " A multipart example"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed;\n            boundary=unique-boundary-1"
       }
     ],
     "type": "multipart/mixed",
@@ -54,7 +55,8 @@
         "partId": "1",
         "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
         "size": 262,
-        "type": "text/plain"
+        "type": "text/plain",
+        "charset": "us-ascii"
       },
       {
         "partId": "2",
@@ -63,17 +65,18 @@
         "headers": [
           {
             "name": "Content-Type",
-            "value": "text/plain; charset=US-ASCII"
+            "value": " text/plain; charset=US-ASCII"
           }
         ],
         "type": "text/plain",
         "charset": "US-ASCII"
       },
       {
+        "size": 0,
         "headers": [
           {
             "name": "Content-Type",
-            "value": "multipart/parallel; boundary=unique-boundary-2"
+            "value": " multipart/parallel; boundary=unique-boundary-2"
           }
         ],
         "type": "multipart/parallel",
@@ -84,15 +87,16 @@
             "size": 85,
             "headers": [
               {
-                "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "name": "Content-Type",
+                "value": " audio/basic"
               },
               {
-                "name": "Content-Type",
-                "value": "audio/basic"
+                "name": "Content-Transfer-Encoding",
+                "value": " base64"
               }
             ],
-            "type": "audio/basic"
+            "type": "audio/basic",
+            "charset": "us-ascii"
           },
           {
             "partId": "5",
@@ -100,15 +104,16 @@
             "size": 44,
             "headers": [
               {
-                "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "name": "Content-Type",
+                "value": " image/jpeg"
               },
               {
-                "name": "Content-Type",
-                "value": "image/jpeg"
+                "name": "Content-Transfer-Encoding",
+                "value": " base64"
               }
             ],
-            "type": "image/jpeg"
+            "type": "image/jpeg",
+            "charset": "us-ascii"
           }
         ]
       },
@@ -119,10 +124,11 @@
         "headers": [
           {
             "name": "Content-Type",
-            "value": "text/enriched"
+            "value": " text/enriched"
           }
         ],
-        "type": "text/enriched"
+        "type": "text/enriched",
+        "charset": "us-ascii"
       },
       {
         "partId": "7",
@@ -131,7 +137,7 @@
         "headers": [
           {
             "name": "Content-Type",
-            "value": "message/rfc822"
+            "value": " message/rfc822"
           }
         ],
         "type": "message/rfc822"
@@ -148,16 +154,6 @@
       "value": "This could have been part of the previous part, but\nillustrates explicit versus implicit typing o...",
       "isEncodingProblem": false,
       "isTruncated": true
-    },
-    "8": {
-      "value": "<html><body>... Some text appears here ...<br/><br/>[Note that the blank between the boundary and...",
-      "isEncodingProblem": false,
-      "isTruncated": true
-    },
-    "9": {
-      "value": "<html><body>This could have been part of the previous part, but<br/>illustrates explicit versus i...",
-      "isEncodingProblem": false,
-      "isTruncated": true
     }
   },
   "textBody": [
@@ -165,7 +161,8 @@
       "partId": "1",
       "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
       "size": 262,
-      "type": "text/plain"
+      "type": "text/plain",
+      "charset": "us-ascii"
     },
     {
       "partId": "2",
@@ -174,7 +171,7 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "text/plain; charset=US-ASCII"
+          "value": " text/plain; charset=US-ASCII"
         }
       ],
       "type": "text/plain",
@@ -183,16 +180,24 @@
   ],
   "htmlBody": [
     {
-      "partId": "8",
-      "blobId": "b87a218f3d261478417dcdddf6ca45f955dc5a10026549f36297a0852a8c35676bc02",
-      "size": 316,
-      "type": "text/html"
+      "partId": "1",
+      "blobId": "b827e24c037c8aca29f92996bba2982907d85dd38bf3a06773c9899618379f43c8602",
+      "size": 262,
+      "type": "text/plain",
+      "charset": "us-ascii"
     },
     {
-      "partId": "9",
-      "blobId": "b0a9aca7b5d908f73948d7590a30990598f5484456f76bd19302cd4dcfda091f79501",
-      "size": 149,
-      "type": "text/html"
+      "partId": "2",
+      "blobId": "b9032658848b2d19fe0b1892e11c31f72f218ccb8b18b6d43ce4ea4bb396b64756f",
+      "size": 111,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=US-ASCII"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "US-ASCII"
     }
   ],
   "attachments": [
@@ -202,15 +207,16 @@
       "size": 85,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "name": "Content-Type",
+          "value": " audio/basic"
         },
         {
-          "name": "Content-Type",
-          "value": "audio/basic"
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
-      "type": "audio/basic"
+      "type": "audio/basic",
+      "charset": "us-ascii"
     },
     {
       "partId": "5",
@@ -218,15 +224,16 @@
       "size": 44,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "name": "Content-Type",
+          "value": " image/jpeg"
         },
         {
-          "name": "Content-Type",
-          "value": "image/jpeg"
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
-      "type": "image/jpeg"
+      "type": "image/jpeg",
+      "charset": "us-ascii"
     },
     {
       "partId": "6",
@@ -235,10 +242,11 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "text/enriched"
+          "value": " text/enriched"
         }
       ],
-      "type": "text/enriched"
+      "type": "text/enriched",
+      "charset": "us-ascii"
     },
     {
       "partId": "7",
@@ -247,7 +255,7 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "message/rfc822"
+          "value": " message/rfc822"
         }
       ],
       "type": "message/rfc822"

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, fmt};
 
 use jmap::{
     orm::acl::ACLUpdate,
@@ -6,7 +6,7 @@ use jmap::{
     types::json_pointer::JSONPointer,
 };
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
-use store::core::acl::ACL;
+use store::core::{acl::ACL, vec_map::VecMap};
 
 use super::{
     schema::{Filter, Mailbox, Property, Value},
@@ -90,13 +90,13 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut properties: VecMap<Property, Value> = VecMap::new();
         let mut acls = Vec::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
                 "name" => {
-                    properties.insert(
+                    properties.append(
                         Property::Name,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -106,7 +106,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                     );
                 }
                 "parentId" => {
-                    properties.insert(
+                    properties.append(
                         Property::ParentId,
                         if let Some(value) = map.next_value::<Option<MaybeIdReference>>()? {
                             match value {
@@ -119,7 +119,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                     );
                 }
                 "role" => {
-                    properties.insert(
+                    properties.append(
                         Property::Role,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -129,7 +129,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                     );
                 }
                 "sortOrder" => {
-                    properties.insert(
+                    properties.append(
                         Property::SortOrder,
                         if let Some(value) = map.next_value::<Option<u32>>()? {
                             Value::Number { value }
@@ -139,7 +139,7 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                     );
                 }
                 "isSubscribed" => {
-                    properties.insert(
+                    properties.append(
                         Property::IsSubscribed,
                         Value::Bool {
                             value: map.next_value::<Option<bool>>()?.unwrap_or(false),
@@ -149,13 +149,13 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                 "acl" => {
                     acls.push(ACLUpdate::Replace {
                         acls: map
-                            .next_value::<Option<HashMap<String, Vec<ACL>>>>()?
+                            .next_value::<Option<VecMap<String, Vec<ACL>>>>()?
                             .unwrap_or_default(),
                     });
                 }
                 _ if key.starts_with('#') => {
                     if let Some(property) = key.get(1..) {
-                        properties.insert(
+                        properties.append(
                             Property::parse(property),
                             Value::ResultReference {
                                 value: map.next_value()?,
@@ -198,15 +198,19 @@ impl<'de> serde::de::Visitor<'de> for MailboxVisitor {
                                     acls: map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
                                 });
                             }
+                        } else {
+                            map.next_value::<IgnoredAny>()?;
                         }
                     }
-                    _ => (),
+                    _ => {
+                        map.next_value::<IgnoredAny>()?;
+                    }
                 },
             }
         }
 
         if !acls.is_empty() {
-            properties.insert(Property::ACL, Value::ACLSet(acls));
+            properties.append(Property::ACL, Value::ACLSet(acls));
         }
 
         Ok(Mailbox { properties })
@@ -274,9 +278,12 @@ impl<'de> serde::de::Visitor<'de> for FilterVisitor {
                 "isSubscribed" => Filter::IsSubscribed {
                     value: map.next_value()?,
                 },
-                unsupported => Filter::Unsupported {
-                    value: unsupported.to_string(),
-                },
+                unsupported => {
+                    map.next_value::<IgnoredAny>()?;
+                    Filter::Unsupported {
+                        value: unsupported.to_string(),
+                    }
+                }
             },
         )
     }

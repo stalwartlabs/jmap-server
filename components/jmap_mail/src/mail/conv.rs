@@ -9,7 +9,7 @@ use mail_parser::{
         },
         message::MessageStream,
     },
-    Addr, HeaderOffset, HeaderValue, RfcHeader, RfcHeaders,
+    Addr, Header, HeaderValue, RfcHeader,
 };
 
 use super::{
@@ -137,231 +137,110 @@ impl From<super::EmailAddressGroup> for Vec<super::EmailAddress> {
 }
 
 pub trait HeaderValueInto {
-    fn into_address(self) -> Vec<super::HeaderValue>;
-    fn into_text(self) -> Vec<super::HeaderValue>;
-    fn into_keyword(self) -> Vec<super::HeaderValue>;
-    fn into_date(self) -> Vec<super::HeaderValue>;
-    fn into_url(self) -> Vec<super::HeaderValue>;
+    fn into_address(self) -> Option<super::HeaderValue>;
+    fn into_text(self) -> Option<super::HeaderValue>;
+    fn into_keyword(self) -> Option<super::HeaderValue>;
+    fn into_date(self) -> Option<super::HeaderValue>;
+    fn into_url(self) -> Option<super::HeaderValue>;
 }
 
 impl HeaderValueInto for mail_parser::HeaderValue<'_> {
-    fn into_text(self) -> Vec<super::HeaderValue> {
+    fn into_text(self) -> Option<super::HeaderValue> {
         match self {
-            HeaderValue::Text(text) => vec![super::HeaderValue::Text(text.into_owned())],
-            HeaderValue::TextList(textlist) => vec![super::HeaderValue::Text(textlist.join(", "))],
-            HeaderValue::Collection(list) => {
-                let mut result = Vec::with_capacity(list.len());
-                for item in list {
-                    match item {
-                        HeaderValue::Text(text) => {
-                            result.push(super::HeaderValue::Text(text.into_owned()))
-                        }
-                        HeaderValue::TextList(textlist) => {
-                            result.push(super::HeaderValue::Text(textlist.join(", ")))
-                        }
-                        _ => (),
-                    }
-                }
-                result
-            }
-            _ => Vec::with_capacity(0),
+            HeaderValue::Text(text) => super::HeaderValue::Text(text.into_owned()).into(),
+            HeaderValue::TextList(textlist) => super::HeaderValue::Text(textlist.join(", ")).into(),
+            _ => None,
         }
     }
 
-    fn into_date(self) -> Vec<super::HeaderValue> {
+    fn into_date(self) -> Option<super::HeaderValue> {
         match self {
             HeaderValue::DateTime(datetime) => {
-                vec![super::HeaderValue::Timestamp(datetime.to_timestamp())]
+                super::HeaderValue::Timestamp(datetime.to_timestamp()).into()
             }
-            HeaderValue::Collection(list) => {
-                let mut result = Vec::with_capacity(list.len());
-                for item in list {
-                    if let HeaderValue::DateTime(datetime) = item {
-                        result.push(super::HeaderValue::Timestamp(datetime.to_timestamp()));
-                    }
-                }
-                result
-            }
-            _ => Vec::with_capacity(0),
+            _ => None,
         }
     }
 
-    fn into_keyword(self) -> Vec<super::HeaderValue> {
+    fn into_keyword(self) -> Option<super::HeaderValue> {
         match self {
-            HeaderValue::Text(text) => vec![super::HeaderValue::TextList(vec![text.into_owned()])],
-            HeaderValue::TextList(textlist) => vec![super::HeaderValue::TextList(
-                textlist.into_iter().map(|s| s.into_owned()).collect(),
-            )],
-            HeaderValue::Collection(list) => {
-                let mut result = Vec::with_capacity(list.len());
-                for item in list {
-                    match item {
-                        HeaderValue::Text(text) => {
-                            result.push(super::HeaderValue::TextList(vec![text.into_owned()]))
-                        }
-                        HeaderValue::TextList(textlist) => {
-                            result.push(super::HeaderValue::TextList(
-                                textlist.into_iter().map(|s| s.into_owned()).collect(),
-                            ))
-                        }
-                        _ => (),
-                    }
-                }
-                result
+            HeaderValue::Text(text) => super::HeaderValue::TextList(vec![text.into_owned()]).into(),
+            HeaderValue::TextList(textlist) => {
+                super::HeaderValue::TextList(textlist.into_iter().map(|s| s.into_owned()).collect())
+                    .into()
             }
-            _ => Vec::with_capacity(0),
+            _ => None,
         }
     }
 
-    fn into_url(self) -> Vec<super::HeaderValue> {
+    fn into_url(self) -> Option<super::HeaderValue> {
         match self {
             HeaderValue::Address(Addr {
                 address: Some(addr),
                 ..
-            }) if addr.contains(':') => vec![super::HeaderValue::TextList(vec![addr.into_owned()])],
-            HeaderValue::AddressList(addrlist) => {
-                vec![super::HeaderValue::TextList(
-                    addrlist
-                        .into_iter()
-                        .filter_map(|addr| match addr {
-                            Addr {
-                                address: Some(addr),
-                                ..
-                            } if addr.contains(':') => Some(addr.into_owned()),
-                            _ => None,
-                        })
-                        .collect(),
-                )]
+            }) if addr.contains(':') => {
+                super::HeaderValue::TextList(vec![addr.into_owned()]).into()
             }
-            HeaderValue::Collection(list) => {
-                let mut result = Vec::with_capacity(list.len());
-                for item in list {
-                    match item {
-                        HeaderValue::Address(Addr {
+            HeaderValue::AddressList(addrlist) => super::HeaderValue::TextList(
+                addrlist
+                    .into_iter()
+                    .filter_map(|addr| match addr {
+                        Addr {
                             address: Some(addr),
                             ..
-                        }) if addr.contains(':') => {
-                            result.push(super::HeaderValue::TextList(vec![addr.into_owned()]))
-                        }
-                        HeaderValue::AddressList(addrlist) => {
-                            result.push(super::HeaderValue::TextList(
-                                addrlist
-                                    .into_iter()
-                                    .filter_map(|addr| match addr {
-                                        Addr {
-                                            address: Some(addr),
-                                            ..
-                                        } if addr.contains(':') => Some(addr.into_owned()),
-                                        _ => None,
-                                    })
-                                    .collect(),
-                            ));
-                        }
-                        _ => (),
-                    }
-                }
-
-                result
-            }
-            _ => Vec::with_capacity(0),
+                        } if addr.contains(':') => Some(addr.into_owned()),
+                        _ => None,
+                    })
+                    .collect(),
+            )
+            .into(),
+            _ => None,
         }
     }
 
-    fn into_address(self) -> Vec<super::HeaderValue> {
+    fn into_address(self) -> Option<super::HeaderValue> {
         match self {
             HeaderValue::Address(addr) => {
                 if let Ok(addr) = addr.try_into() {
-                    vec![super::HeaderValue::Addresses(vec![addr])]
+                    super::HeaderValue::Addresses(vec![addr]).into()
                 } else {
-                    Vec::with_capacity(0)
+                    None
                 }
             }
-            HeaderValue::AddressList(addrlist) => {
-                vec![super::HeaderValue::Addresses(
-                    addrlist
-                        .into_iter()
-                        .filter_map(|addr| addr.try_into().ok())
-                        .collect(),
-                )]
-            }
+            HeaderValue::AddressList(addrlist) => super::HeaderValue::Addresses(
+                addrlist
+                    .into_iter()
+                    .filter_map(|addr| addr.try_into().ok())
+                    .collect(),
+            )
+            .into(),
             HeaderValue::Group(group) => {
                 if let Ok(group) = group.try_into() {
-                    vec![super::HeaderValue::GroupedAddresses(vec![group])]
+                    super::HeaderValue::GroupedAddresses(vec![group]).into()
                 } else {
-                    Vec::with_capacity(0)
+                    None
                 }
             }
-            HeaderValue::GroupList(grouplist) => {
-                vec![super::HeaderValue::GroupedAddresses(
-                    grouplist
-                        .into_iter()
-                        .filter_map(|addr| addr.try_into().ok())
-                        .collect(),
-                )]
-            }
-            HeaderValue::Collection(list) => {
-                let convert_to_group = list
-                    .iter()
-                    .any(|item| matches!(item, HeaderValue::Group(_) | HeaderValue::GroupList(_)));
-
-                let mut result = Vec::with_capacity(list.len());
-                for item in list {
-                    match item {
-                        HeaderValue::Address(addr) => {
-                            if convert_to_group {
-                                if let Ok(group) = addr.try_into() {
-                                    result.push(super::HeaderValue::GroupedAddresses(vec![group]));
-                                }
-                            } else if let Ok(addr) = addr.try_into() {
-                                result.push(super::HeaderValue::Addresses(vec![addr]));
-                            }
-                        }
-                        HeaderValue::AddressList(addrlist) => {
-                            if convert_to_group {
-                                if let Ok(group) = addrlist.try_into() {
-                                    result.push(super::HeaderValue::GroupedAddresses(vec![group]));
-                                }
-                            } else {
-                                result.push(super::HeaderValue::Addresses(
-                                    addrlist
-                                        .into_iter()
-                                        .filter_map(|addr| addr.try_into().ok())
-                                        .collect(),
-                                ));
-                            }
-                        }
-                        HeaderValue::Group(group) => {
-                            if let Ok(group) = group.try_into() {
-                                result.push(super::HeaderValue::GroupedAddresses(vec![group]));
-                            }
-                        }
-                        HeaderValue::GroupList(grouplist) => {
-                            result.push(super::HeaderValue::GroupedAddresses(
-                                grouplist
-                                    .into_iter()
-                                    .filter_map(|addr| addr.try_into().ok())
-                                    .collect(),
-                            ));
-                        }
-                        _ => (),
-                    }
-                }
-                result
-            }
-            _ => Vec::with_capacity(0),
+            HeaderValue::GroupList(grouplist) => super::HeaderValue::GroupedAddresses(
+                grouplist
+                    .into_iter()
+                    .filter_map(|addr| addr.try_into().ok())
+                    .collect(),
+            )
+            .into(),
+            _ => None,
         }
     }
 }
 
 impl MimePart {
     pub fn from_headers(
-        rfc_headers: RfcHeaders,
-        raw_headers: Vec<(HeaderName, HeaderOffset)>,
+        headers: Vec<Header>,
         mime_type: MimePartType,
         is_encoding_problem: bool,
         size: usize,
     ) -> Self {
-        let mut headers = Self {
+        let mut mime_part = Self {
             type_: None,
             charset: None,
             name: None,
@@ -372,47 +251,39 @@ impl MimePart {
             size,
             mime_type,
             is_encoding_problem,
-            raw_headers,
+            raw_headers: Vec::with_capacity(headers.len()),
         };
 
-        for (header, value) in rfc_headers {
-            headers.add_header(header, value);
+        for header in headers {
+            let header_name = match header.name {
+                mail_parser::HeaderName::Rfc(header_name) => {
+                    mime_part.add_header(header_name, header.value);
+                    HeaderName::Rfc(header_name)
+                }
+                mail_parser::HeaderName::Other(header_name) => {
+                    HeaderName::Other(header_name.into_owned())
+                }
+            };
+            mime_part
+                .raw_headers
+                .push((header_name, header.offset_start, header.offset_end));
         }
 
-        headers
+        mime_part
     }
-
-    /*pub fn empty(is_html: bool, size: usize) -> Self {
-        Self {
-            type_: if is_html {
-                "text/html".to_string()
-            } else {
-                "text/plain".to_string()
-            }
-            .into(),
-            charset: None,
-            name: None,
-            disposition: None,
-            location: None,
-            language: None,
-            cid: None,
-            size,
-        }
-    }*/
 
     pub fn add_header(&mut self, header: RfcHeader, value: HeaderValue) {
         match header {
             RfcHeader::ContentType => {
-                if let HeaderValue::ContentType(content_type) = value {
-                    if let Some(mut attributes) = content_type.attributes {
-                        if content_type.c_type == "text" {
-                            if let Some(charset) = attributes.remove("charset") {
-                                self.charset = charset.into_owned().into();
-                            }
+                if let HeaderValue::ContentType(mut content_type) = value {
+                    if &content_type.c_type == "text" {
+                        if let Some(charset) = content_type.remove_attribute("charset") {
+                            self.charset = charset.into_owned().into();
                         }
-                        if let (Some(name), None) = (attributes.remove("name"), &self.name) {
-                            self.name = name.into_owned().into();
-                        }
+                    }
+                    if let (Some(name), None) = (content_type.remove_attribute("name"), &self.name)
+                    {
+                        self.name = name.into_owned().into();
                     }
                     self.type_ = if let Some(subtype) = content_type.c_subtype {
                         format!("{}/{}", content_type.c_type, subtype)
@@ -424,15 +295,10 @@ impl MimePart {
             }
             RfcHeader::ContentDisposition => {
                 if let HeaderValue::ContentType(mut content_disposition) = value {
-                    self.disposition = content_disposition.c_type.into_owned().into();
-
-                    if let Some(name) = content_disposition
-                        .attributes
-                        .as_mut()
-                        .and_then(|attrs| attrs.remove("filename"))
-                    {
+                    if let Some(name) = content_disposition.remove_attribute("filename") {
                         self.name = name.into_owned().into();
                     }
+                    self.disposition = content_disposition.c_type.into_owned().into();
                 }
             }
             RfcHeader::ContentId => match value {
@@ -523,102 +389,99 @@ pub trait IntoForm {
     fn into_form(self, form: &HeaderForm, all: bool) -> Option<Value>;
 }
 
-impl IntoForm for mail_parser::HeaderValue<'_> {
+impl IntoForm for Vec<mail_parser::HeaderValue<'_>> {
     fn into_form(self, form: &HeaderForm, all: bool) -> Option<Value> {
-        match form {
-            HeaderForm::Raw | HeaderForm::Text => self.into_text(),
-            HeaderForm::URLs => self.into_url(),
-            HeaderForm::MessageIds => self.into_keyword(),
-            HeaderForm::Addresses | HeaderForm::GroupedAddresses => self.into_address(),
-            HeaderForm::Date => self.into_date(),
-        }
-        .into_form(form, all)
-    }
-}
-
-impl IntoForm for super::HeaderValue {
-    fn into_form(self, form: &HeaderForm, _all: bool) -> Option<Value> {
-        match (form, self) {
-            (HeaderForm::Raw | HeaderForm::Text, super::HeaderValue::Text(value)) => {
-                Value::Text { value }.into()
-            }
-            (HeaderForm::MessageIds | HeaderForm::URLs, super::HeaderValue::TextList(value)) => {
-                Value::TextList { value }.into()
-            }
-            (HeaderForm::Date, super::HeaderValue::Timestamp(ts)) => Value::Date {
-                value: from_timestamp(ts),
-            }
-            .into(),
-            (HeaderForm::Addresses, super::HeaderValue::Addresses(value)) => {
-                Value::Addresses { value }.into()
-            }
-            (HeaderForm::Addresses, super::HeaderValue::GroupedAddresses(value)) => {
-                Value::Addresses {
-                    value: value.into_iter().flat_map(|g| g.addresses).collect(),
-                }
-                .into()
-            }
-            (HeaderForm::GroupedAddresses, super::HeaderValue::GroupedAddresses(value)) => {
-                Value::GroupedAddresses { value }.into()
-            }
-            (HeaderForm::GroupedAddresses, super::HeaderValue::Addresses(value)) => {
-                Value::GroupedAddresses {
-                    value: vec![value.into()],
-                }
-                .into()
-            }
-            _ => None,
-        }
+        self.into_iter()
+            .filter_map(|value| match form {
+                HeaderForm::Raw | HeaderForm::Text => value.into_text(),
+                HeaderForm::URLs => value.into_url(),
+                HeaderForm::MessageIds => value.into_keyword(),
+                HeaderForm::Addresses | HeaderForm::GroupedAddresses => value.into_address(),
+                HeaderForm::Date => value.into_date(),
+            })
+            .collect::<Vec<_>>()
+            .into_form(form, all)
     }
 }
 
 impl IntoForm for Vec<super::HeaderValue> {
     fn into_form(mut self, form: &HeaderForm, all: bool) -> Option<Value> {
         if !all {
-            return self.pop()?.into_form(form, false);
-        }
-
-        match form {
-            HeaderForm::Raw | HeaderForm::Text => Value::TextList {
-                value: self.into_iter().filter_map(|v| v.into_text()).collect(),
+            match (form, self.pop()?) {
+                (HeaderForm::Raw | HeaderForm::Text, super::HeaderValue::Text(value)) => {
+                    Value::Text { value }.into()
+                }
+                (
+                    HeaderForm::MessageIds | HeaderForm::URLs,
+                    super::HeaderValue::TextList(value),
+                ) => Value::TextList { value }.into(),
+                (HeaderForm::Date, super::HeaderValue::Timestamp(ts)) => Value::Date {
+                    value: from_timestamp(ts),
+                }
+                .into(),
+                (HeaderForm::Addresses, super::HeaderValue::Addresses(value)) => {
+                    Value::Addresses { value }.into()
+                }
+                (HeaderForm::Addresses, super::HeaderValue::GroupedAddresses(value)) => {
+                    Value::Addresses {
+                        value: value.into_iter().flat_map(|g| g.addresses).collect(),
+                    }
+                    .into()
+                }
+                (HeaderForm::GroupedAddresses, super::HeaderValue::GroupedAddresses(value)) => {
+                    Value::GroupedAddresses { value }.into()
+                }
+                (HeaderForm::GroupedAddresses, super::HeaderValue::Addresses(value)) => {
+                    Value::GroupedAddresses {
+                        value: vec![value.into()],
+                    }
+                    .into()
+                }
+                _ => None,
             }
-            .into(),
-            HeaderForm::MessageIds | HeaderForm::URLs => Value::TextListMany {
-                value: self
-                    .into_iter()
-                    .filter_map(|v| v.into_text_list())
-                    .collect(),
+        } else {
+            match form {
+                HeaderForm::Raw | HeaderForm::Text => Value::TextList {
+                    value: self.into_iter().filter_map(|v| v.into_text()).collect(),
+                }
+                .into(),
+                HeaderForm::MessageIds | HeaderForm::URLs => Value::TextListMany {
+                    value: self
+                        .into_iter()
+                        .filter_map(|v| v.into_text_list())
+                        .collect(),
+                }
+                .into(),
+                HeaderForm::Date => Value::DateList {
+                    value: self
+                        .into_iter()
+                        .filter_map(|v| v.into_timestamp().map(from_timestamp))
+                        .collect(),
+                }
+                .into(),
+                HeaderForm::Addresses => Value::AddressesList {
+                    value: self
+                        .into_iter()
+                        .filter_map(|v| v.into_addresses())
+                        .collect(),
+                }
+                .into(),
+                HeaderForm::GroupedAddresses => Value::GroupedAddressesList {
+                    value: self
+                        .into_iter()
+                        .filter_map(|v| v.into_grouped_addresses())
+                        .collect(),
+                }
+                .into(),
             }
-            .into(),
-            HeaderForm::Date => Value::DateList {
-                value: self
-                    .into_iter()
-                    .filter_map(|v| v.into_timestamp().map(from_timestamp))
-                    .collect(),
-            }
-            .into(),
-            HeaderForm::Addresses => Value::AddressesList {
-                value: self
-                    .into_iter()
-                    .filter_map(|v| v.into_addresses())
-                    .collect(),
-            }
-            .into(),
-            HeaderForm::GroupedAddresses => Value::GroupedAddressesList {
-                value: self
-                    .into_iter()
-                    .filter_map(|v| v.into_grouped_addresses())
-                    .collect(),
-            }
-            .into(),
         }
     }
 }
 
 impl MessageData {
     pub fn header(&mut self, header: &RfcHeader, form: &HeaderForm, all: bool) -> Option<Value> {
-        if let Some(header) = self.headers.remove(header) {
-            header.into_form(form, all)
+        if let Some(values) = self.headers.remove(header) {
+            values.into_form(form, all)
         } else if all {
             Value::TextList { value: Vec::new() }.into()
         } else {
@@ -630,20 +493,20 @@ impl MessageData {
 impl HeaderForm {
     pub fn parse_offsets<'x>(
         &self,
-        offsets: &[&HeaderOffset],
+        offsets: &[(usize, usize)],
         raw_message: &'x [u8],
         all: bool,
-    ) -> HeaderValue<'x> {
-        let mut header_values: Vec<HeaderValue> = offsets
+    ) -> Vec<HeaderValue<'x>> {
+        offsets
             .iter()
             .skip(if !all && offsets.len() > 1 {
                 offsets.len() - 1
             } else {
                 0
             })
-            .map(|offset| {
+            .map(|(start, end)| {
                 (raw_message
-                    .get(offset.start..offset.end)
+                    .get(*start..*end)
                     .map_or(HeaderValue::Empty, |bytes| match self {
                         HeaderForm::Raw => {
                             HeaderValue::Text(std::str::from_utf8(bytes).map_or_else(
@@ -662,12 +525,6 @@ impl HeaderForm {
                     }))
                 .into_owned()
             })
-            .collect();
-
-        if all {
-            HeaderValue::Collection(header_values)
-        } else {
-            header_values.pop().unwrap_or_default()
-        }
+            .collect()
     }
 }

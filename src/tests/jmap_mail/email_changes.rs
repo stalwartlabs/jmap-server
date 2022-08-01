@@ -2,9 +2,8 @@ use actix_web::web;
 
 use jmap::types::jmap::JMAPId;
 use jmap_client::client::Client;
+use store::ahash::AHashSet;
 use store::Store;
-
-use std::collections::HashSet;
 
 use jmap::types::state::JMAPState;
 use store::{core::collection::Collection, write::batch::WriteBatch};
@@ -177,15 +176,15 @@ where
                 let mut insertions = expected_changelog[test_num][0]
                     .iter()
                     .copied()
-                    .collect::<HashSet<_>>();
+                    .collect::<AHashSet<_>>();
                 let mut updates = expected_changelog[test_num][1]
                     .iter()
                     .copied()
-                    .collect::<HashSet<_>>();
+                    .collect::<AHashSet<_>>();
                 let mut deletions = expected_changelog[test_num][2]
                     .iter()
                     .copied()
-                    .collect::<HashSet<_>>();
+                    .collect::<AHashSet<_>>();
 
                 let mut int_state = state.clone();
 

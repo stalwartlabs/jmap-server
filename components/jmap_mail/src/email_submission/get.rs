@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
 
 use store::core::error::StoreError;
+use store::core::vec_map::VecMap;
 use store::JMAPStore;
 use store::Store;
 
@@ -55,8 +54,14 @@ where
         &self,
         request: GetRequest<EmailSubmission>,
     ) -> jmap::Result<GetResponse<EmailSubmission>> {
-        let helper = GetHelper::new(self, request, default_mapper.into(), None::<SharedDocsFnc>)?;
+        let mut helper =
+            GetHelper::new(self, request, default_mapper.into(), None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
+
+        // Add Id Property
+        if !helper.properties.contains(&Property::Id) {
+            helper.properties.push(Property::Id);
+        }
 
         helper.get(|id, properties| {
             let document_id = id.get_document_id();
@@ -65,10 +70,10 @@ where
                 .ok_or_else(|| {
                     StoreError::InternalError("EmailSubmission data not found".to_string())
                 })?;
-            let mut email_submission = HashMap::with_capacity(properties.len());
+            let mut email_submission = VecMap::with_capacity(properties.len());
 
             for property in properties {
-                email_submission.insert(
+                email_submission.append(
                     *property,
                     if let Property::Id = property {
                         Value::Id { value: id }

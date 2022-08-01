@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use jmap::{
     orm,
@@ -7,13 +7,15 @@ use jmap::{
 };
 use serde::{Deserialize, Serialize};
 use store::{
+    ahash::AHashMap,
     chrono::{DateTime, Utc},
+    core::vec_map::VecMap,
     FieldId,
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct EmailSubmission {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +33,7 @@ pub enum Value {
         value: UndoStatus,
     },
     DeliveryStatus {
-        value: HashMap<String, DeliveryStatus>,
+        value: AHashMap<String, DeliveryStatus>,
     },
     Envelope {
         value: Envelope,
@@ -72,7 +74,7 @@ impl Envelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Address {
     pub email: String,
-    pub parameters: Option<HashMap<String, Option<String>>>,
+    pub parameters: Option<AHashMap<String, Option<String>>>,
 }
 
 impl Display for Address {

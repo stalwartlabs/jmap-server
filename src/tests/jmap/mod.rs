@@ -82,10 +82,10 @@ async fn jmap_core_tests() {
 
     // Run tests
     acl::test(server.clone(), &mut client).await;
-    /*authorization::test(server.clone(), &mut client).await;
+    authorization::test(server.clone(), &mut client).await;
     event_source::test(server.clone(), &mut client).await;
     push_subscription::test(server.clone(), &mut client).await;
-    websocket::test(server.clone(), &mut client).await;*/
+    websocket::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(temp_dir);
 }

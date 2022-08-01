@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use store::{
-    core::{acl::ACLToken, collection::Collection, document::Document},
+    core::{acl::ACLToken, collection::Collection, document::Document, vec_map::VecMap},
     log::changes::ChangeId,
     parking_lot::MutexGuard,
     roaring::RoaringBitmap,
@@ -80,8 +80,8 @@ where
                 from_account_id: request.from_account_id,
                 new_state: old_state.clone(),
                 old_state,
-                created: HashMap::with_capacity(request.create.len()),
-                not_created: HashMap::new(),
+                created: VecMap::with_capacity(request.create.len()),
+                not_created: VecMap::default(),
                 next_call: None,
                 change_id: None,
                 state_changes: None,
@@ -106,7 +106,7 @@ where
             let create_id = create_id.unwrap_value().unwrap_or_else(JMAPId::singleton);
             // Validate id
             if !self.document_ids.contains(create_id.get_document_id()) {
-                self.response.not_created.insert(
+                self.response.not_created.append(
                     create_id,
                     SetError::new(
                         SetErrorType::NotFound,
@@ -132,10 +132,10 @@ where
                     if lock.is_some() {
                         self.write()?;
                     }
-                    self.response.created.insert(create_id, result);
+                    self.response.created.append(create_id, result);
                 }
                 Err(err) => {
-                    self.response.not_created.insert(create_id, err);
+                    self.response.not_created.append(create_id, err);
                 }
             };
         }

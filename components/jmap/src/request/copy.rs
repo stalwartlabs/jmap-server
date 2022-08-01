@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use store::{log::changes::ChangeId, AccountId};
+use store::{ahash::AHashMap, core::vec_map::VecMap, log::changes::ChangeId, AccountId};
 
 use crate::{
     error::set::SetError,
@@ -32,8 +32,8 @@ pub struct CopyRequest<T: SetObject> {
     pub if_in_state: Option<JMAPState>,
 
     #[serde(rename = "create")]
-    #[serde(bound(deserialize = "HashMap<MaybeIdReference, T>: serde::Deserialize<'de>"))]
-    pub create: HashMap<MaybeIdReference, T>,
+    #[serde(bound(deserialize = "VecMap<MaybeIdReference, T>: serde::Deserialize<'de>"))]
+    pub create: VecMap<MaybeIdReference, T>,
 
     #[serde(rename = "onSuccessDestroyOriginal")]
     pub on_success_destroy_original: Option<bool>,
@@ -58,12 +58,12 @@ pub struct CopyResponse<O: SetObject> {
     pub new_state: JMAPState,
 
     #[serde(rename = "created")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub created: HashMap<JMAPId, O>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    pub created: VecMap<JMAPId, O>,
 
     #[serde(rename = "notCreated")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub not_created: HashMap<JMAPId, SetError<O::Property>>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    pub not_created: VecMap<JMAPId, SetError<O::Property>>,
 
     #[serde(skip)]
     pub change_id: Option<ChangeId>,
@@ -79,14 +79,14 @@ impl<O: SetObject> CopyRequest<O> {
     pub fn eval_references(
         &mut self,
         mut result_map_fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
-        created_ids: &HashMap<String, JMAPId>,
+        created_ids: &AHashMap<String, JMAPId>,
     ) -> crate::Result<()> {
-        let mut create = HashMap::with_capacity(self.create.len());
+        let mut create = VecMap::with_capacity(self.create.len());
 
         for (id, mut object) in std::mem::take(&mut self.create) {
             object.eval_result_references(&mut result_map_fnc);
             object.eval_id_references(|parent_id| created_ids.get(parent_id).copied());
-            create.insert(
+            create.append(
                 match id {
                     MaybeIdReference::Reference(id_ref) => {
                         if let Some(id) = created_ids.get(&id_ref) {
@@ -110,9 +110,9 @@ impl<O: SetObject> CopyRequest<O> {
 }
 
 impl<O: SetObject> CopyResponse<O> {
-    pub fn created_ids(&self) -> Option<HashMap<String, JMAPId>> {
+    pub fn created_ids(&self) -> Option<AHashMap<String, JMAPId>> {
         if !self.created.is_empty() {
-            let mut created_ids = HashMap::with_capacity(self.created.len());
+            let mut created_ids = AHashMap::with_capacity(self.created.len());
             for (create_id, item) in &self.created {
                 created_ids.insert(create_id.to_string(), *item.id().unwrap());
             }

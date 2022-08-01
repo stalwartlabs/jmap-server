@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use ahash::AHashMap;
 
 use crate::{
     blob::BlobId,
@@ -57,7 +57,7 @@ where
         ops: &mut Vec<WriteOperation>,
         batch: WriteBatch,
     ) -> crate::Result<Option<Changes>> {
-        let mut bitmap_list = HashMap::new();
+        let mut bitmap_list = AHashMap::default();
 
         let tombstone_deletions = self
             .tombstone_deletions
@@ -73,7 +73,7 @@ where
                             batch.account_id,
                             document.collection,
                         ))
-                        .or_insert_with(HashMap::new)
+                        .or_insert_with(AHashMap::default)
                         .insert(document.document_id, true);
 
                     document
@@ -87,7 +87,7 @@ where
                                 batch.account_id,
                                 document.collection,
                             ))
-                            .or_insert_with(HashMap::new)
+                            .or_insert_with(AHashMap::default)
                             .insert(document.document_id, false);
 
                         // Delete term index
@@ -144,7 +144,7 @@ where
                                     &field.value.text,
                                     true,
                                 ))
-                                .or_insert_with(HashMap::new)
+                                .or_insert_with(AHashMap::default)
                                 .insert(document.document_id, !is_clear);
                         }
                         <u64 as Options>::F_TOKENIZE => {
@@ -161,7 +161,7 @@ where
                                         token.word.as_ref(),
                                         true,
                                     ))
-                                    .or_insert_with(HashMap::new)
+                                    .or_insert_with(AHashMap::default)
                                     .insert(document.document_id, !is_clear);
                             }
                         }
@@ -184,7 +184,7 @@ where
                                         &token.word,
                                         true,
                                     ))
-                                    .or_insert_with(HashMap::new)
+                                    .or_insert_with(AHashMap::default)
                                     .insert(document.document_id, !is_clear);
 
                                 if let Some(stemmed_word) = token.stemmed_word.as_ref() {
@@ -196,7 +196,7 @@ where
                                             stemmed_word,
                                             false,
                                         ))
-                                        .or_insert_with(HashMap::new)
+                                        .or_insert_with(AHashMap::default)
                                         .insert(document.document_id, !is_clear);
                                 }
 
@@ -307,7 +307,7 @@ where
                                     })?,
                                     is_exact,
                                 ))
-                                .or_insert_with(HashMap::new)
+                                .or_insert_with(AHashMap::default)
                                 .insert(document.document_id, !is_clear);
                         }
                     }
@@ -383,7 +383,7 @@ where
                         field.field,
                         &field.value,
                     ))
-                    .or_insert_with(HashMap::new)
+                    .or_insert_with(AHashMap::default)
                     .insert(document.document_id, !field.is_clear());
             }
 

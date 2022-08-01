@@ -75,6 +75,7 @@ pub enum Operator {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Comparator<A> {
     #[serde(rename = "isAscending")]
+    #[serde(default = "is_true")]
     pub is_ascending: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,6 +83,10 @@ pub struct Comparator<A> {
 
     #[serde(flatten)]
     pub property: A,
+}
+
+fn is_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

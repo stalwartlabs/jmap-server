@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use actix_web::web;
 use futures::StreamExt;
@@ -12,7 +12,7 @@ use jmap_client::{
     },
     TypeState,
 };
-use store::Store;
+use store::{ahash::AHashSet, Store};
 use tokio::sync::mpsc;
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
@@ -121,8 +121,8 @@ async fn assert_state(stream_rx: &mut mpsc::Receiver<WebSocketMessage>, state: &
                         .changes(&JMAPId::new(1).to_string())
                         .unwrap()
                         .map(|x| x.0)
-                        .collect::<HashSet<&TypeState>>(),
-                    state.iter().collect::<HashSet<&TypeState>>()
+                        .collect::<AHashSet<&TypeState>>(),
+                    state.iter().collect::<AHashSet<&TypeState>>()
                 );
             }
             _ => panic!("Expected state change, got: {:?}", message),

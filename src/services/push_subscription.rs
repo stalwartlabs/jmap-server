@@ -8,10 +8,11 @@ use jmap::{
 };
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::hash_map::Entry,
     time::{Duration, Instant, SystemTime},
 };
 use store::{
+    ahash::{AHashMap, AHashSet},
     core::{bitmap::Bitmap, collection::Collection, error::StoreError},
     tracing::debug,
     AccountId, DocumentId, Store,
@@ -106,11 +107,11 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
     let push_tx = push_tx_.clone();
 
     tokio::spawn(async move {
-        let mut subscriptions = HashMap::new();
-        let mut last_verify: HashMap<AccountId, u64> = HashMap::new();
+        let mut subscriptions = AHashMap::default();
+        let mut last_verify: AHashMap<AccountId, u64> = AHashMap::default();
         let mut last_retry = Instant::now();
         let mut retry_timeout = Duration::from_millis(LONG_SLUMBER_MS);
-        let mut retry_ids = HashSet::new();
+        let mut retry_ids = AHashSet::default();
 
         loop {
             match time::timeout(retry_timeout, push_rx.recv()).await {
@@ -321,9 +322,8 @@ impl PushServer {
                 for (type_state, change_id) in &state_change.types {
                     response
                         .changed
-                        .entry(state_change.account_id.into())
-                        .or_insert_with(HashMap::new)
-                        .insert(*type_state, (*change_id).into());
+                        .get_mut_or_insert(state_change.account_id.into())
+                        .set(*type_state, (*change_id).into());
                 }
             }
 

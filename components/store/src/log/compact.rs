@@ -11,8 +11,8 @@ use crate::{
     AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError,
     WriteOperation,
 };
+use ahash::AHashMap;
 use roaring::RoaringTreemap;
-use std::collections::HashMap;
 
 impl<T> JMAPStore<T>
 where
@@ -102,7 +102,7 @@ where
         }
 
         let mut last_term = TermId::MAX;
-        let mut changed_accounts = HashMap::new();
+        let mut changed_accounts = AHashMap::default();
 
         for (key, value) in self.db.iterator(
             ColumnFamily::Logs,
@@ -158,7 +158,7 @@ where
         debug_assert_ne!(last_term, ChangeId::MAX);
 
         // Serialize raft snapshot
-        let mut changed_collections = HashMap::new();
+        let mut changed_collections = AHashMap::default();
         let total_accounts = changed_accounts.len();
         for (account_id, collections) in changed_accounts {
             changed_collections

@@ -158,20 +158,21 @@ where
         W: FnMut(Vec<JMAPId>) -> crate::Result<Vec<JMAPId>>,
     {
         let collection = O::collection();
+        let mut result = QueryResponse {
+            account_id: self.request.account_id,
+            position: 0,
+            query_state: self.store.get_state(self.account_id, collection)?,
+            total: None,
+            limit: None,
+            ids: Vec::with_capacity(0),
+            is_immutable: false,
+            can_calculate_changes: true,
+        };
 
         // Do not run the query if there are no shared documents to include
         if let Some(shared_documents) = &self.shared_documents {
             if !shared_documents.has_some_access() {
-                return Ok(QueryResponse {
-                    account_id: self.request.account_id,
-                    position: 0,
-                    query_state: self.store.get_state(self.account_id, collection)?,
-                    total: None,
-                    limit: None,
-                    ids: Vec::with_capacity(0),
-                    is_immutable: false,
-                    can_calculate_changes: true,
-                });
+                return Ok(result);
             }
         }
 
@@ -182,25 +183,24 @@ where
             self.comparator,
         )?;
 
-        let mut limit = self.request.limit.as_ref().copied().unwrap_or(0);
-        if limit == 0 || limit > self.store.config.query_max_results {
-            limit = self.store.config.query_max_results
+        let limit = if let Some(limit) = &self.request.limit {
+            if *limit > 0 {
+                std::cmp::min(*limit, self.store.config.query_max_results)
+            } else {
+                if self.request.calculate_total.unwrap_or(false) {
+                    result.total = Some(results_it.len());
+                }
+                return Ok(result);
+            }
+        } else {
+            self.store.config.query_max_results
         };
 
-        let mut result = QueryResponse {
-            account_id: self.request.account_id,
-            position: 0,
-            query_state: self.store.get_state(self.account_id, collection)?,
-            total: None,
-            limit: None,
-            ids: Vec::with_capacity(if limit > 0 && limit < results_it.len() {
-                limit
-            } else {
-                results_it.len()
-            }),
-            is_immutable: false,
-            can_calculate_changes: true,
-        };
+        result.ids = Vec::with_capacity(if limit > 0 && limit < results_it.len() {
+            limit
+        } else {
+            results_it.len()
+        });
 
         let position = self.request.position.unwrap_or(0);
         let anchor = self.request.anchor;
@@ -296,6 +296,7 @@ impl QueryResponse {
     {
         let has_anchor = anchor.is_some();
         let mut anchor_found = false;
+        let requested_position = position;
 
         for jmap_id in jmap_ids {
             if !has_anchor {
@@ -342,7 +343,9 @@ impl QueryResponse {
         }
 
         if !has_anchor || anchor_found {
-            if position >= 0 {
+            if !has_anchor && requested_position >= 0 {
+                self.position = if position == 0 { requested_position } else { 0 };
+            } else if position >= 0 {
                 self.position = position;
             } else {
                 let position = position.abs() as usize;

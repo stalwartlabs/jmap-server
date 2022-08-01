@@ -3,7 +3,8 @@ use actix_web::http::header;
 use actix_web::{http::StatusCode, HttpResponse};
 use jmap::types::{jmap::JMAPId, state::JMAPState, type_state::TypeState};
 use std::borrow::Cow;
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
+use store::core::vec_map::VecMap;
 
 pub mod blob;
 pub mod ingest;
@@ -22,14 +23,14 @@ pub enum StateChangeType {
 pub struct StateChangeResponse {
     #[serde(rename = "@type")]
     pub type_: StateChangeType,
-    pub changed: HashMap<JMAPId, HashMap<TypeState, JMAPState>>,
+    pub changed: VecMap<JMAPId, VecMap<TypeState, JMAPState>>,
 }
 
 impl StateChangeResponse {
     pub fn new() -> Self {
         Self {
             type_: StateChangeType::StateChange,
-            changed: HashMap::new(),
+            changed: VecMap::new(),
         }
     }
 }

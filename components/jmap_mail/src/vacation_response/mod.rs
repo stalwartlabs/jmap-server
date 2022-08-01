@@ -16,7 +16,7 @@ impl Object for VacationResponse {
     fn new(id: JMAPId) -> Self {
         let mut item = VacationResponse::default();
         item.properties
-            .insert(Property::Id, Value::Id { value: id });
+            .append(Property::Id, Value::Id { value: id });
         item
     }
 

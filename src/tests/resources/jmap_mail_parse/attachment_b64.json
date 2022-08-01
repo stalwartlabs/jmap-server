@@ -19,38 +19,15 @@
   "subject": "HTML test",
   "sentAt": "2021-12-14T10:48:25Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Language",
-        "value": "en-US"
-      },
-      {
         "name": "Content-Type",
-        "value": "multipart/alternative;\r\n boundary=\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
+        "value": " multipart/alternative;\r\n boundary=\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\""
       },
       {
-        "name": "Date",
-        "value": "Tue, 14 Dec 2021 11:48:25 +0100"
-      },
-      {
-        "name": "From",
-        "value": "Name <email@example.com>"
-      },
-      {
-        "name": "MIME-Version",
-        "value": "1.0"
-      },
-      {
-        "name": "Message-ID",
-        "value": "<random-message-id@example.com>"
-      },
-      {
-        "name": "Subject",
-        "value": "HTML test"
-      },
-      {
-        "name": "To",
-        "value": "\"email@example.com\" <email@example.com>"
+        "name": "Content-Language",
+        "value": " en-US"
       }
     ],
     "type": "multipart/alternative",
@@ -64,12 +41,12 @@
         "size": 30,
         "headers": [
           {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "name": "Content-Type",
+            "value": " text/plain; charset=utf-8; format=flowed"
           },
           {
-            "name": "Content-Type",
-            "value": "text/plain; charset=utf-8; format=flowed"
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
@@ -81,12 +58,12 @@
         "size": 173,
         "headers": [
           {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "name": "Content-Type",
+            "value": " text/html; charset=utf-8"
           },
           {
-            "name": "Content-Type",
-            "value": "text/html; charset=utf-8"
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/html",
@@ -101,7 +78,7 @@
       "isTruncated": false
     },
     "2": {
-      "value": "<html>\r\n  <head>\r\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\r\n  ...",
+      "value": "<html>\n  <head>\n    <meta http-equiv=\"content-type\" content=\"text/html; charset=UTF-8\">\n  </head>...",
       "isEncodingProblem": false,
       "isTruncated": true
     }
@@ -113,12 +90,12 @@
       "size": 30,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "name": "Content-Type",
+          "value": " text/plain; charset=utf-8; format=flowed"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain; charset=utf-8; format=flowed"
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -132,12 +109,12 @@
       "size": 173,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "name": "Content-Type",
+          "value": " text/html; charset=utf-8"
         },
         {
-          "name": "Content-Type",
-          "value": "text/html; charset=utf-8"
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/html",

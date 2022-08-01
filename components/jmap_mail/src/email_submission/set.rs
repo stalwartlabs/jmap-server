@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use crate::identity;
 use crate::identity::schema::Identity;
 use crate::mail::schema::Email;
@@ -10,12 +8,14 @@ use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::Object;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::types::jmap::JMAPId;
+use store::ahash::{AHashMap, AHashSet};
 
 use jmap::jmap_store::set::SetHelper;
 use jmap::request::set::SetResponse;
 use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use mail_parser::RfcHeader;
+use store::core::vec_map::VecMap;
 
 use store::blob::BlobId;
 use store::chrono::{DateTime, Utc};
@@ -29,7 +29,7 @@ use super::schema::{Address, EmailSubmission, Envelope, Property, Value};
 
 #[derive(Debug, Clone, Default)]
 pub struct SetArguments {
-    pub on_success_update_email: Option<HashMap<MaybeIdReference, Email>>,
+    pub on_success_update_email: Option<VecMap<MaybeIdReference, Email>>,
     pub on_success_destroy_email: Option<Vec<MaybeIdReference>>,
 }
 
@@ -96,7 +96,7 @@ where
                 .on_success_update_email
                 .as_ref()
                 .map_or(false, |p| !p.is_empty());
-        let mut update_emails: HashMap<JMAPId, Email> = HashMap::new();
+        let mut update_emails: VecMap<JMAPId, Email> = VecMap::new();
         let mut destroy_emails: Vec<JMAPId> = Vec::new();
 
         helper.create(|create_id, item, helper, document| {
@@ -245,7 +245,7 @@ where
 
             // Obtain recipients from e-mail if missing
             if envelope.rcpt_to.is_empty() {
-                let mut rcpt_to = HashSet::new();
+                let mut rcpt_to = AHashSet::default();
                 for header in [RfcHeader::To, RfcHeader::Cc] {
                     if let Some(values) = message_data.headers.remove(&header) {
                         for value in values {
@@ -277,7 +277,7 @@ where
                     .rcpt_to
                     .into_iter()
                     .map(|a| (a.email.trim().to_string(), a.parameters))
-                    .collect::<HashMap<_, _>>()
+                    .collect::<AHashMap<_, _>>()
                     .into_iter()
                     .map(|(email, parameters)| Address { email, parameters })
                     .collect::<Vec<_>>();
@@ -307,7 +307,7 @@ where
                     .as_mut()
                     .and_then(|p| p.remove(&id_ref))
                 {
-                    update_emails.insert(email_id, update);
+                    update_emails.append(email_id, update);
                 }
 
                 if helper

@@ -142,33 +142,22 @@ async fn create(client: &mut Client, mailbox_id: &str) {
 
         // Compare raw message
         file_name.set_extension("eml");
+        let result = replace_boundaries(String::from_utf8(raw_message).unwrap());
 
-        assert_diff(
-            &replace_boundaries(String::from_utf8(raw_message).unwrap()),
-            &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
-            file_name.to_str().unwrap(),
-        );
-
-        /*fs::write(
-            file_name,
-            replace_boundaries(String::from_utf8(raw_message).unwrap()),
-        )
-        .unwrap();*/
+        if fs::read(&file_name).unwrap() != result.as_bytes() {
+            file_name.set_extension("eml_failed");
+            fs::write(&file_name, result.as_bytes()).unwrap();
+            panic!("Test failed, output saved to {}", file_name.display());
+        }
 
         // Compare response
         file_name.set_extension("jmap");
-
-        assert_diff(
-            &replace_boundaries(serde_json::to_string_pretty(&email).unwrap()),
-            &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
-            file_name.to_str().unwrap(),
-        );
-
-        /*fs::write(
-            file_name.clone(),
-            replace_boundaries(serde_json::to_string_pretty(&email).unwrap()),
-        )
-        .unwrap();*/
+        let result = replace_boundaries(serde_json::to_string_pretty(&email).unwrap());
+        if fs::read(&file_name).unwrap() != result.as_bytes() {
+            file_name.set_extension("jmap_failed");
+            fs::write(&file_name, result.as_bytes()).unwrap();
+            panic!("Test failed, output saved to {}", file_name.display());
+        }
     }
 }
 
@@ -370,7 +359,7 @@ fn replace_boundaries(string: String) -> String {
     }
 }
 
-fn assert_diff(str1: &str, str2: &str, filename: &str) {
+/*fn assert_diff(str1: &str, str2: &str, filename: &str) {
     for ((pos1, ch1), (pos2, ch2)) in str1.char_indices().zip(str2.char_indices()) {
         if ch1 != ch2 {
             panic!(
@@ -384,4 +373,4 @@ fn assert_diff(str1: &str, str2: &str, filename: &str) {
     }
 
     assert_eq!(str1.len(), str2.len(), "{}", filename);
-}
+}*/

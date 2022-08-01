@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use store::core::acl::ACLToken;
+use store::core::{acl::ACLToken, vec_map::VecMap};
 
 use crate::{
     error::set::SetError,
@@ -34,9 +34,9 @@ pub struct CopyBlobResponse {
 
     #[serde(rename = "copied")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub copied: Option<HashMap<JMAPBlob, JMAPBlob>>,
+    pub copied: Option<VecMap<JMAPBlob, JMAPBlob>>,
 
     #[serde(rename = "notCopied")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub not_copied: Option<HashMap<JMAPBlob, SetError<()>>>,
+    pub not_copied: Option<VecMap<JMAPBlob, SetError<()>>>,
 }

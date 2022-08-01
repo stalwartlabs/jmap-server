@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    time::Duration,
-};
+use std::{collections::VecDeque, time::Duration};
 
 use actix_web::web;
 use jmap::{
@@ -13,6 +10,7 @@ use jmap_mail::email_submission::schema::{
 };
 use mail_send::{smtp::message::Message, Transport};
 use store::{
+    ahash::AHashMap,
     blob::BlobId,
     config::env_settings::EnvSettings,
     core::{collection::Collection, document::Document},
@@ -217,7 +215,7 @@ where
 
                                 // Create delivery status list
                                 let mut delivery_status =
-                                    HashMap::with_capacity(envelope.rcpt_to.len());
+                                    AHashMap::with_capacity(envelope.rcpt_to.len());
 
                                 // Send mail-from
                                 let undo_status = if let Err(err) = client
@@ -344,7 +342,7 @@ where
                                 {
                                     // Create delivery status list
                                     let mut delivery_status =
-                                        HashMap::with_capacity(envelope.rcpt_to.len());
+                                        AHashMap::with_capacity(envelope.rcpt_to.len());
 
                                     // Fail all recipients
                                     for rcpt in &envelope.rcpt_to {

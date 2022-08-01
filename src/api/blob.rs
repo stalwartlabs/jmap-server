@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::{RequestError, RequestLimitError};
 use crate::authorization::auth::RemoteAddress;
 use crate::authorization::Session;
@@ -19,6 +17,7 @@ use jmap_sharing::principal::account::JMAPAccountStore;
 use reqwest::header::CONTENT_TYPE;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
+use store::core::vec_map::VecMap;
 use store::JMAPStore;
 use store::{tracing::error, Store};
 
@@ -98,8 +97,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     let (id,) = path.into_inner();
-    let coco = "fddf";
-    let account_id = 2; //id.get_document_id();
+    let account_id = id.get_document_id();
 
     // Rate limit uploads
     let _upload_req = core
@@ -174,8 +172,8 @@ where
         let acl = request.acl.unwrap();
         let account_id = request.account_id.get_document_id();
         let from_account_id = request.from_account_id.get_document_id();
-        let mut copied = HashMap::with_capacity(request.blob_ids.len());
-        let mut not_copied = HashMap::new();
+        let mut copied = VecMap::with_capacity(request.blob_ids.len());
+        let mut not_copied = VecMap::new();
 
         for blob_id in request.blob_ids {
             if !self.blob_account_has_access(&blob_id.id, &acl.member_of)?
@@ -191,14 +189,14 @@ where
                         Collection::Mail,
                         shared_ids,
                     )? {
-                        not_copied.insert(
+                        not_copied.append(
                             blob_id,
                             SetError::forbidden("You do not have access to this blobId."),
                         );
                         continue;
                     }
                 } else {
-                    not_copied.insert(
+                    not_copied.append(
                         blob_id,
                         SetError::forbidden("You do not have access to this blobId."),
                     );
@@ -206,7 +204,7 @@ where
                 }
             }
             self.blob_link_ephimeral(&blob_id.id, account_id)?;
-            copied.insert(blob_id.clone(), blob_id);
+            copied.append(blob_id.clone(), blob_id);
         }
 
         Ok(CopyBlobResponse {

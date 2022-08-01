@@ -1,9 +1,9 @@
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
     time::Instant,
 };
 
+use store::ahash::AHashMap;
 use store::{
     core::{collection::Collection, document::Document, JMAPIdPrefix},
     nlp::Language,
@@ -196,7 +196,7 @@ pub fn test_filter<T>(db: Arc<JMAPStore<T>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut fields = HashMap::new();
+    let mut fields = AHashMap::default();
     for (field_num, field) in FIELDS.iter().enumerate() {
         fields.insert(field.to_string(), field_num as u8);
     }
@@ -453,7 +453,7 @@ pub fn test_sort<T>(db: Arc<JMAPStore<T>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut fields = HashMap::new();
+    let mut fields = AHashMap::default();
     for (field_num, field) in FIELDS.iter().enumerate() {
         fields.insert(field.to_string(), field_num as u8);
     }

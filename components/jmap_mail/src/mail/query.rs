@@ -7,7 +7,7 @@ use jmap::request::query::{QueryRequest, QueryResponse};
 use jmap::types::jmap::JMAPId;
 use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
 use mail_parser::RfcHeader;
-use std::collections::HashSet;
+use store::ahash::AHashSet;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
@@ -335,7 +335,7 @@ where
             })
         })?;
 
-        let mut seen_threads = HashSet::new();
+        let mut seen_threads = AHashSet::default();
         helper
             .query(
                 |document_id| {

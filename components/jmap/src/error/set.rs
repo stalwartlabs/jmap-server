@@ -113,6 +113,17 @@ impl<U> SetError<U> {
         }
     }
 
+    pub fn invalid_properties(
+        properties: impl IntoIterator<Item = U>,
+        description: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        SetError {
+            type_: SetErrorType::InvalidProperties,
+            description: description.into().into(),
+            properties: properties.into_iter().collect::<Vec<_>>().into(),
+        }
+    }
+
     pub fn forbidden(description: impl Into<Cow<'static, str>>) -> Self {
         SetError {
             type_: SetErrorType::Forbidden,

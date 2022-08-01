@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::FromIterator};
+use std::iter::FromIterator;
 
 use crate::{api::response::serialize_hex, authorization};
 use actix_web::{
@@ -12,6 +12,7 @@ use jmap::{
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
+    core::vec_map::VecMap,
     Store,
 };
 
@@ -22,11 +23,11 @@ use super::RequestError;
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Session {
     #[serde(rename(serialize = "capabilities"))]
-    capabilities: HashMap<URI, Capabilities>,
+    capabilities: VecMap<URI, Capabilities>,
     #[serde(rename(serialize = "accounts"))]
-    accounts: HashMap<JMAPId, Account>,
+    accounts: VecMap<JMAPId, Account>,
     #[serde(rename(serialize = "primaryAccounts"))]
-    primary_accounts: HashMap<URI, JMAPId>,
+    primary_accounts: VecMap<URI, JMAPId>,
     #[serde(rename(serialize = "username"))]
     username: String,
     #[serde(rename(serialize = "apiUrl"))]
@@ -51,7 +52,7 @@ struct Account {
     #[serde(rename(serialize = "isReadOnly"))]
     is_read_only: bool,
     #[serde(rename(serialize = "accountCapabilities"))]
-    account_capabilities: HashMap<URI, Capabilities>,
+    account_capabilities: VecMap<URI, Capabilities>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -130,7 +131,7 @@ impl Session {
         };
 
         Session {
-            capabilities: HashMap::from_iter([
+            capabilities: VecMap::from_iter([
                 (URI::Core, Capabilities::Core(CoreCapabilities::new(config))),
                 (URI::Mail, Capabilities::Mail(MailCapabilities::new(config))),
                 (
@@ -138,8 +139,8 @@ impl Session {
                     Capabilities::WebSocket(WebSocketCapabilities::new(&hostname, is_tls)),
                 ),
             ]),
-            accounts: HashMap::new(),
-            primary_accounts: HashMap::new(),
+            accounts: VecMap::new(),
+            primary_accounts: VecMap::new(),
             username: "".to_string(),
             api_url: format!("{}://{}/jmap/", prefix, hostname),
             download_url: format!(
@@ -166,15 +167,15 @@ impl Session {
 
         if let Some(capabilities) = capabilities {
             for capability in capabilities {
-                self.primary_accounts.insert(capability.clone(), account_id);
+                self.primary_accounts.append(capability.clone(), account_id);
             }
         } else {
             for capability in self.capabilities.keys() {
-                self.primary_accounts.insert(capability.clone(), account_id);
+                self.primary_accounts.append(capability.clone(), account_id);
             }
         }
 
-        self.accounts.insert(
+        self.accounts.set(
             account_id,
             Account::new(name, true, false).add_capabilities(capabilities, &self.capabilities),
         );
@@ -188,7 +189,7 @@ impl Session {
         is_read_only: bool,
         capabilities: Option<&[URI]>,
     ) {
-        self.accounts.insert(
+        self.accounts.set(
             account_id,
             Account::new(name, is_personal, is_read_only)
                 .add_capabilities(capabilities, &self.capabilities),
@@ -206,18 +207,18 @@ impl Account {
             name,
             is_personal,
             is_read_only,
-            account_capabilities: HashMap::new(),
+            account_capabilities: VecMap::new(),
         }
     }
 
     pub fn add_capabilities(
         mut self,
         capabilities: Option<&[URI]>,
-        core_capabilities: &HashMap<URI, Capabilities>,
+        core_capabilities: &VecMap<URI, Capabilities>,
     ) -> Account {
         if let Some(capabilities) = capabilities {
             for capability in capabilities {
-                self.account_capabilities.insert(
+                self.account_capabilities.append(
                     capability.clone(),
                     core_capabilities.get(capability).unwrap().clone(),
                 );

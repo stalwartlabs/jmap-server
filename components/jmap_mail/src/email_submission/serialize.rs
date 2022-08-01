@@ -1,7 +1,8 @@
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, fmt};
 
 use jmap::request::{ArgumentSerializer, MaybeIdReference};
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
+use store::core::vec_map::VecMap;
 
 use super::{
     schema::{EmailSubmission, Envelope, Filter, Property, Value},
@@ -85,12 +86,12 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut properties: VecMap<Property, Value> = VecMap::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
                 "emailId" => {
-                    properties.insert(
+                    properties.append(
                         Property::EmailId,
                         match map.next_value::<MaybeIdReference>()? {
                             MaybeIdReference::Value(value) => Value::Id { value },
@@ -99,7 +100,7 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
                     );
                 }
                 "identityId" => {
-                    properties.insert(
+                    properties.append(
                         Property::IdentityId,
                         match map.next_value::<MaybeIdReference>()? {
                             MaybeIdReference::Value(value) => Value::Id { value },
@@ -108,7 +109,7 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
                     );
                 }
                 "undoStatus" => {
-                    properties.insert(
+                    properties.append(
                         Property::UndoStatus,
                         Value::UndoStatus {
                             value: map.next_value()?,
@@ -116,7 +117,7 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
                     );
                 }
                 "envelope" => {
-                    properties.insert(
+                    properties.append(
                         Property::Envelope,
                         if let Some(value) = map.next_value::<Option<Envelope>>()? {
                             Value::Envelope { value }
@@ -127,7 +128,7 @@ impl<'de> serde::de::Visitor<'de> for EmailSubmissionVisitor {
                 }
                 _ if key.starts_with('#') => {
                     if let Some(property) = key.get(1..) {
-                        properties.insert(
+                        properties.append(
                             Property::parse(property),
                             Value::ResultReference {
                                 value: map.next_value()?,

@@ -8,11 +8,12 @@ use jmap::request::get::{GetRequest, GetResponse};
 use jmap::request::ACLEnforce;
 use jmap::types::jmap::JMAPId;
 use jmap::types::principal::JMAPPrincipals;
-use std::collections::{HashMap, HashSet};
+use store::ahash::AHashSet;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::core::vec_map::VecMap;
 use store::roaring::RoaringBitmap;
 use store::{AccountId, JMAPStore, SharedBitmap};
 use store::{DocumentId, Store};
@@ -72,7 +73,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mailbox_get(&self, request: GetRequest<Mailbox>) -> jmap::Result<GetResponse<Mailbox>> {
-        let helper = GetHelper::new(
+        let mut helper = GetHelper::new(
             self,
             request,
             default_mapper.into(),
@@ -95,6 +96,11 @@ where
         let acl = helper.acl.clone();
         let mail_document_ids = self.get_document_ids(account_id, Collection::Mail)?;
 
+        // Add Id Property
+        if !helper.properties.contains(&Property::Id) {
+            helper.properties.push(Property::Id);
+        }
+
         helper.get(|id, properties| {
             let document_id = id.get_document_id();
             let mut fields = if fetch_fields {
@@ -107,16 +113,21 @@ where
             } else {
                 None
             };
-            let mut mailbox = HashMap::with_capacity(properties.len());
+            let mut mailbox = VecMap::with_capacity(properties.len());
 
             for property in properties {
                 let value = match property {
                     Property::Id => Value::Id { value: id },
-                    Property::Name | Property::Role | Property::SortOrder => fields
+                    Property::Name | Property::Role => fields
                         .as_mut()
                         .unwrap()
                         .remove(property)
                         .unwrap_or_default(),
+                    Property::SortOrder => fields
+                        .as_mut()
+                        .unwrap()
+                        .remove(property)
+                        .unwrap_or(Value::Number { value: 0 }),
                     Property::ParentId => fields
                         .as_ref()
                         .unwrap()
@@ -189,10 +200,10 @@ where
                                 .mail_shared_folders(account_id, &acl.member_of, ACL::Administer)?
                                 .has_access(document_id) =>
                     {
-                        let mut acl_get = HashMap::new();
+                        let mut acl_get = VecMap::new();
                         for (account_id, acls) in fields.as_ref().unwrap().get_acls() {
                             if let Some(email) = self.principal_to_email(account_id)? {
-                                acl_get.insert(email, acls);
+                                acl_get.append(email, acls);
                             }
                         }
                         Value::ACLGet(acl_get)
@@ -200,7 +211,7 @@ where
                     _ => Value::Null,
                 };
 
-                mailbox.insert(*property, value);
+                mailbox.append(*property, value);
             }
             Ok(Some(Mailbox {
                 properties: mailbox,
@@ -214,7 +225,7 @@ where
         document_ids: Option<RoaringBitmap>,
     ) -> store::Result<usize> {
         if let Some(document_ids) = document_ids {
-            let mut thread_ids = HashSet::new();
+            let mut thread_ids = AHashSet::default();
             self.get_multi_document_value(
                 account_id,
                 Collection::Mail,

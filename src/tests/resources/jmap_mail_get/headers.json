@@ -73,20 +73,19 @@
   "subject": "Why not both importing AND exporting? ☺",
   "sentAt": "2003-07-01T08:52:37Z",
   "bodyStructure": {
+    "size": 0,
     "type": "multipart/mixed",
     "subParts": [
       {
         "partId": "1",
         "size": 175,
         "type": "text/html",
-        "charset": "us-ascii",
-        "header:X-Custom-Header": "123"
+        "charset": "us-ascii"
       },
       {
         "partId": "2",
         "size": 724,
-        "type": "message/rfc822",
-        "header:X-Custom-Header-2": "345"
+        "type": "message/rfc822"
       }
     ]
   },
@@ -95,18 +94,14 @@
       "value": "<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus just on the &ldquo;im...",
       "isEncodingProblem": false,
       "isTruncated": true
-    },
-    "3": {
-      "value": "I was thinking about quitting the “exporting” to focus just on the “importing”,\nbut then ...",
-      "isEncodingProblem": false,
-      "isTruncated": true
     }
   },
   "textBody": [
     {
-      "partId": "3",
-      "size": 129,
-      "type": "text/plain"
+      "partId": "1",
+      "size": 175,
+      "type": "text/html",
+      "charset": "us-ascii"
     }
   ],
   "htmlBody": [
@@ -114,24 +109,22 @@
       "partId": "1",
       "size": 175,
       "type": "text/html",
-      "charset": "us-ascii",
-      "header:X-Custom-Header": "123"
+      "charset": "us-ascii"
     }
   ],
   "attachments": [
     {
       "partId": "2",
       "size": 724,
-      "type": "message/rfc822",
-      "header:X-Custom-Header-2": "345"
+      "type": "message/rfc822"
     }
   ],
   "hasAttachment": true,
   "preview": "I was thinking about quitting the “exporting” to focus just on the “importing”,\nbut then I thought, why not do both? ☺\n",
-  "header:Bcc": "ietf-822@dimacs.rutgers.edu, ojarnef@admin.kth.se",
+  "header:Bcc": " ietf-822@dimacs.rutgers.edu, ojarnef@admin.kth.se",
   "header:Bcc:all": [
-    "Greg Vaudreuil <gvaudre@NRI.Reston.VA.US>, Ned Freed\n        <ned@innosoft.com>, Keith Moore <moore@cs.utk.edu>",
-    "ietf-822@dimacs.rutgers.edu, ojarnef@admin.kth.se"
+    " Greg Vaudreuil <gvaudre@NRI.Reston.VA.US>, Ned Freed\n        <ned@innosoft.com>, Keith Moore <moore@cs.utk.edu>",
+    " ietf-822@dimacs.rutgers.edu, ojarnef@admin.kth.se"
   ],
   "header:Bcc:asAddresses": [
     {
@@ -220,10 +213,10 @@
       }
     ]
   ],
-  "header:Cc": "=?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: addr1@test.com, \n       addr2@test.com; =?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: \n       addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com",
+  "header:Cc": " =?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: addr1@test.com, \n       addr2@test.com; =?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: \n       addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com",
   "header:Cc:all": [
-    "List 1: addr1@test.com, addr2@test.com; List 2: addr3@test.com, \n       addr4@test.com; addr5@test.com, addr6@test.com",
-    "=?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: addr1@test.com, \n       addr2@test.com; =?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: \n       addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com"
+    " List 1: addr1@test.com, addr2@test.com; List 2: addr3@test.com, \n       addr4@test.com; addr5@test.com, addr6@test.com",
+    " =?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: addr1@test.com, \n       addr2@test.com; =?utf-8?b?VGjDrXMgw61zIHbDoWzDrWQgw5pURjg=?=: \n       addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com"
   ],
   "header:Cc:asAddresses": [
     {
@@ -430,17 +423,17 @@
       }
     ]
   ],
-  "header:Date": "Tue, 1 Jul 2003 10:52:37 +0200",
+  "header:Date": " Tue, 1 Jul 2003 10:52:37 +0200",
   "header:Date:all": [
-    "Tue, 1 Jul 2003 10:52:37 +0200"
+    " Tue, 1 Jul 2003 10:52:37 +0200"
   ],
   "header:Date:asDate": "2003-07-01T08:52:37Z",
   "header:Date:asDate:all": [
     "2003-07-01T08:52:37Z"
   ],
-  "header:From": "Art Vandelay <art@vandelay.com> (Vandelay Industries)",
+  "header:From": " Art Vandelay <art@vandelay.com> (Vandelay Industries)",
   "header:From:all": [
-    "Art Vandelay <art@vandelay.com> (Vandelay Industries)"
+    " Art Vandelay <art@vandelay.com> (Vandelay Industries)"
   ],
   "header:From:asAddresses": [
     {
@@ -480,17 +473,17 @@
       }
     ]
   ],
-  "header:Keywords": "multipart, alternative, example",
+  "header:Keywords": " multipart, alternative, example",
   "header:Keywords:all": [
-    "multipart, alternative, example"
+    " multipart, alternative, example"
   ],
   "header:Keywords:asText": "multipart, alternative, example",
   "header:Keywords:asText:all": [
     "multipart, alternative, example"
   ],
-  "header:List-Owner": "<http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>",
+  "header:List-Owner": " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>",
   "header:List-Owner:all": [
-    "<http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>"
+    " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\n       <mailto:list-manager@host.com?body=subscribe%20list>"
   ],
   "header:List-Owner:asURLs": [
     "http://www.host.com/list.cgi?cmd=sub&lst=list",
@@ -502,9 +495,9 @@
       "mailto:list-manager@host.com?body=subscribe%20list"
     ]
   ],
-  "header:List-Post": "<mailto:moderator@host.com> (Postings are Moderated)",
+  "header:List-Post": " <mailto:moderator@host.com> (Postings are Moderated)",
   "header:List-Post:all": [
-    "<mailto:moderator@host.com> (Postings are Moderated)"
+    " <mailto:moderator@host.com> (Postings are Moderated)"
   ],
   "header:List-Post:asURLs": [
     "mailto:moderator@host.com"
@@ -514,10 +507,10 @@
       "mailto:moderator@host.com"
     ]
   ],
-  "header:List-Subscribe": "<ftp://ftp.host.com/list.txt> (FTP),  \n               <mailto:list@host.com?subject=subscribe>",
+  "header:List-Subscribe": " <ftp://ftp.host.com/list.txt> (FTP),  \n               <mailto:list@host.com?subject=subscribe>",
   "header:List-Subscribe:all": [
-    "(Use this command to join the list)\n       <mailto:list-manager@host.com?body=subscribe%20list>",
-    "<ftp://ftp.host.com/list.txt> (FTP),  \n               <mailto:list@host.com?subject=subscribe>"
+    " (Use this command to join the list)\n       <mailto:list-manager@host.com?body=subscribe%20list>",
+    " <ftp://ftp.host.com/list.txt> (FTP),  \n               <mailto:list@host.com?subject=subscribe>"
   ],
   "header:List-Subscribe:asURLs": [
     "ftp://ftp.host.com/list.txt",
@@ -532,9 +525,9 @@
       "mailto:list@host.com?subject=subscribe"
     ]
   ],
-  "header:List-Unsubscribe": "(Use this command to get off the list)\n         <mailto:list-manager@host.com?body=unsubscribe%20list>",
+  "header:List-Unsubscribe": " (Use this command to get off the list)\n         <mailto:list-manager@host.com?body=unsubscribe%20list>",
   "header:List-Unsubscribe:all": [
-    "(Use this command to get off the list)\n         <mailto:list-manager@host.com?body=unsubscribe%20list>"
+    " (Use this command to get off the list)\n         <mailto:list-manager@host.com?body=unsubscribe%20list>"
   ],
   "header:List-Unsubscribe:asURLs": [
     "mailto:list-manager@host.com?body=unsubscribe%20list"
@@ -544,9 +537,9 @@
       "mailto:list-manager@host.com?body=unsubscribe%20list"
     ]
   ],
-  "header:Message-ID": "<5678.21-Nov-1997@example.com>",
+  "header:Message-ID": " <5678.21-Nov-1997@example.com>",
   "header:Message-ID:all": [
-    "<5678.21-Nov-1997@example.com>"
+    " <5678.21-Nov-1997@example.com>"
   ],
   "header:Message-ID:asMessageIds": [
     "5678.21-Nov-1997@example.com"
@@ -556,10 +549,10 @@
       "5678.21-Nov-1997@example.com"
     ]
   ],
-  "header:References": "<789@local.machine.example>\n            <abcd@example.net>",
+  "header:References": " <789@local.machine.example>\n            <abcd@example.net>",
   "header:References:all": [
-    "<1234@local.machine.example>\n            <3456@example.net>",
-    "<789@local.machine.example>\n            <abcd@example.net>"
+    " <1234@local.machine.example>\n            <3456@example.net>",
+    " <789@local.machine.example>\n            <abcd@example.net>"
   ],
   "header:References:asMessageIds": [
     "789@local.machine.example",
@@ -575,11 +568,11 @@
       "abcd@example.net"
     ]
   ],
-  "header:Resent-Date": "Tue, 4 Jul 2005 13:52:37 +0400",
+  "header:Resent-Date": " Tue, 4 Jul 2005 13:52:37 +0400",
   "header:Resent-Date:all": [
-    "Tue, 2 Jul 2005 11:52:37 +0200",
-    "Tue, 3 Jul 2005 12:52:37 +0300",
-    "Tue, 4 Jul 2005 13:52:37 +0400"
+    " Tue, 2 Jul 2005 11:52:37 +0200",
+    " Tue, 3 Jul 2005 12:52:37 +0300",
+    " Tue, 4 Jul 2005 13:52:37 +0400"
   ],
   "header:Resent-Date:asDate": "2005-07-04T09:52:37Z",
   "header:Resent-Date:asDate:all": [
@@ -587,17 +580,17 @@
     "2005-07-03T09:52:37Z",
     "2005-07-04T09:52:37Z"
   ],
-  "header:Subject": "Why not both importing AND exporting? =?utf-8?b?4pi6?=",
+  "header:Subject": " Why not both importing AND exporting? =?utf-8?b?4pi6?=",
   "header:Subject:all": [
-    "Why not both importing AND exporting? =?utf-8?b?4pi6?="
+    " Why not both importing AND exporting? =?utf-8?b?4pi6?="
   ],
   "header:Subject:asText": "Why not both importing AND exporting? ☺",
   "header:Subject:asText:all": [
     "Why not both importing AND exporting? ☺"
   ],
-  "header:To": "\"  James Smythe\" <james@example.com>, Friends:\n      jane@example.com, =?UTF-8?Q?John_Sm=C3=AEth?=\n      <john@example.com>;",
+  "header:To": " \"  James Smythe\" <james@example.com>, Friends:\n      jane@example.com, =?UTF-8?Q?John_Sm=C3=AEth?=\n      <john@example.com>;",
   "header:To:all": [
-    "\"  James Smythe\" <james@example.com>, Friends:\n      jane@example.com, =?UTF-8?Q?John_Sm=C3=AEth?=\n      <john@example.com>;"
+    " \"  James Smythe\" <james@example.com>, Friends:\n      jane@example.com, =?UTF-8?Q?John_Sm=C3=AEth?=\n      <john@example.com>;"
   ],
   "header:To:asAddresses": [
     {
@@ -679,10 +672,10 @@
       }
     ]
   ],
-  "header:X-Address": "John Doe <jdoe@machine.example>",
+  "header:X-Address": " John Doe <jdoe@machine.example>",
   "header:X-Address:all": [
-    "Mary Smith <mary@example.net>",
-    "John Doe <jdoe@machine.example>"
+    " Mary Smith <mary@example.net>",
+    " John Doe <jdoe@machine.example>"
   ],
   "header:X-Address:asAddresses": [
     {
@@ -739,9 +732,9 @@
       }
     ]
   ],
-  "header:X-Address-Single": "=?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>",
+  "header:X-Address-Single": " =?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>",
   "header:X-Address-Single:all": [
-    "=?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>"
+    " =?ISO-8859-1?Q?Andr=E9?= Pirard <PIRARD@vm1.ulg.ac.be>"
   ],
   "header:X-Address-Single:asAddresses": [
     {
@@ -781,10 +774,10 @@
       }
     ]
   ],
-  "header:X-AddressList": "=?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>,\n                =?ISO-8859-1?Q?Olle_J=E4rnefors?= <ojarnef@admin.kth.se>",
+  "header:X-AddressList": " =?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>,\n                =?ISO-8859-1?Q?Olle_J=E4rnefors?= <ojarnef@admin.kth.se>",
   "header:X-AddressList:all": [
-    "=?US-ASCII*EN?Q?Keith_Moore?= <moore@cs.utk.edu>, \n                John =?US-ASCII*EN?Q?Doe?= <moore@cs.utk.edu>",
-    "=?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>,\n                =?ISO-8859-1?Q?Olle_J=E4rnefors?= <ojarnef@admin.kth.se>"
+    " =?US-ASCII*EN?Q?Keith_Moore?= <moore@cs.utk.edu>, \n                John =?US-ASCII*EN?Q?Doe?= <moore@cs.utk.edu>",
+    " =?ISO-8859-1?Q?Keld_J=F8rn_Simonsen?= <keld@dkuug.dk>,\n                =?ISO-8859-1?Q?Olle_J=E4rnefors?= <ojarnef@admin.kth.se>"
   ],
   "header:X-AddressList:asAddresses": [
     {
@@ -865,9 +858,9 @@
       }
     ]
   ],
-  "header:X-AddressList-Single": "Mary Smith <mary@x.test>, jdoe@example.org, Who? <one@y.test>",
+  "header:X-AddressList-Single": " Mary Smith <mary@x.test>, jdoe@example.org, Who? <one@y.test>",
   "header:X-AddressList-Single:all": [
-    "Mary Smith <mary@x.test>, jdoe@example.org, Who? <one@y.test>"
+    " Mary Smith <mary@x.test>, jdoe@example.org, Who? <one@y.test>"
   ],
   "header:X-AddressList-Single:asAddresses": [
     {
@@ -939,10 +932,10 @@
       }
     ]
   ],
-  "header:X-AddressesGroup": "\"List 1\": addr1@test.com, addr2@test.com; \"List 2\": \n            addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com",
+  "header:X-AddressesGroup": " \"List 1\": addr1@test.com, addr2@test.com; \"List 2\": \n            addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com",
   "header:X-AddressesGroup:all": [
-    "A Group:Ed Jones <c@a.test>,joe@where.test,John <jdoe@one.test>;",
-    "\"List 1\": addr1@test.com, addr2@test.com; \"List 2\": \n            addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com"
+    " A Group:Ed Jones <c@a.test>,joe@where.test,John <jdoe@one.test>;",
+    " \"List 1\": addr1@test.com, addr2@test.com; \"List 2\": \n            addr3@test.com, addr4@test.com; addr5@test.com, addr6@test.com"
   ],
   "header:X-AddressesGroup:asAddresses": [
     {
@@ -1115,9 +1108,9 @@
       }
     ]
   ],
-  "header:X-AddressesGroup-Single": "A Group(Some people)\n            :Chris Jones <c@(Chris's host.)public.example>,\n            joe@example.org,     John <jdoe@one.test> (my dear\n            friend); (the end of the group)",
+  "header:X-AddressesGroup-Single": " A Group(Some people)\n            :Chris Jones <c@(Chris's host.)public.example>,\n            joe@example.org,     John <jdoe@one.test> (my dear\n            friend); (the end of the group)",
   "header:X-AddressesGroup-Single:all": [
-    "A Group(Some people)\n            :Chris Jones <c@(Chris's host.)public.example>,\n            joe@example.org,     John <jdoe@one.test> (my dear\n            friend); (the end of the group)"
+    " A Group(Some people)\n            :Chris Jones <c@(Chris's host.)public.example>,\n            joe@example.org,     John <jdoe@one.test> (my dear\n            friend); (the end of the group)"
   ],
   "header:X-AddressesGroup-Single:asAddresses": [
     {
@@ -1197,28 +1190,28 @@
       }
     ]
   ],
-  "header:X-Date": "Sun, 21 Nov 2021 15:23:02 -0900",
+  "header:X-Date": " Sun, 21 Nov 2021 15:23:02 -0900",
   "header:X-Date:all": [
-    "Sat, 20 Nov 2021 14:22:01 -0800",
-    "Sun, 21 Nov 2021 15:23:02 -0900"
+    " Sat, 20 Nov 2021 14:22:01 -0800",
+    " Sun, 21 Nov 2021 15:23:02 -0900"
   ],
   "header:X-Date:asDate": "2021-11-22T00:23:02Z",
   "header:X-Date:asDate:all": [
     "2021-11-20T22:22:01Z",
     "2021-11-22T00:23:02Z"
   ],
-  "header:X-Date-Single": "Tue, 5 Jul 2006 13:52:37 -0500",
+  "header:X-Date-Single": " Tue, 5 Jul 2006 13:52:37 -0500",
   "header:X-Date-Single:all": [
-    "Tue, 5 Jul 2006 13:52:37 -0500"
+    " Tue, 5 Jul 2006 13:52:37 -0500"
   ],
   "header:X-Date-Single:asDate": "2006-07-05T18:52:37Z",
   "header:X-Date-Single:asDate:all": [
     "2006-07-05T18:52:37Z"
   ],
-  "header:X-Id": "<myid4@example.com> <myid5@example.com>",
+  "header:X-Id": " <myid4@example.com> <myid5@example.com>",
   "header:X-Id:all": [
-    "<myid3@example.com>",
-    "<myid4@example.com> <myid5@example.com>"
+    " <myid3@example.com>",
+    " <myid4@example.com> <myid5@example.com>"
   ],
   "header:X-Id:asMessageIds": [
     "myid4@example.com",
@@ -1233,9 +1226,9 @@
       "myid5@example.com"
     ]
   ],
-  "header:X-Id-Single": "<myid@example.com> <myid2@example.com>",
+  "header:X-Id-Single": " <myid@example.com> <myid2@example.com>",
   "header:X-Id-Single:all": [
-    "<myid@example.com> <myid2@example.com>"
+    " <myid@example.com> <myid2@example.com>"
   ],
   "header:X-Id-Single:asMessageIds": [
     "myid@example.com",
@@ -1247,10 +1240,10 @@
       "myid2@example.com"
     ]
   ],
-  "header:X-List": "<http://www.mylist2.com/list2>,\n       <mailto:list2@mylist2.com>",
+  "header:X-List": " <http://www.mylist2.com/list2>,\n       <mailto:list2@mylist2.com>",
   "header:X-List:all": [
-    "<http://www.mylist.com/list>,\n       <mailto:list@mylist.com>",
-    "<http://www.mylist2.com/list2>,\n       <mailto:list2@mylist2.com>"
+    " <http://www.mylist.com/list>,\n       <mailto:list@mylist.com>",
+    " <http://www.mylist2.com/list2>,\n       <mailto:list2@mylist2.com>"
   ],
   "header:X-List:asURLs": [
     "http://www.mylist2.com/list2",
@@ -1266,9 +1259,9 @@
       "mailto:list2@mylist2.com"
     ]
   ],
-  "header:X-List-Single": "<mailto:x-moderator@host.com> (X-Postings are Moderated)",
+  "header:X-List-Single": " <mailto:x-moderator@host.com> (X-Postings are Moderated)",
   "header:X-List-Single:all": [
-    "<mailto:x-moderator@host.com> (X-Postings are Moderated)"
+    " <mailto:x-moderator@host.com> (X-Postings are Moderated)"
   ],
   "header:X-List-Single:asURLs": [
     "mailto:x-moderator@host.com"
@@ -1278,19 +1271,19 @@
       "mailto:x-moderator@host.com"
     ]
   ],
-  "header:X-Text": "=?ISO-8859-1?Q?a?= =?ISO-8859-2?Q?_b?=",
+  "header:X-Text": " =?ISO-8859-1?Q?a?= =?ISO-8859-2?Q?_b?=",
   "header:X-Text:all": [
-    "=?iso-8859-1?q?this=20is=20some=20text?=",
-    "=?ISO-8859-1?Q?a?= =?ISO-8859-2?Q?_b?="
+    " =?iso-8859-1?q?this=20is=20some=20text?=",
+    " =?ISO-8859-1?Q?a?= =?ISO-8859-2?Q?_b?="
   ],
   "header:X-Text:asText": "a b",
   "header:X-Text:asText:all": [
     "this is some text",
     "a b"
   ],
-  "header:X-Text-Single": "=?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=\n              =?ISO-8859-2?B?dSB1bmRlcnN0YW5kIHRoZSBleGFtcGxlLg==?=",
+  "header:X-Text-Single": " =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=\n              =?ISO-8859-2?B?dSB1bmRlcnN0YW5kIHRoZSBleGFtcGxlLg==?=",
   "header:X-Text-Single:all": [
-    "=?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=\n              =?ISO-8859-2?B?dSB1bmRlcnN0YW5kIHRoZSBleGFtcGxlLg==?="
+    " =?ISO-8859-1?B?SWYgeW91IGNhbiByZWFkIHRoaXMgeW8=?=\n              =?ISO-8859-2?B?dSB1bmRlcnN0YW5kIHRoZSBleGFtcGxlLg==?="
   ],
   "header:X-Text-Single:asText": "If you can read this you understand the example.",
   "header:X-Text-Single:asText:all": [

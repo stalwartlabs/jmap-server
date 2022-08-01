@@ -12,11 +12,11 @@ use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use jmap::types::type_state::TypeState;
 use std::borrow::Cow;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
+use store::ahash::AHashMap;
+use store::core::ahash_is_empty;
 use store::core::bitmap::Bitmap;
+use store::core::vec_map::VecMap;
 use store::tracing::log::debug;
 use store::Store;
 
@@ -36,7 +36,7 @@ struct WebSocketRequest {
     pub method_calls: Vec<method::Call<method::Request>>,
 
     #[serde(rename = "createdIds")]
-    pub created_ids: Option<HashMap<String, JMAPId>>,
+    pub created_ids: Option<AHashMap<String, JMAPId>>,
 }
 
 #[derive(Message, Debug, serde::Serialize)]
@@ -53,8 +53,8 @@ pub struct WebSocketResponse {
     session_state: u32,
 
     #[serde(rename(deserialize = "createdIds"))]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    created_ids: HashMap<String, JMAPId>,
+    #[serde(skip_serializing_if = "ahash_is_empty")]
+    created_ids: AHashMap<String, JMAPId>,
 
     #[serde(rename = "requestId")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,7 +114,7 @@ pub enum WebSocketStateChangeType {
 pub struct WebSocketStateChange {
     #[serde(rename = "@type")]
     pub type_: WebSocketStateChangeType,
-    pub changed: HashMap<JMAPId, HashMap<TypeState, JMAPState>>,
+    pub changed: VecMap<JMAPId, VecMap<TypeState, JMAPState>>,
     #[serde(rename = "pushState")]
     #[serde(skip_serializing_if = "Option::is_none")]
     push_state: Option<String>,
@@ -326,9 +326,8 @@ where
                                                 for (type_state, change_id) in state_change.types {
                                                     response
                                                         .changed
-                                                        .entry(state_change.account_id.into())
-                                                        .or_insert_with(HashMap::new)
-                                                        .insert(type_state, change_id.into());
+                                                        .get_mut_or_insert(state_change.account_id.into())
+                                                        .set(type_state, change_id.into());
                                                 }
                                             }
                                             Ok(None) => {
@@ -432,7 +431,7 @@ impl WebSocketStateChange {
     pub fn new(push_state: Option<String>) -> Self {
         WebSocketStateChange {
             type_: WebSocketStateChangeType::StateChange,
-            changed: HashMap::new(),
+            changed: VecMap::new(),
             push_state,
         }
     }

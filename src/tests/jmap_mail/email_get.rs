@@ -156,15 +156,11 @@ where
 
         file_name.set_extension("json");
 
-        //fs::write(&file_name, &result).unwrap();
-
-        assert_eq!(
-            &String::from_utf8(fs::read(&file_name).unwrap()).unwrap(),
-            &result,
-            "{} ({})",
-            result,
-            file_name.to_str().unwrap()
-        );
+        if fs::read(&file_name).unwrap() != result.as_bytes() {
+            file_name.set_extension("failed");
+            fs::write(&file_name, result.as_bytes()).unwrap();
+            panic!("Test failed, output saved to {}", file_name.display());
+        }
     }
 
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();

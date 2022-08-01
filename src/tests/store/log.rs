@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use jmap::{
     request::changes::ChangesRequest,
@@ -6,6 +6,7 @@ use jmap::{
 };
 use jmap_mail::mail::changes::JMAPMailChanges;
 use store::{
+    ahash::AHashSet,
     core::{acl::ACLToken, collection::Collection, error::StoreError},
     log::{
         entry::Entry,
@@ -22,7 +23,7 @@ where
 {
     const NUM_ACCOUNTS: usize = 100;
 
-    let mut expected_changed_accounts = HashSet::new();
+    let mut expected_changed_accounts = AHashSet::default();
     let mut expected_inserted_ids: Vec<Vec<JMAPId>> = vec![Vec::new(); NUM_ACCOUNTS];
 
     for run in 0u64..10u64 {
@@ -66,7 +67,7 @@ where
                     .unwrap()
                     .1
                     .into_iter()
-                    .collect::<HashSet<_>>(),
+                    .collect::<AHashSet<_>>(),
                 expected_changed_accounts
             );
         }

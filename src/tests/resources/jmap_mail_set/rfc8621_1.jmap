@@ -24,32 +24,32 @@
     "size": 81,
     "headers": [
       {
-        "name": "Content-Language",
-        "value": "en"
-      },
-      {
-        "name": "Content-Transfer-Encoding",
-        "value": "7bit"
-      },
-      {
-        "name": "Content-Type",
-        "value": "text/plain; charset=\"utf-8\""
-      },
-      {
         "name": "Date",
-        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        "value": " Tue, 10 Jul 2018 01:03:11 +0000"
       },
       {
         "name": "From",
-        "value": "\"Joe Bloggs\" <joe@example.com>"
+        "value": " \"Joe Bloggs\" <joe@example.com>"
       },
       {
         "name": "Message-ID",
-        "value": "<my-message-id>"
+        "value": " <my-message-id>"
       },
       {
         "name": "Subject",
-        "value": "World domination"
+        "value": " World domination"
+      },
+      {
+        "name": "Content-Language",
+        "value": " en"
+      },
+      {
+        "name": "Content-Type",
+        "value": " text/plain; charset=\"utf-8\""
+      },
+      {
+        "name": "Content-Transfer-Encoding",
+        "value": " 7bit"
       }
     ],
     "type": "text/plain",
@@ -63,11 +63,6 @@
       "value": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
       "isEncodingProblem": false,
       "isTruncated": false
-    },
-    "1": {
-      "value": "<html><body>I have the most brilliant plan.  Let me tell you all about it.  What we do is, we...",
-      "isEncodingProblem": false,
-      "isTruncated": true
     }
   },
   "textBody": [
@@ -77,32 +72,32 @@
       "size": 81,
       "headers": [
         {
-          "name": "Content-Language",
-          "value": "en"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
-        },
-        {
-          "name": "Content-Type",
-          "value": "text/plain; charset=\"utf-8\""
-        },
-        {
           "name": "Date",
-          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+          "value": " Tue, 10 Jul 2018 01:03:11 +0000"
         },
         {
           "name": "From",
-          "value": "\"Joe Bloggs\" <joe@example.com>"
+          "value": " \"Joe Bloggs\" <joe@example.com>"
         },
         {
           "name": "Message-ID",
-          "value": "<my-message-id>"
+          "value": " <my-message-id>"
         },
         {
           "name": "Subject",
-          "value": "World domination"
+          "value": " World domination"
+        },
+        {
+          "name": "Content-Language",
+          "value": " en"
+        },
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -114,10 +109,44 @@
   ],
   "htmlBody": [
     {
-      "partId": "1",
-      "blobId": "b3ba028461f4a3b85243a1abc8221be05df348ad1f974318357644e2b63d0cd036b",
-      "size": 107,
-      "type": "text/html"
+      "partId": "0",
+      "blobId": "b29233a034f7e657139de5be7444de0815ba4fb884fc575d1bf94ca6f08cc1f2051",
+      "size": 81,
+      "headers": [
+        {
+          "name": "Date",
+          "value": " Tue, 10 Jul 2018 01:03:11 +0000"
+        },
+        {
+          "name": "From",
+          "value": " \"Joe Bloggs\" <joe@example.com>"
+        },
+        {
+          "name": "Message-ID",
+          "value": " <my-message-id>"
+        },
+        {
+          "name": "Subject",
+          "value": " World domination"
+        },
+        {
+          "name": "Content-Language",
+          "value": " en"
+        },
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8",
+      "language": [
+        "en"
+      ]
     }
   ],
   "attachments": [],

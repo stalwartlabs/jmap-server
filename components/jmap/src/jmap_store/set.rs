@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::changes::JMAPChanges;
@@ -13,10 +12,12 @@ use crate::{
     error::{method::MethodError, set::SetErrorType},
     request::set::SetRequest,
 };
+use store::ahash::AHashMap;
 use store::core::acl::ACLToken;
 use store::core::collection::Collection;
 use store::core::document::Document;
 
+use store::core::vec_map::VecMap;
 use store::log::changes::ChangeId;
 use store::parking_lot::MutexGuard;
 use store::write::batch::WriteBatch;
@@ -90,12 +91,12 @@ where
                 account_id: request.account_id.into(),
                 new_state: old_state.clone().into(),
                 old_state: old_state.into(),
-                created: HashMap::with_capacity(request.create.as_ref().map_or(0, |v| v.len())),
-                not_created: HashMap::new(),
-                updated: HashMap::with_capacity(request.update.as_ref().map_or(0, |v| v.len())),
-                not_updated: HashMap::new(),
+                created: AHashMap::with_capacity(request.create.as_ref().map_or(0, |v| v.len())),
+                not_created: VecMap::with_capacity(0),
+                updated: VecMap::with_capacity(request.update.as_ref().map_or(0, |v| v.len())),
+                not_updated: VecMap::with_capacity(0),
                 destroyed: Vec::with_capacity(will_destroy.len()),
-                not_destroyed: HashMap::new(),
+                not_destroyed: VecMap::with_capacity(0),
                 next_call: None,
                 change_id: None,
                 state_changes: None,
@@ -173,7 +174,7 @@ where
                     self.response.created.insert(create_id, result);
                 }
                 Err(err) => {
-                    self.response.not_created.insert(create_id, err);
+                    self.response.not_created.append(create_id, err);
                 }
             };
         }
@@ -194,10 +195,10 @@ where
             if !self.document_ids.contains(document_id) {
                 self.response
                     .not_updated
-                    .insert(id, SetError::new(SetErrorType::NotFound, "ID not found."));
+                    .append(id, SetError::new(SetErrorType::NotFound, "ID not found."));
                 continue;
             } else if self.will_destroy.contains(&id) {
-                self.response.not_updated.insert(
+                self.response.not_updated.append(
                     id,
                     SetError::new(SetErrorType::WillDestroy, "ID will be destroyed."),
                 );
@@ -211,10 +212,10 @@ where
                         self.changes.update_document(document);
                         self.changes.log_update(self.collection, id);
                     }
-                    self.response.updated.insert(id, result);
+                    self.response.updated.append(id, result);
                 }
                 Err(err) => {
-                    self.response.not_updated.insert(id, err);
+                    self.response.not_updated.append(id, err);
                 }
             };
         }
@@ -240,13 +241,13 @@ where
                         self.response.destroyed.push(id);
                     }
                     Err(err) => {
-                        self.response.not_destroyed.insert(id, err);
+                        self.response.not_destroyed.append(id, err);
                     }
                 };
             } else {
                 self.response
                     .not_destroyed
-                    .insert(id, SetError::new(SetErrorType::NotFound, "ID not found."));
+                    .append(id, SetError::new(SetErrorType::NotFound, "ID not found."));
             }
         }
         Ok(())

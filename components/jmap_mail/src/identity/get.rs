@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
 
 use store::core::error::StoreError;
+use store::core::vec_map::VecMap;
 use store::JMAPStore;
 use store::Store;
 
@@ -44,18 +43,24 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn identity_get(&self, request: GetRequest<Identity>) -> jmap::Result<GetResponse<Identity>> {
-        let helper = GetHelper::new(self, request, default_mapper.into(), None::<SharedDocsFnc>)?;
+        let mut helper =
+            GetHelper::new(self, request, default_mapper.into(), None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
+
+        // Add Id Property
+        if !helper.properties.contains(&Property::Id) {
+            helper.properties.push(Property::Id);
+        }
 
         helper.get(|id, properties| {
             let document_id = id.get_document_id();
             let mut fields = self
                 .get_orm::<Identity>(account_id, document_id)?
                 .ok_or_else(|| StoreError::InternalError("Identity data not found".to_string()))?;
-            let mut identity = HashMap::with_capacity(properties.len());
+            let mut identity = VecMap::with_capacity(properties.len());
 
             for property in properties {
-                identity.insert(
+                identity.append(
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },

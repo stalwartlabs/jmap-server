@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -13,7 +12,7 @@ use jmap::{
 };
 use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys};
 use reqwest::header::CONTENT_ENCODING;
-use store::Store;
+use store::{ahash::AHashSet, Store};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -277,7 +276,7 @@ async fn assert_state(event_rx: &mut mpsc::Receiver<PushMessage>, state: &[TypeS
             .unwrap()
             .iter()
             .map(|x| x.0)
-            .collect::<HashSet<&TypeState>>(),
-        state.iter().collect::<HashSet<&TypeState>>()
+            .collect::<AHashSet<&TypeState>>(),
+        state.iter().collect::<AHashSet<&TypeState>>()
     );
 }

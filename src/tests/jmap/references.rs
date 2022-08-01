@@ -1,7 +1,6 @@
-use std::collections::HashMap;
-
 use jmap::{error::method::MethodError, jmap_store::get::GetObject, types::jmap::JMAPId};
 use jmap_mail::mailbox::schema::Property;
+use store::ahash::AHashMap;
 
 use crate::api::{method, request::Request, response::Response};
 
@@ -293,7 +292,7 @@ fn map_sort_created_ids() {
             .unwrap()
             .into_iter()
             .map(|(p, v)| (p, v.get_as_id(&Property::ParentId).unwrap().pop().unwrap()))
-            .collect::<HashMap<_, _>>();
+            .collect::<AHashMap<_, _>>();
         assert_eq!(create.get("a").unwrap(), &JMAPId::new(1));
         assert_eq!(create.get("b").unwrap(), &JMAPId::new(2));
         assert_eq!(create.get("c").unwrap(), &JMAPId::new(3));
@@ -314,7 +313,7 @@ fn map_sort_created_ids() {
             .unwrap()
             .into_iter()
             .map(|(p, v)| (p, v.get_as_id(&Property::ParentId).unwrap().pop().unwrap()))
-            .collect::<HashMap<_, _>>();
+            .collect::<AHashMap<_, _>>();
         assert_eq!(create.get("a1").unwrap(), &JMAPId::new(5));
         assert_eq!(create.get("b2").unwrap(), &JMAPId::new(6));
         assert_eq!(create.get("c3").unwrap(), &JMAPId::new(7));

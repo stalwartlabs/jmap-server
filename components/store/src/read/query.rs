@@ -8,8 +8,9 @@ use crate::{
     AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };
 
+use ahash::AHashSet;
 use roaring::RoaringBitmap;
-use std::{collections::HashSet, vec::IntoIter};
+use std::vec::IntoIter;
 
 use super::{
     comparator::Comparator,
@@ -189,7 +190,7 @@ where
                                         bitmap_op(state.op, &mut state.bm, None, &document_ids);
                                     }
                                 } else {
-                                    let mut requested_keys = HashSet::new();
+                                    let mut requested_keys = AHashSet::default();
                                     let mut text_bitmap = None;
 
                                     for token in Stemmer::new(&text, language, MAX_TOKEN_LENGTH) {

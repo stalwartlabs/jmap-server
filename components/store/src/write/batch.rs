@@ -1,7 +1,9 @@
+use ahash::AHashSet;
+
 use crate::core::document::Document;
+use crate::core::vec_map::VecMap;
 use crate::serialize::leb128::Leb128;
 use crate::{AccountId, Collection, DocumentId, JMAPId};
-use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub enum WriteAction {
@@ -12,24 +14,24 @@ pub enum WriteAction {
 
 pub struct WriteBatch {
     pub account_id: AccountId,
-    pub changes: HashMap<Collection, Change>,
+    pub changes: VecMap<Collection, Change>,
     pub documents: Vec<WriteAction>,
     pub linked_batch: Option<Box<WriteBatch>>,
 }
 
 #[derive(Default)]
 pub struct Change {
-    pub inserts: HashSet<JMAPId>,
-    pub updates: HashSet<JMAPId>,
-    pub deletes: HashSet<JMAPId>,
-    pub child_updates: HashSet<JMAPId>,
+    pub inserts: AHashSet<JMAPId>,
+    pub updates: AHashSet<JMAPId>,
+    pub deletes: AHashSet<JMAPId>,
+    pub child_updates: AHashSet<JMAPId>,
 }
 
 impl WriteBatch {
     pub fn new(account_id: AccountId) -> Self {
         WriteBatch {
             account_id,
-            changes: HashMap::new(),
+            changes: VecMap::new(),
             documents: Vec::new(),
             linked_batch: None,
         }
@@ -38,7 +40,7 @@ impl WriteBatch {
     pub fn insert(account_id: AccountId, document: Document) -> Self {
         WriteBatch {
             account_id,
-            changes: HashMap::new(),
+            changes: VecMap::new(),
             documents: vec![WriteAction::Insert(document)],
             linked_batch: None,
         }
@@ -47,7 +49,7 @@ impl WriteBatch {
     pub fn delete(account_id: AccountId, collection: Collection, document_id: DocumentId) -> Self {
         WriteBatch {
             account_id,
-            changes: HashMap::new(),
+            changes: VecMap::new(),
             documents: vec![WriteAction::Delete(Document::new(collection, document_id))],
             linked_batch: None,
         }
@@ -71,32 +73,28 @@ impl WriteBatch {
 
     pub fn log_insert(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
         self.changes
-            .entry(collection)
-            .or_insert_with(Change::new)
+            .get_mut_or_insert(collection)
             .inserts
             .insert(jmap_id.into());
     }
 
     pub fn log_update(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
         self.changes
-            .entry(collection)
-            .or_insert_with(Change::new)
+            .get_mut_or_insert(collection)
             .updates
             .insert(jmap_id.into());
     }
 
     pub fn log_child_update(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
         self.changes
-            .entry(collection)
-            .or_insert_with(Change::new)
+            .get_mut_or_insert(collection)
             .child_updates
             .insert(jmap_id.into());
     }
 
     pub fn log_delete(&mut self, collection: Collection, jmap_id: impl Into<JMAPId>) {
         self.changes
-            .entry(collection)
-            .or_insert_with(Change::new)
+            .get_mut_or_insert(collection)
             .deletes
             .insert(jmap_id.into());
     }
@@ -107,7 +105,7 @@ impl WriteBatch {
         old_jmap_id: impl Into<JMAPId>,
         new_jmap_id: impl Into<JMAPId>,
     ) {
-        let change = self.changes.entry(collection).or_insert_with(Change::new);
+        let change = self.changes.get_mut_or_insert(collection);
         change.deletes.insert(old_jmap_id.into());
         change.inserts.insert(new_jmap_id.into());
     }

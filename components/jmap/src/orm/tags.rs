@@ -1,6 +1,4 @@
-use store::core::tag::Tag;
-
-use std::collections::HashSet;
+use store::{ahash::AHashSet, core::tag::Tag};
 
 use super::{Object, TinyORM};
 
@@ -9,10 +7,7 @@ where
     T: Object + 'static,
 {
     pub fn tag(&mut self, property: T::Property, tag: Tag) {
-        self.tags
-            .entry(property)
-            .or_insert_with(HashSet::new)
-            .insert(tag);
+        self.tags.get_mut_or_insert(property).insert(tag);
     }
 
     pub fn untag(&mut self, property: &T::Property, tag: &Tag) {
@@ -25,7 +20,7 @@ where
         }
     }
 
-    pub fn get_tags(&self, property: &T::Property) -> Option<&HashSet<Tag>> {
+    pub fn get_tags(&self, property: &T::Property) -> Option<&AHashSet<Tag>> {
         self.tags.get(property)
     }
 
@@ -36,10 +31,10 @@ where
             .unwrap_or(false)
     }
 
-    pub fn get_changed_tags(&self, changes: &Self, property: &T::Property) -> HashSet<Tag> {
+    pub fn get_changed_tags(&self, changes: &Self, property: &T::Property) -> AHashSet<Tag> {
         match (self.tags.get(property), changes.tags.get(property)) {
             (Some(this), Some(changes)) if this != changes => {
-                let mut tag_diff = HashSet::new();
+                let mut tag_diff = AHashSet::default();
                 for tag in this {
                     if !changes.contains(tag) {
                         tag_diff.insert(tag.clone());
@@ -54,14 +49,14 @@ where
             }
             (Some(this), None) => this.clone(),
             (None, Some(changes)) => changes.clone(),
-            _ => HashSet::with_capacity(0),
+            _ => AHashSet::default(),
         }
     }
 
-    pub fn get_added_tags(&self, changes: &Self, property: &T::Property) -> HashSet<Tag> {
+    pub fn get_added_tags(&self, changes: &Self, property: &T::Property) -> AHashSet<Tag> {
         match (self.tags.get(property), changes.tags.get(property)) {
             (Some(this), Some(changes)) if this != changes => {
-                let mut tag_diff = HashSet::new();
+                let mut tag_diff = AHashSet::default();
                 for tag in changes {
                     if !this.contains(tag) {
                         tag_diff.insert(tag.clone());
@@ -70,14 +65,14 @@ where
                 tag_diff
             }
             (None, Some(changes)) => changes.clone(),
-            _ => HashSet::with_capacity(0),
+            _ => AHashSet::default(),
         }
     }
 
-    pub fn get_removed_tags(&self, changes: &Self, property: &T::Property) -> HashSet<Tag> {
+    pub fn get_removed_tags(&self, changes: &Self, property: &T::Property) -> AHashSet<Tag> {
         match (self.tags.get(property), changes.tags.get(property)) {
             (Some(this), Some(changes)) if this != changes => {
-                let mut tag_diff = HashSet::new();
+                let mut tag_diff = AHashSet::default();
                 for tag in this {
                     if !changes.contains(tag) {
                         tag_diff.insert(tag.clone());
@@ -86,7 +81,7 @@ where
                 tag_diff
             }
             (Some(this), None) => this.clone(),
-            _ => HashSet::with_capacity(0),
+            _ => AHashSet::default(),
         }
     }
 }

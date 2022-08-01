@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    convert::TryInto,
-};
+use std::convert::TryInto;
 
 use crate::nlp::{stemmer::StemmedToken, tokenizers::Token};
 
@@ -10,6 +7,7 @@ use crate::{
     serialize::{StoreDeserialize, StoreSerialize},
     FieldId,
 };
+use ahash::{AHashMap, AHashSet};
 use bitpacking::{BitPacker, BitPacker1x, BitPacker4x, BitPacker8x};
 
 #[derive(Debug)]
@@ -49,7 +47,7 @@ pub struct TermIndexBuilderItem {
 
 #[derive(Debug)]
 pub struct TermIndexBuilder {
-    terms: HashMap<String, u32>,
+    terms: AHashMap<String, u32>,
     items: Vec<TermIndexBuilderItem>,
 }
 
@@ -63,7 +61,7 @@ pub struct TermIndexItem {
 
 #[derive(Debug, Default)]
 pub struct TermIndex {
-    pub token_map: HashMap<String, u32>,
+    pub token_map: AHashMap<String, u32>,
     pub items: Vec<TermIndexItem>,
 }
 
@@ -204,7 +202,7 @@ impl TermIndexBuilder {
     pub fn new() -> TermIndexBuilder {
         TermIndexBuilder {
             items: Vec::new(),
-            terms: HashMap::new(),
+            terms: AHashMap::default(),
         }
     }
 
@@ -362,7 +360,7 @@ impl StoreSerialize for TermIndexBuilder {
 impl StoreDeserialize for TermIndex {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
         let (num_tokens, mut pos) = u32::from_leb128_bytes(bytes)?;
-        let mut token_map = HashMap::with_capacity(num_tokens as usize);
+        let mut token_map = AHashMap::with_capacity(num_tokens as usize);
         for term_id in 0..num_tokens {
             let nil_pos = bytes.get(pos..)?.iter().position(|b| b == &0)?;
             token_map.insert(
@@ -495,7 +493,7 @@ impl TermIndex {
     pub fn match_terms(
         &self,
         match_terms: &[MatchTerm],
-        match_in: Option<HashSet<FieldId>>,
+        match_in: Option<AHashSet<FieldId>>,
         match_phrase: bool,
         match_many: bool,
         include_offsets: bool,
@@ -657,8 +655,8 @@ impl TermIndex {
 #[derive(Default)]
 pub struct Terms {
     pub field_id: FieldId,
-    pub exact_terms: HashSet<TermId>,
-    pub stemmed_terms: HashSet<TermId>,
+    pub exact_terms: AHashSet<TermId>,
+    pub stemmed_terms: AHashSet<TermId>,
 }
 
 pub struct TokenIndex {
@@ -684,8 +682,8 @@ impl StoreDeserialize for TokenIndex {
 
             let mut field_terms = Terms {
                 field_id: *bytes.get(pos)?,
-                exact_terms: HashSet::new(),
-                stemmed_terms: HashSet::new(),
+                exact_terms: AHashSet::default(),
+                stemmed_terms: AHashSet::default(),
             };
             pos += 1;
 
@@ -730,7 +728,8 @@ impl StoreDeserialize for TokenIndex {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+
+    use ahash::{AHashMap, AHashSet};
 
     use crate::nlp::{
         stemmer::Stemmer,
@@ -842,7 +841,7 @@ mod tests {
         ];
 
         let mut builder = TermIndexBuilder::new();
-        let mut stemmed_word_ids = HashMap::new();
+        let mut stemmed_word_ids = AHashMap::default();
 
         // Build the term index
         for (part_id, (text, field_id)) in parts.iter().enumerate() {
@@ -911,7 +910,7 @@ mod tests {
                 .match_terms(
                     &match_terms,
                     field_id.and_then(|f| {
-                        let mut h = HashSet::new();
+                        let mut h = AHashSet::default();
                         h.insert(f);
                         Some(h)
                     }),

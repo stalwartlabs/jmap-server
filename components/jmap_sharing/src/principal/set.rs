@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
@@ -11,6 +9,7 @@ use jmap::types::principal::{JMAPPrincipals, Principal, Property, Type, Value};
 use jmap::{sanitize_domain, sanitize_email};
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
+use store::ahash::AHashSet;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::read::comparator::Comparator;
@@ -378,7 +377,7 @@ where
             for domain in validate_emails
                 .iter()
                 .filter_map(|e| e.split_once('@')?.1.into())
-                .collect::<HashSet<_>>()
+                .collect::<AHashSet<_>>()
             {
                 if helper
                     .store

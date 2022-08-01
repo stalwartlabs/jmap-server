@@ -1,11 +1,11 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use actix_web::web;
 use futures::StreamExt;
 
 use jmap::types::jmap::JMAPId;
 use jmap_client::{client::Client, event_source::Changes, mailbox::Role, TypeState};
-use store::{RecipientType, Store};
+use store::{ahash::AHashSet, RecipientType, Store};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -80,6 +80,7 @@ where
         &mut event_rx,
         &[
             TypeState::EmailDelivery,
+            TypeState::Email,
             TypeState::Thread,
             TypeState::Mailbox,
         ],
@@ -109,8 +110,8 @@ async fn assert_state(event_rx: &mut mpsc::Receiver<Changes>, state: &[TypeState
                     .changes(&JMAPId::new(1).to_string())
                     .unwrap()
                     .map(|x| x.0)
-                    .collect::<HashSet<&TypeState>>(),
-                state.iter().collect::<HashSet<&TypeState>>()
+                    .collect::<AHashSet<&TypeState>>(),
+                state.iter().collect::<AHashSet<&TypeState>>()
             );
         }
         result => {

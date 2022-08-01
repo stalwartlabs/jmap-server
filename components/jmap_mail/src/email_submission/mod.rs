@@ -19,7 +19,7 @@ impl Object for EmailSubmission {
     fn new(id: JMAPId) -> Self {
         let mut item = EmailSubmission::default();
         item.properties
-            .insert(Property::Id, Value::Id { value: id });
+            .append(Property::Id, Value::Id { value: id });
         item
     }
 

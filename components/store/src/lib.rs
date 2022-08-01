@@ -28,6 +28,7 @@ use write::{
     operation::WriteOperation,
 };
 
+pub use ahash;
 pub use bincode;
 pub use chrono;
 pub use lz4_flex;

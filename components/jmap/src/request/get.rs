@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fmt, sync::Arc};
 
 use serde::{de::IgnoredAny, Deserialize};
-use store::core::acl::ACLToken;
+use store::{ahash::AHashSet, core::acl::ACLToken};
 
 use crate::{
     error::method::MethodError,
@@ -150,8 +150,8 @@ impl<'de, O: GetObject> serde::de::Visitor<'de> for GetRequestVisitor<O> {
                 }
                 "properties" => {
                     request.properties = if request.properties.is_none() {
-                        map.next_value::<Option<Vec<O::Property>>>()?
-                            .map(MaybeResultReference::Value)
+                        map.next_value::<Option<AHashSet<O::Property>>>()?
+                            .map(|p| MaybeResultReference::Value(p.into_iter().collect()))
                     } else {
                         map.next_value::<IgnoredAny>()?;
                         MaybeResultReference::Error("Duplicate 'properties' property.".into())

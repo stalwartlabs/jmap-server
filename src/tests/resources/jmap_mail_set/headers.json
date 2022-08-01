@@ -164,16 +164,8 @@
             "type": "text/plain",
             "blobId": "I have the most brilliant plan.  Let me tell you all about it.  What we do is, we",
             "charset": "us-ascii",
-            "headers": [
-                {
-                    "name": "Content-Language",
-                    "value": "en"
-                },
-                {
-                    "name": "X-Header",
-                    "value": "just a value"
-                }
-            ],
+            "header:Content-Language": "en",
+            "header:X-Header": "just a value",
             "header:X-Text": "more text"
         }
     ],

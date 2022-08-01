@@ -19,46 +19,11 @@
   "subject": "Map of Argentina with Description",
   "sentAt": "1998-08-13T07:42:41Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
         "name": "Content-Type",
-        "value": "multipart/mixed;\n              boundary=\"DC8------------DC8638F443D87A7F0726DEF7\""
-      },
-      {
-        "name": "Date",
-        "value": "Mon, 13 Aug 1998 17:42:41 +1000"
-      },
-      {
-        "name": "From",
-        "value": "Bill Clinton <president@whitehouse.gov>"
-      },
-      {
-        "name": "MIME-Version",
-        "value": "1.0"
-      },
-      {
-        "name": "Message-ID",
-        "value": "<199804130742.RAA20366@mai1host.whitehouse.gov>"
-      },
-      {
-        "name": "Received",
-        "value": "from mailhost.whitehouse.gov ([192.168.51.200])\n        by heartbeat.whitehouse.gov (8.8.8/8.8.8) with ESMTP id SAA22453\n        for <vice-president@heartbeat.whitehouse.gov>;\n        Mon, 13 Aug 1998 l8:14:23 +1000"
-      },
-      {
-        "name": "Received",
-        "value": "from the_big_box.whitehouse.gov ([192.168.51.50])\n        by mailhost.whitehouse.gov (8.8.8/8.8.7) with ESMTP id RAA20366\n        for vice-president@whitehouse.gov; Mon, 13 Aug 1998 17:42:41 +1000"
-      },
-      {
-        "name": "Return-Path",
-        "value": "<president@whitehouse.gov>"
-      },
-      {
-        "name": "Subject",
-        "value": "Map of Argentina with Description"
-      },
-      {
-        "name": "To",
-        "value": "A1 (The Enforcer) Gore <vice-president@whitehouse.gov>"
+        "value": " multipart/mixed;\n              boundary=\"DC8------------DC8638F443D87A7F0726DEF7\""
       }
     ],
     "type": "multipart/mixed",
@@ -69,12 +34,12 @@
         "size": 355,
         "headers": [
           {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "name": "Content-Type",
+            "value": " text/plain; charset=us-ascii"
           },
           {
-            "name": "Content-Type",
-            "value": "text/plain; charset=us-ascii"
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
@@ -86,16 +51,16 @@
         "size": 288,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+            "name": "Content-Type",
+            "value": " image/gif; name=\"map_of_Argentina.gif\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " base64"
           },
           {
-            "name": "Content-Type",
-            "value": "image/gif; name=\"map_of_Argentina.gif\""
+            "name": "Content-Disposition",
+            "value": " inline; fi1ename=\"map_of_Argentina.gif\""
           }
         ],
         "name": "map_of_Argentina.gif",
@@ -109,11 +74,6 @@
       "value": "Hi A1,\n\nI finally figured out this MIME thing.  Pretty cool.  I'll send you\nsome sax music in .au...",
       "isEncodingProblem": false,
       "isTruncated": true
-    },
-    "3": {
-      "value": "<html><body>Hi A1,<br/><br/>I finally figured out this MIME thing.  Pretty cool.  I'll send you...",
-      "isEncodingProblem": false,
-      "isTruncated": true
     }
   },
   "textBody": [
@@ -123,12 +83,12 @@
       "size": 355,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "name": "Content-Type",
+          "value": " text/plain; charset=us-ascii"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain; charset=us-ascii"
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -140,16 +100,16 @@
       "size": 288,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+          "name": "Content-Type",
+          "value": " image/gif; name=\"map_of_Argentina.gif\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/gif; name=\"map_of_Argentina.gif\""
+          "name": "Content-Disposition",
+          "value": " inline; fi1ename=\"map_of_Argentina.gif\""
         }
       ],
       "name": "map_of_Argentina.gif",
@@ -159,10 +119,21 @@
   ],
   "htmlBody": [
     {
-      "partId": "3",
-      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f03",
-      "size": 429,
-      "type": "text/html"
+      "partId": "1",
+      "blobId": "ie9188726e97512a83dab5bd6f36e7ff1b2cec1840be9cc5dd2955974e210e7a1bc0f01",
+      "size": 355,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=us-ascii"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii"
     },
     {
       "partId": "2",
@@ -170,16 +141,16 @@
       "size": 288,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+          "name": "Content-Type",
+          "value": " image/gif; name=\"map_of_Argentina.gif\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/gif; name=\"map_of_Argentina.gif\""
+          "name": "Content-Disposition",
+          "value": " inline; fi1ename=\"map_of_Argentina.gif\""
         }
       ],
       "name": "map_of_Argentina.gif",
@@ -194,16 +165,16 @@
       "size": 288,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline; fi1ename=\"map_of_Argentina.gif\""
+          "name": "Content-Type",
+          "value": " image/gif; name=\"map_of_Argentina.gif\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/gif; name=\"map_of_Argentina.gif\""
+          "name": "Content-Disposition",
+          "value": " inline; fi1ename=\"map_of_Argentina.gif\""
         }
       ],
       "name": "map_of_Argentina.gif",

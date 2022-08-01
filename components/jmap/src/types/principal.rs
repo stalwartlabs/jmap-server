@@ -1,12 +1,11 @@
 use std::{
     borrow::Cow,
-    collections::HashMap,
     fmt::{self, Display},
 };
 
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::{
-    core::{acl::ACL, collection::Collection},
+    core::{acl::ACL, collection::Collection, vec_map::VecMap},
     read::{
         filter::{self, Query},
         FilterMapper,
@@ -27,7 +26,7 @@ use super::{blob::JMAPBlob, jmap::JMAPId, json_pointer::JSONPointer};
 
 #[derive(Debug, Clone, Default)]
 pub struct Principal {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
@@ -87,7 +86,7 @@ pub enum Value {
     DKIM { value: DKIM },
     Members { value: Vec<JMAPId> },
     ACLSet(Vec<ACLUpdate>),
-    ACLGet(HashMap<String, Vec<ACL>>),
+    ACLGet(VecMap<String, Vec<ACL>>),
     Null,
 }
 
@@ -205,7 +204,7 @@ impl Object for Principal {
     fn new(id: JMAPId) -> Self {
         let mut item = Principal::default();
         item.properties
-            .insert(Property::Id, Value::Id { value: id });
+            .append(Property::Id, Value::Id { value: id });
         item
     }
 
@@ -433,13 +432,13 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut properties: VecMap<Property, Value> = VecMap::new();
         let mut acls = Vec::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
                 "name" => {
-                    properties.insert(
+                    properties.append(
                         Property::Name,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -449,7 +448,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "description" => {
-                    properties.insert(
+                    properties.append(
                         Property::Description,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -459,7 +458,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "timezone" => {
-                    properties.insert(
+                    properties.append(
                         Property::Timezone,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -469,7 +468,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "email" => {
-                    properties.insert(
+                    properties.append(
                         Property::Email,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -479,7 +478,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "aliases" => {
-                    properties.insert(
+                    properties.append(
                         Property::Aliases,
                         if let Some(value) = map.next_value::<Option<Vec<String>>>()? {
                             Value::TextList { value }
@@ -489,7 +488,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "capabilities" => {
-                    properties.insert(
+                    properties.append(
                         Property::Capabilities,
                         if let Some(value) = map.next_value::<Option<Vec<String>>>()? {
                             Value::TextList { value }
@@ -499,7 +498,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "type" => {
-                    properties.insert(
+                    properties.append(
                         Property::Type,
                         Value::Type {
                             value: map.next_value::<Type>()?,
@@ -507,7 +506,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "secret" => {
-                    properties.insert(
+                    properties.append(
                         Property::Secret,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -517,7 +516,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "dkim" => {
-                    properties.insert(
+                    properties.append(
                         Property::DKIM,
                         if let Some(value) = map.next_value::<Option<DKIM>>()? {
                             Value::DKIM { value }
@@ -527,7 +526,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "members" => {
-                    properties.insert(
+                    properties.append(
                         Property::Members,
                         if let Some(value) = map.next_value::<Option<Vec<JMAPId>>>()? {
                             Value::Members { value }
@@ -537,7 +536,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "quota" => {
-                    properties.insert(
+                    properties.append(
                         Property::Quota,
                         if let Some(value) = map.next_value::<Option<u64>>()? {
                             Value::Number {
@@ -549,7 +548,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                     );
                 }
                 "picture" => {
-                    properties.insert(
+                    properties.append(
                         Property::Picture,
                         if let Some(value) = map.next_value::<Option<JMAPBlob>>()? {
                             Value::Blob { value }
@@ -561,7 +560,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                 "acl" => {
                     acls.push(ACLUpdate::Replace {
                         acls: map
-                            .next_value::<Option<HashMap<String, Vec<ACL>>>>()?
+                            .next_value::<Option<VecMap<String, Vec<ACL>>>>()?
                             .unwrap_or_default(),
                     });
                 }
@@ -610,7 +609,7 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
         }
 
         if !acls.is_empty() {
-            properties.insert(Property::ACL, Value::ACLSet(acls));
+            properties.append(Property::ACL, Value::ACLSet(acls));
         }
 
         Ok(Principal { properties })

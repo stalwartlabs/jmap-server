@@ -9,14 +9,15 @@
   "receivedAt": "1997-07-27T10:40:00Z",
   "subject": "RFC 8621 Section 4.1.4 test",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/mixed; boundary=\"1\""
+        "name": "Subject",
+        "value": " RFC 8621 Section 4.1.4 test"
       },
       {
-        "name": "Subject",
-        "value": "RFC 8621 Section 4.1.4 test"
+        "name": "Content-Type",
+        "value": " multipart/mixed; boundary=\"1\""
       }
     ],
     "type": "multipart/mixed",
@@ -27,40 +28,44 @@
         "size": 1,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Type",
+            "value": " text/plain"
           },
           {
-            "name": "Content-Type",
-            "value": "text/plain"
+            "name": "Content-Disposition",
+            "value": " inline"
           }
         ],
         "type": "text/plain",
+        "charset": "us-ascii",
         "disposition": "inline"
       },
       {
+        "size": 0,
         "headers": [
           {
             "name": "Content-Type",
-            "value": "multipart/mixed; boundary=\"2\""
+            "value": " multipart/mixed; boundary=\"2\""
           }
         ],
         "type": "multipart/mixed",
         "subParts": [
           {
+            "size": 0,
             "headers": [
               {
                 "name": "Content-Type",
-                "value": "multipart/alternative; boundary=\"3\""
+                "value": " multipart/alternative; boundary=\"3\""
               }
             ],
             "type": "multipart/alternative",
             "subParts": [
               {
+                "size": 0,
                 "headers": [
                   {
                     "name": "Content-Type",
-                    "value": "multipart/mixed; boundary=\"4\""
+                    "value": " multipart/mixed; boundary=\"4\""
                   }
                 ],
                 "type": "multipart/mixed",
@@ -71,15 +76,16 @@
                     "size": 1,
                     "headers": [
                       {
-                        "name": "Content-Disposition",
-                        "value": "inline"
+                        "name": "Content-Type",
+                        "value": " text/plain"
                       },
                       {
-                        "name": "Content-Type",
-                        "value": "text/plain"
+                        "name": "Content-Disposition",
+                        "value": " inline"
                       }
                     ],
                     "type": "text/plain",
+                    "charset": "us-ascii",
                     "disposition": "inline"
                   },
                   {
@@ -88,12 +94,12 @@
                     "size": 1,
                     "headers": [
                       {
-                        "name": "Content-Disposition",
-                        "value": "inline"
+                        "name": "Content-Type",
+                        "value": " image/jpeg"
                       },
                       {
-                        "name": "Content-Type",
-                        "value": "image/jpeg"
+                        "name": "Content-Disposition",
+                        "value": " inline"
                       }
                     ],
                     "type": "image/jpeg",
@@ -105,24 +111,26 @@
                     "size": 1,
                     "headers": [
                       {
-                        "name": "Content-Disposition",
-                        "value": "inline"
+                        "name": "Content-Type",
+                        "value": " text/plain"
                       },
                       {
-                        "name": "Content-Type",
-                        "value": "text/plain"
+                        "name": "Content-Disposition",
+                        "value": " inline"
                       }
                     ],
                     "type": "text/plain",
+                    "charset": "us-ascii",
                     "disposition": "inline"
                   }
                 ]
               },
               {
+                "size": 0,
                 "headers": [
                   {
                     "name": "Content-Type",
-                    "value": "multipart/related; boundary=\"5\""
+                    "value": " multipart/related; boundary=\"5\""
                   }
                 ],
                 "type": "multipart/related",
@@ -134,10 +142,11 @@
                     "headers": [
                       {
                         "name": "Content-Type",
-                        "value": "text/html"
+                        "value": " text/html"
                       }
                     ],
-                    "type": "text/html"
+                    "type": "text/html",
+                    "charset": "us-ascii"
                   },
                   {
                     "partId": "10",
@@ -146,7 +155,7 @@
                     "headers": [
                       {
                         "name": "Content-Type",
-                        "value": "image/jpeg"
+                        "value": " image/jpeg"
                       }
                     ],
                     "type": "image/jpeg"
@@ -161,12 +170,12 @@
             "size": 1,
             "headers": [
               {
-                "name": "Content-Disposition",
-                "value": "attachment"
+                "name": "Content-Type",
+                "value": " image/jpeg"
               },
               {
-                "name": "Content-Type",
-                "value": "image/jpeg"
+                "name": "Content-Disposition",
+                "value": " attachment"
               }
             ],
             "type": "image/jpeg",
@@ -179,7 +188,7 @@
             "headers": [
               {
                 "name": "Content-Type",
-                "value": "application/x-excel"
+                "value": " application/x-excel"
               }
             ],
             "type": "application/x-excel"
@@ -191,7 +200,7 @@
             "headers": [
               {
                 "name": "Content-Type",
-                "value": "message/rfc822"
+                "value": " message/rfc822"
               }
             ],
             "type": "message/rfc822"
@@ -204,15 +213,16 @@
         "size": 1,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Type",
+            "value": " text/plain"
           },
           {
-            "name": "Content-Type",
-            "value": "text/plain"
+            "name": "Content-Disposition",
+            "value": " inline"
           }
         ],
         "type": "text/plain",
+        "charset": "us-ascii",
         "disposition": "inline"
       }
     ]
@@ -228,18 +238,13 @@
       "isEncodingProblem": false,
       "isTruncated": false
     },
-    "15": {
-      "value": "<html><body>A</body></html>",
-      "isEncodingProblem": false,
-      "isTruncated": false
-    },
-    "16": {
-      "value": "<html><body>K</body></html>",
-      "isEncodingProblem": false,
-      "isTruncated": false
-    },
     "5": {
       "value": "B",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "6": {
+      "value": "C",
       "isEncodingProblem": false,
       "isTruncated": false
     },
@@ -261,15 +266,16 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " text/plain"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     },
     {
@@ -278,15 +284,16 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " text/plain"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     },
     {
@@ -295,12 +302,12 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " image/jpeg"
         },
         {
-          "name": "Content-Type",
-          "value": "image/jpeg"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "image/jpeg",
@@ -312,15 +319,16 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " text/plain"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     },
     {
@@ -329,24 +337,37 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " text/plain"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     }
   ],
   "htmlBody": [
     {
-      "partId": "15",
-      "blobId": "bebd481a1bee3ad997d4a6593c4ed7cd7cd64b2a02d4c8aa487bb272171affafe1b",
-      "size": 27,
-      "type": "text/html"
+      "partId": "1",
+      "blobId": "b559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd01",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Disposition",
+          "value": " inline"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii",
+      "disposition": "inline"
     },
     {
       "partId": "9",
@@ -355,16 +376,29 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "text/html"
+          "value": " text/html"
         }
       ],
-      "type": "text/html"
+      "type": "text/html",
+      "charset": "us-ascii"
     },
     {
-      "partId": "16",
-      "blobId": "bcb290313e061011dfa60c545f3633757e9a4fd7d3030376ba19cf4d9b5b225d71b",
-      "size": 27,
-      "type": "text/html"
+      "partId": "14",
+      "blobId": "b86be9a55762d316a3026c2836d044f5fc76e34da10e1b45feee5f18be7edb17701",
+      "size": 1,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Disposition",
+          "value": " inline"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii",
+      "disposition": "inline"
     }
   ],
   "attachments": [
@@ -374,12 +408,12 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " image/jpeg"
         },
         {
-          "name": "Content-Type",
-          "value": "image/jpeg"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "image/jpeg",
@@ -392,7 +426,7 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "image/jpeg"
+          "value": " image/jpeg"
         }
       ],
       "type": "image/jpeg"
@@ -403,12 +437,12 @@
       "size": 1,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "attachment"
+          "name": "Content-Type",
+          "value": " image/jpeg"
         },
         {
-          "name": "Content-Type",
-          "value": "image/jpeg"
+          "name": "Content-Disposition",
+          "value": " attachment"
         }
       ],
       "type": "image/jpeg",
@@ -421,7 +455,7 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "application/x-excel"
+          "value": " application/x-excel"
         }
       ],
       "type": "application/x-excel"
@@ -433,7 +467,7 @@
       "headers": [
         {
           "name": "Content-Type",
-          "value": "message/rfc822"
+          "value": " message/rfc822"
         }
       ],
       "type": "message/rfc822"

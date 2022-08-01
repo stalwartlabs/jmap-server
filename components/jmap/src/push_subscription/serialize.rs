@@ -1,7 +1,10 @@
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, fmt};
 
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
-use store::chrono::{DateTime, Utc};
+use store::{
+    chrono::{DateTime, Utc},
+    core::vec_map::VecMap,
+};
 
 use crate::types::type_state::TypeState;
 
@@ -78,12 +81,12 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut properties: VecMap<Property, Value> = VecMap::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
                 "deviceClientId" => {
-                    properties.insert(
+                    properties.append(
                         Property::DeviceClientId,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -93,7 +96,7 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                     );
                 }
                 "url" => {
-                    properties.insert(
+                    properties.append(
                         Property::Url,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -103,7 +106,7 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                     );
                 }
                 "verificationCode" => {
-                    properties.insert(
+                    properties.append(
                         Property::VerificationCode,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -113,7 +116,7 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                     );
                 }
                 "keys" => {
-                    properties.insert(
+                    properties.append(
                         Property::Keys,
                         if let Some(value) = map.next_value::<Option<Keys>>()? {
                             Value::Keys { value }
@@ -123,7 +126,7 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                     );
                 }
                 "expires" => {
-                    properties.insert(
+                    properties.append(
                         Property::Expires,
                         if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
                             Value::DateTime { value }
@@ -133,7 +136,7 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                     );
                 }
                 "types" => {
-                    properties.insert(
+                    properties.append(
                         Property::Types,
                         if let Some(value) = map.next_value::<Option<Vec<TypeState>>>()? {
                             Value::Types { value }

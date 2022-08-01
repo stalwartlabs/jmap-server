@@ -25,63 +25,65 @@
   "subject": "Test message from Microsoft Outlook 00",
   "sentAt": "2000-05-17T23:44:45Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/related;\n\tboundary=\"----=_NextPart_000_000C_01BFC038.5A5C8E60\""
-      },
-      {
-        "name": "Date",
-        "value": "Wed, 17 May 2000 19:44:45 -0400"
-      },
-      {
         "name": "From",
-        "value": "\"Doug Sauder\" <doug@example.com>"
-      },
-      {
-        "name": "Importance",
-        "value": "Normal"
-      },
-      {
-        "name": "MIME-Version",
-        "value": "1.0"
-      },
-      {
-        "name": "Message-ID",
-        "value": "<NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com>"
-      },
-      {
-        "name": "Subject",
-        "value": "Test message from Microsoft Outlook 00"
+        "value": " \"Doug Sauder\" <doug@example.com>"
       },
       {
         "name": "To",
-        "value": "\"Joe Blow\" <jblow@example.com>"
+        "value": " \"Joe Blow\" <jblow@example.com>"
       },
       {
-        "name": "X-MSMail-Priority",
-        "value": "Normal"
+        "name": "Subject",
+        "value": " Test message from Microsoft Outlook 00"
       },
       {
-        "name": "X-Mailer",
-        "value": "Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+        "name": "Date",
+        "value": " Wed, 17 May 2000 19:44:45 -0400"
       },
       {
-        "name": "X-MimeOLE",
-        "value": "Produced By Microsoft MimeOLE V5.00.2314.1300"
+        "name": "Message-ID",
+        "value": " <NDBBIAKOPKHFGPLCODIGKEKFCHAA.doug@example.com>"
+      },
+      {
+        "name": "MIME-Version",
+        "value": " 1.0"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/related;\n\tboundary=\"----=_NextPart_000_000C_01BFC038.5A5C8E60\""
       },
       {
         "name": "X-Priority",
-        "value": "3 (Normal)"
+        "value": " 3 (Normal)"
+      },
+      {
+        "name": "X-MSMail-Priority",
+        "value": " Normal"
+      },
+      {
+        "name": "X-Mailer",
+        "value": " Microsoft Outlook IMO, Build 9.0.2416 (9.0.2910.0)"
+      },
+      {
+        "name": "Importance",
+        "value": " Normal"
+      },
+      {
+        "name": "X-MimeOLE",
+        "value": " Produced By Microsoft MimeOLE V5.00.2314.1300"
       }
     ],
     "type": "multipart/related",
     "subParts": [
       {
+        "size": 0,
         "headers": [
           {
             "name": "Content-Type",
-            "value": "multipart/alternative;\n\tboundary=\"----=_NextPart_001_000D_01BFC038.5A5C8E60\""
+            "value": " multipart/alternative;\n\tboundary=\"----=_NextPart_001_000D_01BFC038.5A5C8E60\""
           }
         ],
         "type": "multipart/alternative",
@@ -92,12 +94,12 @@
             "size": 761,
             "headers": [
               {
-                "name": "Content-Transfer-Encoding",
-                "value": "quoted-printable"
+                "name": "Content-Type",
+                "value": " text/plain;\n\tcharset=\"iso-8859-1\""
               },
               {
-                "name": "Content-Type",
-                "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+                "name": "Content-Transfer-Encoding",
+                "value": " quoted-printable"
               }
             ],
             "type": "text/plain",
@@ -109,12 +111,12 @@
             "size": 1442,
             "headers": [
               {
-                "name": "Content-Transfer-Encoding",
-                "value": "quoted-printable"
+                "name": "Content-Type",
+                "value": " text/html;\n\tcharset=\"iso-8859-1\""
               },
               {
-                "name": "Content-Type",
-                "value": "text/html;\n\tcharset=\"iso-8859-1\""
+                "name": "Content-Transfer-Encoding",
+                "value": " quoted-printable"
               }
             ],
             "type": "text/html",
@@ -128,16 +130,16 @@
         "size": 1325,
         "headers": [
           {
-            "name": "Content-ID",
-            "value": "<823504223@17052000-0f8d>"
+            "name": "Content-Type",
+            "value": " image/png;\n\tname=\"blueball.png\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " base64"
           },
           {
-            "name": "Content-Type",
-            "value": "image/png;\n\tname=\"blueball.png\""
+            "name": "Content-ID",
+            "value": " <823504223@17052000-0f8d>"
           }
         ],
         "name": "blueball.png",
@@ -150,16 +152,16 @@
         "size": 1453,
         "headers": [
           {
-            "name": "Content-ID",
-            "value": "<823504223@17052000-0f94>"
+            "name": "Content-Type",
+            "value": " image/png;\n\tname=\"redball.png\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " base64"
           },
           {
-            "name": "Content-Type",
-            "value": "image/png;\n\tname=\"redball.png\""
+            "name": "Content-ID",
+            "value": " <823504223@17052000-0f94>"
           }
         ],
         "name": "redball.png",
@@ -187,12 +189,12 @@
       "size": 761,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "name": "Content-Type",
+          "value": " text/plain;\n\tcharset=\"iso-8859-1\""
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain;\n\tcharset=\"iso-8859-1\""
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
         }
       ],
       "type": "text/plain",
@@ -206,12 +208,12 @@
       "size": 1442,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "name": "Content-Type",
+          "value": " text/html;\n\tcharset=\"iso-8859-1\""
         },
         {
-          "name": "Content-Type",
-          "value": "text/html;\n\tcharset=\"iso-8859-1\""
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
         }
       ],
       "type": "text/html",
@@ -225,16 +227,16 @@
       "size": 1325,
       "headers": [
         {
-          "name": "Content-ID",
-          "value": "<823504223@17052000-0f8d>"
+          "name": "Content-Type",
+          "value": " image/png;\n\tname=\"blueball.png\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/png;\n\tname=\"blueball.png\""
+          "name": "Content-ID",
+          "value": " <823504223@17052000-0f8d>"
         }
       ],
       "name": "blueball.png",
@@ -247,16 +249,16 @@
       "size": 1453,
       "headers": [
         {
-          "name": "Content-ID",
-          "value": "<823504223@17052000-0f94>"
+          "name": "Content-Type",
+          "value": " image/png;\n\tname=\"redball.png\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/png;\n\tname=\"redball.png\""
+          "name": "Content-ID",
+          "value": " <823504223@17052000-0f94>"
         }
       ],
       "name": "redball.png",

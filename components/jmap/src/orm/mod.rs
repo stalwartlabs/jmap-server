@@ -4,13 +4,13 @@ pub mod serialize;
 pub mod tags;
 pub mod update;
 
+use store::ahash::AHashSet;
 use store::core::acl::Permission;
 use store::core::tag::Tag;
+use store::core::vec_map::VecMap;
 use store::{Integer, LongInteger};
 
 use crate::jmap_store::Object;
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Eq)]
 pub struct TinyORM<T>
@@ -18,15 +18,15 @@ where
     T: Object,
 {
     #[serde(bound(
-        serialize = "HashMap<T::Property, T::Value>: serde::Serialize",
-        deserialize = "HashMap<T::Property, T::Value>: serde::Deserialize<'de>"
+        serialize = "VecMap<T::Property, T::Value>: serde::Serialize",
+        deserialize = "VecMap<T::Property, T::Value>: serde::Deserialize<'de>"
     ))]
-    properties: HashMap<T::Property, T::Value>,
+    properties: VecMap<T::Property, T::Value>,
     #[serde(bound(
-        serialize = "HashMap<T::Property, HashSet<Tag>>: serde::Serialize",
-        deserialize = "HashMap<T::Property, HashSet<Tag>>: serde::Deserialize<'de>"
+        serialize = "VecMap<T::Property, AHashSet<Tag>>: serde::Serialize",
+        deserialize = "VecMap<T::Property, AHashSet<Tag>>: serde::Deserialize<'de>"
     ))]
-    tags: HashMap<T::Property, HashSet<Tag>>,
+    tags: VecMap<T::Property, AHashSet<Tag>>,
     acls: Vec<Permission>,
 }
 
@@ -102,8 +102,8 @@ where
 {
     fn default() -> Self {
         Self {
-            properties: HashMap::new(),
-            tags: HashMap::new(),
+            properties: VecMap::new(),
+            tags: VecMap::new(),
             acls: Vec::new(),
         }
     }
@@ -121,7 +121,7 @@ where
 
     pub fn track_changes(source: &TinyORM<T>) -> TinyORM<T> {
         TinyORM {
-            properties: HashMap::new(),
+            properties: VecMap::new(),
             tags: source.tags.clone(),
             acls: source.acls.clone(),
         }
@@ -135,12 +135,12 @@ where
         self.properties.get_mut(property)
     }
 
-    pub fn entry(&mut self, property: T::Property) -> Entry<'_, T::Property, T::Value> {
+    /*pub fn entry(&mut self, property: T::Property) -> Entry<'_, T::Property, T::Value> {
         self.properties.entry(property)
-    }
+    }*/
 
     pub fn set(&mut self, property: T::Property, value: impl Into<T::Value>) {
-        self.properties.insert(property, value.into());
+        self.properties.set(property, value.into());
     }
 
     pub fn remove(&mut self, property: &T::Property) -> Option<T::Value> {

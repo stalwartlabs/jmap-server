@@ -4,11 +4,11 @@ Cc: "=?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?=" <addr0@example.com>
 Date: Tue, 10 Jul 2018 01:03:11 +0000
 From: "Joe Bloggs" <joe@example.com>
 In-Reply-To: <other-message-id> <yet-another-message-id>
-List-Owner: <http://www.host.com/list.cgi?cmd=sub&lst=list>
+List-Owner: <http://www.host.com/list.cgi?cmd=sub&lst=list>,
 	<mailto:list-manager@host.com?body=subscribe%20list>
-List-Subscribe: <mailto:list-manager@host.com?body=subscribe%20list>
-List-Subscribe: <ftp://ftp.host.com/list.txt>
+List-Subscribe: <ftp://ftp.host.com/list.txt>,
 	<mailto:list@host.com?subject=subscribe>
+List-Subscribe: <mailto:list-manager@host.com?body=subscribe%20list>
 Message-ID: <my-message-id>
 References: <first-message-id> <second-message-id>
 Reply-To: "=?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?=" <addr2@example.com>, 
@@ -28,8 +28,8 @@ X-AddressesGroup: "List 1": <addr1@test.com>,
 	<addr6@test.com>
 X-References: <1234@local.machine.example> <3456@example.net>
 X-References: <789@local.machine.example> <abcd@example.net>
-X-Text: this is some text
 X-Text: a b
+X-Text: this is some text
 Content-Type: multipart/alternative; 
 	boundary="boundary_0"
 

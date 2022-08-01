@@ -1,11 +1,9 @@
 use actix_web::web;
 use jmap::types::type_state::TypeState;
 use jmap_sharing::principal::account::JMAPAccountStore;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant, SystemTime},
-};
+use std::time::{Duration, Instant, SystemTime};
 use store::{
+    ahash::AHashMap,
     core::bitmap::Bitmap,
     log::changes::ChangeId,
     tracing::{debug, error},
@@ -90,10 +88,11 @@ pub fn spawn_state_manager<T>(
     let push_tx = spawn_push_manager();
 
     tokio::spawn(async move {
-        let mut subscribers: HashMap<AccountId, HashMap<DocumentId, Subscriber>> = HashMap::new();
-        let mut shared_accounts: HashMap<AccountId, Vec<AccountId>> = HashMap::new();
-        let mut shared_accounts_map: HashMap<AccountId, Vec<(AccountId, Bitmap<TypeState>)>> =
-            HashMap::new();
+        let mut subscribers: AHashMap<AccountId, AHashMap<DocumentId, Subscriber>> =
+            AHashMap::default();
+        let mut shared_accounts: AHashMap<AccountId, Vec<AccountId>> = AHashMap::default();
+        let mut shared_accounts_map: AHashMap<AccountId, Vec<(AccountId, Bitmap<TypeState>)>> =
+            AHashMap::default();
 
         let mut last_purge = Instant::now();
 
@@ -196,7 +195,7 @@ pub fn spawn_state_manager<T>(
                 } if started => {
                     subscribers
                         .entry(account_id)
-                        .or_insert_with(HashMap::new)
+                        .or_insert_with(AHashMap::default)
                         .insert(
                             DocumentId::MAX - id,
                             Subscriber {
@@ -334,7 +333,7 @@ pub fn spawn_state_manager<T>(
                                 updated_ids.push(verified.id);
                                 subscribers
                                     .entry(account_id)
-                                    .or_insert_with(HashMap::new)
+                                    .or_insert_with(AHashMap::default)
                                     .insert(
                                         verified.id,
                                         Subscriber {

@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
-
 use actix_web::web;
 
 use jmap::types::jmap::JMAPId;
 use jmap_client::{client::Client, email, mailbox::Role};
-use store::{Store, ThreadId};
+use store::{
+    ahash::{AHashMap, AHashSet},
+    Store, ThreadId,
+};
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
 
@@ -14,7 +15,7 @@ where
 {
     println!("Running Email Merge Threads tests...");
 
-    let mut all_mailboxes = HashMap::new();
+    let mut all_mailboxes = AHashMap::default();
 
     for (base_test_num, test) in [test_1(), test_2(), test_3()].iter().enumerate() {
         let base_test_num = ((base_test_num * 6) as u32) + 1;
@@ -143,7 +144,7 @@ where
                 test_num
             );
 
-            let thread_ids: HashSet<ThreadId> = result
+            let thread_ids: AHashSet<ThreadId> = result
                 .ids()
                 .iter()
                 .map(|id| JMAPId::parse(id).unwrap().get_prefix_id())

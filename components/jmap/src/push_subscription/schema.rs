@@ -1,8 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 use store::{
     chrono::{DateTime, Utc},
+    core::vec_map::VecMap,
     FieldId,
 };
 
@@ -10,7 +11,7 @@ use crate::{orm, types::jmap::JMAPId, types::type_state::TypeState};
 
 #[derive(Debug, Clone, Default)]
 pub struct PushSubscription {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-
+use ahash::AHashMap;
 use whatlang::{detect, Lang};
 
 use crate::Language;
@@ -15,7 +14,7 @@ struct WeightedAverage {
 
 #[derive(Debug)]
 pub struct LanguageDetector {
-    lang_detected: HashMap<Language, WeightedAverage>,
+    lang_detected: AHashMap<Language, WeightedAverage>,
 }
 
 impl Default for LanguageDetector {
@@ -27,7 +26,7 @@ impl Default for LanguageDetector {
 impl LanguageDetector {
     pub fn new() -> LanguageDetector {
         LanguageDetector {
-            lang_detected: HashMap::new(),
+            lang_detected: AHashMap::default(),
         }
     }
 

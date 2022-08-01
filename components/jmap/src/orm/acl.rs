@@ -1,10 +1,12 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::hash_map::Entry;
 
 use serde::{Deserialize, Serialize};
 use store::{
+    ahash::AHashMap,
     core::{
         acl::{Permission, ACL},
         bitmap::Bitmap,
+        vec_map::VecMap,
     },
     AccountId,
 };
@@ -16,7 +18,7 @@ use super::TinyORM;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ACLUpdate {
     Replace {
-        acls: HashMap<String, Vec<ACL>>,
+        acls: VecMap<String, Vec<ACL>>,
     },
     Update {
         account_id: String,
@@ -101,7 +103,7 @@ where
     pub fn get_changed_acls(&self, changes: Option<&Self>) -> Option<Vec<Permission>> {
         if let Some(changes) = changes {
             if changes.acls != self.acls {
-                let mut acls: HashMap<AccountId, Bitmap<ACL>> = HashMap::new();
+                let mut acls: AHashMap<AccountId, Bitmap<ACL>> = AHashMap::default();
                 for (a, b) in [(&self.acls, &changes.acls), (&changes.acls, &self.acls)] {
                     for p in a {
                         if !b.contains(p) {

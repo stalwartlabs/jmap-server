@@ -1,9 +1,9 @@
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use actix_web::web;
 use jmap::types::jmap::JMAPId;
 use jmap_client::{client::Client, core::query, email::query::Filter, mailbox::Role};
-use store::Store;
+use store::{ahash::AHashMap, Store};
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
 
@@ -20,7 +20,7 @@ where
         .unwrap()
         .take_id();
 
-    let mut email_ids = HashMap::new();
+    let mut email_ids = AHashMap::default();
 
     let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     test_dir.push("src");

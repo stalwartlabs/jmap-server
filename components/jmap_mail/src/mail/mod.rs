@@ -14,14 +14,14 @@ pub mod sharing;
 
 use jmap::{jmap_store::Object, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, collections::HashMap, fmt::Display};
+use std::{borrow::Cow, fmt::Display};
 
-use mail_parser::{HeaderOffset, MessagePartId, RfcHeader};
+use mail_parser::{Header, MessagePartId, RfcHeader};
 
 use store::{
     bincode,
     blob::BlobId,
-    core::collection::Collection,
+    core::{collection::Collection, vec_map::VecMap},
     serialize::{StoreDeserialize, StoreSerialize},
     FieldId,
 };
@@ -58,14 +58,14 @@ impl Object for Email {
         let mut email = Email::default();
         email
             .properties
-            .insert(Property::Id, Value::Id { value: id });
+            .append(Property::Id, Value::Id { value: id });
         email
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageData {
-    pub headers: HashMap<RfcHeader, Vec<HeaderValue>>,
+    pub headers: VecMap<RfcHeader, Vec<HeaderValue>>,
     pub mime_parts: Vec<MimePart>,
     pub html_body: Vec<MessagePartId>,
     pub text_body: Vec<MessagePartId>,
@@ -90,17 +90,38 @@ impl StoreDeserialize for MessageData {
 }
 
 pub trait GetRawHeader {
-    fn get_header(&self, name: &HeaderName) -> Option<Vec<&HeaderOffset>>;
+    fn get_raw_header(&self, name: &HeaderName) -> Option<Vec<(usize, usize)>>;
 }
 
-impl GetRawHeader for Vec<(HeaderName, HeaderOffset)> {
-    fn get_header(&self, name: &HeaderName) -> Option<Vec<&HeaderOffset>> {
+impl GetRawHeader for Vec<(HeaderName, usize, usize)> {
+    fn get_raw_header(&self, name: &HeaderName) -> Option<Vec<(usize, usize)>> {
         let name = name.as_str();
         let offsets = self
             .iter()
-            .filter_map(|(k, v)| {
+            .filter_map(|(k, start, end)| {
                 if k.as_str().eq_ignore_ascii_case(name) {
-                    Some(v)
+                    Some((*start, *end))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !offsets.is_empty() {
+            Some(offsets)
+        } else {
+            None
+        }
+    }
+}
+
+impl GetRawHeader for Vec<Header<'_>> {
+    fn get_raw_header(&self, name: &HeaderName) -> Option<Vec<(usize, usize)>> {
+        let name = name.as_str();
+        let offsets = self
+            .iter()
+            .filter_map(|h| {
+                if h.name.as_str().eq_ignore_ascii_case(name) {
+                    Some((h.offset_start, h.offset_end))
                 } else {
                     None
                 }
@@ -202,7 +223,7 @@ impl MimePartType {
 pub struct MimePart {
     pub mime_type: MimePartType,
     pub is_encoding_problem: bool,
-    pub raw_headers: Vec<(HeaderName, HeaderOffset)>,
+    pub raw_headers: Vec<(HeaderName, usize, usize)>,
     // Headers
     pub type_: Option<String>,
     pub charset: Option<String>,

@@ -1,3 +1,5 @@
+#![warn(clippy::disallowed_types)]
+
 pub mod api;
 pub mod authorization;
 pub mod cluster;
@@ -17,12 +19,7 @@ use cluster::{
 use authorization::{auth::RemoteAddress, rate_limit::RateLimiter};
 use server::http::{init_jmap_server, start_jmap_server};
 use services::{email_delivery, state_change};
-use store::{
-    config::env_settings::EnvSettings,
-    moka::future::Cache,
-    tracing::{self, info},
-    JMAPStore,
-};
+use store::{config::env_settings::EnvSettings, moka::future::Cache, tracing::info, JMAPStore};
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
 

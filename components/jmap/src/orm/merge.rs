@@ -99,7 +99,7 @@ where
                                         );
                                     }
                                 }
-                                self.properties.insert(property, new_value);
+                                self.properties.set(property, new_value);
                             } else {
                                 for item in current_value {
                                     document.text(
@@ -133,7 +133,7 @@ where
                                         document.number(property.clone(), item, *index_options);
                                     }
                                 }
-                                self.properties.insert(property, new_value);
+                                self.properties.set(property, new_value);
                             } else {
                                 for item in current_value {
                                     document.number(
@@ -190,7 +190,7 @@ where
             };
 
             if do_insert {
-                self.properties.insert(property, new_value);
+                self.properties.set(property, new_value);
             } else {
                 self.properties.remove(&property);
             }

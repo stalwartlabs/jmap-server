@@ -25,64 +25,67 @@
   "subject": "Die Hasen und die Frosche",
   "sentAt": "2000-05-19T04:36:58Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/mixed;\n\tboundary=\"=====================_715392540==_\""
-      },
-      {
-        "name": "Date",
-        "value": "Fri, 19 May 2000 00:36:58 -0400"
-      },
-      {
-        "name": "From",
-        "value": "Doug Sauder <dwsauder@example.com>"
-      },
-      {
-        "name": "MIME-Version",
-        "value": "1.0"
-      },
-      {
         "name": "Message-ID",
-        "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com>"
-      },
-      {
-        "name": "Subject",
-        "value": "=?iso-8859-1?Q?Die_Hasen_und_die_Frosche?="
-      },
-      {
-        "name": "To",
-        "value": "Heinz =?iso-8859-1?Q?Muller?= <mueller@example.com>"
-      },
-      {
-        "name": "X-Mailer",
-        "value": "QUALCOMM Windows Eudora Pro Version 4.2.0.58"
-      },
-      {
-        "name": "X-Priority",
-        "value": "2 (High)"
+        "value": " <4.2.0.58.20000519003556.00a918e0@pop.example.com>"
       },
       {
         "name": "X-Sender",
-        "value": "dwsauder@pop.example.com (Unverified)"
+        "value": " dwsauder@pop.example.com (Unverified)"
+      },
+      {
+        "name": "X-Mailer",
+        "value": " QUALCOMM Windows Eudora Pro Version 4.2.0.58"
+      },
+      {
+        "name": "X-Priority",
+        "value": " 2 (High)"
+      },
+      {
+        "name": "Date",
+        "value": " Fri, 19 May 2000 00:36:58 -0400"
+      },
+      {
+        "name": "To",
+        "value": " Heinz =?iso-8859-1?Q?Muller?= <mueller@example.com>"
+      },
+      {
+        "name": "From",
+        "value": " Doug Sauder <dwsauder@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": " =?iso-8859-1?Q?Die_Hasen_und_die_Frosche?="
+      },
+      {
+        "name": "MIME-Version",
+        "value": " 1.0"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed;\n\tboundary=\"=====================_715392540==_\""
       }
     ],
     "type": "multipart/mixed",
     "subParts": [
       {
+        "size": 0,
         "headers": [
           {
             "name": "Content-Type",
-            "value": "multipart/related;\n\ttype=\"multipart/alternative\";\n\tboundary=\"=====================_715392540==_.REL\""
+            "value": " multipart/related;\n\ttype=\"multipart/alternative\";\n\tboundary=\"=====================_715392540==_.REL\""
           }
         ],
         "type": "multipart/related",
         "subParts": [
           {
+            "size": 0,
             "headers": [
               {
                 "name": "Content-Type",
-                "value": "multipart/alternative;\n\tboundary=\"=====================_715392550==_.ALT\""
+                "value": " multipart/alternative;\n\tboundary=\"=====================_715392550==_.ALT\""
               }
             ],
             "type": "multipart/alternative",
@@ -93,12 +96,12 @@
                 "size": 779,
                 "headers": [
                   {
-                    "name": "Content-Transfer-Encoding",
-                    "value": "quoted-printable"
+                    "name": "Content-Type",
+                    "value": " text/plain; charset=\"iso-8859-1\""
                   },
                   {
-                    "name": "Content-Type",
-                    "value": "text/plain; charset=\"iso-8859-1\""
+                    "name": "Content-Transfer-Encoding",
+                    "value": " quoted-printable"
                   }
                 ],
                 "type": "text/plain",
@@ -110,12 +113,12 @@
                 "size": 1154,
                 "headers": [
                   {
-                    "name": "Content-Transfer-Encoding",
-                    "value": "quoted-printable"
+                    "name": "Content-Type",
+                    "value": " text/html; charset=\"iso-8859-1\""
                   },
                   {
-                    "name": "Content-Type",
-                    "value": "text/html; charset=\"iso-8859-1\""
+                    "name": "Content-Transfer-Encoding",
+                    "value": " quoted-printable"
                   }
                 ],
                 "type": "text/html",
@@ -129,20 +132,20 @@
             "size": 1325,
             "headers": [
               {
-                "name": "Content-Disposition",
-                "value": "inline; filename=\"2aa3ed95.png\""
+                "name": "Content-Type",
+                "value": " image/png; name=\"2aa3ed95.png\""
               },
               {
                 "name": "Content-ID",
-                "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
+                "value": " <4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
               },
               {
                 "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "value": " base64"
               },
               {
-                "name": "Content-Type",
-                "value": "image/png; name=\"2aa3ed95.png\""
+                "name": "Content-Disposition",
+                "value": " inline; filename=\"2aa3ed95.png\""
               }
             ],
             "name": "2aa3ed95.png",
@@ -156,20 +159,20 @@
             "size": 1453,
             "headers": [
               {
-                "name": "Content-Disposition",
-                "value": "inline; filename=\"2aa3edd1.png\""
+                "name": "Content-Type",
+                "value": " image/png; name=\"2aa3edd1.png\""
               },
               {
                 "name": "Content-ID",
-                "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
+                "value": " <4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
               },
               {
                 "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "value": " base64"
               },
               {
-                "name": "Content-Type",
-                "value": "image/png; name=\"2aa3edd1.png\""
+                "name": "Content-Disposition",
+                "value": " inline; filename=\"2aa3edd1.png\""
               }
             ],
             "name": "2aa3edd1.png",
@@ -185,16 +188,16 @@
         "size": 1325,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "attachment; filename=\"blueball.png\""
+            "name": "Content-Type",
+            "value": " image/png; name=\"blueball.png\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " base64"
           },
           {
-            "name": "Content-Type",
-            "value": "image/png; name=\"blueball.png\""
+            "name": "Content-Disposition",
+            "value": " attachment; filename=\"blueball.png\""
           }
         ],
         "name": "blueball.png",
@@ -207,16 +210,16 @@
         "size": 1298,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "attachment; filename=\"greenball.png\""
+            "name": "Content-Type",
+            "value": " image/png; name=\"greenball.png\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " base64"
           },
           {
-            "name": "Content-Type",
-            "value": "image/png; name=\"greenball.png\""
+            "name": "Content-Disposition",
+            "value": " attachment; filename=\"greenball.png\""
           }
         ],
         "name": "greenball.png",
@@ -244,12 +247,12 @@
       "size": 779,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"iso-8859-1\""
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain; charset=\"iso-8859-1\""
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
         }
       ],
       "type": "text/plain",
@@ -263,12 +266,12 @@
       "size": 1154,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "name": "Content-Type",
+          "value": " text/html; charset=\"iso-8859-1\""
         },
         {
-          "name": "Content-Type",
-          "value": "text/html; charset=\"iso-8859-1\""
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
         }
       ],
       "type": "text/html",
@@ -282,20 +285,20 @@
       "size": 1325,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline; filename=\"2aa3ed95.png\""
+          "name": "Content-Type",
+          "value": " image/png; name=\"2aa3ed95.png\""
         },
         {
           "name": "Content-ID",
-          "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
+          "value": " <4.2.0.58.20000519003556.00a918e0@pop.example.com.2>"
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/png; name=\"2aa3ed95.png\""
+          "name": "Content-Disposition",
+          "value": " inline; filename=\"2aa3ed95.png\""
         }
       ],
       "name": "2aa3ed95.png",
@@ -309,20 +312,20 @@
       "size": 1453,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline; filename=\"2aa3edd1.png\""
+          "name": "Content-Type",
+          "value": " image/png; name=\"2aa3edd1.png\""
         },
         {
           "name": "Content-ID",
-          "value": "<4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
+          "value": " <4.2.0.58.20000519003556.00a918e0@pop.example.com.3>"
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/png; name=\"2aa3edd1.png\""
+          "name": "Content-Disposition",
+          "value": " inline; filename=\"2aa3edd1.png\""
         }
       ],
       "name": "2aa3edd1.png",
@@ -336,16 +339,16 @@
       "size": 1325,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "attachment; filename=\"blueball.png\""
+          "name": "Content-Type",
+          "value": " image/png; name=\"blueball.png\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/png; name=\"blueball.png\""
+          "name": "Content-Disposition",
+          "value": " attachment; filename=\"blueball.png\""
         }
       ],
       "name": "blueball.png",
@@ -358,16 +361,16 @@
       "size": 1298,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "attachment; filename=\"greenball.png\""
+          "name": "Content-Type",
+          "value": " image/png; name=\"greenball.png\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " base64"
         },
         {
-          "name": "Content-Type",
-          "value": "image/png; name=\"greenball.png\""
+          "name": "Content-Disposition",
+          "value": " attachment; filename=\"greenball.png\""
         }
       ],
       "name": "greenball.png",

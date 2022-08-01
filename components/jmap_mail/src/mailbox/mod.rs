@@ -50,7 +50,7 @@ impl Object for Mailbox {
     fn new(id: JMAPId) -> Self {
         let mut item = Mailbox::default();
         item.properties
-            .insert(Property::Id, Value::Id { value: id });
+            .append(Property::Id, Value::Id { value: id });
         item
     }
 }

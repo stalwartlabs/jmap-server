@@ -5,9 +5,11 @@ use jmap_client::{
     email,
     mailbox::Role,
 };
-use store::{write::options::Options, Store};
-
-use std::collections::{HashMap, HashSet};
+use store::{
+    ahash::{AHashMap, AHashSet},
+    write::options::Options,
+    Store,
+};
 
 use jmap::types::{jmap::JMAPId, state::JMAPState};
 use jmap_mail::mail::MessageField;
@@ -39,11 +41,11 @@ where
         .take_id();
 
     let mut states = vec![JMAPState::Initial];
-    let mut id_map = HashMap::new();
+    let mut id_map = AHashMap::default();
 
-    let mut updated_ids = HashSet::new();
-    let mut removed_ids = HashSet::new();
-    let mut type1_ids = HashSet::new();
+    let mut updated_ids = AHashSet::default();
+    let mut removed_ids = AHashSet::default();
+    let mut type1_ids = AHashSet::default();
 
     let mut thread_id = 100;
 

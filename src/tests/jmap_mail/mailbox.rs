@@ -10,8 +10,8 @@ use jmap_client::{
     Error, Set,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use store::Store;
+
+use store::{ahash::AHashMap, Store};
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
 
@@ -565,8 +565,8 @@ where
     server.store.assert_is_empty();
 }
 
-async fn create_test_mailboxes(client: &mut Client) -> HashMap<String, String> {
-    let mut mailbox_map = HashMap::new();
+async fn create_test_mailboxes(client: &mut Client) -> AHashMap<String, String> {
+    let mut mailbox_map = AHashMap::default();
     let mut request = client.build();
     build_create_query(
         request.set_mailbox(),
@@ -575,7 +575,7 @@ async fn create_test_mailboxes(client: &mut Client) -> HashMap<String, String> {
         None,
     );
     let mut result = request.send_set_mailbox().await.unwrap();
-    let mut id_map = HashMap::with_capacity(mailbox_map.len());
+    let mut id_map = AHashMap::with_capacity(mailbox_map.len());
     for (create_id, local_id) in mailbox_map {
         let server_id = result.created(&create_id).unwrap().take_id();
         id_map.insert(local_id.clone(), server_id.clone());
@@ -586,7 +586,7 @@ async fn create_test_mailboxes(client: &mut Client) -> HashMap<String, String> {
 
 fn build_create_query(
     request: &mut SetRequest<Mailbox<Set>>,
-    mailbox_map: &mut HashMap<String, String>,
+    mailbox_map: &mut AHashMap<String, String>,
     mailboxes: Vec<TestMailbox>,
     parent_id: Option<String>,
 ) {

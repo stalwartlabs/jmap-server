@@ -1,7 +1,8 @@
 use super::schema::{Mailbox, Property, Value};
+use crate::mail::schema::Email;
 use crate::mail::set::JMAPSetMail;
 use crate::mail::sharing::JMAPShareMail;
-use crate::mail::MessageField;
+use crate::mail::{self, MessageField};
 use crate::{INBOX_ID, TRASH_ID};
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::{SetHelper, SetObject};
@@ -244,15 +245,57 @@ where
             )? {
                 if on_destroy_remove_emails {
                     // Fetch results
-                    for document_id in message_doc_ids {
-                        let mut document = Document::new(Collection::Mail, document_id);
-                        if let Some(id) = self.mail_delete(
-                            helper.account_id,
-                            Some(&mut helper.changes),
-                            &mut document,
-                        )? {
-                            helper.changes.delete_document(document);
-                            helper.changes.log_delete(Collection::Mail, id);
+                    for message_document_id in message_doc_ids {
+                        let mut document = Document::new(Collection::Mail, message_document_id);
+                        // Fetch Email's ORM
+                        let current_fields = self
+                            .get_orm::<Email>(helper.account_id, message_document_id)?
+                            .ok_or_else(|| {
+                                StoreError::DataCorruption(format!(
+                                    "Failed to fetch Email ORM for {}:{}.",
+                                    helper.account_id, message_document_id
+                                ))
+                            })?;
+
+                        // If the message is in multiple mailboxes, untag it from the current mailbox,
+                        // otherwise delete it.
+                        match current_fields.get_tags(&mail::schema::Property::MailboxIds) {
+                            Some(tags) if tags.len() > 1 => {
+                                let thread_id = self
+                                    .get_document_value::<DocumentId>(
+                                        helper.account_id,
+                                        Collection::Mail,
+                                        message_document_id,
+                                        MessageField::ThreadId.into(),
+                                    )?
+                                    .ok_or_else(|| {
+                                        StoreError::DataCorruption(format!(
+                                            "Failed to fetch threadId for {}:{}.",
+                                            helper.account_id, message_document_id
+                                        ))
+                                    })?;
+                                let mut fields = TinyORM::track_changes(&current_fields);
+                                fields.untag(
+                                    &mail::schema::Property::MailboxIds,
+                                    &Tag::Id(document_id),
+                                );
+                                current_fields.merge(&mut document, fields)?;
+                                helper.changes.update_document(document);
+                                helper.changes.log_update(
+                                    Collection::Mail,
+                                    JMAPId::from_parts(thread_id, message_document_id),
+                                )
+                            }
+                            _ => {
+                                if let Some(id) = self.mail_delete(
+                                    helper.account_id,
+                                    Some(&mut helper.changes),
+                                    &mut document,
+                                )? {
+                                    helper.changes.delete_document(document);
+                                    helper.changes.log_delete(Collection::Mail, id);
+                                }
+                            }
                         }
                     }
                 } else {

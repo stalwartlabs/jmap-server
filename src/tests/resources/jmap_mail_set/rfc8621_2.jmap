@@ -25,30 +25,31 @@
   "subject": "World domination",
   "sentAt": "2018-07-10T01:05:08Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
-      },
-      {
         "name": "Date",
-        "value": "Tue, 10 Jul 2018 01:05:08 +0000"
+        "value": " Tue, 10 Jul 2018 01:05:08 +0000"
       },
       {
         "name": "From",
-        "value": "\"Joe Bloggs\" <joe@example.com>"
+        "value": " \"Joe Bloggs\" <joe@example.com>"
       },
       {
         "name": "Message-ID",
-        "value": "<my-message-id>"
+        "value": " <my-message-id>"
       },
       {
         "name": "Subject",
-        "value": "World domination"
+        "value": " World domination"
       },
       {
         "name": "To",
-        "value": "\"John\" <john@example.com>"
+        "value": " \"John\" <john@example.com>"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/alternative; \r\n\tboundary=\"boundary_0\""
       }
     ],
     "type": "multipart/alternative",
@@ -60,15 +61,15 @@
         "headers": [
           {
             "name": "Content-Language",
-            "value": "en"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "value": " en"
           },
           {
             "name": "Content-Type",
-            "value": "text/html; charset=\"utf-8\""
+            "value": " text/html; charset=\"utf-8\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/html",
@@ -84,15 +85,15 @@
         "headers": [
           {
             "name": "Content-Language",
-            "value": "en"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "value": " en"
           },
           {
             "name": "Content-Type",
-            "value": "text/plain; charset=\"utf-8\""
+            "value": " text/plain; charset=\"utf-8\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
@@ -123,15 +124,15 @@
       "headers": [
         {
           "name": "Content-Language",
-          "value": "en"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " en"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain; charset=\"utf-8\""
+          "value": " text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -149,15 +150,15 @@
       "headers": [
         {
           "name": "Content-Language",
-          "value": "en"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " en"
         },
         {
           "name": "Content-Type",
-          "value": "text/html; charset=\"utf-8\""
+          "value": " text/html; charset=\"utf-8\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/html",

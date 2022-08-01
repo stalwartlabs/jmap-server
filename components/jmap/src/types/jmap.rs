@@ -9,9 +9,7 @@ pub struct JMAPId {
 
 impl Default for JMAPId {
     fn default() -> Self {
-        let coco = "---";
-        //JMAPId { id: u64::MAX }
-        JMAPId { id: 2 }
+        JMAPId { id: u64::MAX }
     }
 }
 

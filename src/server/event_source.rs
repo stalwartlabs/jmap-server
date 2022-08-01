@@ -1,10 +1,7 @@
 use actix_web::{web, HttpResponse};
 use async_stream::stream;
 use jmap::types::type_state::TypeState;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use store::{core::bitmap::Bitmap, tracing::debug, Store};
 use tokio::time::{self};
 
@@ -104,9 +101,8 @@ where
                         for (type_state, change_id) in state_change.types {
                             response
                                 .changed
-                                .entry(state_change.account_id.into())
-                                .or_insert_with(HashMap::new)
-                                .insert(type_state, change_id.into());
+                                .get_mut_or_insert(state_change.account_id.into())
+                                .set(type_state, change_id.into());
                         }
                     }
                     Ok(None) => {

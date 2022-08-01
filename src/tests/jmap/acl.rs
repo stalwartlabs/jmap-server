@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use actix_web::web;
 use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
 use jmap_client::{
@@ -9,7 +7,7 @@ use jmap_client::{
     principal::ACL,
 };
 use jmap_mail::{INBOX_ID, TRASH_ID};
-use store::Store;
+use store::{ahash::AHashMap, Store};
 
 use crate::{
     tests::{jmap::authorization::assert_forbidden, store::utils::StoreCompareWith},
@@ -73,7 +71,7 @@ where
     .unwrap();
 
     // Insert two emails in each account
-    let mut email_ids = HashMap::new();
+    let mut email_ids = AHashMap::default();
     for (client, account_id, name) in [
         (&mut john_client, &john_id, "john"),
         (&mut jane_client, &jane_id, "jane"),
@@ -420,7 +418,7 @@ where
         .await
         .unwrap();
 
-    // Try to create child
+    // Try to create a child
     assert_forbidden(
         john_client
             .set_default_account_id(&jane_id)
@@ -600,7 +598,10 @@ where
             .await
             .unwrap()
             .ids(),
-        [email_ids.get("jane").unwrap().first().unwrap().as_str()]
+        [
+            email_ids.get("jane").unwrap().first().unwrap().as_str(),
+            &email_id_2
+        ]
     );
 
     // Revoke all access to John

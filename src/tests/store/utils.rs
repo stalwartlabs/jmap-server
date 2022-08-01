@@ -1,14 +1,10 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    io::Read,
-    iter::FromIterator,
-    path::PathBuf,
-};
+use std::{io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::bufread::GzDecoder;
 use jmap::orm::TinyORM;
 use jmap_mail::{mail::schema::Email, mailbox::schema::Mailbox};
 use store::{
+    ahash::AHashMap,
     blob::BLOB_HASH_LEN,
     serialize::{key::ValueKey, leb128::Leb128},
 };
@@ -135,7 +131,7 @@ pub fn init_settings(
     if delete_if_exists && temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).unwrap();
     }
-    let mut args = HashMap::from_iter(
+    let mut args = AHashMap::from_iter(
         vec![
             (
                 "db-path".to_string(),
@@ -178,22 +174,28 @@ pub fn destroy_temp_dir(temp_dir: PathBuf) {
     std::fs::remove_dir_all(&temp_dir).unwrap();
 }
 
+#[allow(clippy::disallowed_types)]
 pub trait StoreCompareWith<T> {
-    fn compare_with(&self, other: &JMAPStore<T>) -> BTreeMap<ColumnFamily, usize>;
+    fn compare_with(&self, other: &JMAPStore<T>)
+        -> std::collections::BTreeMap<ColumnFamily, usize>;
     fn assert_is_empty(&self);
 }
 
 const ASSERT: bool = true;
 
+#[allow(clippy::disallowed_types)]
 impl<T> StoreCompareWith<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    fn compare_with(&self, other: &JMAPStore<T>) -> BTreeMap<ColumnFamily, usize> {
+    fn compare_with(
+        &self,
+        other: &JMAPStore<T>,
+    ) -> std::collections::BTreeMap<ColumnFamily, usize> {
         let mut last_account_id = AccountId::MAX;
         let mut last_collection = Collection::None;
         let mut last_ids = RoaringBitmap::new();
-        let mut total_keys = BTreeMap::from_iter([
+        let mut total_keys = std::collections::BTreeMap::from_iter([
             (ColumnFamily::Bitmaps, 0),
             (ColumnFamily::Values, 0),
             (ColumnFamily::Indexes, 0),
@@ -488,7 +490,7 @@ where
     }
 
     fn assert_is_empty(&self) {
-        let mut keys = BTreeMap::new();
+        let mut keys = std::collections::BTreeMap::new();
         for cf in [
             ColumnFamily::Bitmaps,
             ColumnFamily::Values,

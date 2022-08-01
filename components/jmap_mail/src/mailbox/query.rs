@@ -6,7 +6,7 @@ use jmap::orm::serialize::JMAPOrm;
 use jmap::request::query::{QueryRequest, QueryResponse};
 use jmap::request::ACLEnforce;
 use jmap::types::jmap::JMAPId;
-use std::collections::{HashMap, HashSet};
+use store::ahash::{AHashMap, AHashSet};
 use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
@@ -131,8 +131,8 @@ where
             helper.query(
                 default_filter_mapper,
                 Some(|mut results: Vec<JMAPId>| {
-                    let mut hierarchy = HashMap::new();
-                    let mut tree = HashMap::new();
+                    let mut hierarchy = AHashMap::default();
+                    let mut tree = AHashMap::default();
 
                     for doc_id in self
                         .get_document_ids(account_id, Collection::Mailbox)?
@@ -148,7 +148,7 @@ where
                             .unwrap_or_default();
                         hierarchy.insert((doc_id + 1) as u64, parent_id);
                         tree.entry(parent_id)
-                            .or_insert_with(HashSet::new)
+                            .or_insert_with(AHashSet::default)
                             .insert((doc_id + 1) as u64);
                     }
 

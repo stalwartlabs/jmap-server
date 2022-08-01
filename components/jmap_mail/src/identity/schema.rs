@@ -1,14 +1,14 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use jmap::{orm, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
-use store::FieldId;
+use store::{core::vec_map::VecMap, FieldId};
 
 use crate::mail::schema::EmailAddress;
 
 #[derive(Debug, Clone, Default)]
 pub struct Identity {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

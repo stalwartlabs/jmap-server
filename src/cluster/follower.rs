@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
-
 use jmap::jmap_store::raft::RaftUpdate;
+use store::ahash::{AHashMap, AHashSet};
 use store::blob::BlobId;
 use store::core::bitmap::Bitmap;
 use store::core::collection::Collection;
@@ -30,13 +29,13 @@ use super::{PeerId, IPC_CHANNEL_BUFFER};
 enum State {
     Synchronize,
     AppendEntries {
-        changed_accounts: HashMap<AccountId, Bitmap<Collection>>,
+        changed_accounts: AHashMap<AccountId, Bitmap<Collection>>,
     },
     AppendChanges {
         changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
     },
     AppendBlobs {
-        pending_blobs: HashSet<BlobId>,
+        pending_blobs: AHashSet<BlobId>,
         pending_updates: Vec<Update>,
         changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
     },
@@ -167,7 +166,7 @@ where
                         core.set_up_to_date(false);
 
                         if let Some((next_state, response)) = core
-                            .handle_update_log(&mut indexes, HashMap::new(), updates)
+                            .handle_update_log(&mut indexes, AHashMap::default(), updates)
                             .await
                         {
                             state = next_state;
@@ -434,7 +433,7 @@ where
     async fn handle_update_log(
         &self,
         mut indexes: &mut RaftIndexes,
-        mut changed_accounts: HashMap<AccountId, Bitmap<Collection>>,
+        mut changed_accounts: AHashMap<AccountId, Bitmap<Collection>>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
         let store = self.store.clone();
@@ -742,7 +741,7 @@ where
         let store = self.store.clone();
         match self
             .spawn_worker(move || {
-                let mut missing_blob_ids = HashSet::new();
+                let mut missing_blob_ids = AHashSet::default();
 
                 for update in &updates {
                     match update {
@@ -799,7 +798,7 @@ where
         &self,
         indexes: &mut RaftIndexes,
         changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
-        mut pending_blobs: HashSet<BlobId>,
+        mut pending_blobs: AHashSet<BlobId>,
         pending_updates: Vec<Update>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {

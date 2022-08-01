@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
 use jmap::types::jmap::JMAPId;
-use store::{tracing::debug, Store};
+use store::{ahash::AHashMap, tracing::debug, Store};
 
 use crate::{
     api::{invocation::handle_method_calls, RequestError, RequestLimitError},
@@ -23,7 +21,7 @@ pub struct Request {
     pub method_calls: Vec<method::Call<method::Request>>,
 
     #[serde(rename = "createdIds")]
-    pub created_ids: Option<HashMap<String, JMAPId>>,
+    pub created_ids: Option<AHashMap<String, JMAPId>>,
 }
 
 pub async fn handle_jmap_request<T>(

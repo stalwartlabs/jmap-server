@@ -2,6 +2,7 @@
   "mailboxIds": {
     "i00": true
   },
+  "keywords": {},
   "receivedAt": "2018-07-10T01:03:11Z",
   "messageId": [
     "my-message-id"
@@ -13,20 +14,20 @@
     "size": 2,
     "headers": [
       {
-        "name": "Content-Transfer-Encoding",
-        "value": "7bit"
-      },
-      {
-        "name": "Content-Type",
-        "value": "text/plain; charset=\"utf-8\""
-      },
-      {
         "name": "Date",
-        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        "value": " Tue, 10 Jul 2018 01:03:11 +0000"
       },
       {
         "name": "Message-ID",
-        "value": "<my-message-id>"
+        "value": " <my-message-id>"
+      },
+      {
+        "name": "Content-Type",
+        "value": " text/plain; charset=\"utf-8\""
+      },
+      {
+        "name": "Content-Transfer-Encoding",
+        "value": " 7bit"
       }
     ],
     "type": "text/plain",
@@ -34,12 +35,7 @@
   },
   "bodyValues": {
     "0": {
-      "value": "\r\n",
-      "isEncodingProblem": false,
-      "isTruncated": false
-    },
-    "1": {
-      "value": "<html><body><br/></body></html>",
+      "value": "\n",
       "isEncodingProblem": false,
       "isTruncated": false
     }
@@ -51,20 +47,20 @@
       "size": 2,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
-        },
-        {
-          "name": "Content-Type",
-          "value": "text/plain; charset=\"utf-8\""
-        },
-        {
           "name": "Date",
-          "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+          "value": " Tue, 10 Jul 2018 01:03:11 +0000"
         },
         {
           "name": "Message-ID",
-          "value": "<my-message-id>"
+          "value": " <my-message-id>"
+        },
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -73,10 +69,29 @@
   ],
   "htmlBody": [
     {
-      "partId": "1",
-      "blobId": "ba65fab0fe1985b442263be760464b115fbc4259253c348d9e75e064d607851d31f",
-      "size": 31,
-      "type": "text/html"
+      "partId": "0",
+      "blobId": "b7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a602",
+      "size": 2,
+      "headers": [
+        {
+          "name": "Date",
+          "value": " Tue, 10 Jul 2018 01:03:11 +0000"
+        },
+        {
+          "name": "Message-ID",
+          "value": " <my-message-id>"
+        },
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"utf-8\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "utf-8"
     }
   ],
   "attachments": [],

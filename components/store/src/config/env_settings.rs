@@ -1,12 +1,13 @@
 use std::{
-    collections::HashMap,
     env,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
     str::FromStr,
 };
 
+use ahash::AHashMap;
+
 pub struct EnvSettings {
-    pub args: HashMap<String, String>,
+    pub args: AHashMap<String, String>,
 }
 
 impl Default for EnvSettings {
@@ -17,7 +18,7 @@ impl Default for EnvSettings {
 
 impl EnvSettings {
     pub fn new() -> Self {
-        let mut args = HashMap::new();
+        let mut args = AHashMap::default();
         let mut current_key: Option<String> = None;
 
         for arg in env::args().into_iter().skip(1) {

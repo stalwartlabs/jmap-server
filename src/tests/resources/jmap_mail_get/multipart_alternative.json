@@ -21,22 +21,23 @@
   ],
   "subject": "Multipart Email Example",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/alternative; boundary=\"boundary-string\""
-      },
-      {
         "name": "From",
-        "value": "sender@example.com"
-      },
-      {
-        "name": "Subject",
-        "value": "Multipart Email Example"
+        "value": " sender@example.com"
       },
       {
         "name": "To",
-        "value": "recipient@example.com"
+        "value": " recipient@example.com"
+      },
+      {
+        "name": "Subject",
+        "value": " Multipart Email Example"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/alternative; boundary=\"boundary-string\""
       }
     ],
     "type": "multipart/alternative",
@@ -47,16 +48,16 @@
         "size": 87,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Type",
+            "value": " text/plain; charset=\"utf-8\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
+            "value": " quoted-printable"
           },
           {
-            "name": "Content-Type",
-            "value": "text/plain; charset=\"utf-8\""
+            "name": "Content-Disposition",
+            "value": " inline"
           }
         ],
         "type": "text/plain",
@@ -69,16 +70,16 @@
         "size": 93,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Type",
+            "value": " text/html; charset=\"utf-8\""
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "quoted-printable"
+            "value": " quoted-printable"
           },
           {
-            "name": "Content-Type",
-            "value": "text/html; charset=\"utf-8\""
+            "name": "Content-Disposition",
+            "value": " inline"
           }
         ],
         "type": "text/html",
@@ -106,16 +107,16 @@
       "size": 87,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " text/plain; charset=\"utf-8\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "value": " quoted-printable"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain; charset=\"utf-8\""
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "text/plain",
@@ -130,16 +131,16 @@
       "size": 93,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " text/html; charset=\"utf-8\""
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "value": " quoted-printable"
         },
         {
-          "name": "Content-Type",
-          "value": "text/html; charset=\"utf-8\""
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "text/html",

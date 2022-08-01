@@ -50,8 +50,8 @@ impl From<&EnvSettings> for JMAPConfig {
             mail_import_max_items: 2,
             mail_parse_max_items: 5,
             default_language: Language::English,
-            rate_limit_authenticated: (99999, 1), // (1000, 60)
-            rate_limit_anonymous: (99999, 1),     // (100, 60) 100 is used on tests
+            rate_limit_authenticated: (1000, 60),
+            rate_limit_anonymous: (100, 60), // 100 is used on tests
             use_forwarded_header: false,
         }
     }

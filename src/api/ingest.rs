@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
@@ -20,6 +18,7 @@ use jmap_mail::{
 };
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
+    ahash::AHashSet,
     core::{collection::Collection, document::Document, tag::Tag},
     log::changes::ChangeId,
     tracing::{debug, error},
@@ -271,7 +270,7 @@ where
 
         // Deliver message to recipients
         let mut result = Vec::with_capacity(recipients.len());
-        let mut delivered_to = HashSet::with_capacity(recipients.len());
+        let mut delivered_to = AHashSet::with_capacity(recipients.len());
         for email in recipients {
             // Expand recipients
             match self.expand_rcpt(email.clone()) {

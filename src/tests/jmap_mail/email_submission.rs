@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use actix_web::web;
 use jmap::types::jmap::JMAPId;
@@ -9,7 +9,7 @@ use jmap_client::{
     mailbox::Role,
     Error,
 };
-use store::{chrono::DateTime, parking_lot::Mutex, Store};
+use store::{ahash::AHashMap, chrono::DateTime, parking_lot::Mutex, Store};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpListener,
@@ -50,6 +50,7 @@ pub struct MockSMTPSettings {
     pub do_stop: bool,
 }
 
+#[allow(clippy::disallowed_types)]
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
@@ -208,7 +209,7 @@ where
     assert_eq!(email_submission.undo_status().unwrap(), &UndoStatus::Final);
     assert_eq!(
         email_submission.delivery_status().unwrap(),
-        &HashMap::from_iter([
+        &AHashMap::from_iter([
             (
                 "tim@foobar.com".to_string(),
                 DeliveryStatus::new("250 OK", Delivered::Queued, Displayed::Unknown)
@@ -252,7 +253,7 @@ where
     assert_eq!(email_submission.undo_status().unwrap(), &UndoStatus::Final);
     assert_eq!(
         email_submission.delivery_status().unwrap(),
-        &HashMap::from_iter([
+        &AHashMap::from_iter([
             (
                 "james@other_domain.com".to_string(),
                 DeliveryStatus::new(
@@ -304,7 +305,7 @@ where
     );
     assert_eq!(
         email_submission.delivery_status().unwrap(),
-        &HashMap::from_iter([
+        &AHashMap::from_iter([
             (
                 "james@other_domain.com".to_string(),
                 DeliveryStatus::new(

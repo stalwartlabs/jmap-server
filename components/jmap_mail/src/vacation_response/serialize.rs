@@ -1,7 +1,8 @@
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, fmt};
 
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use store::chrono::{DateTime, Utc};
+use store::core::vec_map::VecMap;
 
 use super::schema::{Property, VacationResponse, Value};
 
@@ -76,12 +77,12 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut properties: VecMap<Property, Value> = VecMap::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
                 "subject" => {
-                    properties.insert(
+                    properties.append(
                         Property::Subject,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -91,7 +92,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                     );
                 }
                 "textBody" => {
-                    properties.insert(
+                    properties.append(
                         Property::TextBody,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -101,7 +102,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                     );
                 }
                 "htmlBody" => {
-                    properties.insert(
+                    properties.append(
                         Property::HtmlBody,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -111,7 +112,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                     );
                 }
                 "isEnabled" => {
-                    properties.insert(
+                    properties.append(
                         Property::IsEnabled,
                         Value::Bool {
                             value: map.next_value::<Option<bool>>()?.unwrap_or(false),
@@ -119,7 +120,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                     );
                 }
                 "fromDate" => {
-                    properties.insert(
+                    properties.append(
                         Property::FromDate,
                         if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
                             Value::DateTime { value }
@@ -129,7 +130,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                     );
                 }
                 "toDate" => {
-                    properties.insert(
+                    properties.append(
                         Property::ToDate,
                         if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
                             Value::DateTime { value }

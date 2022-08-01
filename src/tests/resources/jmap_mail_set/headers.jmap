@@ -69,102 +69,103 @@
   "subject": "Headers test",
   "sentAt": "2018-07-10T01:03:11Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
         "name": "Bcc",
-        "value": "\"=?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\"\r\n\t<addr1@example.com>"
+        "value": " \"=?utf-8?B?wqFFbCDDsWFuZMO6IGNvbWnDsyDDsW9xdWlzIQ==?=\"\r\n\t<addr1@example.com>"
       },
       {
         "name": "Cc",
-        "value": "\"=?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?=\" <addr0@example.com>"
-      },
-      {
-        "name": "Content-Type",
-        "value": "multipart/alternative; \r\n\tboundary=\"boundary_0\""
+        "value": " \"=?utf-8?B?0J/RgNC40LLQtdGCLCDQvNC40YA=?=\" <addr0@example.com>"
       },
       {
         "name": "Date",
-        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        "value": " Tue, 10 Jul 2018 01:03:11 +0000"
       },
       {
         "name": "From",
-        "value": "\"Joe Bloggs\" <joe@example.com>"
+        "value": " \"Joe Bloggs\" <joe@example.com>"
       },
       {
         "name": "In-Reply-To",
-        "value": "<other-message-id> <yet-another-message-id>"
+        "value": " <other-message-id> <yet-another-message-id>"
       },
       {
         "name": "List-Owner",
-        "value": "<http://www.host.com/list.cgi?cmd=sub&lst=list>\r\n\t<mailto:list-manager@host.com?body=subscribe%20list>"
+        "value": " <http://www.host.com/list.cgi?cmd=sub&lst=list>,\r\n\t<mailto:list-manager@host.com?body=subscribe%20list>"
       },
       {
         "name": "List-Subscribe",
-        "value": "<ftp://ftp.host.com/list.txt>\r\n\t<mailto:list@host.com?subject=subscribe>"
+        "value": " <ftp://ftp.host.com/list.txt>,\r\n\t<mailto:list@host.com?subject=subscribe>"
       },
       {
         "name": "List-Subscribe",
-        "value": "<mailto:list-manager@host.com?body=subscribe%20list>"
+        "value": " <mailto:list-manager@host.com?body=subscribe%20list>"
       },
       {
         "name": "Message-ID",
-        "value": "<my-message-id>"
+        "value": " <my-message-id>"
       },
       {
         "name": "References",
-        "value": "<first-message-id> <second-message-id>"
+        "value": " <first-message-id> <second-message-id>"
       },
       {
         "name": "Reply-To",
-        "value": "\"=?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?=\" <addr2@example.com>, \r\n\t\"=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?=\" <addr3@example.com>"
+        "value": " \"=?utf-8?B?7JWI64WV7ZWY7IS47JqUIOyEuOqzhA==?=\" <addr2@example.com>, \r\n\t\"=?utf-8?Q?Antoine_de_Saint-Exup=C3=A9ry?=\" <addr3@example.com>"
       },
       {
         "name": "Resent-Date",
-        "value": "Mon, 04 Jul 2005 09:52:37 +0000"
+        "value": " Sat, 02 Jul 2005 09:52:37 +0000"
       },
       {
         "name": "Resent-Date",
-        "value": "Sat, 02 Jul 2005 09:52:37 +0000"
+        "value": " Sun, 03 Jul 2005 09:52:37 +0000"
       },
       {
         "name": "Resent-Date",
-        "value": "Sun, 03 Jul 2005 09:52:37 +0000"
+        "value": " Mon, 04 Jul 2005 09:52:37 +0000"
       },
       {
         "name": "Sender",
-        "value": "\"=?utf-8?B?44OP44Ot44O844O744Ov44O844Or44OJ?=\" <joe@example.com>"
+        "value": " \"=?utf-8?B?44OP44Ot44O844O744Ov44O844Or44OJ?=\" <joe@example.com>"
       },
       {
         "name": "Subject",
-        "value": "Headers test"
+        "value": " Headers test"
       },
       {
         "name": "To",
-        "value": "\"Greg Vaudreuil\" <gvaudre@NRI.Reston.VA.US>, \r\n\t\"Ned Freed\" <ned@innosoft.com>, \"Keith Moore\" <moore@cs.utk.edu>"
+        "value": " \"Greg Vaudreuil\" <gvaudre@NRI.Reston.VA.US>, \r\n\t\"Ned Freed\" <ned@innosoft.com>, \"Keith Moore\" <moore@cs.utk.edu>"
       },
       {
         "name": "X-AddressesGroup",
-        "value": "\"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>"
+        "value": " \"A Group\": \"Ed Jones\" <c@a.test>, \r\n\t<joe@where.test>, \"John\" <jdoe@one.test>"
       },
       {
         "name": "X-AddressesGroup",
-        "value": "\"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>"
+        "value": " \"List 1\": <addr1@test.com>, \r\n\t<addr2@test.com>; \"List 2\": <addr3@test.com>, \r\n\t<addr4@test.com>; <addr5@test.com>, \r\n\t<addr6@test.com>"
       },
       {
         "name": "X-References",
-        "value": "<1234@local.machine.example> <3456@example.net>"
+        "value": " <1234@local.machine.example> <3456@example.net>"
       },
       {
         "name": "X-References",
-        "value": "<789@local.machine.example> <abcd@example.net>"
+        "value": " <789@local.machine.example> <abcd@example.net>"
       },
       {
         "name": "X-Text",
-        "value": "a b"
+        "value": " a b"
       },
       {
         "name": "X-Text",
-        "value": "this is some text"
+        "value": " this is some text"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/alternative; \r\n\tboundary=\"boundary_0\""
       }
     ],
     "type": "multipart/alternative",
@@ -176,23 +177,23 @@
         "headers": [
           {
             "name": "Content-Language",
-            "value": "en"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "value": " en"
           },
           {
             "name": "Content-Type",
-            "value": "text/plain; charset=\"us-ascii\""
+            "value": " text/plain; charset=\"us-ascii\""
           },
           {
             "name": "X-Header",
-            "value": "just a value"
+            "value": " just a value"
           },
           {
             "name": "X-Text",
-            "value": "more text"
+            "value": " more text"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
@@ -208,15 +209,15 @@
         "headers": [
           {
             "name": "Content-Location",
-            "value": "https://example.com/html-body.html"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "value": " https://example.com/html-body.html"
           },
           {
             "name": "Content-Type",
-            "value": "text/html; charset=\"utf-8\"; name=\"html-body.html\""
+            "value": " text/html; charset=\"utf-8\"; name=\"html-body.html\""
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "name": "html-body.html",
@@ -246,23 +247,23 @@
       "headers": [
         {
           "name": "Content-Language",
-          "value": "en"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " en"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain; charset=\"us-ascii\""
+          "value": " text/plain; charset=\"us-ascii\""
         },
         {
           "name": "X-Header",
-          "value": "just a value"
+          "value": " just a value"
         },
         {
           "name": "X-Text",
-          "value": "more text"
+          "value": " more text"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -280,15 +281,15 @@
       "headers": [
         {
           "name": "Content-Location",
-          "value": "https://example.com/html-body.html"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " https://example.com/html-body.html"
         },
         {
           "name": "Content-Type",
-          "value": "text/html; charset=\"utf-8\"; name=\"html-body.html\""
+          "value": " text/html; charset=\"utf-8\"; name=\"html-body.html\""
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "name": "html-body.html",

@@ -34,39 +34,41 @@
   "subject": "Why not both importing AND exporting? ☺",
   "sentAt": "2021-11-20T22:22:01Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/mixed; \r\n\tboundary=\"boundary_0\""
-      },
-      {
         "name": "Date",
-        "value": "Sat, 20 Nov 2021 22:22:01 +0000"
+        "value": " Sat, 20 Nov 2021 22:22:01 +0000"
       },
       {
         "name": "From",
-        "value": "\"Art Vandelay (Vandelay Industries)\" <art@vandelay.com>"
+        "value": " \"Art Vandelay (Vandelay Industries)\" <art@vandelay.com>"
       },
       {
         "name": "Message-ID",
-        "value": "<my-message-id>"
+        "value": " <my-message-id>"
       },
       {
         "name": "Subject",
-        "value": "=?utf-8?Q?Why_not_both_importing_AND_exporting=3F_=E2=98=BA?="
+        "value": " =?utf-8?Q?Why_not_both_importing_AND_exporting=3F_=E2=98=BA?="
       },
       {
         "name": "To",
-        "value": "\"Colleagues\": \"James Smythe\" <james@vandelay.com>; \r\n\t\"Friends\": <jane@example.com>, \r\n\t\"=?utf-8?Q?John_Sm=C3=AEth?=\" <john@example.com>"
+        "value": " \"Colleagues\": \"James Smythe\" <james@vandelay.com>; \r\n\t\"Friends\": <jane@example.com>, \r\n\t\"=?utf-8?Q?John_Sm=C3=AEth?=\" <john@example.com>"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed; \r\n\tboundary=\"boundary_0\""
       }
     ],
     "type": "multipart/mixed",
     "subParts": [
       {
+        "size": 0,
         "headers": [
           {
             "name": "Content-Type",
-            "value": "multipart/alternative; \r\n\tboundary=\"boundary_1\""
+            "value": " multipart/alternative; \r\n\tboundary=\"boundary_1\""
           }
         ],
         "type": "multipart/alternative",
@@ -78,18 +80,19 @@
             "headers": [
               {
                 "name": "Content-Language",
-                "value": "en"
-              },
-              {
-                "name": "Content-Transfer-Encoding",
-                "value": "quoted-printable"
+                "value": " en"
               },
               {
                 "name": "Content-Type",
-                "value": "text/plain"
+                "value": " text/plain"
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": " quoted-printable"
               }
             ],
             "type": "text/plain",
+            "charset": "us-ascii",
             "language": [
               "en"
             ]
@@ -101,18 +104,19 @@
             "headers": [
               {
                 "name": "Content-Language",
-                "value": "en_US"
-              },
-              {
-                "name": "Content-Transfer-Encoding",
-                "value": "7bit"
+                "value": " en_US"
               },
               {
                 "name": "Content-Type",
-                "value": "text/html"
+                "value": " text/html"
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": " 7bit"
               }
             ],
             "type": "text/html",
+            "charset": "us-ascii",
             "language": [
               "en_US"
             ]
@@ -126,15 +130,15 @@
         "headers": [
           {
             "name": "Content-ID",
-            "value": "<cid:1234-5678-9012-3456>"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " <cid:1234-5678-9012-3456>"
           },
           {
             "name": "Content-Type",
-            "value": "image/png"
+            "value": " image/png"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " base64"
           }
         ],
         "type": "image/png",
@@ -147,15 +151,15 @@
         "headers": [
           {
             "name": "Content-Disposition",
-            "value": "attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "base64"
+            "value": " attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
           },
           {
             "name": "Content-Type",
-            "value": "x-document/pdf"
+            "value": " x-document/pdf"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " base64"
           }
         ],
         "name": "Book about ☕ tables.pdf",
@@ -174,6 +178,11 @@
       "value": "<html><p>I was thinking about quitting the &ldquo;exporting&rdquo; to focus just on the &ldquo;im...",
       "isEncodingProblem": false,
       "isTruncated": true
+    },
+    "4": {
+      "value": "here are the embedded image contents!",
+      "isEncodingProblem": false,
+      "isTruncated": false
     }
   },
   "textBody": [
@@ -184,18 +193,19 @@
       "headers": [
         {
           "name": "Content-Language",
-          "value": "en"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "quoted-printable"
+          "value": " en"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain"
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " quoted-printable"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "language": [
         "en"
       ]
@@ -207,15 +217,15 @@
       "headers": [
         {
           "name": "Content-ID",
-          "value": "<cid:1234-5678-9012-3456>"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " <cid:1234-5678-9012-3456>"
         },
         {
           "name": "Content-Type",
-          "value": "image/png"
+          "value": " image/png"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/png",
@@ -230,18 +240,19 @@
       "headers": [
         {
           "name": "Content-Language",
-          "value": "en_US"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " en_US"
         },
         {
           "name": "Content-Type",
-          "value": "text/html"
+          "value": " text/html"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/html",
+      "charset": "us-ascii",
       "language": [
         "en_US"
       ]
@@ -253,15 +264,15 @@
       "headers": [
         {
           "name": "Content-ID",
-          "value": "<cid:1234-5678-9012-3456>"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " <cid:1234-5678-9012-3456>"
         },
         {
           "name": "Content-Type",
-          "value": "image/png"
+          "value": " image/png"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/png",
@@ -276,15 +287,15 @@
       "headers": [
         {
           "name": "Content-ID",
-          "value": "<cid:1234-5678-9012-3456>"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " <cid:1234-5678-9012-3456>"
         },
         {
           "name": "Content-Type",
-          "value": "image/png"
+          "value": " image/png"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/png",
@@ -297,15 +308,15 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " attachment; filename=\"=?utf-8?Q?Book_about_=E2=98=95_tables.pdf?=\""
         },
         {
           "name": "Content-Type",
-          "value": "x-document/pdf"
+          "value": " x-document/pdf"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "name": "Book about ☕ tables.pdf",

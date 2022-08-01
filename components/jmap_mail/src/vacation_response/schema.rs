@@ -1,18 +1,17 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
+use std::fmt::Display;
 
 use jmap::{orm, types::jmap::JMAPId};
 use serde::{Deserialize, Serialize};
 use store::{
+    ahash::AHashSet,
     chrono::{DateTime, Utc},
+    core::vec_map::VecMap,
     FieldId,
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct VacationResponse {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,7 +20,7 @@ pub enum Value {
     Text { value: String },
     Bool { value: bool },
     DateTime { value: DateTime<Utc> },
-    SentResponses { value: HashSet<String> },
+    SentResponses { value: AHashSet<String> },
     Null,
 }
 

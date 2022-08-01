@@ -18,7 +18,7 @@ impl Object for Identity {
     fn new(id: JMAPId) -> Self {
         let mut item = Identity::default();
         item.properties
-            .insert(Property::Id, Value::Id { value: id });
+            .append(Property::Id, Value::Id { value: id });
         item
     }
 

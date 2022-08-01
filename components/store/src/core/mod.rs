@@ -1,3 +1,5 @@
+use ahash::AHashMap;
+
 use crate::{DocumentId, JMAPId};
 
 pub mod acl;
@@ -7,6 +9,7 @@ pub mod document;
 pub mod error;
 pub mod number;
 pub mod tag;
+pub mod vec_map;
 
 pub trait JMAPIdPrefix {
     fn from_parts(prefix_id: DocumentId, doc_id: DocumentId) -> JMAPId;
@@ -26,4 +29,9 @@ impl JMAPIdPrefix for JMAPId {
     fn get_prefix_id(&self) -> DocumentId {
         (self >> 32) as DocumentId
     }
+}
+
+#[inline(always)]
+pub fn ahash_is_empty<K, V>(map: &AHashMap<K, V>) -> bool {
+    map.is_empty()
 }

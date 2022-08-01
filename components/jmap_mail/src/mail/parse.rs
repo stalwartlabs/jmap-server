@@ -1,5 +1,5 @@
 use super::{
-    conv::IntoForm,
+    conv::{HeaderValueInto, IntoForm},
     get::{AsBodyParts, AsBodyStructure, AsEmailHeaders, BlobResult, JMAPGetMail},
     schema::{BodyProperty, Email, HeaderForm, Property, Value},
     GetRawHeader,
@@ -13,10 +13,14 @@ use jmap::{
 use mail_parser::{
     decoders::html::{html_to_text, text_to_html},
     parsers::preview::{preview_html, preview_text},
-    Message, MessageAttachment, PartType, RfcHeader,
+    Header, HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader,
 };
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
-use store::{core::acl::ACLToken, JMAPStore, Store};
+use std::{borrow::Cow, sync::Arc};
+use store::{
+    ahash::AHashSet,
+    core::{acl::ACLToken, vec_map::VecMap},
+    JMAPStore, Store,
+};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EmailParseRequest {
@@ -27,7 +31,7 @@ pub struct EmailParseRequest {
     pub account_id: JMAPId,
 
     #[serde(rename = "blobIds")]
-    blob_ids: Vec<JMAPBlob>,
+    blob_ids: AHashSet<JMAPBlob>,
 
     #[serde(rename = "properties")]
     properties: Option<Vec<Property>>,
@@ -58,8 +62,8 @@ pub struct EmailParseResponse {
     account_id: JMAPId,
 
     #[serde(rename = "parsed")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    parsed: HashMap<JMAPBlob, Email>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    parsed: VecMap<JMAPBlob, Email>,
 
     #[serde(rename = "notParsable")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -96,7 +100,7 @@ where
         }
         let mut response = EmailParseResponse {
             account_id: request.account_id,
-            parsed: HashMap::with_capacity(request.blob_ids.len()),
+            parsed: VecMap::with_capacity(request.blob_ids.len()),
             not_parsable: Vec::new(),
             not_found: Vec::new(),
         };
@@ -122,7 +126,7 @@ where
             if let BlobResult::Blob(blob) = self.mail_blob_get(account_id, &acl, &blob_id)? {
                 if let Some(message) = Message::parse(&blob) {
                     let email = message.into_parsed_email(&parse_properties, &blob_id, &blob);
-                    response.parsed.insert(blob_id, email);
+                    response.parsed.append(blob_id, email);
                 } else {
                     response.not_parsable.push(blob_id);
                 }
@@ -151,57 +155,50 @@ impl IntoParsedEmail for Message<'_> {
         blob_id: &JMAPBlob,
         raw_message: &[u8],
     ) -> Email {
-        let mut total_parts = self.parts.len();
-        let mut mime_parts = Vec::with_capacity(total_parts);
-        let mut html_body = self.html_body;
-        let mut text_body = self.text_body;
+        let mut mime_parts = Vec::with_capacity(self.parts.len());
+        let html_body = self.html_body;
+        let text_body = self.text_body;
         let attachments = self.attachments;
         let mut has_attachments = false;
 
         // Add MIME headers
-        let mut headers_rfc;
+        let mut headers;
         {
             let root_part = &mut self.parts[0];
-            let mut mime_headers = HashMap::new();
+            let mut mime_headers = Vec::with_capacity(4);
+            headers = Vec::with_capacity(root_part.headers.len());
 
-            for header_name in [
-                RfcHeader::ContentType,
-                RfcHeader::ContentDisposition,
-                RfcHeader::ContentId,
-                RfcHeader::ContentLanguage,
-                RfcHeader::ContentLocation,
-            ] {
-                if let Some(header_value) = root_part.headers_rfc.remove(&header_name) {
-                    mime_headers.insert(header_name, header_value);
+            for header in std::mem::take(&mut root_part.headers) {
+                if matches!(&header.name, HeaderName::Rfc(name) if [
+                    RfcHeader::ContentType,
+                    RfcHeader::ContentDisposition,
+                    RfcHeader::ContentId,
+                    RfcHeader::ContentLanguage,
+                    RfcHeader::ContentLocation,
+                ].contains(name))
+                {
+                    headers.push(Header {
+                        name: header.name.clone(),
+                        value: HeaderValue::Empty,
+                        offset_start: header.offset_start,
+                        offset_end: header.offset_end,
+                    });
+                    mime_headers.push(header);
+                } else {
+                    headers.push(header);
                 }
             }
 
-            headers_rfc = std::mem::take(&mut root_part.headers_rfc);
-            root_part.headers_rfc = mime_headers;
+            root_part.headers = mime_headers;
         }
 
-        let mut extra_mime_parts = Vec::new();
         let mut blobs = Vec::new();
 
         // Extract blobs and build parts list
         for (part_id, part) in self.parts.into_iter().enumerate() {
             let (mime_type, part_size) = match part.body {
                 PartType::Html(html) => {
-                    if let Some(pos) = text_body.iter().position(|&p| p == part_id) {
-                        text_body[pos] = total_parts;
-                        let value = html_to_text(html.as_ref()).into_bytes();
-                        extra_mime_parts.push(MimePart {
-                            mime_type: MimePartType::Text {
-                                blob_id: blobs.len().into(),
-                            },
-                            is_encoding_problem: false,
-                            type_: "text/plain".to_string().into(),
-                            size: value.len(),
-                            ..Default::default()
-                        });
-                        blobs.push(value);
-                        total_parts += 1;
-                    } else if !html_body.contains(&part_id) {
+                    if !text_body.contains(&part_id) && !html_body.contains(&part_id) {
                         has_attachments = true;
                     }
                     let value = (
@@ -214,21 +211,7 @@ impl IntoParsedEmail for Message<'_> {
                     value
                 }
                 PartType::Text(text) => {
-                    if let Some(pos) = html_body.iter().position(|&p| p == part_id) {
-                        let value = text_to_html(text.as_ref());
-                        extra_mime_parts.push(MimePart {
-                            mime_type: MimePartType::Html {
-                                blob_id: blobs.len().into(),
-                            },
-                            is_encoding_problem: false,
-                            type_: "text/html".to_string().into(),
-                            size: value.len(),
-                            ..Default::default()
-                        });
-                        blobs.push(value.into_bytes());
-                        html_body[pos] = total_parts;
-                        total_parts += 1;
-                    } else if !text_body.contains(&part_id) {
+                    if !text_body.contains(&part_id) && !html_body.contains(&part_id) {
                         has_attachments = true;
                     }
                     let value = (
@@ -291,43 +274,35 @@ impl IntoParsedEmail for Message<'_> {
             };
 
             mime_parts.push(MimePart::from_headers(
-                part.headers_rfc,
-                part.headers_raw
-                    .into_iter()
-                    .map(|(k, v)| (k.into(), v))
-                    .collect(),
+                part.headers,
                 mime_type,
                 part.is_encoding_problem,
                 part_size,
             ));
         }
 
-        if !extra_mime_parts.is_empty() {
-            mime_parts.append(&mut extra_mime_parts);
-        }
-
-        let mut email = HashMap::with_capacity(request.properties.len());
+        let mut email = VecMap::with_capacity(request.properties.len());
 
         for property in &request.properties {
             let value = match property {
                 Property::BlobId => Some(blob_id.into()),
                 Property::Size => Some(raw_message.len().into()),
-                Property::MessageId | Property::InReplyTo | Property::References => headers_rfc
-                    .remove(&property.as_rfc_header())
+                Property::MessageId | Property::InReplyTo | Property::References => headers
+                    .get_header(property.as_rfc_header())
                     .and_then(|p| p.into_form(&HeaderForm::MessageIds, false)),
                 Property::Sender
                 | Property::From
                 | Property::To
                 | Property::Cc
                 | Property::Bcc
-                | Property::ReplyTo => headers_rfc
-                    .remove(&property.as_rfc_header())
+                | Property::ReplyTo => headers
+                    .get_header(property.as_rfc_header())
                     .and_then(|p| p.into_form(&HeaderForm::Addresses, false)),
-                Property::Subject => headers_rfc
-                    .remove(&RfcHeader::Subject)
+                Property::Subject => headers
+                    .get_header(RfcHeader::Subject)
                     .and_then(|p| p.into_form(&HeaderForm::Text, false)),
-                Property::SentAt => headers_rfc
-                    .remove(&RfcHeader::Date)
+                Property::SentAt => headers
+                    .get_header(RfcHeader::Date)
                     .and_then(|p| p.into_form(&HeaderForm::Date, false)),
                 Property::Headers => Value::Headers {
                     value: if let Some(root_part) = mime_parts.get(0) {
@@ -337,11 +312,45 @@ impl IntoParsedEmail for Message<'_> {
                     },
                 }
                 .into(),
-                Property::Header(header) => {
-                    if let Some(offsets) = mime_parts
-                        .get(0)
-                        .and_then(|h| h.raw_headers.get_header(&header.header))
-                    {
+                Property::Header(header) => match (&header.header, &header.form) {
+                    (super::HeaderName::Other(_), _)
+                    | (super::HeaderName::Rfc(_), HeaderForm::Raw) => {
+                        if let Some(offsets) = headers.get_raw_header(&header.header) {
+                            header
+                                .form
+                                .parse_offsets(&offsets, raw_message, header.all)
+                                .into_form(&header.form, header.all)
+                        } else if header.all {
+                            Value::TextList { value: Vec::new() }.into()
+                        } else {
+                            None
+                        }
+                    }
+                    (super::HeaderName::Rfc(header_name), _) => headers
+                        .iter_mut()
+                        .filter_map(|h| {
+                            if matches!(&h.name, HeaderName::Rfc(name) if name == header_name)
+                                && !matches!(h.value, HeaderValue::Empty)
+                            {
+                                let value = std::mem::take(&mut h.value);
+                                match header.form {
+                                    HeaderForm::Raw | HeaderForm::Text => value.into_text(),
+                                    HeaderForm::URLs => value.into_url(),
+                                    HeaderForm::MessageIds => value.into_keyword(),
+                                    HeaderForm::Addresses | HeaderForm::GroupedAddresses => {
+                                        value.into_address()
+                                    }
+                                    HeaderForm::Date => value.into_date(),
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<super::HeaderValue>>()
+                        .into_form(&header.form, header.all),
+                },
+                /*Property::Header(header) => {
+                    if let Some(offsets) = headers.get_raw_header(&header.header) {
                         header
                             .form
                             .parse_offsets(&offsets, raw_message, header.all)
@@ -351,31 +360,34 @@ impl IntoParsedEmail for Message<'_> {
                     } else {
                         None
                     }
-                }
+                }*/
                 Property::HasAttachment => Some(has_attachments.into()),
                 Property::Preview => {
                     if !text_body.is_empty() || !html_body.is_empty() {
-                        #[allow(clippy::type_complexity)]
-                        let (body, preview_fnc): (
-                            &Vec<usize>,
-                            fn(Cow<str>, usize) -> Cow<str>,
-                        ) = if !text_body.is_empty() {
-                            (&text_body, preview_text)
+                        let parts = if !text_body.is_empty() {
+                            &text_body
                         } else {
-                            (&html_body, preview_html)
+                            &html_body
                         };
+
+                        #[allow(clippy::type_complexity)]
+                        let (preview_fnc, blob_id): (
+                            fn(Cow<str>, usize) -> Cow<str>,
+                            _,
+                        ) = match &parts
+                            .get(0)
+                            .and_then(|p| mime_parts.get(*p))
+                            .unwrap()
+                            .mime_type
+                        {
+                            MimePartType::Text { blob_id } => (preview_text, blob_id),
+                            MimePartType::Html { blob_id } => (preview_html, blob_id),
+                            _ => unreachable!(),
+                        };
+
                         Value::Text {
                             value: preview_fnc(
-                                String::from_utf8_lossy(
-                                    &blobs[body
-                                        .get(0)
-                                        .and_then(|p| mime_parts.get(*p))
-                                        .unwrap()
-                                        .mime_type
-                                        .blob_id()
-                                        .unwrap()
-                                        .size as usize],
-                                ),
+                                String::from_utf8_lossy(&blobs[blob_id.size as usize]),
                                 256,
                             )
                             .into_owned(),
@@ -386,7 +398,7 @@ impl IntoParsedEmail for Message<'_> {
                     }
                 }
                 Property::BodyValues => {
-                    let mut body_values = HashMap::new();
+                    let mut body_values = VecMap::new();
                     for (part_id, mime_part) in mime_parts.iter().enumerate() {
                         if ((mime_part.mime_type.is_html()
                             && (request.fetch_all_body_values || request.fetch_html_body_values))
@@ -395,24 +407,26 @@ impl IntoParsedEmail for Message<'_> {
                                     || request.fetch_text_body_values)))
                             && (text_body.contains(&part_id) || html_body.contains(&part_id))
                         {
-                            body_values.insert(
+                            body_values.append(
                                 part_id.to_string(),
                                 mime_part.as_body_value(
-                                    String::from_utf8_lossy(
-                                        &blobs
-                                            [mime_part.mime_type.blob_id().unwrap().size as usize],
+                                    String::from_utf8(
+                                        blobs[mime_part.mime_type.blob_id().unwrap().size as usize]
+                                            .iter()
+                                            .filter(|&&ch| ch != b'\r')
+                                            .copied()
+                                            .collect::<Vec<_>>(),
                                     )
-                                    .into_owned(),
+                                    .map_or_else(
+                                        |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                                        |s| s,
+                                    ),
                                     request.max_body_value_bytes,
                                 ),
                             );
                         }
                     }
-                    if !body_values.is_empty() {
-                        Value::BodyValues { value: body_values }.into()
-                    } else {
-                        None
-                    }
+                    Value::BodyValues { value: body_values }.into()
                 }
                 Property::TextBody => Some(
                     mime_parts
@@ -458,9 +472,8 @@ impl IntoParsedEmail for Message<'_> {
                 | Property::ReceivedAt
                 | Property::Invalid(_) => None,
             };
-            if let Some(value) = value {
-                email.insert(property.clone(), value);
-            }
+
+            email.append(property.clone(), value.unwrap_or_default());
         }
 
         Email { properties: email }
@@ -523,5 +536,28 @@ pub fn get_message_part(mut message: Message, part_id: u32, as_text: bool) -> Op
             }
         }
         None
+    }
+}
+
+trait GetHeaderValues {
+    fn get_header(&mut self, header_name: RfcHeader) -> Option<Vec<HeaderValue>>;
+}
+
+impl GetHeaderValues for Vec<Header<'_>> {
+    fn get_header(&mut self, header_name: RfcHeader) -> Option<Vec<HeaderValue>> {
+        let mut headers = Vec::new();
+        for header in self.iter_mut() {
+            if matches!(&header.name, HeaderName::Rfc(name) if &header_name == name)
+                && !matches!(&header.value, HeaderValue::Empty)
+            {
+                headers.push(std::mem::take(&mut header.value));
+            }
+        }
+
+        if !headers.is_empty() {
+            headers.into()
+        } else {
+            None
+        }
     }
 }

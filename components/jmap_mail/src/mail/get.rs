@@ -2,11 +2,11 @@ use super::{
     conv::IntoForm,
     parse::get_message_part,
     schema::{
-        BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm, Property,
-        Value,
+        BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
+        HeaderProperty, Property, Value,
     },
     sharing::JMAPShareMail,
-    GetRawHeader,
+    GetRawHeader, HeaderName,
 };
 use crate::mail::{MessageData, MessageField, MimePart, MimePartType};
 use jmap::{
@@ -25,10 +25,13 @@ use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
     HeaderValue, Message, RfcHeader,
 };
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 use store::{
     blob::BlobId,
-    core::acl::{ACLToken, ACL},
+    core::{
+        acl::{ACLToken, ACL},
+        vec_map::VecMap,
+    },
     AccountId, JMAPStore,
 };
 use store::{
@@ -195,13 +198,24 @@ where
         } else if helper.properties.iter().any(|prop| {
             matches!(
                 prop,
-                Property::Headers | Property::Header(_) | Property::BodyStructure
+                Property::Header(HeaderProperty {
+                    form: HeaderForm::Raw,
+                    ..
+                }) | Property::Header(HeaderProperty {
+                    header: HeaderName::Other(_),
+                    ..
+                }) | Property::BodyStructure
             )
         }) {
             FetchRaw::Header
         } else {
             FetchRaw::None
         };
+
+        // Add Id Property
+        if !helper.properties.contains(&Property::Id) {
+            helper.properties.push(Property::Id);
+        }
 
         // Get items
         helper.get(|id, properties| {
@@ -271,7 +285,7 @@ where
                 .ok_or_else(|| StoreError::InternalError("ORM not found for Email.".to_string()))?;
 
             // Add requested properties to result
-            let mut email = HashMap::with_capacity(properties.len());
+            let mut email = VecMap::with_capacity(properties.len());
             for property in properties {
                 let value = match property {
                     Property::Id => Value::Id { value: id }.into(),
@@ -301,7 +315,7 @@ where
                             set: true,
                         })
                         .unwrap_or(Value::Keywords {
-                            value: HashMap::new(),
+                            value: VecMap::new(),
                             set: true,
                         })
                         .into(),
@@ -341,10 +355,35 @@ where
                     }
                     .into(),
                     Property::Header(header) => {
+                        match (&header.header, &header.form, &raw_message) {
+                            (HeaderName::Other(_), _, Some(raw_message))
+                            | (HeaderName::Rfc(_), HeaderForm::Raw, Some(raw_message)) => {
+                                if let Some(offsets) = message_data
+                                    .mime_parts
+                                    .get(0)
+                                    .and_then(|h| h.raw_headers.get_raw_header(&header.header))
+                                {
+                                    header
+                                        .form
+                                        .parse_offsets(&offsets, raw_message, header.all)
+                                        .into_form(&header.form, header.all)
+                                } else if header.all {
+                                    Value::TextList { value: Vec::new() }.into()
+                                } else {
+                                    None
+                                }
+                            }
+                            (HeaderName::Rfc(header_name), _, _) => {
+                                message_data.header(header_name, &header.form, header.all)
+                            }
+                            _ => None,
+                        }
+                    }
+                    /*Property::Header(header) => {
                         if let Some(offsets) = message_data
                             .mime_parts
                             .get(0)
-                            .and_then(|h| h.raw_headers.get_header(&header.header))
+                            .and_then(|h| h.raw_headers.get_raw_header(&header.header))
                         {
                             header
                                 .form
@@ -355,7 +394,7 @@ where
                         } else {
                             None
                         }
-                    }
+                    }*/
                     Property::Headers => Value::Headers {
                         value: if let Some(root_part) = message_data.mime_parts.get(0) {
                             root_part.as_email_headers(raw_message.as_ref().unwrap())
@@ -367,47 +406,48 @@ where
                     Property::Preview => {
                         if !message_data.text_body.is_empty() || !message_data.html_body.is_empty()
                         {
-                            #[allow(clippy::type_complexity)]
-                            let (parts, preview_fnc): (
-                                &Vec<usize>,
-                                fn(Cow<str>, usize) -> Cow<str>,
-                            ) = if !message_data.text_body.is_empty() {
-                                (&message_data.text_body, preview_text)
+                            let parts = if !message_data.text_body.is_empty() {
+                                &message_data.text_body
                             } else {
-                                (&message_data.html_body, preview_html)
+                                &message_data.html_body
+                            };
+
+                            #[allow(clippy::type_complexity)]
+                            let (preview_fnc, blob_id): (
+                                fn(Cow<str>, usize) -> Cow<str>,
+                                _,
+                            ) = match &parts
+                                .get(0)
+                                .and_then(|p| message_data.mime_parts.get(*p))
+                                .ok_or_else(|| {
+                                    StoreError::DataCorruption(format!(
+                                        "Missing message part for {}/{}",
+                                        account_id, document_id
+                                    ))
+                                })?
+                                .mime_type
+                            {
+                                MimePartType::Text { blob_id } => (preview_text, blob_id),
+                                MimePartType::Html { blob_id } => (preview_html, blob_id),
+                                _ => {
+                                    return Err(StoreError::DataCorruption(format!(
+                                        "Message part blobId not found for {}/{}.",
+                                        account_id, document_id
+                                    ))
+                                    .into());
+                                }
                             };
 
                             Value::Text {
                                 value: preview_fnc(
-                                    String::from_utf8(
-                                        self.blob_get(
-                                            parts
-                                                .get(0)
-                                                .and_then(|p| message_data.mime_parts.get(*p))
-                                                .ok_or_else(|| {
-                                                    StoreError::DataCorruption(format!(
-                                                        "Missing message part for {}/{}",
-                                                        account_id, document_id
-                                                    ))
-                                                })?
-                                                .mime_type
-                                                .blob_id()
-                                                .ok_or_else(|| {
-                                                    StoreError::DataCorruption(format!(
-                                                        "Message part blobId not found for {}/{}.",
-                                                        account_id, document_id
-                                                    ))
-                                                })?,
-                                        )?
-                                        .ok_or_else(
-                                            || {
-                                                StoreError::DataCorruption(format!(
-                                                    "Message part blob not found for {}/{}.",
-                                                    account_id, document_id
-                                                ))
-                                            },
-                                        )?,
-                                    )
+                                    String::from_utf8(self.blob_get(blob_id)?.ok_or_else(
+                                        || {
+                                            StoreError::DataCorruption(format!(
+                                                "Message part blob not found for {}/{}.",
+                                                account_id, document_id
+                                            ))
+                                        },
+                                    )?)
                                     .map_or_else(
                                         |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
                                         |s| s,
@@ -423,7 +463,7 @@ where
                         }
                     }
                     Property::BodyValues => {
-                        let mut body_values = HashMap::new();
+                        let mut body_values = VecMap::new();
                         for (part_id, mime_part) in message_data.mime_parts.iter().enumerate() {
                             if (message_data.html_body.contains(&part_id)
                                 && (fetch_all_body_values || fetch_html_body_values))
@@ -444,7 +484,7 @@ where
                                         ))
                                     })?;
 
-                                body_values.insert(
+                                body_values.append(
                                     part_id.to_string(),
                                     mime_part.as_body_value(
                                         String::from_utf8(
@@ -510,7 +550,7 @@ where
                     }
                 };
 
-                email.insert(property.clone(), value.unwrap_or_default());
+                email.append(property.clone(), value.unwrap_or_default());
             }
 
             Ok(Some(Email { properties: email }))
@@ -564,13 +604,13 @@ impl MimePart {
         message_raw: Option<&[u8]>,
         base_blob_id: Option<&BlobId>,
     ) -> EmailBodyPart {
-        let mut body_part = HashMap::with_capacity(properties.len());
+        let mut body_part = VecMap::with_capacity(properties.len());
         let blob_id = self.mime_type.blob_id();
 
         for property in properties {
             match property {
                 BodyProperty::PartId => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::PartId,
                         if blob_id.is_some() {
                             Value::Text {
@@ -582,7 +622,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::BlobId => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::BlobId,
                         if blob_id.is_some() {
                             Value::Blob {
@@ -598,7 +638,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Size => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Size,
                         Value::Size {
                             value: if blob_id.is_some() { self.size } else { 0 },
@@ -606,7 +646,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Name => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Name,
                         if let Some(value) = &self.name {
                             Value::Text {
@@ -618,7 +658,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Type => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Type,
                         if let Some(mime_type) = self.type_.as_deref().or(match &self.mime_type {
                             MimePartType::Text { .. } => Some("text/plain"),
@@ -634,7 +674,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Charset => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Charset,
                         if let Some(value) = &self.charset {
                             Value::Text {
@@ -652,7 +692,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Disposition => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Disposition,
                         if let Some(value) = &self.disposition {
                             Value::Text {
@@ -664,7 +704,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Cid => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Cid,
                         if let Some(value) = &self.cid {
                             Value::Text {
@@ -676,7 +716,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Language => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Language,
                         if let Some(value) = &self.language {
                             Value::TextList {
@@ -688,7 +728,7 @@ impl MimePart {
                     );
                 }
                 BodyProperty::Location => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Location,
                         if let Some(value) = &self.location {
                             Value::Text {
@@ -707,7 +747,7 @@ impl MimePart {
                             Value::TextList { value: Vec::new() }
                         };
 
-                        if let Some(offsets) = self.raw_headers.get_header(&header.header) {
+                        if let Some(offsets) = self.raw_headers.get_raw_header(&header.header) {
                             if let Some(value_) = header
                                 .form
                                 .parse_offsets(&offsets, message_raw, header.all)
@@ -717,12 +757,12 @@ impl MimePart {
                             }
                         }
 
-                        body_part.insert(BodyProperty::Header(header.clone()), value);
+                        body_part.append(BodyProperty::Header(header.clone()), value);
                     }
                 }
                 BodyProperty::Headers => match message_raw {
                     Some(message_raw) if !self.raw_headers.is_empty() => {
-                        body_part.insert(
+                        body_part.append(
                             BodyProperty::Headers,
                             Value::Headers {
                                 value: self.as_email_headers(message_raw),
@@ -732,7 +772,7 @@ impl MimePart {
                     _ => (),
                 },
                 BodyProperty::Subparts => {
-                    body_part.insert(
+                    body_part.append(
                         BodyProperty::Subparts,
                         Value::BodyPartList { value: Vec::new() },
                     );
@@ -842,7 +882,7 @@ impl AsBodyStructure for Vec<MimePart> {
 
                 if let Some((prev_part_list_iter, mut prev_subparts)) = stack.pop() {
                     let prev_part = prev_subparts.last_mut().unwrap();
-                    prev_part.properties.insert(
+                    prev_part.properties.append(
                         BodyProperty::Subparts,
                         Value::BodyPartList { value: subparts },
                     );
@@ -853,7 +893,7 @@ impl AsBodyStructure for Vec<MimePart> {
                 }
             }
 
-            body_structure.properties.insert(
+            body_structure.properties.append(
                 BodyProperty::Subparts,
                 Value::BodyPartList { value: subparts },
             );
@@ -870,20 +910,19 @@ pub trait AsEmailHeaders {
 impl AsEmailHeaders for MimePart {
     fn as_email_headers(&self, message_raw: &[u8]) -> Vec<EmailHeader> {
         let mut headers = Vec::with_capacity(self.raw_headers.len());
-        for (header, value) in &self.raw_headers {
-            if let HeaderValue::Collection(values) =
-                HeaderForm::Raw.parse_offsets(&[value], message_raw, true)
+        for (header, from_offset, to_offset) in &self.raw_headers {
+            for value in
+                HeaderForm::Raw.parse_offsets(&[(*from_offset, *to_offset)], message_raw, true)
             {
-                for value in values {
-                    if let HeaderValue::Text(value) = value {
-                        headers.push(EmailHeader {
-                            name: header.as_str().to_string(),
-                            value: value.into_owned(),
-                        });
-                    }
+                if let HeaderValue::Text(value) = value {
+                    headers.push(EmailHeader {
+                        name: header.as_str().to_string(),
+                        value: value.into_owned(),
+                    });
                 }
             }
         }
+
         headers
     }
 }

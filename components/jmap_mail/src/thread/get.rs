@@ -46,13 +46,18 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn thread_get(&self, request: GetRequest<Thread>) -> jmap::Result<GetResponse<Thread>> {
-        let helper = GetHelper::new(self, request, None::<IdMapper>, None::<SharedDocsFnc>)?;
+        let mut helper = GetHelper::new(self, request, None::<IdMapper>, None::<SharedDocsFnc>)?;
         let account_id = helper.account_id;
         let shared_messages = if helper.acl.is_shared(account_id) {
             Some(self.mail_shared_messages(account_id, &helper.acl.member_of, ACL::ReadItems)?)
         } else {
             None
         };
+
+        // Add Id Property
+        if !helper.properties.contains(&Property::Id) {
+            helper.properties.push(Property::Id);
+        }
 
         let response = helper.get(|id, _properties| {
             let thread_id = id.get_document_id();

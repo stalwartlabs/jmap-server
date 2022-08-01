@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use crate::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use crate::orm::serialize::JMAPOrm;
 use crate::request::get::{GetRequest, GetResponse};
 use crate::types::jmap::JMAPId;
 
 use store::core::error::StoreError;
+use store::core::vec_map::VecMap;
 use store::JMAPStore;
 use store::Store;
 
@@ -57,10 +56,10 @@ where
                 .ok_or_else(|| {
                     StoreError::InternalError("PushSubscription data not found".to_string())
                 })?;
-            let mut push_subscription = HashMap::with_capacity(properties.len());
+            let mut push_subscription = VecMap::with_capacity(properties.len());
 
             for property in properties {
-                push_subscription.insert(
+                push_subscription.append(
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },

@@ -1,27 +1,30 @@
-use serde::de::IgnoredAny;
-use serde::Deserialize;
-use store::AccountId;
-use store::{core::acl::ACLToken, log::changes::ChangeId};
-
 use crate::error::method::MethodError;
 use crate::error::set::SetError;
 use crate::jmap_store::set::SetObject;
+use crate::request::ArgumentSerializer;
 use crate::types::jmap::JMAPId;
 use crate::types::state::JMAPState;
 use crate::types::type_state::TypeState;
+use serde::de::IgnoredAny;
+use serde::Deserialize;
 use std::borrow::Cow;
+use std::fmt;
 use std::sync::Arc;
-use std::{collections::HashMap, fmt};
+use store::ahash::AHashMap;
+use store::core::ahash_is_empty;
+use store::core::vec_map::VecMap;
+use store::AccountId;
+use store::{core::acl::ACLToken, log::changes::ChangeId};
 
-use super::{ArgumentSerializer, MaybeResultReference, ResultReference};
+use super::{MaybeResultReference, ResultReference};
 
 #[derive(Debug, Clone, Default)]
 pub struct SetRequest<O: SetObject> {
     pub acl: Option<Arc<ACLToken>>,
     pub account_id: JMAPId,
     pub if_in_state: Option<JMAPState>,
-    pub create: Option<Vec<(String, O)>>,
-    pub update: Option<HashMap<JMAPId, O>>,
+    pub create: Option<VecMap<String, O>>,
+    pub update: Option<VecMap<JMAPId, O>>,
     pub destroy: Option<MaybeResultReference<Vec<JMAPId>>>,
     pub arguments: O::SetArguments,
 }
@@ -41,28 +44,28 @@ pub struct SetResponse<O: SetObject> {
     pub new_state: Option<JMAPState>,
 
     #[serde(rename = "created")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub created: HashMap<String, O>,
+    #[serde(skip_serializing_if = "ahash_is_empty")]
+    pub created: AHashMap<String, O>,
 
     #[serde(rename = "updated")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub updated: HashMap<JMAPId, Option<O>>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    pub updated: VecMap<JMAPId, Option<O>>,
 
     #[serde(rename = "destroyed")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub destroyed: Vec<JMAPId>,
 
     #[serde(rename = "notCreated")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub not_created: HashMap<String, SetError<O::Property>>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    pub not_created: VecMap<String, SetError<O::Property>>,
 
     #[serde(rename = "notUpdated")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub not_updated: HashMap<JMAPId, SetError<O::Property>>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    pub not_updated: VecMap<JMAPId, SetError<O::Property>>,
 
     #[serde(rename = "notDestroyed")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub not_destroyed: HashMap<JMAPId, SetError<O::Property>>,
+    #[serde(skip_serializing_if = "VecMap::is_empty")]
+    pub not_destroyed: VecMap<JMAPId, SetError<O::Property>>,
 
     #[serde(skip)]
     pub change_id: Option<ChangeId>,
@@ -78,11 +81,11 @@ impl<O: SetObject> SetRequest<O> {
     pub fn eval_references(
         &mut self,
         mut result_map_fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
-        created_ids: &HashMap<String, JMAPId>,
+        created_ids: &AHashMap<String, JMAPId>,
     ) -> crate::Result<()> {
         if let Some(mut objects) = self.create.take() {
-            let mut create = Vec::with_capacity(objects.len());
-            let mut graph = HashMap::with_capacity(objects.len());
+            let mut create = VecMap::with_capacity(objects.len());
+            let mut graph = AHashMap::with_capacity(objects.len());
 
             for (child_id, object) in objects.iter_mut() {
                 object.eval_result_references(&mut result_map_fnc);
@@ -116,10 +119,8 @@ impl<O: SetObject> SetRequest<O> {
                             }
                             it = to_ids.iter();
                             continue;
-                        } else if let Some(object_pos) =
-                            objects.iter().position(|(id, _)| id == from_id)
-                        {
-                            create.push((from_id.to_string(), objects.swap_remove(object_pos).1));
+                        } else if let Some((id, value)) = objects.remove_entry(from_id) {
+                            create.append(id, value);
                             if objects.is_empty() {
                                 break 'main;
                             }
@@ -128,8 +129,8 @@ impl<O: SetObject> SetRequest<O> {
 
                     if let Some((prev_it, from_id)) = it_stack.pop() {
                         it = prev_it;
-                        if let Some(object_pos) = objects.iter().position(|(id, _)| id == from_id) {
-                            create.push((from_id.to_string(), objects.swap_remove(object_pos).1));
+                        if let Some((id, value)) = objects.remove_entry(from_id) {
+                            create.append(id, value);
                             if objects.is_empty() {
                                 break 'main;
                             }
@@ -141,7 +142,7 @@ impl<O: SetObject> SetRequest<O> {
             }
 
             for (user_id, object) in objects {
-                create.push((user_id, object));
+                create.append(user_id, object);
             }
 
             self.create = create.into();
@@ -171,9 +172,9 @@ impl<O: SetObject> SetRequest<O> {
 }
 
 impl<O: SetObject> SetResponse<O> {
-    pub fn created_ids(&self) -> Option<HashMap<String, JMAPId>> {
+    pub fn created_ids(&self) -> Option<AHashMap<String, JMAPId>> {
         if !self.created.is_empty() {
-            let mut created_ids = HashMap::with_capacity(self.created.len());
+            let mut created_ids = AHashMap::with_capacity(self.created.len());
             for (create_id, item) in &self.created {
                 created_ids.insert(create_id.to_string(), *item.id().unwrap());
             }
@@ -238,9 +239,7 @@ impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
                     request.update = map.next_value()?;
                 }
                 "create" => {
-                    request.create = map
-                        .next_value::<Option<HashMap<String, O>>>()?
-                        .map(|v| v.into_iter().collect());
+                    request.create = map.next_value()?;
                 }
                 "destroy" => {
                     request.destroy = if request.destroy.is_none() {
@@ -261,7 +260,9 @@ impl<'de, O: SetObject> serde::de::Visitor<'de> for SetRequestVisitor<O> {
                     .into();
                 }
                 key => {
-                    if let Err(err) = request.arguments.deserialize(key, &mut map) {
+                    if let Err(err) =
+                        O::SetArguments::deserialize(&mut request.arguments, key, &mut map)
+                    {
                         return Err(serde::de::Error::custom(err));
                     }
                 }

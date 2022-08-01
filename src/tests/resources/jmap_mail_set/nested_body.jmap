@@ -19,26 +19,27 @@
   "subject": "RFC 8621 Section 4.1.4 test",
   "sentAt": "2018-07-10T01:03:11Z",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/mixed; \r\n\tboundary=\"boundary_0\""
-      },
-      {
         "name": "Date",
-        "value": "Tue, 10 Jul 2018 01:03:11 +0000"
+        "value": " Tue, 10 Jul 2018 01:03:11 +0000"
       },
       {
         "name": "From",
-        "value": "\"Joe Bloggs\" <joe@example.com>"
+        "value": " \"Joe Bloggs\" <joe@example.com>"
       },
       {
         "name": "Message-ID",
-        "value": "<my-message-id>"
+        "value": " <my-message-id>"
       },
       {
         "name": "Subject",
-        "value": "RFC 8621 Section 4.1.4 test"
+        "value": " RFC 8621 Section 4.1.4 test"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed; \r\n\tboundary=\"boundary_0\""
       }
     ],
     "type": "multipart/mixed",
@@ -50,43 +51,47 @@
         "headers": [
           {
             "name": "Content-Disposition",
-            "value": "inline"
+            "value": " inline"
+          },
+          {
+            "name": "Content-Type",
+            "value": " text/plain"
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "7bit"
-          },
-          {
-            "name": "Content-Type",
-            "value": "text/plain"
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
+        "charset": "us-ascii",
         "disposition": "inline"
       },
       {
+        "size": 0,
         "headers": [
           {
             "name": "Content-Type",
-            "value": "multipart/mixed; \r\n\tboundary=\"boundary_1\""
+            "value": " multipart/mixed; \r\n\tboundary=\"boundary_1\""
           }
         ],
         "type": "multipart/mixed",
         "subParts": [
           {
+            "size": 0,
             "headers": [
               {
                 "name": "Content-Type",
-                "value": "multipart/alternative; \r\n\tboundary=\"boundary_2\""
+                "value": " multipart/alternative; \r\n\tboundary=\"boundary_2\""
               }
             ],
             "type": "multipart/alternative",
             "subParts": [
               {
+                "size": 0,
                 "headers": [
                   {
                     "name": "Content-Type",
-                    "value": "multipart/mixed; \r\n\tboundary=\"boundary_3\""
+                    "value": " multipart/mixed; \r\n\tboundary=\"boundary_3\""
                   }
                 ],
                 "type": "multipart/mixed",
@@ -98,18 +103,19 @@
                     "headers": [
                       {
                         "name": "Content-Disposition",
-                        "value": "inline"
-                      },
-                      {
-                        "name": "Content-Transfer-Encoding",
-                        "value": "7bit"
+                        "value": " inline"
                       },
                       {
                         "name": "Content-Type",
-                        "value": "text/plain"
+                        "value": " text/plain"
+                      },
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": " 7bit"
                       }
                     ],
                     "type": "text/plain",
+                    "charset": "us-ascii",
                     "disposition": "inline"
                   },
                   {
@@ -119,15 +125,15 @@
                     "headers": [
                       {
                         "name": "Content-Disposition",
-                        "value": "inline"
-                      },
-                      {
-                        "name": "Content-Transfer-Encoding",
-                        "value": "base64"
+                        "value": " inline"
                       },
                       {
                         "name": "Content-Type",
-                        "value": "image/jpeg"
+                        "value": " image/jpeg"
+                      },
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": " base64"
                       }
                     ],
                     "type": "image/jpeg",
@@ -140,27 +146,29 @@
                     "headers": [
                       {
                         "name": "Content-Disposition",
-                        "value": "inline"
-                      },
-                      {
-                        "name": "Content-Transfer-Encoding",
-                        "value": "7bit"
+                        "value": " inline"
                       },
                       {
                         "name": "Content-Type",
-                        "value": "text/plain"
+                        "value": " text/plain"
+                      },
+                      {
+                        "name": "Content-Transfer-Encoding",
+                        "value": " 7bit"
                       }
                     ],
                     "type": "text/plain",
+                    "charset": "us-ascii",
                     "disposition": "inline"
                   }
                 ]
               },
               {
+                "size": 0,
                 "headers": [
                   {
                     "name": "Content-Type",
-                    "value": "multipart/related; \r\n\tboundary=\"boundary_4\""
+                    "value": " multipart/related; \r\n\tboundary=\"boundary_4\""
                   }
                 ],
                 "type": "multipart/related",
@@ -171,15 +179,16 @@
                     "size": 6,
                     "headers": [
                       {
-                        "name": "Content-Transfer-Encoding",
-                        "value": "7bit"
+                        "name": "Content-Type",
+                        "value": " text/html"
                       },
                       {
-                        "name": "Content-Type",
-                        "value": "text/html"
+                        "name": "Content-Transfer-Encoding",
+                        "value": " 7bit"
                       }
                     ],
-                    "type": "text/html"
+                    "type": "text/html",
+                    "charset": "us-ascii"
                   },
                   {
                     "partId": "10",
@@ -187,12 +196,12 @@
                     "size": 6,
                     "headers": [
                       {
-                        "name": "Content-Transfer-Encoding",
-                        "value": "base64"
+                        "name": "Content-Type",
+                        "value": " image/jpeg"
                       },
                       {
-                        "name": "Content-Type",
-                        "value": "image/jpeg"
+                        "name": "Content-Transfer-Encoding",
+                        "value": " base64"
                       }
                     ],
                     "type": "image/jpeg"
@@ -208,15 +217,15 @@
             "headers": [
               {
                 "name": "Content-Disposition",
-                "value": "attachment"
-              },
-              {
-                "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "value": " attachment"
               },
               {
                 "name": "Content-Type",
-                "value": "image/jpeg"
+                "value": " image/jpeg"
+              },
+              {
+                "name": "Content-Transfer-Encoding",
+                "value": " base64"
               }
             ],
             "type": "image/jpeg",
@@ -228,12 +237,12 @@
             "size": 6,
             "headers": [
               {
-                "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "name": "Content-Type",
+                "value": " application/x-excel"
               },
               {
-                "name": "Content-Type",
-                "value": "application/x-excel"
+                "name": "Content-Transfer-Encoding",
+                "value": " base64"
               }
             ],
             "type": "application/x-excel"
@@ -244,12 +253,12 @@
             "size": 6,
             "headers": [
               {
-                "name": "Content-Transfer-Encoding",
-                "value": "base64"
+                "name": "Content-Type",
+                "value": " x-message/rfc822"
               },
               {
-                "name": "Content-Type",
-                "value": "x-message/rfc822"
+                "name": "Content-Transfer-Encoding",
+                "value": " base64"
               }
             ],
             "type": "x-message/rfc822"
@@ -263,18 +272,19 @@
         "headers": [
           {
             "name": "Content-Disposition",
-            "value": "inline"
-          },
-          {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "value": " inline"
           },
           {
             "name": "Content-Type",
-            "value": "text/plain"
+            "value": " text/plain"
+          },
+          {
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
+        "charset": "us-ascii",
         "disposition": "inline"
       }
     ]
@@ -290,18 +300,13 @@
       "isEncodingProblem": false,
       "isTruncated": false
     },
-    "15": {
-      "value": "<html><body>Part A</body></html>",
-      "isEncodingProblem": false,
-      "isTruncated": false
-    },
-    "16": {
-      "value": "<html><body>Part K</body></html>",
-      "isEncodingProblem": false,
-      "isTruncated": false
-    },
     "5": {
       "value": "Part B",
+      "isEncodingProblem": false,
+      "isTruncated": false
+    },
+    "6": {
+      "value": "Part C",
       "isEncodingProblem": false,
       "isTruncated": false
     },
@@ -324,18 +329,19 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "inline"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain"
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     },
     {
@@ -345,18 +351,19 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "inline"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain"
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     },
     {
@@ -366,15 +373,15 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "inline"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "image/jpeg"
+          "value": " image/jpeg"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/jpeg",
@@ -387,18 +394,19 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "inline"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain"
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     },
     {
@@ -408,27 +416,44 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "inline"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "text/plain"
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
+      "charset": "us-ascii",
       "disposition": "inline"
     }
   ],
   "htmlBody": [
     {
-      "partId": "15",
-      "blobId": "b03eee5592a734d428d971e08ebcc909e2cebc7382621708667950ccf4a6f7f3d20",
-      "size": 32,
-      "type": "text/html"
+      "partId": "1",
+      "blobId": "b83d2558d4bdc274adbddac390799efbfd8d3f406a8d3a52c40408b305daae5c006",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": " inline"
+        },
+        {
+          "name": "Content-Type",
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii",
+      "disposition": "inline"
     },
     {
       "partId": "9",
@@ -436,21 +461,38 @@
       "size": 6,
       "headers": [
         {
+          "name": "Content-Type",
+          "value": " text/html"
+        },
+        {
           "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " 7bit"
+        }
+      ],
+      "type": "text/html",
+      "charset": "us-ascii"
+    },
+    {
+      "partId": "14",
+      "blobId": "b80996ff30631cec5e9ae8adff55eb5b12b1f5b8472bac96190ac13a376b9bd9706",
+      "size": 6,
+      "headers": [
+        {
+          "name": "Content-Disposition",
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "text/html"
+          "value": " text/plain"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
-      "type": "text/html"
-    },
-    {
-      "partId": "16",
-      "blobId": "b1b4bec58fbecdf002451efb4e86dfc2f365cc18065ec640888cb72a54225135c20",
-      "size": 32,
-      "type": "text/html"
+      "type": "text/plain",
+      "charset": "us-ascii",
+      "disposition": "inline"
     }
   ],
   "attachments": [
@@ -461,15 +503,15 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "inline"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " inline"
         },
         {
           "name": "Content-Type",
-          "value": "image/jpeg"
+          "value": " image/jpeg"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/jpeg",
@@ -481,12 +523,12 @@
       "size": 6,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "name": "Content-Type",
+          "value": " image/jpeg"
         },
         {
-          "name": "Content-Type",
-          "value": "image/jpeg"
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/jpeg"
@@ -498,15 +540,15 @@
       "headers": [
         {
           "name": "Content-Disposition",
-          "value": "attachment"
-        },
-        {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "value": " attachment"
         },
         {
           "name": "Content-Type",
-          "value": "image/jpeg"
+          "value": " image/jpeg"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "image/jpeg",
@@ -518,12 +560,12 @@
       "size": 6,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "name": "Content-Type",
+          "value": " application/x-excel"
         },
         {
-          "name": "Content-Type",
-          "value": "application/x-excel"
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "application/x-excel"
@@ -534,12 +576,12 @@
       "size": 6,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "base64"
+          "name": "Content-Type",
+          "value": " x-message/rfc822"
         },
         {
-          "name": "Content-Type",
-          "value": "x-message/rfc822"
+          "name": "Content-Transfer-Encoding",
+          "value": " base64"
         }
       ],
       "type": "x-message/rfc822"

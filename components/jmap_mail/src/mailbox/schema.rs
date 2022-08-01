@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 
 use jmap::{
     orm::{self, acl::ACLUpdate},
@@ -7,13 +7,13 @@ use jmap::{
 };
 use serde::{Deserialize, Serialize};
 use store::{
-    core::{acl::ACL, bitmap::Bitmap},
+    core::{acl::ACL, bitmap::Bitmap, vec_map::VecMap},
     AccountId, FieldId,
 };
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct Mailbox {
-    pub properties: HashMap<Property, Value>,
+    pub properties: VecMap<Property, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub enum Value {
     ResultReference { value: ResultReference },
     IdReference { value: String },
     ACLSet(Vec<ACLUpdate>),
-    ACLGet(HashMap<String, Vec<ACL>>),
+    ACLGet(VecMap<String, Vec<ACL>>),
     Null,
 }
 

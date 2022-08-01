@@ -138,15 +138,11 @@ where
 
         let result = serde_json::to_string_pretty(&email.into_test()).unwrap();
 
-        //fs::write(&test_file, &result).unwrap();
-
-        assert_eq!(
-            result,
-            String::from_utf8(fs::read(&test_file).unwrap()).unwrap(),
-            "({}) {}",
-            test_file.display(),
-            result
-        );
+        if fs::read(&test_file).unwrap() != result.as_bytes() {
+            test_file.set_extension("failed");
+            fs::write(&test_file, result.as_bytes()).unwrap();
+            panic!("Test failed, output saved to {}", test_file.display());
+        }
     }
 
     // Test header parsing on a temporary blob
@@ -222,15 +218,11 @@ where
 
     let result = serde_json::to_string_pretty(&email).unwrap();
 
-    //fs::write(&test_file, &result).unwrap();
-
-    assert_eq!(
-        result,
-        String::from_utf8(fs::read(&test_file).unwrap()).unwrap(),
-        "({}) {}",
-        test_file.display(),
-        result
-    );
+    if fs::read(&test_file).unwrap() != result.as_bytes() {
+        test_file.set_extension("failed");
+        fs::write(&test_file, result.as_bytes()).unwrap();
+        panic!("Test failed, output saved to {}", test_file.display());
+    }
 
     client.mailbox_destroy(&mailbox_id, true).await.unwrap();
 

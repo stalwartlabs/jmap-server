@@ -1,6 +1,7 @@
-use std::{borrow::Cow, collections::HashMap, fmt};
+use std::{borrow::Cow, fmt};
 
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
+use store::core::vec_map::VecMap;
 
 use crate::mail::schema::EmailAddress;
 
@@ -76,12 +77,12 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut properties: HashMap<Property, Value> = HashMap::new();
+        let mut properties: VecMap<Property, Value> = VecMap::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
                 "name" => {
-                    properties.insert(
+                    properties.append(
                         Property::Name,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -91,7 +92,7 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
                     );
                 }
                 "email" => {
-                    properties.insert(
+                    properties.append(
                         Property::Email,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -101,7 +102,7 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
                     );
                 }
                 "textSignature" => {
-                    properties.insert(
+                    properties.append(
                         Property::TextSignature,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -111,7 +112,7 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
                     );
                 }
                 "htmlSignature" => {
-                    properties.insert(
+                    properties.append(
                         Property::HtmlSignature,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
@@ -121,7 +122,7 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
                     );
                 }
                 "replyTo" => {
-                    properties.insert(
+                    properties.append(
                         Property::ReplyTo,
                         if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
                             Value::Addresses { value }
@@ -131,7 +132,7 @@ impl<'de> serde::de::Visitor<'de> for IdentityVisitor {
                     );
                 }
                 "bcc" => {
-                    properties.insert(
+                    properties.append(
                         Property::Bcc,
                         if let Some(value) = map.next_value::<Option<Vec<EmailAddress>>>()? {
                             Value::Addresses { value }

@@ -1,12 +1,13 @@
-use std::collections::HashMap;
-
 use serde::Serialize;
 
 use jmap::{error::method::MethodError, types::jmap::JMAPId};
+use store::ahash::AHashMap;
+use store::core::ahash_is_empty;
 
 use super::method;
 
 #[derive(Debug, serde::Serialize)]
+
 pub struct Response {
     #[serde(rename = "methodResponses")]
     pub method_responses: Vec<method::Call<method::Response>>,
@@ -16,12 +17,12 @@ pub struct Response {
     pub session_state: u32,
 
     #[serde(rename(deserialize = "createdIds"))]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub created_ids: HashMap<String, JMAPId>,
+    #[serde(skip_serializing_if = "ahash_is_empty")]
+    pub created_ids: AHashMap<String, JMAPId>,
 }
 
 impl Response {
-    pub fn new(session_state: u32, created_ids: HashMap<String, JMAPId>, capacity: usize) -> Self {
+    pub fn new(session_state: u32, created_ids: AHashMap<String, JMAPId>, capacity: usize) -> Self {
         Response {
             session_state,
             created_ids,

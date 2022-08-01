@@ -21,22 +21,23 @@
   ],
   "subject": "[Fwd: Map of Argentina with Description]",
   "bodyStructure": {
+    "size": 0,
     "headers": [
       {
-        "name": "Content-Type",
-        "value": "multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
-      },
-      {
         "name": "From",
-        "value": "Al Gore <vice-president@whitehouse.gov>"
-      },
-      {
-        "name": "Subject",
-        "value": "[Fwd: Map of Argentina with Description]"
+        "value": "  Al Gore <vice-president@whitehouse.gov>"
       },
       {
         "name": "To",
-        "value": "White House Transportation Coordinator\n     <transport@whitehouse.gov>"
+        "value": "  White House Transportation Coordinator\n     <transport@whitehouse.gov>"
+      },
+      {
+        "name": "Subject",
+        "value": " [Fwd: Map of Argentina with Description]"
+      },
+      {
+        "name": "Content-Type",
+        "value": " multipart/mixed;\n              boundary=\"D7F------------D7FD5A0B8AB9C65CCDBFA872\""
       }
     ],
     "type": "multipart/mixed",
@@ -47,12 +48,12 @@
         "size": 61,
         "headers": [
           {
-            "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "name": "Content-Type",
+            "value": " text/plain; charset=us-ascii"
           },
           {
-            "name": "Content-Type",
-            "value": "text/plain; charset=us-ascii"
+            "name": "Content-Transfer-Encoding",
+            "value": " 7bit"
           }
         ],
         "type": "text/plain",
@@ -64,16 +65,16 @@
         "size": 1980,
         "headers": [
           {
-            "name": "Content-Disposition",
-            "value": "inline"
+            "name": "Content-Type",
+            "value": " message/rfc822"
           },
           {
             "name": "Content-Transfer-Encoding",
-            "value": "7bit"
+            "value": " 7bit"
           },
           {
-            "name": "Content-Type",
-            "value": "message/rfc822"
+            "name": "Content-Disposition",
+            "value": " inline"
           }
         ],
         "type": "message/rfc822",
@@ -86,11 +87,6 @@
       "value": "Fred,\n\nFire up Air Force One!  We're going South!\n\nThanks,\nAl",
       "isEncodingProblem": false,
       "isTruncated": false
-    },
-    "3": {
-      "value": "<html><body>Fred,<br/><br/>Fire up Air Force One!  We're going South!<br/><br/>Thanks,<br/>Al...",
-      "isEncodingProblem": false,
-      "isTruncated": true
     }
   },
   "textBody": [
@@ -100,12 +96,12 @@
       "size": 61,
       "headers": [
         {
-          "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "name": "Content-Type",
+          "value": " text/plain; charset=us-ascii"
         },
         {
-          "name": "Content-Type",
-          "value": "text/plain; charset=us-ascii"
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
         }
       ],
       "type": "text/plain",
@@ -114,10 +110,21 @@
   ],
   "htmlBody": [
     {
-      "partId": "3",
-      "blobId": "bc42fd3622fe117b228fc56f1b9c545bbdd08ecf805a42dbac340059223fb6e3d6b",
-      "size": 107,
-      "type": "text/html"
+      "partId": "1",
+      "blobId": "b0855eff89e41a035bcba5e95630bf0a2c04db40393cef1a6bfb33c5765fbf8773d",
+      "size": 61,
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": " text/plain; charset=us-ascii"
+        },
+        {
+          "name": "Content-Transfer-Encoding",
+          "value": " 7bit"
+        }
+      ],
+      "type": "text/plain",
+      "charset": "us-ascii"
     }
   ],
   "attachments": [
@@ -127,16 +134,16 @@
       "size": 1980,
       "headers": [
         {
-          "name": "Content-Disposition",
-          "value": "inline"
+          "name": "Content-Type",
+          "value": " message/rfc822"
         },
         {
           "name": "Content-Transfer-Encoding",
-          "value": "7bit"
+          "value": " 7bit"
         },
         {
-          "name": "Content-Type",
-          "value": "message/rfc822"
+          "name": "Content-Disposition",
+          "value": " inline"
         }
       ],
       "type": "message/rfc822",

@@ -288,6 +288,7 @@ checksum = "fcb51a0695d8f838b1ee009b3fbf66bda078cd64590202a864a8f3e8c4315c47"
 dependencies = [
  "getrandom",
  "once_cell",
+ "serde",
  "version_check",
 ]
 
@@ -1357,6 +1358,7 @@ dependencies = [
 name = "jmap-client"
 version = "0.1.0"
 dependencies = [
+ "ahash 0.7.6",
  "async-stream",
  "base64",
  "chrono",
@@ -2599,6 +2601,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "store"
 version = "0.1.0"
 dependencies = [
+ "ahash 0.7.6",
  "base32",
  "bincode",
  "bitpacking",

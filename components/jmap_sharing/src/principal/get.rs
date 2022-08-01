@@ -1,11 +1,10 @@
-use std::collections::HashMap;
-
 use jmap::jmap_store::get::{default_mapper, GetHelper, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
 
 use jmap::types::principal::{JMAPPrincipals, Principal, Property, Value};
 use store::core::error::StoreError;
+use store::core::vec_map::VecMap;
 use store::JMAPStore;
 use store::Store;
 
@@ -33,18 +32,18 @@ where
             let mut fields = self
                 .get_orm::<Principal>(account_id, document_id)?
                 .ok_or_else(|| StoreError::InternalError("Principal data not found".to_string()))?;
-            let mut principal = HashMap::with_capacity(properties.len());
+            let mut principal = VecMap::with_capacity(properties.len());
 
             for property in properties {
-                principal.insert(
+                principal.append(
                     *property,
                     match property {
                         Property::Id => Value::Id { value: id },
                         Property::ACL => {
-                            let mut acl_get = HashMap::new();
+                            let mut acl_get = VecMap::new();
                             for (account_id, acls) in fields.get_acls() {
                                 if let Some(email) = self.principal_to_email(account_id)? {
-                                    acl_get.insert(email, acls);
+                                    acl_get.append(email, acls);
                                 }
                             }
                             Value::ACLGet(acl_get)

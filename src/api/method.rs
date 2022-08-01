@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use jmap::{
     error::method::MethodError,
@@ -31,7 +31,7 @@ use jmap_mail::{
     vacation_response::schema::VacationResponse,
 };
 use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
-use store::{log::changes::ChangeId, AccountId};
+use store::{ahash::AHashMap, log::changes::ChangeId, AccountId};
 
 use crate::services::state_change::StateChange;
 
@@ -45,9 +45,10 @@ pub struct Call<T> {
 
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
+
 pub enum Changes {
     Item {
-        created_ids: Option<HashMap<String, JMAPId>>,
+        created_ids: Option<AHashMap<String, JMAPId>>,
         change_id: ChangeId,
         state_change: Option<StateChange>,
         next_call: Option<Request>,

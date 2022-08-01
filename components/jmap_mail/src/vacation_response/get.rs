@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
-
 use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper, SharedDocsFnc};
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
+use store::ahash::AHashSet;
 
 use mail_builder::headers::address::Address;
 use mail_builder::MessageBuilder;
@@ -11,6 +10,7 @@ use store::chrono::Utc;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
+use store::core::vec_map::VecMap;
 use store::write::batch::WriteBatch;
 use store::Store;
 use store::{AccountId, JMAPStore};
@@ -81,10 +81,10 @@ where
                 .ok_or_else(|| {
                     StoreError::InternalError("VacationResponse data not found".to_string())
                 })?;
-            let mut vacation_response = HashMap::with_capacity(properties.len());
+            let mut vacation_response = VecMap::with_capacity(properties.len());
 
             for property in properties {
-                vacation_response.insert(
+                vacation_response.append(
                     *property,
                     if let Property::Id = property {
                         Value::Id {
@@ -135,7 +135,7 @@ where
                         }
                         addresses
                     } else {
-                        HashSet::from([address.clone()])
+                        AHashSet::from_iter([address.clone()])
                     };
 
                     // Update the vacation response object with the new addresses

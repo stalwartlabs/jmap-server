@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -13,7 +12,9 @@ use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use mail_parser::decoders::html::html_to_text;
 use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::{HeaderValue, Message, MessageAttachment, PartType, RfcHeader};
+use mail_parser::{HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader};
+use store::ahash::AHashMap;
+use store::ahash::AHashSet;
 use store::blob::BlobId;
 use store::chrono::DateTime;
 use store::core::acl::{ACLToken, ACL};
@@ -21,6 +22,7 @@ use store::core::collection::Collection;
 use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::core::vec_map::VecMap;
 use store::core::JMAPIdPrefix;
 use store::log::changes::ChangeId;
 use store::nlp::Language;
@@ -56,14 +58,14 @@ pub struct EmailImportRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub if_in_state: Option<JMAPState>,
 
-    pub emails: HashMap<String, EmailImport>,
+    pub emails: VecMap<String, EmailImport>,
 }
 
 #[derive(Debug, Clone)]
 pub struct EmailImport {
     pub blob_id: JMAPBlob,
-    pub mailbox_ids: Option<MaybeResultReference<HashMap<MaybeIdReference, bool>>>,
-    pub keywords: Option<HashMap<Keyword, bool>>,
+    pub mailbox_ids: Option<MaybeResultReference<VecMap<MaybeIdReference, bool>>>,
+    pub keywords: Option<VecMap<Keyword, bool>>,
     pub received_at: Option<DateTime<store::chrono::Utc>>,
 }
 
@@ -81,11 +83,11 @@ pub struct EmailImportResponse {
 
     #[serde(rename = "created")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub created: Option<HashMap<String, Email>>,
+    pub created: Option<VecMap<String, Email>>,
 
     #[serde(rename = "notCreated")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub not_created: Option<HashMap<String, SetError<Property>>>,
+    pub not_created: Option<VecMap<String, SetError<Property>>>,
 }
 
 pub trait JMAPMailImport {
@@ -141,8 +143,8 @@ where
             }
         }
 
-        let mut created = HashMap::with_capacity(request.emails.len());
-        let mut not_created = HashMap::with_capacity(request.emails.len());
+        let mut created = VecMap::with_capacity(request.emails.len());
+        let mut not_created = VecMap::with_capacity(request.emails.len());
 
         'outer: for (id, item) in request.emails {
             if let Some(mailbox_ids) = item.mailbox_ids {
@@ -155,12 +157,12 @@ where
                     })?
                     .into_iter()
                     .filter_map(|(id, value)| (id.unwrap_value()?, value).into())
-                    .collect::<HashMap<JMAPId, bool>>();
+                    .collect::<AHashMap<JMAPId, bool>>();
 
                 for mailbox_id in mailbox_ids.keys() {
                     let document_id = mailbox_id.get_document_id();
                     if !mailbox_document_ids.contains(document_id) {
-                        not_created.insert(
+                        not_created.append(
                             id,
                             SetError::invalid_property(
                                 Property::MailboxIds,
@@ -173,7 +175,7 @@ where
                             .mail_shared_folders(account_id, &acl.member_of, ACL::AddItems)?
                             .has_access(document_id)
                     {
-                        not_created.insert(
+                        not_created.append(
                             id,
                             SetError::forbidden(format!(
                                 "You are not allowed to import messages into mailbox {}.",
@@ -186,7 +188,7 @@ where
 
                 match self.mail_blob_get(account_id, &acl, &item.blob_id)? {
                     BlobResult::Blob(blob) => {
-                        created.insert(
+                        created.append(
                             id,
                             self.mail_import_item(
                                 account_id,
@@ -217,7 +219,7 @@ where
                         );
                     }
                     BlobResult::Unauthorized => {
-                        not_created.insert(
+                        not_created.append(
                             id,
                             SetError::new(
                                 SetErrorType::Forbidden,
@@ -226,7 +228,7 @@ where
                         );
                     }
                     BlobResult::NotFound => {
-                        not_created.insert(
+                        not_created.append(
                             id,
                             SetError::new(
                                 SetErrorType::BlobNotFound,
@@ -236,7 +238,7 @@ where
                     }
                 }
             } else {
-                not_created.insert(
+                not_created.append(
                     id,
                     SetError::invalid_property(
                         Property::MailboxIds,
@@ -338,7 +340,7 @@ where
     ) -> store::Result<()> {
         let root_part = message.get_root_part();
         let mut message_data = MessageData {
-            headers: HashMap::with_capacity(root_part.headers_rfc.len()),
+            headers: VecMap::with_capacity(root_part.headers.len()),
             body_offset: root_part.offset_body,
             mime_parts: Vec::with_capacity(message.parts.len()),
             html_body: message.html_body,
@@ -363,17 +365,18 @@ where
         }
 
         // Build JMAP headers
-        let mut mime_headers = HashMap::with_capacity(5);
-        for (header_name, header_value) in std::mem::take(&mut message.parts[0].headers_rfc) {
-            match header_name {
+        for header in message.parts[0].headers.iter_mut() {
+            let header_name = if let HeaderName::Rfc(header_name) = &header.name {
+                *header_name
+            } else {
+                continue;
+            };
+
+            let header_value = match header_name {
                 RfcHeader::MessageId
                 | RfcHeader::InReplyTo
                 | RfcHeader::References
-                | RfcHeader::ResentMessageId => {
-                    message_data
-                        .headers
-                        .insert(header_name, header_value.into_keyword());
-                }
+                | RfcHeader::ResentMessageId => std::mem::take(&mut header.value).into_keyword(),
                 RfcHeader::From
                 | RfcHeader::To
                 | RfcHeader::Cc
@@ -384,33 +387,23 @@ where
                 | RfcHeader::ResentFrom
                 | RfcHeader::ResentBcc
                 | RfcHeader::ResentCc
-                | RfcHeader::ResentSender => {
-                    message_data
-                        .headers
-                        .insert(header_name, header_value.into_address());
-                }
+                | RfcHeader::ResentSender => std::mem::take(&mut header.value).into_address(),
                 RfcHeader::Date | RfcHeader::ResentDate => {
-                    message_data
-                        .headers
-                        .insert(header_name, header_value.into_date());
+                    std::mem::take(&mut header.value).into_date()
                 }
                 RfcHeader::ListArchive
                 | RfcHeader::ListHelp
                 | RfcHeader::ListOwner
                 | RfcHeader::ListPost
                 | RfcHeader::ListSubscribe
-                | RfcHeader::ListUnsubscribe => {
-                    message_data
-                        .headers
-                        .insert(header_name, header_value.into_url());
-                }
+                | RfcHeader::ListUnsubscribe => std::mem::take(&mut header.value).into_url(),
                 RfcHeader::Subject
                 | RfcHeader::Comments
                 | RfcHeader::Keywords
                 | RfcHeader::ListId => {
                     // Add Subject to index
                     if header_name == RfcHeader::Subject {
-                        match &header_value {
+                        match &header.value {
                             HeaderValue::Text(text) => {
                                 document.text(
                                     RfcHeader::Subject,
@@ -431,25 +424,18 @@ where
                         }
                     }
 
-                    message_data
-                        .headers
-                        .insert(header_name, header_value.into_text());
+                    std::mem::take(&mut header.value).into_text()
                 }
-                RfcHeader::ContentType
-                | RfcHeader::ContentDisposition
-                | RfcHeader::ContentId
-                | RfcHeader::ContentLanguage
-                | RfcHeader::ContentLocation => {
-                    mime_headers.insert(header_name, header_value);
-                }
-                RfcHeader::ContentTransferEncoding
-                | RfcHeader::ContentDescription
-                | RfcHeader::MimeVersion
-                | RfcHeader::Received
-                | RfcHeader::ReturnPath => (),
+                _ => None,
+            };
+
+            if let Some(header_value) = header_value {
+                message_data
+                    .headers
+                    .get_mut_or_insert(header_name)
+                    .push(header_value);
             }
         }
-        message.parts[0].headers_rfc = mime_headers;
 
         for (part_id, part) in message.parts.into_iter().enumerate() {
             let (mime_type, part_size) = match part.body {
@@ -542,11 +528,7 @@ where
             };
 
             message_data.mime_parts.push(MimePart::from_headers(
-                part.headers_rfc,
-                part.headers_raw
-                    .into_iter()
-                    .map(|(k, v)| (k.into(), v))
-                    .collect(),
+                part.headers,
                 mime_type,
                 part.is_encoding_problem,
                 part_size,
@@ -630,7 +612,7 @@ where
                 )?
                 .into_iter()
                 .flatten()
-                .collect::<HashSet<ThreadId>>();
+                .collect::<AHashSet<ThreadId>>();
 
             match thread_ids.len() {
                 1 => {
@@ -751,16 +733,16 @@ impl EmailImport {
                 .keys()
                 .any(|k| matches!(k, MaybeIdReference::Reference(_)))
             {
-                let mut new_values = HashMap::with_capacity(value.len());
+                let mut new_values = VecMap::with_capacity(value.len());
 
                 for (id, value) in std::mem::take(value).into_iter() {
                     if let MaybeIdReference::Reference(id) = &id {
                         if let Some(id) = fnc(id) {
-                            new_values.insert(MaybeIdReference::Value(id), value);
+                            new_values.append(MaybeIdReference::Value(id), value);
                             continue;
                         }
                     }
-                    new_values.insert(id, value);
+                    new_values.append(id, value);
                 }
 
                 *value = new_values;
@@ -796,7 +778,7 @@ impl EmailImportRequest {
     pub fn eval_references(
         &mut self,
         mut result_map_fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>,
-        created_ids: &HashMap<String, JMAPId>,
+        created_ids: &AHashMap<String, JMAPId>,
     ) -> jmap::Result<()> {
         for email in self.emails.values_mut() {
             email.eval_result_references(&mut result_map_fnc)?;
@@ -812,13 +794,7 @@ trait AddMessage {
 
 impl AddMessage for Document {
     fn add_message(&mut self, message: &mut Message, part_id: u32) {
-        if let Some(HeaderValue::Text(subject)) = message
-            .parts
-            .get_mut(0)
-            .unwrap()
-            .headers_rfc
-            .remove(&RfcHeader::Subject)
-        {
+        if let Some(HeaderValue::Text(subject)) = message.remove_header_rfc(RfcHeader::Subject) {
             self.text(
                 MessageField::Attachment,
                 subject.into_owned(),
@@ -1064,9 +1040,9 @@ impl EmailImportResponse {
         }
     }
 
-    pub fn created_ids(&self) -> Option<HashMap<String, JMAPId>> {
+    pub fn created_ids(&self) -> Option<AHashMap<String, JMAPId>> {
         if let Some(created) = &self.created {
-            let mut created_ids = HashMap::with_capacity(created.len());
+            let mut created_ids = AHashMap::with_capacity(created.len());
             for (create_id, item) in created {
                 created_ids.insert(create_id.to_string(), *item.id().unwrap());
             }
