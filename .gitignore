@@ -3,3 +3,4 @@
 _ignore
 /stalwart-jmap
 /jmap-client
+.cargo

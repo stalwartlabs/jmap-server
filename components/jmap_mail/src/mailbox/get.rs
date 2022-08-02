@@ -107,7 +107,7 @@ where
                 Some(
                     self.get_orm::<Mailbox>(account_id, document_id)?
                         .ok_or_else(|| {
-                            StoreError::InternalError("Mailbox data not found".to_string())
+                            StoreError::NotFound("Mailbox data not found".to_string())
                         })?,
                 )
             } else {

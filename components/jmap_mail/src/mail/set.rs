@@ -448,12 +448,12 @@ where
                     });
             }
 
-            // Store blob
+            // Write blob
             let mut blob = Vec::with_capacity(1024);
             builder.write_to(&mut blob).map_err(|_| {
                 StoreError::SerializeError("Failed to write to memory.".to_string())
             })?;
-            let blob_id = self.blob_store(&blob)?;
+            let blob_id = BlobId::new_external(&blob);
             let raw_blob: JMAPBlob = (&blob_id).into();
 
             // Add mailbox tags
@@ -468,13 +468,16 @@ where
             let size = blob.len();
             self.mail_parse_item(
                 document,
-                blob_id,
+                blob_id.clone(),
                 Message::parse(&blob).ok_or_else(|| {
                     SetError::new(SetErrorType::InvalidProperties, "Failed to parse e-mail.")
                 })?,
                 received_at,
             )?;
             fields.insert(document)?;
+
+            // Store blob
+            self.blob_store(&blob_id, blob)?;
 
             // Obtain thread Id
             let thread_id = self.mail_set_thread(&mut helper.changes, document)?;
@@ -711,7 +714,7 @@ where
 
         // Remove index entries
         MessageData::deserialize(&self.blob_get(&metadata_blob_id)?.ok_or_else(|| {
-            StoreError::DataCorruption(format!(
+            StoreError::NotFound(format!(
                 "Message data blob for {}:{} not found.",
                 account_id, document_id
             ))
@@ -733,7 +736,7 @@ where
                 MessageField::ThreadId.into(),
             )?
             .ok_or_else(|| {
-                StoreError::DataCorruption(format!(
+                StoreError::NotFound(format!(
                     "Failed to fetch threadId for {}:{}.",
                     account_id, document_id
                 ))

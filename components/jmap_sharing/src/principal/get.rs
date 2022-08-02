@@ -31,7 +31,7 @@ where
             let document_id = id.get_document_id();
             let mut fields = self
                 .get_orm::<Principal>(account_id, document_id)?
-                .ok_or_else(|| StoreError::InternalError("Principal data not found".to_string()))?;
+                .ok_or_else(|| StoreError::NotFound("Principal data not found".to_string()))?;
             let mut principal = VecMap::with_capacity(properties.len());
 
             for property in properties {

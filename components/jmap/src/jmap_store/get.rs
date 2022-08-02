@@ -130,9 +130,15 @@ where
     ) -> crate::Result<GetResponse<O>> {
         for id in self.request_ids {
             if !self.validate_ids || self.document_ids.contains(id.get_document_id()) {
-                if let Some(result) = get_fnc(id, &self.properties)? {
-                    self.response.list.push(result);
-                    continue;
+                match get_fnc(id, &self.properties) {
+                    Ok(Some(result)) => {
+                        self.response.list.push(result);
+                        continue;
+                    }
+                    Ok(None) | Err(MethodError::NotFound) => (),
+                    Err(err) => {
+                        return Err(err);
+                    }
                 }
             }
             self.response.not_found.push(id);

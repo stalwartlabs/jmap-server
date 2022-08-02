@@ -26,7 +26,7 @@
   "sentAt": "2000-05-17T23:35:05Z",
   "bodyStructure": {
     "partId": "0",
-    "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
+    "blobId": "blob_0",
     "size": 1453,
     "headers": [
       {
@@ -96,7 +96,7 @@
   "attachments": [
     {
       "partId": "0",
-      "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
+      "blobId": "blob_0",
       "size": 1453,
       "headers": [
         {

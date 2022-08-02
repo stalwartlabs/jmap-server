@@ -405,7 +405,7 @@ where
                 let mut subscription = store
                     .get_orm::<schema::PushSubscription>(account_id, document_id)?
                     .ok_or_else(|| {
-                        StoreError::InternalError(format!(
+                        StoreError::NotFound(format!(
                             "Could not find ORM for push subscription {}",
                             document_id
                         ))

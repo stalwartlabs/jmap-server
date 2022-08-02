@@ -4,6 +4,7 @@ use roaring::RoaringBitmap;
 use tracing::error;
 
 use crate::serialize::leb128::Leb128;
+use crate::write::operation::WriteOperation;
 use crate::{
     core::collection::Collection,
     serialize::{key::BlobKey, StoreSerialize},
@@ -16,45 +17,61 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn blob_store(&self, bytes: &[u8]) -> crate::Result<BlobId> {
-        let blob_id: BlobId = bytes.into();
-        let key = BlobKey::serialize(&blob_id);
+    pub fn blob_store(&self, blob_id: &BlobId, bytes: Vec<u8>) -> crate::Result<()> {
+        let key = BlobKey::serialize(blob_id);
 
         // Lock blob hash
-        let _lock = self.blob.lock.lock_hash(&blob_id.hash);
+        let _lock = self.blob.lock.lock_hash(blob_id);
 
         // Blob already exists, return.
         if self.db.exists(ColumnFamily::Blobs, &key)? {
-            return Ok(blob_id);
+            return Ok(());
         }
 
-        match &self.blob.store {
-            BlobStoreType::Local(local_store) => local_store.put(&blob_id, bytes)?,
-            BlobStoreType::S3(s3_store) => s3_store.put(&blob_id, bytes)?,
+        // Write blob
+        let value = if blob_id.is_external() {
+            match &self.blob.store {
+                BlobStoreType::Local(local_store) => local_store.put(blob_id, &bytes)?,
+                BlobStoreType::S3(s3_store) => s3_store.put(blob_id, &bytes)?,
+            };
+            Vec::new()
+        } else {
+            bytes
         };
 
+        // Write blob or blob reference to database
+        let mut batch = Vec::with_capacity(2);
+        batch.push(WriteOperation::Set {
+            cf: ColumnFamily::Blobs,
+            key,
+            value,
+        });
         // Obtain seconds from Unix epoch
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        batch.push(WriteOperation::Set {
+            cf: ColumnFamily::Blobs,
+            key: BlobKey::serialize_prefix(blob_id, 0),
+            value: timestamp.serialize().unwrap(),
+        });
 
         // Store blobId including a timestamp
-        if let Err(err) = self
-            .db
-            .set(ColumnFamily::Blobs, &key, &timestamp.serialize().unwrap())
-        {
+        if let Err(err) = self.db.write(batch) {
             // There was a problem writing to the store, delete blob.
-            if let Err(err) = match &self.blob.store {
-                BlobStoreType::Local(local_store) => local_store.delete(&blob_id),
-                BlobStoreType::S3(s3_store) => s3_store.delete(&blob_id),
-            } {
-                error!("Failed to delete blob {}: {:?}", blob_id, err);
+            if blob_id.is_external() {
+                if let Err(err) = match &self.blob.store {
+                    BlobStoreType::Local(local_store) => local_store.delete(blob_id),
+                    BlobStoreType::S3(s3_store) => s3_store.delete(blob_id),
+                } {
+                    error!("Failed to delete blob {}: {:?}", blob_id, err);
+                }
             }
             return Err(err);
         }
 
-        Ok(blob_id)
+        Ok(())
     }
 
     pub fn blob_exists(&self, blob_id: &BlobId) -> crate::Result<bool> {
@@ -81,9 +98,14 @@ where
     }
 
     pub fn blob_get(&self, blob_id: &BlobId) -> crate::Result<Option<Vec<u8>>> {
-        match &self.blob.store {
-            BlobStoreType::Local(local_store) => local_store.get(blob_id),
-            BlobStoreType::S3(s3_store) => s3_store.get(blob_id),
+        if !blob_id.is_local() {
+            match &self.blob.store {
+                BlobStoreType::Local(local_store) => local_store.get(blob_id),
+                BlobStoreType::S3(s3_store) => s3_store.get(blob_id),
+            }
+        } else {
+            self.db
+                .get(ColumnFamily::Blobs, &BlobKey::serialize(blob_id))
         }
     }
 
@@ -92,9 +114,20 @@ where
         blob_id: &BlobId,
         range: Range<u32>,
     ) -> crate::Result<Option<Vec<u8>>> {
-        match &self.blob.store {
-            BlobStoreType::Local(local_store) => local_store.get_range(blob_id, range),
-            BlobStoreType::S3(s3_store) => s3_store.get_range(blob_id, range),
+        if !blob_id.is_local() {
+            match &self.blob.store {
+                BlobStoreType::Local(local_store) => local_store.get_range(blob_id, range),
+                BlobStoreType::S3(s3_store) => s3_store.get_range(blob_id, range),
+            }
+        } else {
+            Ok(self
+                .db
+                .get::<Vec<u8>>(ColumnFamily::Blobs, &BlobKey::serialize(blob_id))?
+                .and_then(|bytes| {
+                    bytes
+                        .get(range.start as usize..range.end as usize)
+                        .map(|bytes| bytes.to_vec())
+                }))
         }
     }
 

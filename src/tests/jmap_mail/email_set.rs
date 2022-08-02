@@ -14,6 +14,8 @@ use store::Store;
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
 
+use super::{find_values, replace_blob_ids, replace_boundaries, replace_values};
+
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
     T: for<'x> Store<'x> + 'static,
@@ -152,7 +154,9 @@ async fn create(client: &mut Client, mailbox_id: &str) {
 
         // Compare response
         file_name.set_extension("jmap");
-        let result = replace_boundaries(serde_json::to_string_pretty(&email).unwrap());
+        let result = replace_blob_ids(replace_boundaries(
+            serde_json::to_string_pretty(&email).unwrap(),
+        ));
         if fs::read(&file_name).unwrap() != result.as_bytes() {
             file_name.set_extension("jmap_failed");
             fs::write(&file_name, result.as_bytes()).unwrap();
@@ -317,60 +321,3 @@ pub async fn assert_email_properties(
     assert_eq!(mailbox_ids_, mailbox_ids);
     assert_eq!(keywords_, keywords);
 }
-
-fn find_values(string: &str, name: &str) -> Vec<String> {
-    let mut last_pos = 0;
-    let mut values = Vec::new();
-
-    while let Some(pos) = string[last_pos..].find(name) {
-        let mut value = string[last_pos + pos + name.len()..]
-            .split('"')
-            .nth(1)
-            .unwrap();
-        if value.ends_with('\\') {
-            value = &value[..value.len() - 1];
-        }
-        values.push(value.to_string());
-        last_pos += pos + name.len();
-    }
-
-    values
-}
-
-fn replace_values(mut string: String, find: &[String], replace: &[String]) -> String {
-    for (find, replace) in find.iter().zip(replace.iter()) {
-        string = string.replace(find, replace);
-    }
-    string
-}
-
-fn replace_boundaries(string: String) -> String {
-    let values = find_values(&string, "boundary=");
-    if !values.is_empty() {
-        replace_values(
-            string,
-            &values,
-            &(0..values.len())
-                .map(|i| format!("boundary_{}", i))
-                .collect::<Vec<_>>(),
-        )
-    } else {
-        string
-    }
-}
-
-/*fn assert_diff(str1: &str, str2: &str, filename: &str) {
-    for ((pos1, ch1), (pos2, ch2)) in str1.char_indices().zip(str2.char_indices()) {
-        if ch1 != ch2 {
-            panic!(
-                "{:?} != {:?} ({}) '{}'",
-                &str1[if pos1 >= 10 { pos1 - 10 } else { pos1 }..pos1 + 10],
-                &str2[if pos2 >= 10 { pos2 - 10 } else { pos2 }..pos2 + 10],
-                filename,
-                str1
-            );
-        }
-    }
-
-    assert_eq!(str1.len(), str2.len(), "{}", filename);
-}*/

@@ -33,7 +33,7 @@ impl BlobStore for LocalBlobStore {
 
         if blob_path.exists() {
             let metadata = fs::metadata(&blob_path)?;
-            if metadata.len() as u32 == blob_id.size {
+            if metadata.len() as usize == blob.len() {
                 return Ok(false);
             }
         }
@@ -51,14 +51,17 @@ impl BlobStore for LocalBlobStore {
         if !blob_path.exists() {
             return Ok(None);
         }
+
+        let blob_size = fs::metadata(&blob_path)?.len();
         let mut blob = File::open(&blob_path)?;
         Ok(Some(if range.start != 0 || range.end != u32::MAX {
-            let from_offset = if range.start < blob_id.size {
+            let from_offset = if range.start < blob_size as u32 {
                 range.start
             } else {
                 0
             };
-            let mut buf = vec![0; (std::cmp::min(range.end, blob_id.size) - from_offset) as usize];
+            let mut buf =
+                vec![0; (std::cmp::min(range.end, blob_size as u32) - from_offset) as usize];
 
             if from_offset > 0 {
                 blob.seek(SeekFrom::Start(from_offset as u64))?;
@@ -66,7 +69,7 @@ impl BlobStore for LocalBlobStore {
             blob.read_exact(&mut buf)?;
             buf
         } else {
-            let mut buf = Vec::with_capacity(blob_id.size as usize);
+            let mut buf = Vec::with_capacity(blob_size as usize);
             blob.read_to_end(&mut buf)?;
             buf
         }))
@@ -93,7 +96,7 @@ impl LocalBlobStore {
                 path_buf.push_str(&format!(
                     "{:02x}",
                     blob_id
-                        .hash
+                        .hash()
                         .get(hash_pos)
                         .ok_or_else(|| StoreError::InternalError("Invalid hash".to_string()))?
                 ));

@@ -19,6 +19,7 @@ pub mod authorization;
 pub mod event_source;
 pub mod push_subscription;
 pub mod references;
+pub mod stress_test;
 pub mod websocket;
 
 pub async fn init_jmap_tests<T>(test_name: &str) -> (web::Data<JMAPServer<T>>, Client, PathBuf)

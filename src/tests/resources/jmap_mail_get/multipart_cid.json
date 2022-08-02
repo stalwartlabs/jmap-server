@@ -90,7 +90,7 @@
         "subParts": [
           {
             "partId": "2",
-            "blobId": "b266c83a89aac2c140806b2f544b284952c38cb56dfc642c7c369b745be65fc4ef905",
+            "blobId": "blob_0",
             "size": 761,
             "headers": [
               {
@@ -107,7 +107,7 @@
           },
           {
             "partId": "3",
-            "blobId": "bb67d2aab9df45ae64313cbc22409f9cca3ada3cb397829137079b7a8544025c5a20b",
+            "blobId": "blob_1",
             "size": 1442,
             "headers": [
               {
@@ -126,7 +126,7 @@
       },
       {
         "partId": "4",
-        "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
+        "blobId": "blob_2",
         "size": 1325,
         "headers": [
           {
@@ -148,7 +148,7 @@
       },
       {
         "partId": "5",
-        "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
+        "blobId": "blob_3",
         "size": 1453,
         "headers": [
           {
@@ -185,7 +185,7 @@
   "textBody": [
     {
       "partId": "2",
-      "blobId": "b266c83a89aac2c140806b2f544b284952c38cb56dfc642c7c369b745be65fc4ef905",
+      "blobId": "blob_0",
       "size": 761,
       "headers": [
         {
@@ -204,7 +204,7 @@
   "htmlBody": [
     {
       "partId": "3",
-      "blobId": "bb67d2aab9df45ae64313cbc22409f9cca3ada3cb397829137079b7a8544025c5a20b",
+      "blobId": "blob_1",
       "size": 1442,
       "headers": [
         {
@@ -223,7 +223,7 @@
   "attachments": [
     {
       "partId": "4",
-      "blobId": "b68aa843030f8c6ad625450054732fe0f3a680496d98f957d578192fa4469cec2ad0a",
+      "blobId": "blob_2",
       "size": 1325,
       "headers": [
         {
@@ -245,7 +245,7 @@
     },
     {
       "partId": "5",
-      "blobId": "b63aa82493459d1a5ac267e20109d380ba995788f7fa13ed43021ebb37ead6fc5ad0b",
+      "blobId": "blob_3",
       "size": 1453,
       "headers": [
         {

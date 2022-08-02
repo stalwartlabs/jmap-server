@@ -68,7 +68,7 @@ where
             let mut fields = self
                 .get_orm::<EmailSubmission>(account_id, document_id)?
                 .ok_or_else(|| {
-                    StoreError::InternalError("EmailSubmission data not found".to_string())
+                    StoreError::NotFound("EmailSubmission data not found".to_string())
                 })?;
             let mut email_submission = VecMap::with_capacity(properties.len());
 

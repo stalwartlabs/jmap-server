@@ -3,7 +3,7 @@ use std::fmt::Display;
 use serde::ser::SerializeMap;
 use serde::Serialize;
 use store::core::error::StoreError;
-use store::tracing::error;
+use store::tracing::{debug, error};
 
 #[derive(Debug)]
 pub enum MethodError {
@@ -22,12 +22,17 @@ pub enum MethodError {
     AccountNotFound,
     AccountNotSupportedByMethod,
     AccountReadOnly,
+    NotFound,
 }
 
 impl From<StoreError> for MethodError {
     fn from(e: StoreError) -> Self {
         match e {
             StoreError::AnchorNotFound => MethodError::AnchorNotFound,
+            StoreError::NotFound(err) => {
+                debug!("Not found: {:?}", err);
+                MethodError::NotFound
+            }
             StoreError::InvalidArguments(err) => MethodError::InvalidArguments(err),
             _ => MethodError::ServerFail(e),
         }
@@ -56,6 +61,7 @@ impl Display for MethodError {
                 write!(f, "Account not supported by method")
             }
             MethodError::AccountReadOnly => write!(f, "Account read only"),
+            MethodError::NotFound => write!(f, "Not found"),
         }
     }
 }
@@ -103,6 +109,12 @@ impl Serialize for MethodError {
                 concat!(
                     "An unexpected error occurred while processing ",
                     "this call, please contact the system administrator."
+                )
+            }),
+            MethodError::NotFound => ("serverPartialFail", {
+                concat!(
+                    "One or more items are no longer available on the ",
+                    "server, please try again."
                 )
             }),
             MethodError::UnknownMethod(description) => ("unknownMethod", description.as_str()),

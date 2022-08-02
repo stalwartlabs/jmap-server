@@ -251,7 +251,7 @@ where
                         let current_fields = self
                             .get_orm::<Email>(helper.account_id, message_document_id)?
                             .ok_or_else(|| {
-                                StoreError::DataCorruption(format!(
+                                StoreError::NotFound(format!(
                                     "Failed to fetch Email ORM for {}:{}.",
                                     helper.account_id, message_document_id
                                 ))
@@ -602,9 +602,7 @@ where
                     if helper
                         .store
                         .get_orm::<Mailbox>(helper.account_id, jmap_id.get_document_id())?
-                        .ok_or_else(|| {
-                            StoreError::InternalError("Mailbox data not found".to_string())
-                        })?
+                        .unwrap_or_default()
                         .get(&Property::Name)
                         .and_then(|n| n.as_text())
                         == Some(mailbox_name)

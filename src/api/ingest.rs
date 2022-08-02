@@ -19,6 +19,7 @@ use jmap_mail::{
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     ahash::AHashSet,
+    blob::BlobId,
     core::{collection::Collection, document::Document, tag::Tag},
     log::changes::ChangeId,
     tracing::{debug, error},
@@ -252,19 +253,17 @@ where
             }
         });
 
-        // Store raw message as a blob
-        let blob_id = match self.blob_store(&raw_message) {
-            Ok(blob_id) => blob_id,
-            Err(err) => {
-                error!("Failed to store blob during message ingestion: {}", err);
-                return recipients.into_iter().map(Status::internal_error).collect();
-            }
-        };
-
         // Build message document
         let mut document = Document::new(Collection::Mail, DocumentId::MAX);
-        if let Err(err) = self.mail_parse_item(&mut document, blob_id, message, None) {
+        let blob_id = BlobId::new_external(&raw_message);
+        if let Err(err) = self.mail_parse_item(&mut document, blob_id.clone(), message, None) {
             error!("Failed to parse message during ingestion: {}", err);
+            return recipients.into_iter().map(Status::internal_error).collect();
+        }
+
+        // Store raw message as a blob
+        if let Err(err) = self.blob_store(&blob_id, raw_message) {
+            error!("Failed to store blob during message ingestion: {}", err);
             return recipients.into_iter().map(Status::internal_error).collect();
         }
 

@@ -249,10 +249,12 @@ where
 
                 // Serialize term index as a linked blob.
                 if !term_index.is_empty() {
-                    let term_index_blob_id =
-                        self.blob_store(&term_index.serialize().ok_or_else(|| {
-                            StoreError::InternalError("Failed to serialize Term Index.".to_string())
-                        })?)?;
+                    let term_index_bytes = term_index.serialize().ok_or_else(|| {
+                        StoreError::InternalError("Failed to serialize Term Index.".to_string())
+                    })?;
+                    let term_index_blob_id = BlobId::new_local(&term_index_bytes);
+
+                    self.blob_store(&term_index_blob_id, term_index_bytes)?;
 
                     ops.push(WriteOperation::set(
                         ColumnFamily::Values,
@@ -279,7 +281,7 @@ where
             if let Some((term_index_id, options)) = document.term_index {
                 let token_index =
                     TokenIndex::deserialize(&self.blob_get(&term_index_id)?.ok_or_else(|| {
-                        StoreError::InternalError("Term Index blob not found.".to_string())
+                        StoreError::NotFound("Term Index blob not found.".to_string())
                     })?)
                     .ok_or_else(|| {
                         StoreError::InternalError("Failed to deserialize Term Index.".to_string())

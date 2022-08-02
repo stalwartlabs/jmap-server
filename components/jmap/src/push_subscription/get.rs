@@ -54,7 +54,7 @@ where
             let mut fields = self
                 .get_orm::<PushSubscription>(account_id, document_id)?
                 .ok_or_else(|| {
-                    StoreError::InternalError("PushSubscription data not found".to_string())
+                    StoreError::NotFound("PushSubscription data not found".to_string())
                 })?;
             let mut push_subscription = VecMap::with_capacity(properties.len());
 

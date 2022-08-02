@@ -1,12 +1,11 @@
 use super::{
     conv::IntoForm,
-    parse::get_message_part,
     schema::{
         BodyProperty, Email, EmailBodyPart, EmailBodyValue, EmailHeader, HeaderForm,
         HeaderProperty, Property, Value,
     },
     sharing::JMAPShareMail,
-    GetRawHeader, HeaderName,
+    GetRawHeader, HeaderName, MessagePart,
 };
 use crate::mail::{MessageData, MessageField, MimePart, MimePartType};
 use jmap::{
@@ -23,7 +22,7 @@ use jmap::{
 };
 use mail_parser::{
     parsers::preview::{preview_html, preview_text, truncate_html, truncate_text},
-    HeaderValue, Message, RfcHeader,
+    Encoding, HeaderValue, RfcHeader,
 };
 use std::{borrow::Cow, sync::Arc};
 use store::{
@@ -40,6 +39,7 @@ use store::{
 };
 use store::{DocumentId, Store};
 
+#[derive(PartialEq, Eq)]
 enum FetchRaw {
     Header,
     All,
@@ -190,30 +190,44 @@ where
             .fetch_all_body_values
             .unwrap_or(false);
         let max_body_value_bytes = helper.request.arguments.max_body_value_bytes.unwrap_or(0);
-        let fetch_raw = if body_properties
-            .iter()
-            .any(|prop| matches!(prop, BodyProperty::Headers | BodyProperty::Header(_)))
-        {
-            FetchRaw::All
-        } else if helper.properties.iter().any(|prop| {
-            matches!(
-                prop,
+
+        // Check whether any parts of the raw message need to be fetched
+        let mut fetch_raw = FetchRaw::None;
+        let mut has_id = false;
+        for property in &helper.properties {
+            match property {
                 Property::Header(HeaderProperty {
                     form: HeaderForm::Raw,
                     ..
-                }) | Property::Header(HeaderProperty {
+                })
+                | Property::Header(HeaderProperty {
                     header: HeaderName::Other(_),
                     ..
-                }) | Property::BodyStructure
-            )
-        }) {
-            FetchRaw::Header
-        } else {
-            FetchRaw::None
-        };
+                }) => {
+                    if fetch_raw != FetchRaw::All {
+                        fetch_raw = FetchRaw::Header;
+                    }
+                }
+                Property::BodyStructure | Property::BodyValues | Property::Preview => {
+                    fetch_raw = FetchRaw::All;
+                }
+                Property::Id => {
+                    has_id = true;
+                }
+                _ => (),
+            }
+        }
+
+        if fetch_raw != FetchRaw::All
+            && body_properties
+                .iter()
+                .any(|prop| matches!(prop, BodyProperty::Headers | BodyProperty::Header(_)))
+        {
+            fetch_raw = FetchRaw::All;
+        }
 
         // Add Id Property
-        if !helper.properties.contains(&Property::Id) {
+        if !has_id {
             helper.properties.push(Property::Id);
         }
 
@@ -232,14 +246,14 @@ where
                             MessageField::Metadata.into(),
                         )?
                         .ok_or_else(|| {
-                            StoreError::DataCorruption(format!(
+                            StoreError::NotFound(format!(
                                 "Email metadata blobId for {}/{} does not exist.",
                                 account_id, document_id
                             ))
                         })?,
                 )?
                 .ok_or_else(|| {
-                    StoreError::DataCorruption(format!(
+                    StoreError::NotFound(format!(
                         "Email metadata blob linked to {}/{} does not exist.",
                         account_id, document_id
                     ))
@@ -258,7 +272,7 @@ where
             let raw_message = match &fetch_raw {
                 FetchRaw::All => {
                     Some(self.blob_get(&message_data.raw_message)?.ok_or_else(|| {
-                        StoreError::DataCorruption(format!(
+                        StoreError::NotFound(format!(
                             "Raw email message not found for {}/{}.",
                             account_id, document_id
                         ))
@@ -270,7 +284,7 @@ where
                         0..message_data.body_offset as u32,
                     )?
                     .ok_or_else(|| {
-                        StoreError::DataCorruption(format!(
+                        StoreError::NotFound(format!(
                             "Raw email message not found for {}/{}.",
                             account_id, document_id
                         ))
@@ -282,7 +296,8 @@ where
             // Fetch ORM
             let fields = self
                 .get_orm::<Email>(account_id, document_id)?
-                .ok_or_else(|| StoreError::InternalError("ORM not found for Email.".to_string()))?;
+                .ok_or_else(|| StoreError::NotFound("ORM not found for Email.".to_string()))?;
+            let blob_id = JMAPBlob::from(&message_data.raw_message);
 
             // Add requested properties to result
             let mut email = VecMap::with_capacity(properties.len());
@@ -290,7 +305,7 @@ where
                 let value = match property {
                     Property::Id => Value::Id { value: id }.into(),
                     Property::BlobId => Value::Blob {
-                        value: JMAPBlob::from(&message_data.raw_message),
+                        value: blob_id.clone(),
                     }
                     .into(),
                     Property::ThreadId => Value::Id {
@@ -379,22 +394,6 @@ where
                             _ => None,
                         }
                     }
-                    /*Property::Header(header) => {
-                        if let Some(offsets) = message_data
-                            .mime_parts
-                            .get(0)
-                            .and_then(|h| h.raw_headers.get_raw_header(&header.header))
-                        {
-                            header
-                                .form
-                                .parse_offsets(&offsets, raw_message.as_ref().unwrap(), header.all)
-                                .into_form(&header.form, header.all)
-                        } else if header.all {
-                            Value::TextList { value: Vec::new() }.into()
-                        } else {
-                            None
-                        }
-                    }*/
                     Property::Headers => Value::Headers {
                         value: if let Some(root_part) = message_data.mime_parts.get(0) {
                             root_part.as_email_headers(raw_message.as_ref().unwrap())
@@ -412,11 +411,7 @@ where
                                 &message_data.html_body
                             };
 
-                            #[allow(clippy::type_complexity)]
-                            let (preview_fnc, blob_id): (
-                                fn(Cow<str>, usize) -> Cow<str>,
-                                _,
-                            ) = match &parts
+                            let mime_part = parts
                                 .get(0)
                                 .and_then(|p| message_data.mime_parts.get(*p))
                                 .ok_or_else(|| {
@@ -424,13 +419,17 @@ where
                                         "Missing message part for {}/{}",
                                         account_id, document_id
                                     ))
-                                })?
-                                .mime_type
-                            {
-                                MimePartType::Text { blob_id } => (preview_text, blob_id),
-                                MimePartType::Html { blob_id } => (preview_html, blob_id),
+                                })?;
+
+                            #[allow(clippy::type_complexity)]
+                            let (preview_fnc, part): (
+                                fn(Cow<str>, usize) -> Cow<str>,
+                                _,
+                            ) = match &mime_part.mime_type {
+                                MimePartType::Text { part } => (preview_text, part),
+                                MimePartType::Html { part } => (preview_html, part),
                                 _ => {
-                                    return Err(StoreError::DataCorruption(format!(
+                                    return Err(StoreError::NotFound(format!(
                                         "Message part blobId not found for {}/{}.",
                                         account_id, document_id
                                     ))
@@ -440,18 +439,17 @@ where
 
                             Value::Text {
                                 value: preview_fnc(
-                                    String::from_utf8(self.blob_get(blob_id)?.ok_or_else(
-                                        || {
-                                            StoreError::DataCorruption(format!(
-                                                "Message part blob not found for {}/{}.",
-                                                account_id, document_id
-                                            ))
-                                        },
-                                    )?)
-                                    .map_or_else(
-                                        |err| String::from_utf8_lossy(err.as_bytes()).into_owned(),
-                                        |s| s,
+                                    part.decode_text(
+                                        raw_message.as_ref().unwrap(),
+                                        mime_part.charset.as_deref(),
+                                        true,
                                     )
+                                    .ok_or_else(|| {
+                                        StoreError::DataCorruption(format!(
+                                            "Failed to decode part for {}/{}.",
+                                            account_id, document_id
+                                        ))
+                                    })?
                                     .into(),
                                     256,
                                 )
@@ -470,36 +468,30 @@ where
                                 || (message_data.text_body.contains(&part_id)
                                     && (fetch_all_body_values || fetch_text_body_values))
                             {
-                                let blob = self
-                                    .blob_get(mime_part.mime_type.blob_id().ok_or_else(|| {
-                                        StoreError::DataCorruption(format!(
-                                            "BodyValue blobId not found for {}/{}.",
+                                let text = mime_part
+                                    .mime_type
+                                    .part()
+                                    .ok_or_else(|| {
+                                        StoreError::NotFound(format!(
+                                            "BodyValue not found for {}/{}.",
                                             account_id, document_id
                                         ))
-                                    })?)?
+                                    })?
+                                    .decode_text(
+                                        raw_message.as_ref().unwrap(),
+                                        mime_part.charset.as_deref(),
+                                        true,
+                                    )
                                     .ok_or_else(|| {
                                         StoreError::DataCorruption(format!(
-                                            "BodyValue blob not found for {}/{}.",
+                                            "Failed to decode BodyValue for {}/{}.",
                                             account_id, document_id
                                         ))
                                     })?;
 
                                 body_values.append(
                                     part_id.to_string(),
-                                    mime_part.as_body_value(
-                                        String::from_utf8(
-                                            blob.into_iter()
-                                                .filter(|&ch| ch != b'\r')
-                                                .collect::<Vec<_>>(),
-                                        )
-                                        .map_or_else(
-                                            |err| {
-                                                String::from_utf8_lossy(err.as_bytes()).into_owned()
-                                            },
-                                            |s| s,
-                                        ),
-                                        max_body_value_bytes,
-                                    ),
+                                    mime_part.as_body_value(text, max_body_value_bytes),
                                 );
                             }
                         }
@@ -512,7 +504,7 @@ where
                                 &message_data.text_body,
                                 &body_properties,
                                 raw_message.as_deref(),
-                                None,
+                                &blob_id,
                             )
                             .into(),
                     ),
@@ -523,7 +515,7 @@ where
                                 &message_data.html_body,
                                 &body_properties,
                                 raw_message.as_deref(),
-                                None,
+                                &blob_id,
                             )
                             .into(),
                     ),
@@ -534,13 +526,13 @@ where
                                 &message_data.attachments,
                                 &body_properties,
                                 raw_message.as_deref(),
-                                None,
+                                &blob_id,
                             )
                             .into(),
                     ),
                     Property::BodyStructure => message_data
                         .mime_parts
-                        .as_body_structure(&body_properties, raw_message.as_deref(), None)
+                        .as_body_structure(&body_properties, raw_message.as_deref(), &blob_id)
                         .map(|b| b.into()),
                     Property::Invalid(property) => {
                         return Err(MethodError::InvalidArguments(format!(
@@ -582,14 +574,27 @@ where
             }
         }
 
-        let bytes = self.blob_get(&blob.id)?;
-        Ok(if let (Some(message), Some(inner_id)) = (
-            bytes.as_ref().and_then(|b| Message::parse(b)),
-            blob.inner_id,
-        ) {
-            get_message_part(message, inner_id, false).map(|bytes| bytes.into_owned())
+        Ok(if let Some(section) = &blob.section {
+            self.blob_get_range(
+                &blob.id,
+                (section.offset_start as u32)
+                    ..(section.offset_start.saturating_add(section.size) as u32),
+            )?
+            .and_then(|bytes| {
+                let encoding = Encoding::from(section.encoding);
+                if encoding != Encoding::None {
+                    MessagePart {
+                        offset_start: 0,
+                        offset_end: section.size,
+                        encoding,
+                    }
+                    .decode(&bytes)
+                } else {
+                    Some(bytes)
+                }
+            })
         } else {
-            bytes
+            self.blob_get(&blob.id)?
         }
         .map(BlobResult::Blob)
         .unwrap_or(BlobResult::NotFound))
@@ -602,17 +607,17 @@ impl MimePart {
         part_id: usize,
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        base_blob_id: Option<&BlobId>,
+        base_blob_id: &JMAPBlob,
     ) -> EmailBodyPart {
         let mut body_part = VecMap::with_capacity(properties.len());
-        let blob_id = self.mime_type.blob_id();
+        let part = self.mime_type.part();
 
         for property in properties {
             match property {
                 BodyProperty::PartId => {
                     body_part.append(
                         BodyProperty::PartId,
-                        if blob_id.is_some() {
+                        if part.is_some() {
                             Value::Text {
                                 value: part_id.to_string(),
                             }
@@ -624,13 +629,15 @@ impl MimePart {
                 BodyProperty::BlobId => {
                     body_part.append(
                         BodyProperty::BlobId,
-                        if blob_id.is_some() {
+                        if let Some(part) = part {
+                            let base_offset_start = base_blob_id.start_offset();
                             Value::Blob {
-                                value: if let Some(base_blob_id) = base_blob_id {
-                                    JMAPBlob::new_inner(base_blob_id.clone(), part_id as u32)
-                                } else {
-                                    JMAPBlob::from(*blob_id.as_ref().unwrap())
-                                },
+                                value: JMAPBlob::new_section(
+                                    base_blob_id.id.clone(),
+                                    part.offset_start + base_offset_start,
+                                    part.offset_end + base_offset_start,
+                                    part.encoding as u8,
+                                ),
                             }
                         } else {
                             Value::Null
@@ -641,7 +648,7 @@ impl MimePart {
                     body_part.append(
                         BodyProperty::Size,
                         Value::Size {
-                            value: if blob_id.is_some() { self.size } else { 0 },
+                            value: if part.is_some() { self.size } else { 0 },
                         },
                     );
                 }
@@ -806,7 +813,7 @@ pub trait AsBodyParts {
         parts: &[usize],
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        base_blob_id: Option<&BlobId>,
+        base_blob_id: &JMAPBlob,
     ) -> Vec<EmailBodyPart>;
 }
 
@@ -816,7 +823,7 @@ impl AsBodyParts for Vec<MimePart> {
         parts: &[usize],
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        base_blob_id: Option<&BlobId>,
+        base_blob_id: &JMAPBlob,
     ) -> Vec<EmailBodyPart> {
         parts
             .iter()
@@ -837,7 +844,7 @@ pub trait AsBodyStructure {
         &self,
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        base_blob_id: Option<&BlobId>,
+        base_blob_id: &JMAPBlob,
     ) -> Option<EmailBodyPart>;
 }
 
@@ -846,7 +853,7 @@ impl AsBodyStructure for Vec<MimePart> {
         &self,
         properties: &[BodyProperty],
         message_raw: Option<&[u8]>,
-        base_blob_id: Option<&BlobId>,
+        base_blob_id: &JMAPBlob,
     ) -> Option<EmailBodyPart> {
         let mut stack = Vec::new();
         let root_part = self.get(0)?;

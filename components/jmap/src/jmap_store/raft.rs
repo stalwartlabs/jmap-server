@@ -141,7 +141,7 @@ where
                 let mut document = Document::new(U::collection(), document_id);
                 self.get_orm::<U>(write_batch.account_id, document_id)?
                     .ok_or_else(|| {
-                        StoreError::InternalError(format!(
+                        StoreError::NotFound(format!(
                             "ORM for document {:?}/{} not found.",
                             U::collection(),
                             document_id

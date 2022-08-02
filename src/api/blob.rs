@@ -15,6 +15,7 @@ use jmap_mail::mail::get::{BlobResult, JMAPGetMail};
 use jmap_mail::mail::sharing::JMAPShareMail;
 use jmap_sharing::principal::account::JMAPAccountStore;
 use reqwest::header::CONTENT_TYPE;
+use store::blob::BlobId;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
 use store::core::vec_map::VecMap;
@@ -124,7 +125,9 @@ where
                     .get_acl_token(session.account_id())?
                     .is_member(account_id)
                 {
-                    let blob_id = store.blob_store(&bytes)?;
+                    let blob = bytes.to_vec();
+                    let blob_id = BlobId::new_external(&blob);
+                    store.blob_store(&blob_id, blob)?;
                     store.blob_link_ephimeral(&blob_id, account_id)?;
                     JMAPBlob::new(blob_id).into()
                 } else {

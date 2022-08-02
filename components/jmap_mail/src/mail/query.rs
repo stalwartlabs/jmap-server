@@ -396,7 +396,7 @@ where
                             MessageField::ThreadId.into(),
                         )?
                         .ok_or_else(|| {
-                            StoreError::InternalError(format!(
+                            StoreError::NotFound(format!(
                                 "Thread id for document {} not found.",
                                 tagged_doc_id
                             ))

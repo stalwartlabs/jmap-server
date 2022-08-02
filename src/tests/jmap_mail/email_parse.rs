@@ -11,7 +11,10 @@ use jmap_client::{
 use store::Store;
 
 use crate::{
-    tests::{jmap_mail::email_get::all_headers, store::utils::StoreCompareWith},
+    tests::{
+        jmap_mail::{email_get::all_headers, replace_blob_ids},
+        store::utils::StoreCompareWith,
+    },
     JMAPServer,
 };
 
@@ -112,31 +115,35 @@ where
             .await
             .unwrap();
 
-        for parts in [
-            email.text_body().unwrap(),
-            email.html_body().unwrap(),
-            email.attachments().unwrap(),
-        ] {
-            for part in parts {
-                let inner_blob = client.download(part.blob_id().unwrap()).await.unwrap();
+        if !test_name.contains("_b64") {
+            for parts in [
+                email.text_body().unwrap(),
+                email.html_body().unwrap(),
+                email.attachments().unwrap(),
+            ] {
+                for part in parts {
+                    let blob_id = part.blob_id().unwrap();
 
-                test_file.set_extension(format!("part{}", part.part_id().unwrap()));
+                    let inner_blob = client.download(blob_id).await.unwrap();
 
-                //fs::write(&test_file, inner_blob).unwrap();
-                let expected_inner_blob = fs::read(&test_file).unwrap();
+                    test_file.set_extension(format!("part{}", part.part_id().unwrap()));
 
-                assert_eq!(
-                    inner_blob,
-                    expected_inner_blob,
-                    "file: {}",
-                    test_file.display()
-                );
+                    //fs::write(&test_file, inner_blob).unwrap();
+                    let expected_inner_blob = fs::read(&test_file).unwrap();
+
+                    assert_eq!(
+                        inner_blob,
+                        expected_inner_blob,
+                        "file: {}",
+                        test_file.display()
+                    );
+                }
             }
         }
 
         test_file.set_extension("json");
 
-        let result = serde_json::to_string_pretty(&email.into_test()).unwrap();
+        let result = replace_blob_ids(serde_json::to_string_pretty(&email.into_test()).unwrap());
 
         if fs::read(&test_file).unwrap() != result.as_bytes() {
             test_file.set_extension("failed");
@@ -216,7 +223,7 @@ where
 
     test_file.set_extension("json");
 
-    let result = serde_json::to_string_pretty(&email).unwrap();
+    let result = replace_blob_ids(serde_json::to_string_pretty(&email).unwrap());
 
     if fs::read(&test_file).unwrap() != result.as_bytes() {
         test_file.set_extension("failed");

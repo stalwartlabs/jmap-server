@@ -8,18 +8,30 @@ use super::{hex_reader, HexWriter};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JMAPBlob {
     pub id: BlobId,
-    pub inner_id: Option<u32>,
+    pub section: Option<BlobSection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BlobSection {
+    pub offset_start: usize,
+    pub size: usize,
+    pub encoding: u8,
 }
 
 impl JMAPBlob {
     pub fn new(id: BlobId) -> Self {
-        JMAPBlob { id, inner_id: None }
+        JMAPBlob { id, section: None }
     }
 
-    pub fn new_inner(id: BlobId, inner_id: u32) -> Self {
+    pub fn new_section(id: BlobId, offset_start: usize, offset_end: usize, encoding: u8) -> Self {
         JMAPBlob {
             id,
-            inner_id: inner_id.into(),
+            section: BlobSection {
+                offset_start,
+                size: offset_end - offset_start,
+                encoding,
+            }
+            .into(),
         }
     }
 
@@ -27,26 +39,48 @@ impl JMAPBlob {
     where
         Self: Sized,
     {
-        let is_inner = id.as_bytes().get(0)? == &b'i';
-        let mut it = hex_reader(id, 1);
-        let mut id = BlobId {
-            hash: [0; BLOB_HASH_LEN],
-            size: 0,
+        let (is_local, encoding) = match id.as_bytes().get(0)? {
+            b'b' => (false, None),
+            b'a' => (true, None),
+            b @ b'c'..=b'g' => (true, Some(*b - b'c')),
+            b @ b'h'..=b'l' => (false, Some(*b - b'h')),
+            _ => {
+                return None;
+            }
         };
 
-        for pos in 0..BLOB_HASH_LEN {
-            id.hash[pos] = it.next()?;
+        let mut it = hex_reader(id, 1);
+        let mut hash = [0; BLOB_HASH_LEN];
+
+        for byte in hash.iter_mut().take(BLOB_HASH_LEN) {
+            *byte = it.next()?;
         }
-        id.size = u32::from_leb128_it(&mut it)?;
 
         Some(JMAPBlob {
-            id,
-            inner_id: if is_inner {
-                u32::from_leb128_it(&mut it)?.into()
+            id: if is_local {
+                BlobId::Local { hash }
+            } else {
+                BlobId::External { hash }
+            },
+            section: if let Some(encoding) = encoding {
+                BlobSection {
+                    offset_start: usize::from_leb128_it(&mut it)?,
+                    size: usize::from_leb128_it(&mut it)?,
+                    encoding,
+                }
+                .into()
             } else {
                 None
             },
         })
+    }
+
+    pub fn start_offset(&self) -> usize {
+        if let Some(section) = &self.section {
+            section.offset_start
+        } else {
+            0
+        }
     }
 }
 
@@ -65,8 +99,10 @@ impl From<BlobId> for JMAPBlob {
 impl Default for JMAPBlob {
     fn default() -> Self {
         Self {
-            id: 0.into(),
-            inner_id: None,
+            id: BlobId::Local {
+                hash: [0; BLOB_HASH_LEN],
+            },
+            section: None,
         }
     }
 }
@@ -110,15 +146,20 @@ impl std::fmt::Display for JMAPBlob {
     #[allow(clippy::unused_io_amount)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut writer = HexWriter::with_capacity(40);
-        if let Some(inner_id) = self.inner_id {
-            writer.result.push('i');
-            writer.write(&self.id.hash).unwrap();
-            self.id.size.to_leb128_writer(&mut writer).unwrap();
-            inner_id.to_leb128_writer(&mut writer).unwrap();
+        if let Some(section) = &self.section {
+            writer.result.push(char::from(if self.id.is_local() {
+                b'c' + section.encoding
+            } else {
+                b'h' + section.encoding
+            }));
+            writer.write(self.id.hash()).unwrap();
+            section.offset_start.to_leb128_writer(&mut writer).unwrap();
+            section.size.to_leb128_writer(&mut writer).unwrap();
         } else {
-            writer.result.push('b');
-            writer.write(&self.id.hash).unwrap();
-            self.id.size.to_leb128_writer(&mut writer).unwrap();
+            writer
+                .result
+                .push(if self.id.is_local() { 'a' } else { 'b' });
+            writer.write(self.id.hash()).unwrap();
         }
         write!(f, "{}", writer.result)
     }

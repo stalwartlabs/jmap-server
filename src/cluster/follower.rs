@@ -809,17 +809,21 @@ where
                     match update {
                         Update::Blob { blob_id, blob } => {
                             if pending_blobs.remove(&blob_id) {
-                                let saved_blob_id = store.blob_store(
-                                    &store::lz4_flex::decompress_size_prepended(&blob).map_err(
-                                        |_| {
-                                            StoreError::InternalError(format!(
-                                                "Failed to decompress blobId {}.",
-                                                blob_id
-                                            ))
-                                        },
-                                    )?,
-                                )?;
-                                if blob_id != saved_blob_id {
+                                let blob = store::lz4_flex::decompress_size_prepended(&blob)
+                                    .map_err(|_| {
+                                        StoreError::InternalError(format!(
+                                            "Failed to decompress blobId {}.",
+                                            blob_id
+                                        ))
+                                    })?;
+                                let saved_blob_id = if blob_id.is_local() {
+                                    BlobId::new_local(&blob)
+                                } else {
+                                    BlobId::new_external(&blob)
+                                };
+                                if blob_id == saved_blob_id {
+                                    store.blob_store(&saved_blob_id, blob)?;
+                                } else {
                                     return Err(StoreError::InternalError(format!(
                                         "BlobId {} was saved with Id {}.",
                                         blob_id, saved_blob_id

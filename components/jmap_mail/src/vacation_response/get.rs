@@ -79,7 +79,7 @@ where
             let mut fields = self
                 .get_orm::<VacationResponse>(account_id, JMAPId::singleton().get_document_id())?
                 .ok_or_else(|| {
-                    StoreError::InternalError("VacationResponse data not found".to_string())
+                    StoreError::NotFound("VacationResponse data not found".to_string())
                 })?;
             let mut vacation_response = VecMap::with_capacity(properties.len());
 

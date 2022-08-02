@@ -228,7 +228,7 @@ where
                             })?,
                     )?
                     .ok_or_else(|| {
-                        StoreError::DataCorruption(format!(
+                        StoreError::NotFound(format!(
                             "Message data for {}:{} not found.",
                             helper.account_id,
                             email_id.get_document_id()
@@ -349,7 +349,7 @@ where
             let email_submission = self
                 .get_orm::<EmailSubmission>(helper.account_id, document_id)?
                 .ok_or_else(|| {
-                    StoreError::DataCorruption(format!(
+                    StoreError::NotFound(format!(
                         "EmailSubmission ORM data for {}:{} not found.",
                         helper.account_id, document_id
                     ))
@@ -373,7 +373,7 @@ where
                 );
                 Ok(())
             } else {
-                Err(StoreError::DataCorruption(format!(
+                Err(StoreError::NotFound(format!(
                     "EmailSubmission Blob for {}:{} not found.",
                     helper.account_id, document_id
                 ))

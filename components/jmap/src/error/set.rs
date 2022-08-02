@@ -138,10 +138,14 @@ impl<U> From<StoreError> for SetError<U> {
         //TODO remove
         println!("Failed store operation: {:?}", error);
         error!("Failed store operation: {:?}", error);
-        SetError::new(
-            SetErrorType::Forbidden,
-            "There was a problem while processing your request.".to_string(),
-        )
+        if let StoreError::NotFound(_) = error {
+            SetError::new(SetErrorType::NotFound, "Not found.")
+        } else {
+            SetError::new(
+                SetErrorType::Forbidden,
+                "There was a problem while processing your request.".to_string(),
+            )
+        }
     }
 }
 

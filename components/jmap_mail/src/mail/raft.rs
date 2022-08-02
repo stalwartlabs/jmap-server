@@ -12,8 +12,8 @@ use store::{
 };
 
 use super::schema::Email;
+use super::MessageData;
 use super::MessageField;
-use super::{MessageData, MimePartType};
 
 impl<T> RaftObject<T> for Email
 where
@@ -80,7 +80,7 @@ where
                     MessageField::ThreadId.into(),
                 )?
                 .ok_or_else(|| {
-                    StoreError::InternalError(format!(
+                    StoreError::NotFound(format!(
                         "No thread id for document {}",
                         document.document_id
                     ))
@@ -135,14 +135,14 @@ where
                 MessageField::Metadata.into(),
             )?
             .ok_or_else(|| {
-                StoreError::InternalError(format!(
+                StoreError::NotFound(format!(
                     "Failed to get message metadata blobId for {}.",
                     document_id
                 ))
             })?];
         let message_data =
             MessageData::deserialize(&store.blob_get(blobs.last().unwrap())?.ok_or_else(|| {
-                StoreError::InternalError(format!(
+                StoreError::NotFound(format!(
                     "Failed to get message metadata blob for {}.",
                     document_id
                 ))
@@ -154,14 +154,6 @@ where
                 ))
             })?;
         blobs.push(message_data.raw_message);
-        for mime_part in message_data.mime_parts {
-            if let MimePartType::Text { blob_id }
-            | MimePartType::Html { blob_id }
-            | MimePartType::Other { blob_id } = mime_part.mime_type
-            {
-                blobs.push(blob_id);
-            }
-        }
         Ok(blobs)
     }
 }

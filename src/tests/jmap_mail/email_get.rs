@@ -10,7 +10,10 @@ use jmap_client::{
 use jmap_mail::mail_parser::RfcHeader;
 use store::Store;
 
-use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
+use crate::{
+    tests::{jmap_mail::replace_blob_ids, store::utils::StoreCompareWith},
+    JMAPServer,
+};
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
@@ -152,7 +155,7 @@ where
             }
         }
 
-        let result = serde_json::to_string_pretty(&result).unwrap();
+        let result = replace_blob_ids(serde_json::to_string_pretty(&result).unwrap());
 
         file_name.set_extension("json");
 

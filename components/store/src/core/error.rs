@@ -8,6 +8,7 @@ pub enum StoreError {
     InvalidArguments(String),
     AnchorNotFound,
     DataCorruption(String),
+    NotFound(String),
 }
 
 impl StoreError {
@@ -25,6 +26,7 @@ impl Display for StoreError {
             StoreError::InvalidArguments(s) => write!(f, "Invalid arguments: {}", s),
             StoreError::AnchorNotFound => write!(f, "Anchor not found."),
             StoreError::DataCorruption(s) => write!(f, "Data corruption: {}", s),
+            StoreError::NotFound(s) => write!(f, "Not found: {}", s),
         }
     }
 }

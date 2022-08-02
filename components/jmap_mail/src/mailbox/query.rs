@@ -9,7 +9,6 @@ use jmap::types::jmap::JMAPId;
 use store::ahash::{AHashMap, AHashSet};
 use store::core::acl::ACL;
 use store::core::collection::Collection;
-use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::read::comparator::{self, FieldComparator};
 use store::read::default_filter_mapper;
@@ -140,11 +139,9 @@ where
                     {
                         let parent_id = self
                             .get_orm::<Mailbox>(account_id, doc_id)?
-                            .ok_or_else(|| {
-                                StoreError::InternalError("Mailbox data not found".to_string())
-                            })?
-                            .get(&Property::ParentId)
-                            .and_then(|v| v.as_id())
+                            .and_then(|fields| {
+                                fields.get(&Property::ParentId).and_then(|v| v.as_id())
+                            })
                             .unwrap_or_default();
                         hierarchy.insert((doc_id + 1) as u64, parent_id);
                         tree.entry(parent_id)

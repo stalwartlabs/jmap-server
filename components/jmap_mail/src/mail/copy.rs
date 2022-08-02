@@ -180,14 +180,14 @@ where
                     MessageField::Metadata.into(),
                 )?
                 .ok_or_else(|| {
-                    StoreError::DataCorruption(format!(
+                    StoreError::NotFound(format!(
                         "Message data for {}:{} not found.",
                         helper.account_id, document_id
                     ))
                 })?;
             let mut message_data = MessageData::deserialize(
                 &helper.store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
-                    StoreError::InternalError(format!(
+                    StoreError::NotFound(format!(
                         "Could not find message metadata blob for {}.",
                         document.document_id
                     ))
@@ -206,10 +206,12 @@ where
                 message_data.received_at = received_at;
 
                 // Link blob and set message data field
-                metadata_blob_id =
-                    self.blob_store(&message_data.serialize().ok_or_else(|| {
-                        StoreError::SerializeError("Failed to serialize message data".into())
-                    })?)?;
+                let metadata_bytes = message_data.serialize().ok_or_else(|| {
+                    StoreError::SerializeError("Failed to serialize message data".into())
+                })?;
+                metadata_blob_id = BlobId::new_local(&metadata_bytes);
+
+                self.blob_store(&metadata_blob_id, metadata_bytes)?;
             }
 
             // Copy properties and build index

@@ -43,7 +43,7 @@ use super::conv::HeaderValueInto;
 use super::get::{BlobResult, JMAPGetMail};
 use super::schema::{Email, Keyword, Property};
 use super::sharing::JMAPShareMail;
-use super::{MessageData, MimePart, MimePartType, MAX_MESSAGE_PARTS};
+use super::{MessageData, MessagePart, MimePart, MimePartType, MAX_MESSAGE_PARTS};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EmailImportRequest {
@@ -437,8 +437,13 @@ where
             }
         }
 
-        for (part_id, part) in message.parts.into_iter().enumerate() {
-            let (mime_type, part_size) = match part.body {
+        for (part_id, message_part) in message.parts.into_iter().enumerate() {
+            let part = MessagePart {
+                offset_start: message_part.offset_body,
+                offset_end: message_part.offset_end,
+                encoding: message_part.encoding,
+            };
+            let (mime_type, part_size) = match message_part.body {
                 PartType::Html(html) => {
                     let field = if message_data.text_body.contains(&part_id)
                         || message_data.html_body.contains(&part_id)
@@ -456,12 +461,7 @@ where
                         IndexOptions::new().full_text((part_id + 1) as u32),
                     );
 
-                    (
-                        MimePartType::Html {
-                            blob_id: self.blob_store(html.as_bytes())?,
-                        },
-                        html.len(),
-                    )
+                    (MimePartType::Html { part }, html.len())
                 }
                 PartType::Text(text) => {
                     let field = if message_data.text_body.contains(&part_id)
@@ -474,63 +474,48 @@ where
                     };
 
                     let text_len = text.len();
-                    let blob_id = self.blob_store(text.as_bytes())?;
                     document.text(
                         field,
                         text.into_owned(),
                         Language::Unknown,
                         IndexOptions::new().full_text((part_id + 1) as u32),
                     );
-                    (MimePartType::Text { blob_id }, text_len)
+                    (MimePartType::Text { part }, text_len)
                 }
                 PartType::Binary(binary) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
-                    (
-                        MimePartType::Other {
-                            blob_id: self.blob_store(binary.as_ref())?,
-                        },
-                        binary.len(),
-                    )
+                    (MimePartType::Other { part }, binary.len())
                 }
-                PartType::InlineBinary(binary) => (
-                    MimePartType::Other {
-                        blob_id: self.blob_store(binary.as_ref())?,
-                    },
-                    binary.len(),
-                ),
+                PartType::InlineBinary(binary) => (MimePartType::Other { part }, binary.len()),
                 PartType::Message(nested_message) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
 
-                    let (blob_id, part_len) = match nested_message {
+                    let part_len = match nested_message {
                         MessageAttachment::Parsed(mut message) => {
                             document.add_message(&mut message, (part_id) as u32);
-                            (
-                                self.blob_store(message.raw_message.as_ref())?,
-                                message.raw_message.len(),
-                            )
+                            message.raw_message.len()
                         }
                         MessageAttachment::Raw(raw_message) => {
                             if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
                                 document.add_message(message, (part_id) as u32);
                             }
-
-                            (self.blob_store(raw_message.as_ref())?, raw_message.len())
+                            raw_message.len()
                         }
                     };
 
-                    (MimePartType::Other { blob_id }, part_len)
+                    (MimePartType::Other { part }, part_len)
                 }
                 PartType::Multipart(subparts) => (MimePartType::MultiPart { subparts }, 0),
             };
 
             message_data.mime_parts.push(MimePart::from_headers(
-                part.headers,
+                message_part.headers,
                 mime_type,
-                part.is_encoding_problem,
+                message_part.is_encoding_problem,
                 part_size,
             ));
         }
@@ -541,9 +526,12 @@ where
         }
 
         // Link blob and set message data field
-        let metadata_blob_id = self.blob_store(&message_data.serialize().ok_or_else(|| {
-            StoreError::SerializeError("Failed to serialize message data".into())
-        })?)?;
+        let metadata_bytes = message_data
+            .serialize()
+            .ok_or_else(|| StoreError::SerializeError("Failed to serialize message data".into()))?;
+        let metadata_blob_id = BlobId::new_local(&metadata_bytes);
+
+        self.blob_store(&metadata_blob_id, metadata_bytes)?;
         document.binary(
             MessageField::Metadata,
             metadata_blob_id.serialize().unwrap(),
@@ -1009,17 +997,6 @@ impl MessageData {
                     }
                 }
                 _ => (),
-            }
-        }
-
-        // Link/unlink blobs
-        document.blob(self.raw_message, IndexOptions::new() | options);
-        for mime_part in self.mime_parts {
-            if let MimePartType::Text { blob_id }
-            | MimePartType::Html { blob_id }
-            | MimePartType::Other { blob_id } = mime_part.mime_type
-            {
-                document.blob(blob_id, IndexOptions::new() | options);
             }
         }
 

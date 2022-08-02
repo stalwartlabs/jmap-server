@@ -37,7 +37,7 @@
     "subParts": [
       {
         "partId": "1",
-        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
+        "blobId": "blob_0",
         "size": 30,
         "headers": [
           {
@@ -54,7 +54,7 @@
       },
       {
         "partId": "2",
-        "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80602",
+        "blobId": "blob_1",
         "size": 173,
         "headers": [
           {
@@ -86,7 +86,7 @@
   "textBody": [
     {
       "partId": "1",
-      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80601",
+      "blobId": "blob_0",
       "size": 30,
       "headers": [
         {
@@ -105,7 +105,7 @@
   "htmlBody": [
     {
       "partId": "2",
-      "blobId": "ic8400205998e7cded16640f52cbb83ff9ca40e637b914bae47a58e0d9484ed3ee80602",
+      "blobId": "blob_1",
       "size": 173,
       "headers": [
         {

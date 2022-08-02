@@ -2,7 +2,7 @@ use super::{
     conv::{HeaderValueInto, IntoForm},
     get::{AsBodyParts, AsBodyStructure, AsEmailHeaders, BlobResult, JMAPGetMail},
     schema::{BodyProperty, Email, HeaderForm, Property, Value},
-    GetRawHeader,
+    GetRawHeader, MessagePart,
 };
 use crate::mail::{MimePart, MimePartType};
 use jmap::{
@@ -11,11 +11,10 @@ use jmap::{
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use mail_parser::{
-    decoders::html::{html_to_text, text_to_html},
     parsers::preview::{preview_html, preview_text},
     Header, HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader,
 };
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 use store::{
     ahash::AHashSet,
     core::{acl::ACLToken, vec_map::VecMap},
@@ -192,91 +191,59 @@ impl IntoParsedEmail for Message<'_> {
             root_part.headers = mime_headers;
         }
 
-        let mut blobs = Vec::new();
-
         // Extract blobs and build parts list
-        for (part_id, part) in self.parts.into_iter().enumerate() {
-            let (mime_type, part_size) = match part.body {
+        for (part_id, message_part) in self.parts.iter_mut().enumerate() {
+            let part = MessagePart {
+                offset_start: message_part.offset_body,
+                offset_end: message_part.offset_end,
+                encoding: message_part.encoding,
+            };
+
+            let (mime_type, part_size) = match &mut message_part.body {
                 PartType::Html(html) => {
                     if !text_body.contains(&part_id) && !html_body.contains(&part_id) {
                         has_attachments = true;
                     }
-                    let value = (
-                        MimePartType::Html {
-                            blob_id: blobs.len().into(),
-                        },
-                        html.len(),
-                    );
-                    blobs.push(html.into_owned().into_bytes());
-                    value
+                    (MimePartType::Html { part }, html.len())
                 }
                 PartType::Text(text) => {
                     if !text_body.contains(&part_id) && !html_body.contains(&part_id) {
                         has_attachments = true;
                     }
-                    let value = (
-                        MimePartType::Text {
-                            blob_id: blobs.len().into(),
-                        },
-                        text.len(),
-                    );
-                    blobs.push(text.into_owned().into_bytes());
-                    value
+                    (MimePartType::Text { part }, text.len())
                 }
                 PartType::Binary(binary) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
-                    let value = (
-                        MimePartType::Other {
-                            blob_id: blobs.len().into(),
-                        },
-                        binary.len(),
-                    );
-                    blobs.push(binary.into_owned());
-                    value
+                    (MimePartType::Other { part }, binary.len())
                 }
-                PartType::InlineBinary(binary) => {
-                    let value = (
-                        MimePartType::Other {
-                            blob_id: blobs.len().into(),
-                        },
-                        binary.len(),
-                    );
-                    blobs.push(binary.into_owned());
-                    value
-                }
+                PartType::InlineBinary(binary) => (MimePartType::Other { part }, binary.len()),
                 PartType::Message(nested_message) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
-                    let blob_index = blobs.len();
 
                     (
-                        MimePartType::Other {
-                            blob_id: blob_index.into(),
-                        },
+                        MimePartType::Other { part },
                         match nested_message {
-                            MessageAttachment::Parsed(message) => {
-                                let message_size = message.raw_message.len();
-                                blobs.push(message.raw_message.into_owned());
-                                message_size
-                            }
-                            MessageAttachment::Raw(raw_message) => {
-                                let message_size = raw_message.len();
-                                blobs.push(raw_message.into_owned());
-                                message_size
-                            }
+                            MessageAttachment::Parsed(message) => message.raw_message.len(),
+                            MessageAttachment::Raw(raw_message) => raw_message.len(),
                         },
                     )
                 }
-                PartType::Multipart(subparts) => (MimePartType::MultiPart { subparts }, 0),
+                PartType::Multipart(subparts) => (
+                    MimePartType::MultiPart {
+                        subparts: std::mem::take(subparts),
+                    },
+                    0,
+                ),
             };
 
             mime_parts.push(MimePart::from_headers(
-                part.headers,
+                std::mem::take(&mut message_part.headers),
                 mime_type,
-                part.is_encoding_problem,
+                message_part.is_encoding_problem,
                 part_size,
             ));
         }
@@ -349,45 +316,25 @@ impl IntoParsedEmail for Message<'_> {
                         .collect::<Vec<super::HeaderValue>>()
                         .into_form(&header.form, header.all),
                 },
-                /*Property::Header(header) => {
-                    if let Some(offsets) = headers.get_raw_header(&header.header) {
-                        header
-                            .form
-                            .parse_offsets(&offsets, raw_message, header.all)
-                            .into_form(&header.form, header.all)
-                    } else if header.all {
-                        Value::TextList { value: Vec::new() }.into()
-                    } else {
-                        None
-                    }
-                }*/
                 Property::HasAttachment => Some(has_attachments.into()),
                 Property::Preview => {
                     if !text_body.is_empty() || !html_body.is_empty() {
-                        let parts = if !text_body.is_empty() {
-                            &text_body
+                        let part_id = if !text_body.is_empty() {
+                            text_body[0]
                         } else {
-                            &html_body
+                            html_body[0]
                         };
 
                         #[allow(clippy::type_complexity)]
-                        let (preview_fnc, blob_id): (
-                            fn(Cow<str>, usize) -> Cow<str>,
-                            _,
-                        ) = match &parts
-                            .get(0)
-                            .and_then(|p| mime_parts.get(*p))
-                            .unwrap()
-                            .mime_type
-                        {
-                            MimePartType::Text { blob_id } => (preview_text, blob_id),
-                            MimePartType::Html { blob_id } => (preview_html, blob_id),
+                        let preview_fnc = match &mime_parts.get(part_id).unwrap().mime_type {
+                            MimePartType::Text { .. } => preview_text,
+                            MimePartType::Html { .. } => preview_html,
                             _ => unreachable!(),
                         };
 
                         Value::Text {
                             value: preview_fnc(
-                                String::from_utf8_lossy(&blobs[blob_id.size as usize]),
+                                String::from_utf8_lossy(self.parts[part_id].get_contents()),
                                 256,
                             )
                             .into_owned(),
@@ -411,7 +358,8 @@ impl IntoParsedEmail for Message<'_> {
                                 part_id.to_string(),
                                 mime_part.as_body_value(
                                     String::from_utf8(
-                                        blobs[mime_part.mime_type.blob_id().unwrap().size as usize]
+                                        self.parts[part_id]
+                                            .get_contents()
                                             .iter()
                                             .filter(|&&ch| ch != b'\r')
                                             .copied()
@@ -434,7 +382,7 @@ impl IntoParsedEmail for Message<'_> {
                             &text_body,
                             &request.body_properties,
                             Some(raw_message),
-                            Some(&blob_id.id),
+                            blob_id,
                         )
                         .into(),
                 ),
@@ -444,7 +392,7 @@ impl IntoParsedEmail for Message<'_> {
                             &html_body,
                             &request.body_properties,
                             Some(raw_message),
-                            Some(&blob_id.id),
+                            blob_id,
                         )
                         .into(),
                 ),
@@ -454,16 +402,12 @@ impl IntoParsedEmail for Message<'_> {
                             &attachments,
                             &request.body_properties,
                             Some(raw_message),
-                            Some(&blob_id.id),
+                            blob_id,
                         )
                         .into(),
                 ),
                 Property::BodyStructure => mime_parts
-                    .as_body_structure(
-                        &request.body_properties,
-                        Some(raw_message),
-                        Some(&blob_id.id),
-                    )
+                    .as_body_structure(&request.body_properties, Some(raw_message), blob_id)
                     .map(|b| b.into()),
                 Property::Id
                 | Property::ThreadId
@@ -477,65 +421,6 @@ impl IntoParsedEmail for Message<'_> {
         }
 
         Email { properties: email }
-    }
-}
-
-pub fn get_message_part(mut message: Message, part_id: u32, as_text: bool) -> Option<Cow<[u8]>> {
-    let part_id = part_id as usize;
-    let total_parts = message.parts.len();
-
-    if part_id < total_parts {
-        match message.parts.swap_remove(part_id).body {
-            PartType::Text(text) => match text {
-                Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
-                Cow::Owned(text) => Cow::Owned(text.into_bytes()),
-            }
-            .into(),
-            PartType::Html(html) => {
-                if !as_text {
-                    match html {
-                        Cow::Borrowed(text) => Cow::Borrowed(text.as_bytes()),
-                        Cow::Owned(text) => Cow::Owned(text.into_bytes()),
-                    }
-                    .into()
-                } else {
-                    Some(html_to_text(html.as_ref()).into_bytes().into())
-                }
-            }
-            PartType::Binary(binary) | PartType::InlineBinary(binary) => binary.into(),
-            PartType::Message(nested_message) => match nested_message {
-                MessageAttachment::Parsed(message) => message.raw_message,
-                MessageAttachment::Raw(raw_message) => raw_message,
-            }
-            .into(),
-            PartType::Multipart(_) => None,
-        }
-    } else {
-        let mut num_conversions = 0;
-        for (part_pos, part) in message.parts.into_iter().enumerate() {
-            match part.body {
-                PartType::Html(html) => {
-                    if message.text_body.contains(&part_pos) {
-                        if total_parts + num_conversions == part_id {
-                            return Cow::from(html_to_text(html.as_ref()).into_bytes()).into();
-                        } else {
-                            num_conversions += 1;
-                        }
-                    }
-                }
-                PartType::Text(text) => {
-                    if message.html_body.contains(&part_pos) {
-                        if total_parts + num_conversions == part_id {
-                            return Cow::from(text_to_html(text.as_ref()).into_bytes()).into();
-                        } else {
-                            num_conversions += 1;
-                        }
-                    }
-                }
-                _ => (),
-            }
-        }
-        None
     }
 }
 

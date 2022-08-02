@@ -111,9 +111,9 @@ where
             &ValueKey::serialize_term_index(account_id, collection, document_id),
         )? {
             Ok(TermIndex::deserialize(
-                &self.blob_get(&blob_id)?.ok_or_else(|| {
-                    StoreError::InternalError("Term Index Blob not found.".into())
-                })?,
+                &self
+                    .blob_get(&blob_id)?
+                    .ok_or_else(|| StoreError::NotFound("Term Index Blob not found.".into()))?,
             )
             .ok_or_else(|| StoreError::InternalError("Failed to deserialize Term Index.".into()))?
             .into())

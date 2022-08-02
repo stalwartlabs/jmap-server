@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     config::env_settings::EnvSettings,
-    serialize::{leb128::Leb128, StoreDeserialize, StoreSerialize},
+    serialize::{StoreDeserialize, StoreSerialize},
     write::mutex_map::MutexMap,
 };
 
@@ -18,60 +18,75 @@ pub mod store;
 pub const BLOB_HASH_LEN: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct BlobId {
-    pub hash: [u8; BLOB_HASH_LEN],
-    pub size: u32,
+pub enum BlobId {
+    Local { hash: [u8; BLOB_HASH_LEN] },
+    External { hash: [u8; BLOB_HASH_LEN] },
 }
 
-impl From<&[u8]> for BlobId {
-    fn from(bytes: &[u8]) -> Self {
+impl BlobId {
+    pub fn new_local(bytes: &[u8]) -> Self {
         // Create blob key
         let mut hasher = Sha256::new();
         hasher.update(bytes);
 
-        BlobId {
+        BlobId::Local {
             hash: hasher.finalize().into(),
-            size: bytes.len() as u32,
         }
     }
-}
 
-impl From<usize> for BlobId {
-    fn from(size: usize) -> Self {
-        BlobId {
-            hash: [0; BLOB_HASH_LEN],
-            size: size as u32,
+    pub fn new_external(bytes: &[u8]) -> Self {
+        // Create blob key
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+
+        BlobId::External {
+            hash: hasher.finalize().into(),
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, BlobId::Local { .. })
+    }
+
+    pub fn is_external(&self) -> bool {
+        matches!(self, BlobId::External { .. })
+    }
+
+    pub fn hash(&self) -> &[u8] {
+        match self {
+            BlobId::Local { hash } => hash,
+            BlobId::External { hash } => hash,
         }
     }
 }
 
 impl Display for BlobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut bytes = Vec::with_capacity(std::mem::size_of::<u32>());
-        self.size.to_leb128_bytes(&mut bytes);
-        write!(
-            f,
-            "{}{}",
-            base32::encode(base32::Alphabet::RFC4648 { padding: false }, &self.hash),
-            base32::encode(base32::Alphabet::RFC4648 { padding: false }, &bytes)
-        )
+        f.write_str(&base32::encode(
+            base32::Alphabet::RFC4648 { padding: false },
+            self.hash(),
+        ))
     }
 }
 
 impl StoreSerialize for BlobId {
     fn serialize(&self) -> Option<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<u32>());
-        bytes.extend_from_slice(&self.hash);
-        self.size.to_leb128_bytes(&mut bytes);
+        let mut bytes = Vec::with_capacity(BLOB_HASH_LEN + 1);
+        bytes.push(if self.is_local() { 0 } else { 1 });
+        bytes.extend_from_slice(self.hash());
         bytes.into()
     }
 }
 
 impl StoreDeserialize for BlobId {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        BlobId {
-            hash: bytes.get(0..BLOB_HASH_LEN)?.try_into().ok()?,
-            size: u32::from_leb128_bytes(bytes.get(BLOB_HASH_LEN..)?)?.0,
+        match bytes.get(0)? {
+            0 => BlobId::Local {
+                hash: bytes.get(1..BLOB_HASH_LEN + 1)?.try_into().ok()?,
+            },
+            _ => BlobId::External {
+                hash: bytes.get(1..BLOB_HASH_LEN + 1)?.try_into().ok()?,
+            },
         }
         .into()
     }
