@@ -1,24 +1,20 @@
-use crate::tests::{
-    cluster::utils::{assert_mirrored_stores, num_online_peers, Ac},
-    store::{
-        jmap_mail_set::{delete_email, insert_email, update_email},
-        jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
-    },
-};
+use crate::tests::cluster::utils::{assert_mirrored_stores, num_online_peers, Ac};
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use jmap_client::mailbox::Role;
+use std::{sync::Arc, time::Duration};
+use store::ahash::AHashMap;
 use store::core::JMAPIdPrefix;
 use store::rand::{self, Rng};
 use store::{core::collection::Collection, parking_lot::Mutex, AccountId, JMAPId, Store};
 use tokio::time::sleep;
 
 use super::utils::{
-    activate_all_peers, assert_cluster_updated, assert_leader_elected, shutdown_all, Cluster, Cmd,
-    Cmds,
+    activate_all_peers, assert_cluster_updated, assert_leader_elected, shutdown_all, Clients,
+    Cluster, Cmd, Cmds,
 };
 
 #[allow(clippy::type_complexity)]
-pub async fn cluster_fuzz<T>(mut replay_cmds: Vec<Cmd>)
+pub async fn test<T>(mut replay_cmds: Vec<Cmd>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -29,18 +25,18 @@ where
         println!("Fuzzing cluster...");
     }
 
-    let mut cluster = Cluster::<T>::new(5, true);
+    let mut cluster = Cluster::<T>::new(5, true).await;
     let peers = cluster.start_cluster().await;
     let mut actions = Cmds::default();
-    let id_map: Arc<Mutex<HashMap<(AccountId, Collection), HashMap<JMAPId, JMAPId>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let id_map: Arc<Mutex<AHashMap<(AccountId, Collection), AHashMap<JMAPId, String>>>> =
+        Arc::new(Mutex::new(AHashMap::new()));
     let mut id_seq = 0;
     let mut change_seq = 0;
 
     let get_random_id = |account_id,
                          collection,
-                         id_map: &HashMap<(AccountId, Collection), HashMap<JMAPId, JMAPId>>|
-     -> Option<(JMAPId, JMAPId)> {
+                         id_map: &AHashMap<(AccountId, Collection), AHashMap<JMAPId, String>>|
+     -> Option<(JMAPId, String)> {
         let ids = id_map.get(&(account_id, collection))?;
         let ids_num = ids.len();
         if ids_num > 0 {
@@ -50,7 +46,7 @@ where
                 } else {
                     0
                 })
-                .map(|(id1, id2)| (*id1, *id2))
+                .map(|(id1, id2)| (*id1, id2.to_string()))
         } else {
             None
         }
@@ -58,6 +54,9 @@ where
 
     assert_leader_elected(&peers).await;
     assert_cluster_updated(&peers).await;
+
+    // Connect clients
+    let clients = Arc::new(Clients::new(5).await);
 
     loop {
         let cmd = if !is_replay {
@@ -209,9 +208,7 @@ where
                     }
                     sleep(Duration::from_millis(100)).await;
                 }
-                let (leader, store) = if let Some(leader) = leader {
-                    (leader, leader.store.clone())
-                } else {
+                if leader.is_none() {
                     panic!(
                         "No elected leader to execute {:?}.",
                         actions.cmds.last().unwrap()
@@ -227,22 +224,23 @@ where
                 let id_map = id_map.clone();
                 let account_id = *account_id;
 
-                tokio::task::spawn_blocking(move || match action {
+                match action {
                     Ac::NewEmail((local_mailbox_id, local_id)) => {
                         let (local_mailbox_id, local_id) = if local_mailbox_id == 0 {
+                            let mailbox_id = clients
+                                .insert_mailbox(
+                                    0,
+                                    account_id,
+                                    format!("Mailbox {}", id_seq),
+                                    Role::None,
+                                )
+                                .await;
+
                             id_map
                                 .lock()
                                 .entry((account_id, Collection::Mailbox))
-                                .or_insert_with(HashMap::new)
-                                .insert(
-                                    id_seq as JMAPId,
-                                    insert_mailbox(
-                                        &store,
-                                        account_id,
-                                        &format!("Mailbox {}", id_seq),
-                                        None,
-                                    ),
-                                );
+                                .or_insert_with(AHashMap::new)
+                                .insert(id_seq as JMAPId, mailbox_id);
                             (id_seq, JMAPId::from_parts(id_seq as u32, local_id as u32))
                         } else {
                             (
@@ -251,87 +249,90 @@ where
                             )
                         };
 
-                        let store_mailbox_id = *id_map
+                        let store_mailbox_id = id_map
                             .lock()
                             .get(&(account_id, Collection::Mailbox))
                             .unwrap()
                             .get(&local_mailbox_id)
-                            .unwrap();
+                            .unwrap()
+                            .to_string();
+
+                        let email_id = clients
+                            .insert_email(
+                                0,
+                                account_id,
+                                format!(
+                                    "From: test@test.com\nSubject: test {}\n\nTest message {}",
+                                    local_id, local_id
+                                )
+                                .into_bytes(),
+                                vec![store_mailbox_id],
+                                vec![],
+                            )
+                            .await;
+
                         id_map
                             .lock()
                             .entry((account_id, Collection::Mail))
-                            .or_insert_with(HashMap::new)
-                            .insert(
-                                local_id,
-                                insert_email(
-                                    &store,
-                                    account_id,
-                                    format!(
-                                        "From: test@test.com\nSubject: test {}\n\nTest message {}",
-                                        local_id, local_id
-                                    )
-                                    .into_bytes(),
-                                    vec![store_mailbox_id],
-                                    vec![],
-                                    None,
-                                ),
-                            );
+                            .or_insert_with(AHashMap::new)
+                            .insert(local_id, email_id);
                     }
                     Ac::UpdateEmail(local_id) => {
-                        println!("{:?}", id_map.lock().get(&(account_id, Collection::Mail)));
-                        update_email(
-                            &store,
-                            account_id,
-                            *id_map
-                                .lock()
-                                .get(&(account_id, Collection::Mail))
-                                .unwrap()
-                                .get(&local_id)
-                                .unwrap(),
-                            None,
-                            Some(vec![format!("tag_{}", change_seq)]),
-                        );
+                        //println!("{:?}", id_map.lock().get(&(account_id, Collection::Mail)));
+                        let email_id = id_map
+                            .lock()
+                            .get(&(account_id, Collection::Mail))
+                            .unwrap()
+                            .get(&local_id)
+                            .unwrap()
+                            .to_string();
+                        clients
+                            .update_email(
+                                0,
+                                account_id,
+                                email_id,
+                                None,
+                                Some(vec![format!("tag_{}", change_seq)]),
+                            )
+                            .await;
                     }
                     Ac::DeleteEmail(local_id) => {
-                        delete_email(
-                            &store,
-                            account_id,
-                            id_map
-                                .lock()
-                                .get_mut(&(account_id, Collection::Mail))
-                                .unwrap()
-                                .remove(&local_id)
-                                .unwrap(),
-                            true,
-                        );
+                        let email_id = id_map
+                            .lock()
+                            .get_mut(&(account_id, Collection::Mail))
+                            .unwrap()
+                            .remove(&local_id)
+                            .unwrap();
+                        clients.delete_email(0, account_id, email_id).await;
                     }
                     Ac::InsertMailbox(local_id) => {
+                        let mailbox_id = clients
+                            .insert_mailbox(
+                                0,
+                                account_id,
+                                format!("Mailbox {}", local_id),
+                                Role::None,
+                            )
+                            .await;
+
                         id_map
                             .lock()
                             .entry((account_id, Collection::Mailbox))
-                            .or_insert_with(HashMap::new)
-                            .insert(
-                                local_id,
-                                insert_mailbox(
-                                    &store,
-                                    account_id,
-                                    &format!("Mailbox {}", local_id),
-                                    None,
-                                ),
-                            );
+                            .or_insert_with(AHashMap::new)
+                            .insert(local_id, mailbox_id);
                     }
-                    Ac::UpdateMailbox(local_id) => update_mailbox(
-                        &store,
-                        account_id,
-                        *id_map
+                    Ac::UpdateMailbox(local_id) => {
+                        let mailbox_id = id_map
                             .lock()
                             .get(&(account_id, Collection::Mailbox))
                             .unwrap()
                             .get(&local_id)
-                            .unwrap(),
-                        local_id as u32,
-                        change_seq,
-                    ),
+                            .unwrap()
+                            .to_string();
+                        clients
+                            .update_mailbox(0, account_id, mailbox_id, local_id as u32, change_seq)
+                            .await;
+                    }
                     Ac::DeleteMailbox(local_id) => {
                         if let Some(ids) = id_map.lock().get_mut(&(account_id, Collection::Mail)) {
                             if !ids.is_empty() {
@@ -346,25 +347,20 @@ where
                             }
                         }
 
-                        delete_mailbox(
-                            &store,
-                            account_id,
-                            id_map
-                                .lock()
-                                .get_mut(&(account_id, Collection::Mailbox))
-                                .unwrap()
-                                .remove(&local_id)
-                                .unwrap(),
-                            true,
-                        );
+                        let mailbox_id = id_map
+                            .lock()
+                            .get_mut(&(account_id, Collection::Mailbox))
+                            .unwrap()
+                            .remove(&local_id)
+                            .unwrap();
+
+                        clients.delete_mailbox(0, account_id, mailbox_id).await;
                     }
-                })
-                .await
-                .unwrap();
+                }
 
                 success = true;
 
-                leader.commit_last_index().await;
+                //leader.commit_last_index().await;
                 assert_cluster_updated(&peers).await;
                 assert_mirrored_stores(peers.clone(), true).await;
             }

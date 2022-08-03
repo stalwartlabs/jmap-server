@@ -1,6 +1,7 @@
 pub mod error;
 pub mod jmap_store;
 pub mod orm;
+pub mod principal;
 pub mod push_subscription;
 pub mod request;
 pub mod types;

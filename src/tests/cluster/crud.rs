@@ -1,23 +1,26 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use actix_web::web;
-use store::{parking_lot::Mutex, Store};
+use store::{ahash::AHashMap, parking_lot::Mutex, Store};
 
 use crate::{
     tests::cluster::utils::{
         activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
-        compact_log, shutdown_all, test_batch, Cluster,
+        compact_log, shutdown_all, test_batch, Clients, Cluster,
     },
     JMAPServer,
 };
 
-pub async fn crud_ops<T>()
+pub async fn test<T>()
 where
     T: for<'x> Store<'x> + 'static,
 {
     println!("Testing distributed CRUD operations...");
-    let mut cluster = Cluster::<T>::new(5, true);
+    let mut cluster = Cluster::<T>::new(5, true).await;
     let peers = cluster.start_cluster().await;
+
+    // Connect clients
+    let clients = Arc::new(Clients::new(5).await);
 
     // Keep one node offline
     assert_leader_elected(&peers)
@@ -26,26 +29,25 @@ where
         .await;
 
     let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
-    let mailbox_map = Arc::new(Mutex::new(HashMap::new()));
-    let email_map = Arc::new(Mutex::new(HashMap::new()));
+    let mailbox_map = Arc::new(Mutex::new(AHashMap::new()));
+    let email_map = Arc::new(Mutex::new(AHashMap::new()));
 
     for (batch_num, batch) in test_batch().into_iter().enumerate() {
         let leader = assert_leader_elected(&peers).await;
-        let store = leader.store.clone();
+        //let store = leader.store.clone();
 
         let mailbox_map = mailbox_map.clone();
         let email_map = email_map.clone();
+        let clients = clients.clone();
 
-        tokio::task::spawn_blocking(move || {
-            for action in batch {
-                action.execute(&store, &mailbox_map, &email_map, batch_num);
-            }
-        })
-        .await
-        .unwrap();
+        for action in batch {
+            action
+                .execute::<T>(&clients, &mailbox_map, &email_map, batch_num)
+                .await;
+        }
 
         // Notify peers of changes
-        leader.commit_last_index().await;
+        //leader.commit_last_index().await;
         assert_cluster_updated(&peers).await;
 
         // Bring back previous offline leader

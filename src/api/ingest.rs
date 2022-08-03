@@ -4,8 +4,9 @@ use actix_web::{
 };
 use jmap::{
     orm::TinyORM,
+    principal::schema::Type,
     sanitize_email,
-    types::{jmap::JMAPId, principal::Type, type_state::TypeState},
+    types::{jmap::JMAPId, type_state::TypeState},
 };
 use jmap_mail::{
     mail::{

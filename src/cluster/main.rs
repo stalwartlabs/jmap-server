@@ -1,220 +1,11 @@
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
-
-use actix_web::web;
-use store::{
-    config::env_settings::EnvSettings,
-    tracing::{debug, error, info},
-};
-use store::{log::raft::LogIndex, Store};
-use tokio::{
-    sync::{mpsc, watch},
-    time,
-};
-
-use crate::{
-    cluster::{IPC_CHANNEL_BUFFER, RAFT_LOG_BEHIND},
-    JMAPServer, DEFAULT_RPC_PORT,
-};
+use crate::JMAPServer;
 
 use super::{
-    gossip::{self, spawn_quidnunc, PING_INTERVAL},
-    rpc::{self, spawn_rpc},
-    Cluster, ClusterIpc, Event,
+    rpc::{self},
+    Cluster, Event,
 };
-
-pub struct ClusterInit {
-    main_rx: mpsc::Receiver<Event>,
-    main_tx: mpsc::Sender<Event>,
-    commit_index_tx: watch::Sender<LogIndex>,
-}
-
-pub fn init_cluster(settings: &EnvSettings) -> Option<(ClusterIpc, ClusterInit)> {
-    if settings.get("cluster").is_some() {
-        let (main_tx, main_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
-        let (commit_index_tx, commit_index_rx) = watch::channel(LogIndex::MAX);
-        (
-            ClusterIpc {
-                tx: main_tx.clone(),
-                state: RAFT_LOG_BEHIND.into(),
-                commit_index_rx,
-            },
-            ClusterInit {
-                main_rx,
-                main_tx,
-                commit_index_tx,
-            },
-        )
-            .into()
-    } else {
-        None
-    }
-}
-
-pub async fn start_cluster<T>(
-    init: ClusterInit,
-    core: web::Data<JMAPServer<T>>,
-    settings: &EnvSettings,
-) where
-    T: for<'x> Store<'x> + 'static,
-{
-    let (gossip_tx, gossip_rx) = mpsc::channel::<(SocketAddr, gossip::Request)>(IPC_CHANNEL_BUFFER);
-    let main_tx = init.main_tx;
-    let mut main_rx = init.main_rx;
-    let commit_index_tx = init.commit_index_tx;
-
-    let mut cluster = Cluster::init(
-        settings,
-        core.clone(),
-        main_tx.clone(),
-        gossip_tx,
-        commit_index_tx,
-    )
-    .await;
-
-    let bind_addr = SocketAddr::from((
-        settings.parse_ipaddr("bind-addr", "127.0.0.1"),
-        settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT),
-    ));
-    info!("Starting RPC server at {} (UDP/TCP)...", bind_addr);
-    let (shutdown_tx, shutdown_rx) = watch::channel(true);
-
-    spawn_rpc(
-        bind_addr,
-        shutdown_rx.clone(),
-        main_tx.clone(),
-        cluster.key.clone(),
-    )
-    .await;
-    spawn_quidnunc(bind_addr, shutdown_rx.clone(), gossip_rx, main_tx.clone()).await;
-
-    tokio::spawn(async move {
-        let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
-        let mut last_ping = Instant::now();
-
-        #[cfg(test)]
-        let mut is_offline = false;
-
-        loop {
-            match time::timeout(wait_timeout, main_rx.recv()).await {
-                Ok(Some(message)) => {
-                    #[cfg(test)]
-                    if let Event::SetOffline {
-                        is_offline: set_offline,
-                        notify_peers,
-                    } = &message
-                    {
-                        if *set_offline {
-                            debug!("[{}] Marked as offline.", cluster.addr);
-                            if *notify_peers {
-                                cluster.broadcast_leave().await;
-                                for peer in &mut cluster.peers {
-                                    peer.state = gossip::State::Offline;
-                                }
-                            }
-                        } else {
-                            debug!("[{}] Marked as online.", cluster.addr);
-                            if *notify_peers {
-                                cluster.broadcast_ping().await;
-                                last_ping = Instant::now();
-                            } else {
-                                last_ping =
-                                    Instant::now() - Duration::from_millis(PING_INTERVAL + 50);
-                                for peer in &mut cluster.peers {
-                                    peer.state = gossip::State::Suspected;
-                                }
-                            }
-                        }
-                        is_offline = *set_offline;
-
-                        cluster.start_election_timer(!is_offline).await;
-                    }
-                    #[cfg(test)]
-                    if is_offline {
-                        continue;
-                    }
-
-                    match cluster.handle_message(message).await {
-                        Ok(true) => (),
-                        Ok(false) => {
-                            debug!("Broadcasting leave request to peers and shutting down.");
-                            cluster.broadcast_leave().await;
-                            shutdown_tx.send(false).ok();
-                            break;
-                        }
-                        Err(err) => {
-                            error!("Cluster process exiting due to error: {:?}", err);
-                            shutdown_tx.send(false).ok();
-                            break;
-                        }
-                    }
-                }
-                Ok(None) => {
-                    debug!("Cluster main process exiting.");
-                    break;
-                }
-                Err(_) =>
-                {
-                    #[cfg(test)]
-                    if is_offline {
-                        continue;
-                    }
-                }
-            }
-
-            if !cluster.peers.is_empty() {
-                let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
-                let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
-                    #[cfg(test)]
-                    if time_since_last_ping > (PING_INTERVAL + 200) {
-                        error!(
-                            "[{}] Possible event loop block: {}ms since last ping.",
-                            cluster.addr, time_since_last_ping
-                        );
-                    }
-
-                    if let Err(err) = cluster.ping_peers().await {
-                        debug!("Failed to ping peers: {:?}", err);
-                        break;
-                    }
-                    last_ping = Instant::now();
-                    PING_INTERVAL
-                } else {
-                    PING_INTERVAL - time_since_last_ping
-                };
-
-                let time = Instant::now();
-                wait_timeout = Duration::from_millis(
-                    if let Some(time_to_next_election) = cluster.time_to_next_election() {
-                        if time_to_next_election == 0 {
-                            if let Err(err) = cluster.request_votes(false).await {
-                                debug!("Failed to request votes: {:?}", err);
-                                break;
-                            }
-                            time_to_next_ping
-                        } else if time_to_next_election < time_to_next_ping {
-                            time_to_next_election
-                        } else {
-                            time_to_next_ping
-                        }
-                    } else {
-                        time_to_next_ping
-                    },
-                );
-
-                if time.elapsed().as_millis() > 50 {
-                    panic!(
-                        "{}ms [{}] Request votes took too long!",
-                        time.elapsed().as_millis(),
-                        cluster.addr,
-                    );
-                }
-            }
-        }
-    });
-}
+use store::tracing::error;
+use store::{log::raft::LogIndex, Store};
 
 impl<T> Cluster<T>
 where
@@ -224,19 +15,29 @@ where
         match message {
             Event::Gossip { request, addr } => match request {
                 // Join request, add node and perform full sync.
-                gossip::Request::Join { id, port } => self.handle_join(id, addr, port).await,
+                crate::cluster::gossip::request::Request::Join { id, port } => {
+                    self.handle_join(id, addr, port).await
+                }
 
                 // Join reply.
-                gossip::Request::JoinReply { id } => self.handle_join_reply(id).await,
+                crate::cluster::gossip::request::Request::JoinReply { id } => {
+                    self.handle_join_reply(id).await
+                }
 
                 // Hearbeat request, reply with the cluster status.
-                gossip::Request::Ping(peer_list) => self.handle_ping(peer_list, true).await,
+                crate::cluster::gossip::request::Request::Ping(peer_list) => {
+                    self.handle_ping(peer_list, true).await
+                }
 
                 // Heartbeat response, update the cluster status if needed.
-                gossip::Request::Pong(peer_list) => self.handle_ping(peer_list, false).await,
+                crate::cluster::gossip::request::Request::Pong(peer_list) => {
+                    self.handle_ping(peer_list, false).await
+                }
 
                 // Leave request.
-                gossip::Request::Leave(peer_list) => self.handle_leave(peer_list).await?,
+                crate::cluster::gossip::request::Request::Leave(peer_list) => {
+                    self.handle_leave(peer_list).await?
+                }
             },
 
             Event::RpcRequest {
@@ -325,90 +126,30 @@ where
         Ok(true)
     }
 
-    pub async fn ping_peers(&mut self) -> store::Result<()> {
-        // Total and alive peers in the cluster.
-        let total_peers = self.peers.len();
-        let mut alive_peers: u32 = 0;
+    pub fn is_enabled(&self) -> bool {
+        !self.key.is_empty()
+    }
 
-        // Start a new election on startup or on an election timeout.
-        let mut leader_is_offline = false;
-        let leader_peer_id = self.leader_peer_id();
-
-        // Count alive peers and start a new election if the current leader becomes offline.
-        for peer in self.peers.iter_mut() {
-            if !peer.is_offline() {
-                // Failure detection
-                if peer.check_heartbeat() {
-                    alive_peers += 1;
-                } else if !leader_is_offline
-                    && leader_peer_id.map(|id| id == peer.peer_id).unwrap_or(false)
-                    && peer.hb_sum > 0
-                {
-                    // Current leader is offline, start election
-                    leader_is_offline = true;
+    pub fn shard_status(&self) -> (u32, u32) {
+        let mut total = 0;
+        let mut healthy = 0;
+        for peer in &self.peers {
+            if peer.is_in_shard(self.shard_id) {
+                if peer.is_healthy() {
+                    healthy += 1;
                 }
+                total += 1;
             }
         }
+        (total, healthy)
+    }
+}
 
-        /*if self.is_leading() {
-            print!(
-                "Leader [{} = {}/{}]",
-                self.addr, self.last_log.index, self.last_log.term
-            );
-            for peer in &self.peers {
-                print!(
-                    " [{} = {:?}, {}/{}]",
-                    peer.addr, peer.state, peer.last_log_index, peer.last_log_term
-                );
-            }
-            println!();
-        }*/
-
-        // Start a new election
-        if leader_is_offline {
-            debug!(
-                "[{}] Leader is offline, starting a new election.",
-                self.addr
-            );
-            self.request_votes(true).await?;
-        }
-
-        // Find next peer to ping
-        for _ in 0..total_peers {
-            self.last_peer_pinged = (self.last_peer_pinged + 1) % total_peers;
-            let (peer_state, target_addr) = {
-                let peer = &self.peers[self.last_peer_pinged];
-                (peer.state, peer.addr)
-            };
-
-            match peer_state {
-                gossip::State::Seed => {
-                    self.send_gossip(
-                        target_addr,
-                        gossip::Request::Join {
-                            id: self.last_peer_pinged,
-                            port: self.addr.port(),
-                        },
-                    )
-                    .await;
-                    break;
-                }
-                gossip::State::Alive | gossip::State::Suspected => {
-                    self.epoch += 1;
-                    self.send_gossip(target_addr, gossip::Request::Ping(self.build_peer_status()))
-                        .await;
-                    break;
-                }
-                gossip::State::Offline if alive_peers == 0 => {
-                    // Probe offline nodes
-                    self.send_gossip(target_addr, gossip::Request::Ping(self.build_peer_status()))
-                        .await;
-                    break;
-                }
-                _ => (),
-            }
-        }
-
-        Ok(())
+impl<T> JMAPServer<T>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    pub fn is_in_cluster(&self) -> bool {
+        self.cluster.is_some()
     }
 }

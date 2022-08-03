@@ -5,12 +5,13 @@ use argon2::{
 
 use jmap::{
     orm::TinyORM,
-    types::principal::{Principal, Property, Type, Value},
+    principal::schema::{Principal, Property, Type, Value},
 };
 
 pub mod account;
 pub mod get;
 pub mod query;
+pub mod raft;
 pub mod set;
 
 pub trait CreateAccount: Sized {

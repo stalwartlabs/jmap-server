@@ -6,15 +6,16 @@ use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::SetResponse;
 use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
-use jmap::types::principal;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
-use jmap::{sanitize_email, SUPERUSER_ID};
+use jmap::{principal, sanitize_email, SUPERUSER_ID};
 use store::core::collection::Collection;
+use store::core::document::Document;
+use store::core::error::StoreError;
 use store::core::JMAPIdPrefix;
 use store::read::comparator::Comparator;
 use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
-use store::{JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
 use super::schema::{Property, Value};
 
@@ -32,6 +33,8 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn identity_set(&self, request: SetRequest<Identity>) -> jmap::Result<SetResponse<Identity>>;
+
+    fn identity_delete(&self, account_id: AccountId, document: &mut Document) -> store::Result<()>;
 }
 
 impl<T> JMAPSetIdentity<T> for JMAPStore<T>
@@ -68,11 +71,11 @@ where
                                         Collection::Principal,
                                         Filter::or(vec![
                                             Filter::eq(
-                                                principal::Property::Email.into(),
+                                                principal::schema::Property::Email.into(),
                                                 Query::Index(value.clone()),
                                             ),
                                             Filter::eq(
-                                                principal::Property::Aliases.into(),
+                                                principal::schema::Property::Aliases.into(),
                                                 Query::Index(value.clone()),
                                             ),
                                         ]),
@@ -164,5 +167,19 @@ where
         })?;
 
         helper.into_response()
+    }
+
+    fn identity_delete(&self, account_id: AccountId, document: &mut Document) -> store::Result<()> {
+        // Delete ORM
+        self.get_orm::<Identity>(account_id, document.document_id)?
+            .ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "Failed to fetch Identity ORM for {}:{}.",
+                    account_id, document.document_id
+                ))
+            })?
+            .delete(document);
+
+        Ok(())
     }
 }

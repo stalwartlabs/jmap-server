@@ -3,20 +3,22 @@ use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
+use jmap::principal::schema::{Principal, Property, Type, Value};
+use jmap::principal::store::JMAPPrincipals;
 use jmap::request::set::SetRequest;
 use jmap::request::set::SetResponse;
-use jmap::types::principal::{JMAPPrincipals, Principal, Property, Type, Value};
 use jmap::{sanitize_domain, sanitize_email};
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
 use store::ahash::AHashSet;
 use store::core::collection::Collection;
 use store::core::document::Document;
+use store::core::error::StoreError;
 use store::read::comparator::Comparator;
 use store::read::filter::{Filter, Query};
 use store::read::FilterMapper;
 use store::write::batch::WriteBatch;
-use store::{DocumentId, JMAPStore, Store};
+use store::{AccountId, DocumentId, JMAPStore, Store};
 
 pub trait JMAPSetPrincipal<T>
 where
@@ -24,6 +26,9 @@ where
 {
     fn principal_set(&self, request: SetRequest<Principal>)
         -> jmap::Result<SetResponse<Principal>>;
+
+    fn principal_delete(&self, account_id: AccountId, document: &mut Document)
+        -> store::Result<()>;
 }
 
 impl<T> JMAPSetPrincipal<T> for JMAPStore<T>
@@ -99,6 +104,24 @@ where
         })?;
 
         helper.into_response()
+    }
+
+    fn principal_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()> {
+        // Delete ORM
+        self.get_orm::<Principal>(account_id, document.document_id)?
+            .ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "Failed to fetch Principal ORM for {}:{}.",
+                    account_id, document.document_id
+                ))
+            })?
+            .delete(document);
+
+        Ok(())
     }
 }
 

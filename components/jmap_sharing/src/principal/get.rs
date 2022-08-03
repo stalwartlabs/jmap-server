@@ -1,8 +1,8 @@
 use jmap::jmap_store::get::{default_mapper, GetHelper, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
+use jmap::principal::schema::{Principal, Property, Value};
+use jmap::principal::store::JMAPPrincipals;
 use jmap::request::get::{GetRequest, GetResponse};
-
-use jmap::types::principal::{JMAPPrincipals, Principal, Property, Value};
 use store::core::error::StoreError;
 use store::core::vec_map::VecMap;
 use store::JMAPStore;

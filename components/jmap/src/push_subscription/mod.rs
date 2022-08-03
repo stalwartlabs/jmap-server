@@ -1,4 +1,5 @@
 pub mod get;
+pub mod raft;
 pub mod schema;
 pub mod serialize;
 pub mod set;

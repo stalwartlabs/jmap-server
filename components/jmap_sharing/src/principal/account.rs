@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use jmap::{
     orm::serialize::JMAPOrm,
-    types::{
-        jmap::JMAPId,
-        principal::{Principal, Property, Type, Value},
-    },
+    principal::schema::{Principal, Property, Type, Value},
+    types::jmap::JMAPId,
     SUPERUSER_ID,
 };
 use store::{

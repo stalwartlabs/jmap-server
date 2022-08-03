@@ -9,10 +9,10 @@ use jmap::jmap_store::set::{SetHelper, SetObject};
 use jmap::jmap_store::Object;
 use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
+use jmap::principal::store::JMAPPrincipals;
 use jmap::request::set::{SetRequest, SetResponse};
 use jmap::request::{ACLEnforce, ResultReference};
 use jmap::types::jmap::JMAPId;
-use jmap::types::principal::JMAPPrincipals;
 use jmap::SUPERUSER_ID;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
@@ -23,7 +23,7 @@ use store::core::JMAPIdPrefix;
 use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
-use store::{DocumentId, JMAPStore, LongInteger, SharedResource};
+use store::{AccountId, DocumentId, JMAPStore, LongInteger, SharedResource};
 use store::{SharedBitmap, Store};
 
 #[derive(Debug, Clone, Default)]
@@ -67,6 +67,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn mailbox_set(&self, request: SetRequest<Mailbox>) -> jmap::Result<SetResponse<Mailbox>>;
+    fn mailbox_delete(&self, account_id: AccountId, document: &mut Document) -> store::Result<()>;
 }
 
 impl<T> JMAPSetMailbox<T> for JMAPStore<T>
@@ -259,6 +260,7 @@ where
 
                         // If the message is in multiple mailboxes, untag it from the current mailbox,
                         // otherwise delete it.
+                        // TODO lock email collection as well
                         match current_fields.get_tags(&mail::schema::Property::MailboxIds) {
                             Some(tags) if tags.len() > 1 => {
                                 let thread_id = self
@@ -318,6 +320,20 @@ where
         })?;
 
         helper.into_response()
+    }
+
+    fn mailbox_delete(&self, account_id: AccountId, document: &mut Document) -> store::Result<()> {
+        // Delete ORM
+        self.get_orm::<Mailbox>(account_id, document.document_id)?
+            .ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "Failed to fetch Mailbox ORM for {}:{}.",
+                    account_id, document.document_id
+                ))
+            })?
+            .delete(document);
+
+        Ok(())
     }
 }
 

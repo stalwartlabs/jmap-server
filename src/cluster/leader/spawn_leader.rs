@@ -1,65 +1,20 @@
+use crate::cluster::leader::{State, BATCH_MAX_SIZE};
+use crate::cluster::log::changes_merge::MergedChanges;
+use crate::cluster::log::entries_get::RaftStoreEntries;
+use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse};
 use futures::poll;
-use jmap::jmap_store::raft::JMAPRaftStore;
-use jmap_mail::mail::schema::Email;
-use jmap_mail::mailbox::schema::Mailbox;
 use std::task::Poll;
-use store::blob::BlobId;
-use store::core::bitmap::Bitmap;
-use store::core::collection::Collection;
-use store::core::error::StoreError;
 use store::log::raft::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
 use store::tracing::{debug, error};
-use store::{AccountId, Store};
+use store::Store;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse, RaftStore};
-use crate::JMAPServer;
-
-use super::log::{MergedChanges, Update};
-use super::Peer;
 use super::{
     rpc::{self, Request, Response, RpcEvent},
     Cluster,
 };
-
-const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024; //TODO configure
-
-#[derive(Debug)]
-enum State {
-    BecomeLeader,
-    Synchronize,
-    Merge {
-        matched_log: RaftId,
-    },
-    AppendLogs {
-        pending_changes: Vec<(Bitmap<Collection>, Vec<AccountId>)>,
-    },
-    AppendChanges {
-        account_id: AccountId,
-        collection: Collection,
-        changes: MergedChanges,
-    },
-    AppendBlobs {
-        pending_blob_ids: Vec<BlobId>,
-    },
-    Wait,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Event {
-    pub last_log_index: LogIndex,
-    pub uncommitted_index: LogIndex,
-}
-
-impl Event {
-    pub fn new(last_log_index: LogIndex, uncommitted_index: LogIndex) -> Self {
-        Self {
-            last_log_index,
-            uncommitted_index,
-        }
-    }
-}
+use super::{Event, Peer};
 
 impl<T> Cluster<T>
 where
@@ -282,7 +237,7 @@ where
                     match response {
                         Response::StepDown { term: peer_term } => {
                             if let Err(err) = main_tx
-                                .send(super::Event::StepDown { term: peer_term })
+                                .send(crate::cluster::Event::StepDown { term: peer_term })
                                 .await
                             {
                                 error!("Error sending step down message: {}", err);
@@ -418,7 +373,7 @@ where
 
                             if local_match == match_log {
                                 main_tx
-                                    .send(super::Event::AdvanceCommitIndex {
+                                    .send(crate::cluster::Event::AdvanceCommitIndex {
                                         peer_id,
                                         commit_index: local_match.index,
                                     })
@@ -521,7 +476,7 @@ where
                         // Advance commit index
                         if up_to_index != LogIndex::MAX {
                             main_tx
-                                .send(super::Event::AdvanceCommitIndex {
+                                .send(crate::cluster::Event::AdvanceCommitIndex {
                                     peer_id,
                                     commit_index: up_to_index,
                                 })
@@ -603,155 +558,6 @@ where
                 }
             }
         });
-    }
-
-    pub fn spawn_raft_leader_init(
-        &self,
-        mut log_index_rx: watch::Receiver<Event>,
-    ) -> watch::Receiver<bool> {
-        let (tx, rx) = watch::channel(false);
-
-        let term = self.term;
-        let last_log_index = self.last_log.index;
-
-        let core = self.core.clone();
-        tokio::spawn(async move {
-            if let Err(err) = core.commit_leader(LogIndex::MAX, true).await {
-                error!("Failed to rollback uncommitted entries: {:?}", err);
-                return;
-            }
-            if let Err(err) = core.commit_follower(LogIndex::MAX, true).await {
-                error!("Failed to commit pending updates: {:?}", err);
-                return;
-            }
-
-            // Poll the receiver to make sure this node is still the leader.
-            match poll!(Box::pin(log_index_rx.changed())) {
-                Poll::Ready(result) => match result {
-                    Ok(_) => (),
-                    Err(_) => {
-                        debug!("This node was asked to step down during initialization.");
-                        return;
-                    }
-                },
-                Poll::Pending => (),
-            }
-
-            core.update_raft_index(last_log_index);
-            if let Err(err) = core.set_leader_commit_index(last_log_index).await {
-                error!("Failed to set leader commit index: {:?}", err);
-                return;
-            }
-            core.set_leader(term).await;
-
-            if tx.send(true).is_err() {
-                error!("Failed to send message to raft leader processes.");
-            }
-        });
-        rx
-    }
-}
-
-impl<T> JMAPServer<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    async fn prepare_changes(
-        &self,
-        account_id: AccountId,
-        collection: Collection,
-        changes: &mut MergedChanges,
-    ) -> store::Result<Vec<Update>> {
-        let mut batch_size = 0;
-        let mut updates = Vec::new();
-
-        loop {
-            let (document_id, is_insert) = if let Some(document_id) = changes.inserts.min() {
-                changes.inserts.remove(document_id);
-                (document_id, true)
-            } else if let Some(document_id) = changes.updates.min() {
-                changes.updates.remove(document_id);
-                (document_id, false)
-            } else {
-                break;
-            };
-
-            let store = self.store.clone();
-            let item = self
-                .spawn_worker(move || match collection {
-                    Collection::Mail => {
-                        store.raft_prepare_update::<Email>(account_id, document_id, is_insert)
-                    }
-                    Collection::Mailbox => {
-                        store.raft_prepare_update::<Mailbox>(account_id, document_id, is_insert)
-                    }
-                    _ => Err(StoreError::InternalError(
-                        "Unsupported collection for changes".into(),
-                    )),
-                })
-                .await?;
-
-            if let Some(item) = item {
-                if updates.is_empty() {
-                    updates.push(Update::Begin {
-                        account_id,
-                        collection,
-                    });
-                }
-                batch_size += item.size();
-                updates.push(Update::Document { update: item });
-            } else {
-                debug!(
-                    "Warning: Failed to fetch item in collection {:?}",
-                    collection,
-                );
-            }
-
-            if batch_size >= BATCH_MAX_SIZE {
-                break;
-            }
-        }
-
-        if !updates.is_empty() {
-            updates.push(Update::Eof);
-        }
-
-        Ok(updates)
-    }
-
-    async fn prepare_blobs(
-        &self,
-        pending_blob_ids: Vec<BlobId>,
-    ) -> store::Result<(Vec<Update>, Vec<BlobId>)> {
-        let store = self.store.clone();
-        self.spawn_worker(move || {
-            let mut remaining_blobs = Vec::new();
-            let mut updates = Vec::new();
-            let mut bytes_sent = 0;
-
-            for pending_blob_id in pending_blob_ids {
-                if bytes_sent < BATCH_MAX_SIZE {
-                    let blob = store::lz4_flex::compress_prepend_size(
-                        &store.blob_get(&pending_blob_id)?.ok_or_else(|| {
-                            StoreError::InternalError(format!(
-                                "Blob {} not found.",
-                                pending_blob_id
-                            ))
-                        })?,
-                    );
-                    bytes_sent += blob.len();
-                    updates.push(Update::Blob {
-                        blob_id: pending_blob_id,
-                        blob,
-                    });
-                } else {
-                    remaining_blobs.push(pending_blob_id);
-                }
-            }
-
-            Ok((updates, remaining_blobs))
-        })
-        .await
     }
 }
 

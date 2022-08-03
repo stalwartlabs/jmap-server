@@ -1411,7 +1411,7 @@ name = "jmap_mail"
 version = "0.1.0"
 dependencies = [
  "jmap",
- "mail-builder 0.2.0",
+ "mail-builder 0.2.1",
  "mail-parser",
  "serde",
  "serde_json",
@@ -1581,6 +1581,8 @@ dependencies = [
 [[package]]
 name = "mail-builder"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d9bbab6c5567f5a5eea259e1dc688f9eb5b18ca9667d3a4c9298a4c4c8fb736"
 dependencies = [
  "chrono",
  "gethostname",
@@ -1588,9 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "mail-builder"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d9bbab6c5567f5a5eea259e1dc688f9eb5b18ca9667d3a4c9298a4c4c8fb736"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "gethostname",
@@ -1610,7 +1610,7 @@ version = "0.2.0"
 dependencies = [
  "base64",
  "gethostname",
- "mail-builder 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mail-builder 0.2.0",
  "md5",
  "rand",
  "rsa",

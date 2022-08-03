@@ -45,6 +45,24 @@ where
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Bypass authentication for the main client
+    bypass_authentication(&server).await;
+
+    // Create client
+    let mut client = Client::connect(
+        &session_url,
+        Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
+    )
+    .await
+    .unwrap();
+    client.set_default_account_id(JMAPId::new(1));
+
+    (server, client, temp_dir)
+}
+
+pub async fn bypass_authentication<T>(server: &JMAPServer<T>)
+where
+    T: for<'x> Store<'x>,
+{
     let acl_token = Arc::new(ACLToken {
         member_of: vec![SUPERUSER_ID, 1],
         access_to: vec![],
@@ -64,17 +82,6 @@ where
             Arc::new(RateLimiter::new(1000, 1000)),
         )
         .await;
-
-    // Create client
-    let mut client = Client::connect(
-        &session_url,
-        Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
-    )
-    .await
-    .unwrap();
-    client.set_default_account_id(JMAPId::new(1));
-
-    (server, client, temp_dir)
 }
 
 #[actix_web::test]

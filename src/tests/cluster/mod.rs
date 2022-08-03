@@ -1,5 +1,3 @@
-use crate::tests::cluster::fuzz::cluster_fuzz;
-use crate::tests::cluster::mail_thread_merge::merge_mail_threads;
 use crate::tests::store::utils::StoreCompareWith;
 use store_rocksdb::RocksDB;
 
@@ -27,20 +25,19 @@ fn postmortem() {
     }
 }
 
-#[tokio::test]
+#[actix_web::test]
 //#[cfg_attr(not(feature = "test_cluster"), ignore)]
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
-    //tokio_test::block_on(raft_election::<RocksDB>());
-    //tokio_test::block_on(merge_mail_threads::<RocksDB>());
-    //tokio_test::block_on(crud_ops::<RocksDB>());
-    //tokio_test::block_on(resolve_log_conflict::<RocksDB>());
+    crud::test::<RocksDB>().await;
+    election::test::<RocksDB>().await;
+    log_conflict::test::<RocksDB>().await;
+    mail_thread_merge::test::<RocksDB>().await;
 }
 
-#[tokio::test]
+#[actix_web::test]
 //#[cfg_attr(not(feature = "fuzz_cluster"), ignore)]
 async fn fuzz_cluster() {
     tracing_subscriber::fmt::init();
-    //tokio_test::block_on(cluster_fuzz::<RocksDB>(vec![]));
-    //tokio_test::block_on(cluster_fuzz::<RocksDB>(serde_json::from_slice(br#""#).unwrap()));
+    fuzz::test::<RocksDB>(vec![]).await;
 }

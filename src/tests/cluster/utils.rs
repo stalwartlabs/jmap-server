@@ -1,24 +1,30 @@
 use crate::{
-    cluster::main::{init_cluster, start_cluster, ClusterInit},
+    cluster::init::{init_cluster, start_cluster, ClusterInit},
     server::http::init_jmap_server,
-    tests::store::utils::StoreCompareWith,
+    tests::{jmap::bypass_authentication, store::utils::StoreCompareWith},
     JMAPServer,
 };
 
 use actix_web::web;
 use futures::future::join_all;
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use jmap::types::jmap::JMAPId;
+use jmap_client::{
+    client::{Client, Credentials},
+    core::set::SetObject,
+    mailbox::Role,
+};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use store::{
-    config::env_settings::EnvSettings, log::raft::RaftId, parking_lot::Mutex, AccountId, JMAPId,
-    JMAPStore, Store,
+    ahash::AHashMap,
+    config::env_settings::EnvSettings,
+    log::raft::RaftId,
+    parking_lot::Mutex,
+    rand::{self, Rng},
+    AccountId, Store,
 };
 use tokio::time::sleep;
 
-use crate::tests::store::{
-    jmap_mail_set::{delete_email, insert_email, update_email},
-    jmap_mailbox::{delete_mailbox, insert_mailbox, update_mailbox},
-    utils::{destroy_temp_dir, init_settings},
-};
+use crate::tests::store::utils::{destroy_temp_dir, init_settings};
 
 pub struct Peer<T> {
     pub init: ClusterInit,
@@ -34,14 +40,18 @@ pub struct Cluster<T> {
     pub delete_if_exists: bool,
 }
 
+pub struct Clients {
+    pub clients: Vec<Client>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Ac {
-    NewEmail((JMAPId, JMAPId)),
-    UpdateEmail(JMAPId),
-    DeleteEmail(JMAPId),
-    InsertMailbox(JMAPId),
-    UpdateMailbox(JMAPId),
-    DeleteMailbox(JMAPId),
+    NewEmail((u64, u64)),
+    UpdateEmail(u64),
+    DeleteEmail(u64),
+    InsertMailbox(u64),
+    UpdateMailbox(u64),
+    DeleteMailbox(u64),
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -74,12 +84,15 @@ impl<T> Peer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn new(peer_num: u32, num_peers: u32, delete_if_exists: bool) -> Self {
+    pub async fn new(peer_num: u32, num_peers: u32, delete_if_exists: bool) -> Self {
         let (settings, temp_dir) =
             init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
 
         let (ipc, init) = init_cluster(&settings).unwrap();
         let jmap_server = init_jmap_server(&settings, ipc.into());
+
+        // Bypass authentication
+        bypass_authentication(&jmap_server).await;
 
         Peer {
             init,
@@ -99,12 +112,14 @@ impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn new(num_peers: u32, delete_if_exists: bool) -> Self {
+    pub async fn new(num_peers: u32, delete_if_exists: bool) -> Self {
+        let mut peers = Vec::with_capacity(num_peers as usize);
+        for peer_num in 1..=num_peers {
+            peers.push(Peer::new(peer_num, num_peers, delete_if_exists).await);
+        }
+
         Cluster {
-            peers: (1..=num_peers)
-                .into_iter()
-                .map(|peer_num| Peer::new(peer_num, num_peers, delete_if_exists))
-                .collect(),
+            peers,
             temp_dirs: vec![],
             num_peers,
             delete_if_exists,
@@ -139,6 +154,7 @@ where
                 self.num_peers,
                 self.delete_if_exists,
             )
+            .await
             .start_cluster()
             .await;
             self.temp_dirs.push(temp_dir);
@@ -157,63 +173,217 @@ where
     }
 }
 
-impl Ac {
-    pub fn execute<T>(
+impl Clients {
+    pub async fn new(num_peers: usize) -> Self {
+        let mut clients = Vec::with_capacity(num_peers);
+        for peer_num in 1..=num_peers {
+            clients.push(
+                Client::connect(
+                    &format!("http://127.0.0.1:{}/.well-known/jmap", 8000 + peer_num),
+                    Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
+                )
+                .await
+                .unwrap(),
+            );
+        }
+        Clients { clients }
+    }
+
+    fn get_client(&self, mut peer_num: usize) -> &Client {
+        if peer_num == 0 {
+            peer_num = rand::thread_rng().gen_range(0..self.clients.len());
+        }
+        &self.clients[peer_num]
+    }
+
+    pub async fn insert_email(
         &self,
-        store: &Arc<JMAPStore<T>>,
-        mailbox_map: &Arc<Mutex<HashMap<JMAPId, JMAPId>>>,
-        email_map: &Arc<Mutex<HashMap<JMAPId, JMAPId>>>,
+        peer_num: usize,
+        account_id: AccountId,
+        raw_message: Vec<u8>,
+        mailbox_ids: Vec<String>,
+        keywords: Vec<String>,
+    ) -> String {
+        self.get_client(peer_num)
+            .email_import_account(
+                &JMAPId::from(account_id).to_string(),
+                raw_message,
+                mailbox_ids,
+                keywords.into(),
+                None,
+            )
+            .await
+            .unwrap()
+            .take_id()
+    }
+
+    pub async fn update_email(
+        &self,
+        peer_num: usize,
+        account_id: AccountId,
+        email_id: String,
+        mailbox_ids: Option<Vec<String>>,
+        keywords: Option<Vec<String>>,
+    ) {
+        let mut request = self.get_client(peer_num).build();
+        let update = request
+            .set_email()
+            .account_id(JMAPId::from(account_id).to_string())
+            .update(&email_id);
+        if let Some(mailbox_ids) = mailbox_ids {
+            update.mailbox_ids(mailbox_ids);
+        }
+        if let Some(keywords) = keywords {
+            update.keywords(keywords);
+        }
+
+        request
+            .send_set_email()
+            .await
+            .unwrap()
+            .updated(&email_id)
+            .unwrap();
+    }
+
+    pub async fn delete_email(&self, peer_num: usize, account_id: AccountId, email_id: String) {
+        let mut request = self.get_client(peer_num).build();
+        request
+            .set_email()
+            .account_id(JMAPId::from(account_id).to_string())
+            .destroy(vec![email_id.to_string()]);
+        request
+            .send_set_email()
+            .await
+            .unwrap()
+            .destroyed(&email_id)
+            .unwrap();
+    }
+
+    pub async fn insert_mailbox(
+        &self,
+        peer_num: usize,
+        account_id: AccountId,
+        name: String,
+        role: Role,
+    ) -> String {
+        let mut request = self.get_client(peer_num).build();
+        let create = request
+            .set_mailbox()
+            .account_id(JMAPId::from(account_id).to_string())
+            .create()
+            .name(name)
+            .role(role);
+        let create_id = create.create_id().unwrap();
+
+        request
+            .send_set_mailbox()
+            .await
+            .unwrap()
+            .created(&create_id)
+            .unwrap()
+            .take_id()
+    }
+
+    pub async fn update_mailbox(
+        &self,
+        peer_num: usize,
+        account_id: AccountId,
+        mailbox_id: String,
+        id1: u32,
+        id2: u32,
+    ) {
+        let mut request = self.get_client(peer_num).build();
+        request
+            .set_mailbox()
+            .account_id(JMAPId::from(account_id).to_string())
+            .update(&mailbox_id)
+            .name(format!("Mailbox {}/{}", id1, id2))
+            .sort_order(id2);
+
+        request
+            .send_set_mailbox()
+            .await
+            .unwrap()
+            .updated(&mailbox_id)
+            .unwrap();
+    }
+
+    pub async fn delete_mailbox(&self, peer_num: usize, account_id: AccountId, mailbox_id: String) {
+        let mut request = self.get_client(peer_num).build();
+        request
+            .set_mailbox()
+            .account_id(JMAPId::from(account_id).to_string())
+            .destroy(vec![mailbox_id.to_string()]);
+        request
+            .send_set_mailbox()
+            .await
+            .unwrap()
+            .destroyed(&mailbox_id)
+            .unwrap();
+    }
+}
+
+impl Ac {
+    pub async fn execute<T>(
+        &self,
+        clients: &Clients,
+        mailbox_map: &Arc<Mutex<AHashMap<u64, String>>>,
+        email_map: &Arc<Mutex<AHashMap<u64, String>>>,
         batch_num: usize,
     ) where
         T: for<'x> Store<'x> + 'static,
     {
+        let peer_num = 0;
         match self {
             Ac::NewEmail((local_id, mailbox_id)) => {
-                email_map.lock().insert(
-                    *local_id,
-                    insert_email(
-                        store,
+                let mailbox_id = mailbox_map.lock().get(mailbox_id).unwrap().to_string();
+                let email_id = clients
+                    .insert_email(
+                        peer_num,
                         2,
                         format!(
                             "From: test@test.com\nSubject: test {}\n\nTest message {}",
                             local_id, local_id
                         )
                         .into_bytes(),
-                        vec![*mailbox_map.lock().get(mailbox_id).unwrap()],
+                        vec![mailbox_id],
                         vec![],
-                        None,
-                    ),
-                );
+                    )
+                    .await;
+
+                email_map.lock().insert(*local_id, email_id);
             }
             Ac::UpdateEmail(local_id) => {
-                update_email(
-                    store,
-                    2,
-                    *email_map.lock().get(local_id).unwrap(),
-                    None,
-                    Some(vec![format!("tag_{}", batch_num)]),
-                );
+                let email_id = email_map.lock().get(local_id).unwrap().to_string();
+                clients
+                    .update_email(
+                        peer_num,
+                        2,
+                        email_id,
+                        None,
+                        Some(vec![format!("tag_{}", batch_num)]),
+                    )
+                    .await;
             }
             Ac::DeleteEmail(local_id) => {
-                delete_email(store, 2, email_map.lock().remove(local_id).unwrap(), true);
+                let email_id = email_map.lock().remove(local_id).unwrap();
+                clients.delete_email(peer_num, 2, email_id).await;
             }
             Ac::InsertMailbox(local_id) => {
-                mailbox_map.lock().insert(
-                    *local_id,
-                    insert_mailbox(store, 2, &format!("Mailbox {}", local_id), None),
-                );
+                let mailbox_id = clients
+                    .insert_mailbox(peer_num, 2, format!("Mailbox {}", local_id), Role::None)
+                    .await;
+                mailbox_map.lock().insert(*local_id, mailbox_id);
             }
             Ac::UpdateMailbox(local_id) => {
-                update_mailbox(
-                    store,
-                    2,
-                    *mailbox_map.lock().get(local_id).unwrap(),
-                    *local_id as u32,
-                    batch_num as u32,
-                );
+                let mailbox_id = mailbox_map.lock().get(local_id).unwrap().to_string();
+                clients
+                    .update_mailbox(peer_num, 2, mailbox_id, *local_id as u32, batch_num as u32)
+                    .await;
             }
             Ac::DeleteMailbox(local_id) => {
-                delete_mailbox(store, 2, mailbox_map.lock().remove(local_id).unwrap(), true);
+                let mailbox_id = mailbox_map.lock().remove(local_id).unwrap();
+                clients.delete_mailbox(peer_num, 2, mailbox_id).await;
             }
         }
     }

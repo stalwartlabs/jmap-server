@@ -37,7 +37,7 @@ where
 
             // Build index from message metadata
             MessageData::deserialize(&store.blob_get(&metadata_blob_id)?.ok_or_else(|| {
-                StoreError::InternalError(format!(
+                StoreError::NotFound(format!(
                     "Could not find message metadata blob for {}.",
                     document.document_id
                 ))

@@ -1,7 +1,6 @@
 pub mod blob;
 pub mod jmap;
 pub mod json_pointer;
-pub mod principal;
 pub mod state;
 pub mod type_state;
 

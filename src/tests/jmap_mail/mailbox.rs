@@ -20,7 +20,6 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     println!("Running Mailbox tests...");
-    //TODO: test isSubscribed
 
     // Create test mailboxes
     let id_map = create_test_mailboxes(client).await;

@@ -15,6 +15,7 @@ use jmap::request::set::SetResponse;
 use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use mail_parser::RfcHeader;
+use store::core::document::Document;
 use store::core::vec_map::VecMap;
 
 use store::blob::BlobId;
@@ -23,7 +24,7 @@ use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::write::options::{IndexOptions, Options};
-use store::{JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
 use super::schema::{Address, EmailSubmission, Envelope, Property, Value};
 
@@ -72,6 +73,12 @@ where
         &self,
         request: SetRequest<EmailSubmission>,
     ) -> jmap::Result<SetResponse<EmailSubmission>>;
+
+    fn email_submission_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()>;
 }
 
 impl<T> JMAPSetEmailSubmission<T> for JMAPStore<T>
@@ -342,43 +349,9 @@ where
             Ok(None)
         })?;
 
-        helper.destroy(|id, helper, document| {
-            let document_id = id.get_document_id();
-
-            // Fetch ORM
-            let email_submission = self
-                .get_orm::<EmailSubmission>(helper.account_id, document_id)?
-                .ok_or_else(|| {
-                    StoreError::NotFound(format!(
-                        "EmailSubmission ORM data for {}:{} not found.",
-                        helper.account_id, document_id
-                    ))
-                })?;
-
-            // Delete ORM
-            email_submission.delete(document);
-
-            // Unlink e-mail
-            if let Some(raw_message_id) = self.get_document_value::<BlobId>(
-                helper.account_id,
-                Collection::EmailSubmission,
-                document_id,
-                Property::EmailId.into(),
-            )? {
-                document.blob(raw_message_id, IndexOptions::new().clear());
-                document.binary(
-                    Property::EmailId,
-                    Vec::with_capacity(0),
-                    IndexOptions::new().clear(),
-                );
-                Ok(())
-            } else {
-                Err(StoreError::NotFound(format!(
-                    "EmailSubmission Blob for {}:{} not found.",
-                    helper.account_id, document_id
-                ))
-                .into())
-            }
+        helper.destroy(|_id, helper, document| {
+            self.email_submission_delete(helper.account_id, document)
+                .map_err(|err| err.into())
         })?;
 
         let account_id = JMAPId::from(helper.account_id);
@@ -406,5 +379,47 @@ where
             }
             r
         })
+    }
+
+    fn email_submission_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()> {
+        let document_id = document.document_id;
+
+        // Fetch ORM
+        let email_submission = self
+            .get_orm::<EmailSubmission>(account_id, document_id)?
+            .ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "EmailSubmission ORM data for {}:{} not found.",
+                    account_id, document_id
+                ))
+            })?;
+
+        // Delete ORM
+        email_submission.delete(document);
+
+        // Unlink e-mail
+        if let Some(raw_message_id) = self.get_document_value::<BlobId>(
+            account_id,
+            Collection::EmailSubmission,
+            document_id,
+            Property::EmailId.into(),
+        )? {
+            document.blob(raw_message_id, IndexOptions::new().clear());
+            document.binary(
+                Property::EmailId,
+                Vec::with_capacity(0),
+                IndexOptions::new().clear(),
+            );
+            Ok(())
+        } else {
+            Err(StoreError::NotFound(format!(
+                "EmailSubmission Blob for {}:{} not found.",
+                account_id, document_id
+            )))
+        }
     }
 }

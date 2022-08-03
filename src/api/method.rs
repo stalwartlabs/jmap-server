@@ -2,6 +2,7 @@ use std::fmt;
 
 use jmap::{
     error::method::MethodError,
+    principal::schema::Principal,
     push_subscription::schema::PushSubscription,
     request::{
         blob::{CopyBlobRequest, CopyBlobResponse},
@@ -14,7 +15,7 @@ use jmap::{
         Method, ResultReference,
     },
     types::jmap::JMAPId,
-    types::{json_pointer::JSONPointerEval, principal::Principal, type_state::TypeState},
+    types::{json_pointer::JSONPointerEval, type_state::TypeState},
 };
 
 use jmap_mail::{

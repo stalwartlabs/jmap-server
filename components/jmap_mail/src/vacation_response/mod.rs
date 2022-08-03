@@ -4,6 +4,7 @@ use store::core::collection::Collection;
 use self::schema::{Property, VacationResponse, Value};
 
 pub mod get;
+pub mod raft;
 pub mod schema;
 pub mod serialize;
 pub mod set;

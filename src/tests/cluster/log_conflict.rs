@@ -1,31 +1,34 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use store::{parking_lot::Mutex, Store};
+use store::{ahash::AHashMap, parking_lot::Mutex, Store};
 
 use crate::tests::cluster::utils::{
     assert_cluster_updated, assert_leader_elected, assert_mirrored_stores, shutdown_all,
-    test_batch, Ac, Cluster,
+    test_batch, Ac, Clients, Cluster,
 };
 
 #[allow(clippy::comparison_chain)]
-pub async fn resolve_log_conflict<T>()
+pub async fn test<T>()
 where
     T: for<'x> Store<'x> + 'static,
 {
     println!("Testing log conflict resolution...");
 
     for conflict_term in 14..30 {
-        let mut cluster = Cluster::<T>::new(2, true);
+        let mut cluster = Cluster::<T>::new(2, true).await;
 
-        let store1 = cluster.peers[0].jmap_server.store.clone();
-        let store2 = cluster.peers[1].jmap_server.store.clone();
+        //let store1 = cluster.peers[0].jmap_server.store.clone();
+        //let store2 = cluster.peers[1].jmap_server.store.clone();
         let peer1 = cluster.peers[0].jmap_server.clone();
         let peer2 = cluster.peers[1].jmap_server.clone();
 
-        let mailbox_map1 = Arc::new(Mutex::new(HashMap::new()));
-        let mailbox_map2 = Arc::new(Mutex::new(HashMap::new()));
-        let email_map1 = Arc::new(Mutex::new(HashMap::new()));
-        let email_map2 = Arc::new(Mutex::new(HashMap::new()));
+        let mailbox_map1 = Arc::new(Mutex::new(AHashMap::new()));
+        let mailbox_map2 = Arc::new(Mutex::new(AHashMap::new()));
+        let email_map1 = Arc::new(Mutex::new(AHashMap::new()));
+        let email_map2 = Arc::new(Mutex::new(AHashMap::new()));
+
+        // Connect clients
+        let clients = Arc::new(Clients::new(2).await);
 
         let mut term_count = 0;
 
@@ -36,11 +39,15 @@ where
                 term_count += 1;
 
                 peer1.set_leader(term_count).await;
-                action.execute(&store1, &mailbox_map1, &email_map1, batch_num);
+                action
+                    .execute::<T>(&clients, &mailbox_map1, &email_map1, batch_num)
+                    .await;
 
                 if term_count < conflict_term {
                     peer2.set_leader(term_count).await;
-                    action.execute(&store2, &mailbox_map2, &email_map2, batch_num);
+                    action
+                        .execute::<T>(&clients, &mailbox_map2, &email_map2, batch_num)
+                        .await;
                 } else {
                     match term_count % 4 {
                         0 if !email_map2.lock().is_empty() => {
@@ -52,12 +59,8 @@ where
                         2 => Ac::InsertMailbox(term_count),
                         _ => Ac::NewEmail((term_count, 1)),
                     }
-                    .execute(
-                        &store2,
-                        &mailbox_map2,
-                        &email_map2,
-                        term_count as usize,
-                    );
+                    .execute::<T>(&clients, &mailbox_map2, &email_map2, term_count as usize)
+                    .await;
                 }
             }
         }

@@ -8,9 +8,11 @@ use crate::request::ResultReference;
 use crate::types::jmap::JMAPId;
 use crate::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::chrono::Utc;
+use store::core::document::Document;
+use store::core::error::StoreError;
 use store::rand::distributions::Alphanumeric;
 use store::rand::{thread_rng, Rng};
-use store::{JMAPStore, Store};
+use store::{AccountId, JMAPStore, Store};
 
 use super::schema::{Property, PushSubscription, Value};
 
@@ -35,6 +37,12 @@ where
         &self,
         request: SetRequest<PushSubscription>,
     ) -> crate::Result<SetResponse<PushSubscription>>;
+
+    fn push_subscription_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()>;
 }
 
 impl<T> JMAPSetPushSubscription<T> for JMAPStore<T>
@@ -205,5 +213,23 @@ where
         })?;
 
         helper.into_response()
+    }
+
+    fn push_subscription_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()> {
+        // Delete ORM
+        self.get_orm::<PushSubscription>(account_id, document.document_id)?
+            .ok_or_else(|| {
+                StoreError::NotFound(format!(
+                    "Failed to fetch PushSubscription ORM for {}:{}.",
+                    account_id, document.document_id
+                ))
+            })?
+            .delete(document);
+
+        Ok(())
     }
 }

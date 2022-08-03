@@ -7,7 +7,9 @@ use jmap::request::set::SetResponse;
 use jmap::request::ResultReference;
 use jmap::types::jmap::JMAPId;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
-use store::{JMAPStore, Store};
+use store::core::document::Document;
+use store::core::error::StoreError;
+use store::{AccountId, JMAPStore, Store};
 
 use super::schema::{Property, Value};
 
@@ -28,6 +30,12 @@ where
         &self,
         request: SetRequest<VacationResponse>,
     ) -> jmap::Result<SetResponse<VacationResponse>>;
+
+    fn vacation_response_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()>;
 }
 
 impl<T> JMAPSetVacationResponse<T> for JMAPStore<T>
@@ -150,5 +158,23 @@ where
         })?;
 
         helper.into_response()
+    }
+
+    fn vacation_response_delete(
+        &self,
+        account_id: AccountId,
+        document: &mut Document,
+    ) -> store::Result<()> {
+        // Delete ORM
+        self.get_orm::<VacationResponse>(account_id, document.document_id)?
+            .ok_or_else(|| {
+                StoreError::DataCorruption(format!(
+                    "Failed to fetch VacationResponse ORM for {}:{}.",
+                    account_id, document.document_id
+                ))
+            })?
+            .delete(document);
+
+        Ok(())
     }
 }

@@ -12,7 +12,7 @@ pub mod tests;
 use std::sync::Arc;
 
 use cluster::{
-    main::{init_cluster, start_cluster},
+    init::{init_cluster, start_cluster},
     ClusterIpc,
 };
 

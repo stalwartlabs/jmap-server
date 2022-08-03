@@ -1,22 +1,22 @@
+use std::sync::Arc;
+
 use actix_web::web;
+use jmap_client::mailbox::Role;
 use store::Store;
 
-use crate::tests::store::{
-    jmap_mail_merge_threads::build_thread_test_messages, jmap_mail_set::insert_email,
-    jmap_mailbox::insert_mailbox,
-};
 use crate::JMAPServer;
 
 use crate::tests::cluster::utils::{
     activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
-    compact_log, shutdown_all, Cluster,
+    compact_log, shutdown_all, Clients, Cluster,
 };
+use crate::tests::jmap_mail::email_thread_merge::build_thread_test_messages;
 
-pub async fn merge_mail_threads<T>()
+pub async fn test<T>()
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut cluster = Cluster::<T>::new(5, true);
+    let mut cluster = Cluster::<T>::new(5, true).await;
     let peers = cluster.start_cluster().await;
 
     let mut messages = build_thread_test_messages()
@@ -28,10 +28,16 @@ where
         messages.len()
     );
 
+    // Connect clients
+    let clients = Arc::new(Clients::new(5).await);
+
     // Create the Inbox
     let leader = assert_leader_elected(&peers).await;
-    let inbox_id = insert_mailbox(&leader.store, 1, "Inbox", "INBOX".into());
-    leader.commit_last_index().await;
+    let inbox_id = clients
+        .insert_mailbox(0, 1, "Inbox".to_string(), Role::None)
+        .await;
+
+    //leader.commit_last_index().await;
     assert_cluster_updated(&peers).await;
 
     // Keep one peer down to test full sync at the end
@@ -43,25 +49,22 @@ where
         let chunk = messages
             .drain(0..std::cmp::min(20, messages.len()))
             .collect::<Vec<_>>();
+
         let leader = assert_leader_elected(&peers).await;
-        let store = leader.store.clone();
-        tokio::task::spawn_blocking(move || {
-            for raw_message in chunk {
-                insert_email(
-                    &store,
+        for raw_message in chunk {
+            clients
+                .insert_email(
+                    0,
                     1,
                     raw_message.into_bytes(),
-                    vec![inbox_id],
+                    vec![inbox_id.to_string()],
                     vec![],
-                    None,
-                );
-            }
-        })
-        .await
-        .unwrap();
+                )
+                .await;
+        }
 
         // Notify peers of changes
-        leader.commit_last_index().await;
+        //leader.commit_last_index().await;
         assert_cluster_updated(&peers).await;
 
         // Bring back previous offline leader

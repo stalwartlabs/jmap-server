@@ -5,10 +5,10 @@ use self::schema::{Identity, Property, Value};
 
 pub mod changes;
 pub mod get;
+pub mod raft;
+pub mod schema;
 pub mod serialize;
 pub mod set;
-
-pub mod schema;
 
 impl Object for Identity {
     type Property = Property;
