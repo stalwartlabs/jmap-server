@@ -1,6 +1,6 @@
 use crate::{
     cluster::init::{init_cluster, start_cluster, ClusterInit},
-    server::http::init_jmap_server,
+    server::http::{init_jmap_server, start_jmap_server},
     tests::{jmap::bypass_authentication, store::utils::StoreCompareWith},
     JMAPServer,
 };
@@ -103,7 +103,16 @@ where
     }
 
     pub async fn start_cluster(self) -> (web::Data<JMAPServer<T>>, PathBuf) {
+        // Start cluster services
         start_cluster(self.init, self.jmap_server.clone(), &self.settings).await;
+
+        // Start web server
+        let server = self.jmap_server.clone();
+        let settings = self.settings;
+        actix_web::rt::spawn(async move {
+            start_jmap_server(server, settings).await.unwrap();
+        });
+
         (self.jmap_server, self.temp_dir)
     }
 }
@@ -178,9 +187,10 @@ impl Clients {
         let mut clients = Vec::with_capacity(num_peers);
         for peer_num in 1..=num_peers {
             clients.push(
-                Client::connect(
+                Client::connect_with_trusted(
                     &format!("http://127.0.0.1:{}/.well-known/jmap", 8000 + peer_num),
                     Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
+                    ["127.0.0.1"],
                 )
                 .await
                 .unwrap(),
@@ -313,7 +323,9 @@ impl Clients {
         request
             .set_mailbox()
             .account_id(JMAPId::from(account_id).to_string())
-            .destroy(vec![mailbox_id.to_string()]);
+            .destroy(vec![mailbox_id.to_string()])
+            .arguments()
+            .on_destroy_remove_emails(true);
         request
             .send_set_mailbox()
             .await
@@ -444,8 +456,17 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     for _ in 0..100 {
-        for peer in peers.iter() {
+        for (peer_num, peer) in peers.iter().enumerate() {
             if peer.is_leader() {
+                for (pos, peer) in peers.iter().enumerate() {
+                    // Clients might try to contact an "offline" peer, redirect them
+                    // to the right leader.
+                    if pos != peer_num && peer.is_offline() {
+                        *peer.cluster.as_ref().unwrap().leader_hostname.lock() =
+                            format!("http://127.0.0.1:{}", 8000 + peer_num + 1).into();
+                    }
+                }
+
                 return peer;
             }
         }

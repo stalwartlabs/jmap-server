@@ -172,6 +172,46 @@ pub enum Response {
 }
 
 impl Request {
+    pub fn is_read_only(&self) -> bool {
+        match self {
+            Request::GetPushSubscription(_)
+            | Request::GetMailbox(_)
+            | Request::ChangesMailbox(_)
+            | Request::QueryMailbox(_)
+            | Request::QueryChangesMailbox(_)
+            | Request::GetThread(_)
+            | Request::ChangesThread(_)
+            | Request::GetEmail(_)
+            | Request::ChangesEmail(_)
+            | Request::QueryEmail(_)
+            | Request::QueryChangesEmail(_)
+            | Request::ParseEmail(_)
+            | Request::GetSearchSnippet(_)
+            | Request::GetIdentity(_)
+            | Request::ChangesIdentity(_)
+            | Request::GetEmailSubmission(_)
+            | Request::ChangesEmailSubmission(_)
+            | Request::QueryEmailSubmission(_)
+            | Request::QueryChangesEmailSubmission(_)
+            | Request::GetVacationResponse(_)
+            | Request::GetPrincipal(_)
+            | Request::QueryPrincipal(_)
+            | Request::Echo(_)
+            | Request::Error(_) => true,
+
+            Request::SetPushSubscription(_)
+            | Request::SetMailbox(_)
+            | Request::SetEmail(_)
+            | Request::CopyEmail(_)
+            | Request::ImportEmail(_)
+            | Request::SetIdentity(_)
+            | Request::SetEmailSubmission(_)
+            | Request::SetVacationResponse(_)
+            | Request::SetPrincipal(_)
+            | Request::CopyBlob(_) => false,
+        }
+    }
+
     pub fn prepare_request(&mut self, response: &response::Response) -> jmap::Result<()> {
         // Create JSON Pointer evaluation function
         let mut eval_result_ref = |rr: &ResultReference| -> Option<Vec<u64>> {

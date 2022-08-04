@@ -35,7 +35,9 @@ where
             tx: tx.clone(),
         };
         self.reset_votes();
-        self.core.set_follower().await;
+        self.core
+            .set_follower(self.get_peer(peer_id).unwrap().hostname.clone().into())
+            .await;
         debug!(
             "[{}] Following peer {} for term {}.",
             self.addr,
@@ -50,12 +52,11 @@ impl<T> JMAPServer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn set_follower(&self) {
-        self.cluster
-            .as_ref()
-            .unwrap()
-            .state
-            .store(RAFT_LOG_BEHIND, Ordering::Relaxed);
+    pub async fn set_follower(&self, leader_hostname: Option<String>) {
+        let cluster_ipc = self.cluster.as_ref().unwrap();
+
+        cluster_ipc.state.store(RAFT_LOG_BEHIND, Ordering::Relaxed);
+        *cluster_ipc.leader_hostname.lock() = leader_hostname;
         self.store
             .tombstone_deletions
             .store(false, Ordering::Relaxed);

@@ -53,7 +53,7 @@ where
             election_due: election_timeout(now),
         };
         self.reset_votes();
-        self.core.set_follower().await;
+        self.core.set_follower(None).await;
     }
 
     pub async fn run_for_election(&mut self, now: bool) {
@@ -62,7 +62,7 @@ where
         };
         self.term += 1;
         self.reset_votes();
-        self.core.set_follower().await;
+        self.core.set_follower(None).await;
         debug!(
             "[{}] Running for election for term {}.",
             self.addr, self.term
@@ -71,7 +71,7 @@ where
 
     pub async fn step_down(&mut self, term: TermId) {
         self.reset_votes();
-        self.core.set_follower().await;
+        self.core.set_follower(None).await;
         self.term = term;
         self.state = State::Wait {
             election_due: match self.state {

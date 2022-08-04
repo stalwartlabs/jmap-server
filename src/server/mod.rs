@@ -107,7 +107,7 @@ where
     pub async fn set_offline(&self, is_offline: bool, notify_peers: bool) {
         self.is_offline
             .store(is_offline, std::sync::atomic::Ordering::Relaxed);
-        self.set_follower().await;
+        self.set_follower(None).await;
         if self
             .cluster
             .as_ref()

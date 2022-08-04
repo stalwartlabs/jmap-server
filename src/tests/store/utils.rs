@@ -1,13 +1,8 @@
 use std::{io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::bufread::GzDecoder;
-use jmap::orm::TinyORM;
-use jmap_mail::{mail::schema::Email, mailbox::schema::Mailbox};
-use store::{
-    ahash::AHashMap,
-    blob::BLOB_HASH_LEN,
-    serialize::{key::ValueKey, leb128::Leb128},
-};
+
+use store::{ahash::AHashMap, blob::BLOB_HASH_LEN, serialize::leb128::Leb128};
 use store::{
     config::env_settings::EnvSettings,
     core::collection::Collection,
@@ -304,7 +299,7 @@ where
                                 };
 
                                 if value != other_value {
-                                    if key
+                                    /*if key
                                         == ValueKey::serialize_value(
                                             account_id,
                                             collection,
@@ -331,7 +326,9 @@ where
                                             Collection::VacationResponse => todo!(),
                                             Collection::Thread | Collection::None => unreachable!(),
                                         }
-                                    } else if ASSERT {
+                                    } else */
+
+                                    if ASSERT {
                                         panic!(
                                             "{:?}/{}/{:?}/{}, key[{:?}] {:?} != {:?}",
                                             cf,
@@ -459,9 +456,11 @@ where
                         };
                     }
                     ColumnFamily::Blobs => {
-                        if key.len()
-                            > BLOB_HASH_LEN
-                                + u32::from_leb128_bytes(&key[BLOB_HASH_LEN..]).unwrap().1
+                        if key.len() > BLOB_HASH_LEN + 1
+                            && key.len()
+                                > BLOB_HASH_LEN
+                                    + u32::from_leb128_bytes(&key[BLOB_HASH_LEN + 1..]).unwrap().1
+                                    + 1
                         {
                             *total_keys.get_mut(&cf).unwrap() += 1;
                             if let Some(other_value) = other.db.get::<Vec<u8>>(cf, &key).unwrap() {

@@ -131,12 +131,12 @@ where
         false
     }
 
-    #[cfg(test)]
+    /*#[cfg(test)]
     pub async fn commit_last_index(&self) -> LogIndex {
         let uncommitted_index = self.get_last_log().await.unwrap().unwrap().index;
         if !self.commit_index(uncommitted_index).await {
             panic!("Failed to commit index {}", uncommitted_index);
         }
         uncommitted_index
-    }
+    }*/
 }

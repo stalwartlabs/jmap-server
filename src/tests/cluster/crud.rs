@@ -19,14 +19,14 @@ where
     let mut cluster = Cluster::<T>::new(5, true).await;
     let peers = cluster.start_cluster().await;
 
+    // Wait for leader to be elected
+    let leader = assert_leader_elected(&peers).await;
+
     // Connect clients
     let clients = Arc::new(Clients::new(5).await);
 
-    // Keep one node offline
-    assert_leader_elected(&peers)
-        .await
-        .set_offline(true, true)
-        .await;
+    // Keep one leader offline
+    leader.set_offline(true, true).await;
 
     let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
     let mailbox_map = Arc::new(Mutex::new(AHashMap::new()));
@@ -63,12 +63,15 @@ where
     }
 
     // Activate all nodes
+    println!("Activating all nodes...");
     activate_all_peers(&peers).await;
     assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers.clone(), false).await;
 
     // Add a new peer and send a snapshot to it.
+    println!("Compacting log...");
     compact_log(peers.clone()).await;
+    println!("Adding peer to cluster...");
     let peers = cluster.extend_cluster(peers, 1).await;
     assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers.clone(), false).await;

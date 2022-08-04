@@ -27,7 +27,7 @@ where
             election_due: election_timeout(false),
         };
         self.reset_votes();
-        self.core.set_follower().await;
+        self.core.set_follower(None).await;
         debug!(
             "[{}] Voted for peer {} for term {}.",
             self.addr,
@@ -65,7 +65,7 @@ where
     pub async fn request_votes(&mut self, now: bool) -> store::Result<()> {
         // Check if there is enough quorum for an election.
         if self.has_election_quorum() {
-            print!(
+            /*print!(
                 "[{} = {}/{}]",
                 self.addr, self.last_log.index, self.last_log.term
             );
@@ -75,7 +75,7 @@ where
                     peer.addr, peer.last_log_index, peer.last_log_term
                 );
             }
-            println!();
+            println!();*/
 
             // Assess whether this node could become the leader for the next term.
             if !self.peers.iter().any(|peer| {

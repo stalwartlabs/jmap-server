@@ -141,6 +141,7 @@ pub struct Peer {
 pub struct ClusterIpc {
     pub tx: mpsc::Sender<Event>,
     pub state: AtomicU8,
+    pub leader_hostname: store::parking_lot::Mutex<Option<String>>,
     pub commit_index_rx: watch::Receiver<LogIndex>,
 }
 

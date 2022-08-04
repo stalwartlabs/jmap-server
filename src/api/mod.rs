@@ -103,6 +103,17 @@ impl RequestError {
         )
     }
 
+    pub fn unavailable() -> Self {
+        RequestError::blank(
+            503,
+            "Temporarily Unavailable",
+            concat!(
+                "There was a temporary problem while processing your request. ",
+                "Please try again in a few moments."
+            ),
+        )
+    }
+
     pub fn invalid_parameters() -> Self {
         RequestError::blank(
             400,
@@ -224,5 +235,49 @@ impl error::ResponseError for RequestError {
 
     fn status_code(&self) -> StatusCode {
         StatusCode::from_u16(self.status).unwrap()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Redirect {
+    pub is_permament: bool,
+    pub location: String,
+}
+
+impl Redirect {
+    pub fn temporary(location: impl Into<String>) -> Self {
+        Redirect {
+            is_permament: false,
+            location: location.into(),
+        }
+    }
+
+    pub fn permanent(location: impl Into<String>) -> Self {
+        Redirect {
+            is_permament: true,
+            location: location.into(),
+        }
+    }
+}
+
+impl Display for Redirect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.location)
+    }
+}
+
+impl error::ResponseError for Redirect {
+    fn status_code(&self) -> StatusCode {
+        if !self.is_permament {
+            StatusCode::TEMPORARY_REDIRECT
+        } else {
+            StatusCode::PERMANENT_REDIRECT
+        }
+    }
+
+    fn error_response(&self) -> HttpResponse {
+        HttpResponse::build(self.status_code())
+            .insert_header((header::LOCATION, self.location.as_str()))
+            .finish()
     }
 }

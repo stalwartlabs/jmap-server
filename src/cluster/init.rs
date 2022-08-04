@@ -39,6 +39,7 @@ pub fn init_cluster(settings: &EnvSettings) -> Option<(ClusterIpc, ClusterInit)>
                 tx: main_tx.clone(),
                 state: RAFT_LOG_BEHIND.into(),
                 commit_index_rx,
+                leader_hostname: None.into(),
             },
             ClusterInit {
                 main_rx,
@@ -269,7 +270,15 @@ where
         let addr = SocketAddr::from((advertise_addr, rpc_port));
 
         // Calculate generationId
-        let hostname = settings.get("hostname").unwrap();
+        let hostname = format!(
+            "{}://{}",
+            if settings.contains_key("cert-path") {
+                "https"
+            } else {
+                "http"
+            },
+            settings.get("hostname").unwrap()
+        );
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
         shard_id.hash(&mut generation);

@@ -196,6 +196,10 @@ impl Session {
     pub fn set_state(&mut self, state: u32) {
         self.state = state;
     }
+
+    pub fn api_url(&self) -> &str {
+        &self.api_url
+    }
 }
 
 impl Account {

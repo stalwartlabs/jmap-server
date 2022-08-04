@@ -73,8 +73,8 @@ where
             .set_leader_commit_index(peer2.get_last_log().await.unwrap().unwrap().index)
             .await
             .unwrap();
-        peer1.set_follower().await;
-        peer2.set_follower().await;
+        peer1.set_follower(None).await;
+        peer2.set_follower(None).await;
 
         // Activate all nodes
         let peers = cluster.start_cluster().await;

@@ -91,7 +91,7 @@ where
                     }
 
                     if !write_batch.is_empty() {
-                        store.write(write_batch)?;
+                        store.commit_write(write_batch)?;
                     }
 
                     log_batch.push(WriteOperation::Delete {

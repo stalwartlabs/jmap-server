@@ -87,6 +87,12 @@ where
             .tombstone_deletions
             .store(true, Ordering::Relaxed);
         self.store.id_assigner.invalidate_all();
+        #[cfg(not(test))]
+        {
+            self.store.acl_tokens.invalidate_all();
+        }
+        self.store.recipients.invalidate_all();
+        self.store.shared_documents.invalidate_all();
         self.state_change
             .clone()
             .send(state_change::Event::Start)

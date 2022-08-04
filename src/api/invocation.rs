@@ -51,6 +51,12 @@ where
         let mut call_method = call.method;
 
         loop {
+            // Make sure this node is up to date to handle the request.
+            if !core.is_leader() && !core.is_up_to_date() {
+                response.push_error(call_id, MethodError::ServerUnavailable);
+                break;
+            }
+
             // Prepare request
             if let Err(err) = call_method.prepare_request(&response) {
                 response.push_error(call_id, err);
@@ -68,7 +74,9 @@ where
                             next_call,
                         } => {
                             // Commit change
-                            if core.is_in_cluster() && !core.commit_index(change_id).await {
+                            if core.is_in_cluster()
+                                && (!core.is_leader() || !core.commit_index(change_id).await)
+                            {
                                 response.push_error(call_id, MethodError::ServerPartialFail);
                                 break;
                             }

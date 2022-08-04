@@ -19,7 +19,10 @@ use store::{
     AccountId, Store,
 };
 
-use crate::{api::RequestError, JMAPServer};
+use crate::{
+    api::{Redirect, RequestError},
+    JMAPServer,
+};
 
 use super::{rate_limit::InFlightRequest, Session};
 
@@ -54,6 +57,43 @@ where
         let service = self.service.clone();
 
         async move {
+            // Redirect request if this node is not the leader.
+            if !core.is_leader() {
+                // Obtain path
+                let request_path = req
+                    .uri()
+                    .path_and_query()
+                    .map(|pq| pq.as_str())
+                    .unwrap_or("");
+
+                // Check whether a redirect is needed
+                let do_redirect = !core.is_up_to_date()
+                    || request_path.starts_with("/jmap/upload")
+                    || request_path.starts_with("/jmap/ws")
+                    || request_path.starts_with("/jmap/eventsource")
+                    || request_path.starts_with("/ingest");
+
+                // Redirect requests to /jmap are evaluated after parsing
+                if do_redirect {
+                    let cluster = core.cluster.as_ref().unwrap();
+                    if let Some(leader_hostname) = cluster.leader_hostname.lock().as_ref() {
+                        let redirect_uri = format!("{}{}", leader_hostname, request_path);
+                        debug!(
+                            "Redirecting '{}{}' to '{}'",
+                            core.base_session.api_url().split_once("/jmap").unwrap().0,
+                            request_path,
+                            redirect_uri
+                        );
+
+                        return Err(Redirect::temporary(redirect_uri).into());
+                    } else {
+                        debug!("Rejecting request, no leader has been elected.");
+
+                        return Err(RequestError::unavailable().into());
+                    }
+                }
+            }
+
             let mut authorized = None;
 
             if let Some((mechanism, token)) = req

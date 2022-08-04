@@ -29,10 +29,10 @@ fn postmortem() {
 //#[cfg_attr(not(feature = "test_cluster"), ignore)]
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
+    //election::test::<RocksDB>().await;
     crud::test::<RocksDB>().await;
-    election::test::<RocksDB>().await;
-    log_conflict::test::<RocksDB>().await;
-    mail_thread_merge::test::<RocksDB>().await;
+    //mail_thread_merge::test::<RocksDB>().await;
+    //log_conflict::test::<RocksDB>().await;
 }
 
 #[actix_web::test]

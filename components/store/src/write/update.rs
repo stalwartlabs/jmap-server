@@ -37,14 +37,29 @@ where
 {
     pub fn write(&self, mut batch: WriteBatch) -> crate::Result<Option<Changes>> {
         let mut ops = Vec::with_capacity(batch.documents.len());
+        let tombstone_deletions = self
+            .tombstone_deletions
+            .load(std::sync::atomic::Ordering::Relaxed);
 
         // Prepare linked batch
         if let Some(linked_batch) = batch.linked_batch.take() {
-            self.prepare_batch(&mut ops, *linked_batch)?;
+            self.prepare_batch(&mut ops, *linked_batch, tombstone_deletions)?;
         }
 
         // Prepare main batch
-        let changes = self.prepare_batch(&mut ops, batch)?;
+        let changes = self.prepare_batch(&mut ops, batch, tombstone_deletions)?;
+
+        // Submit write batch
+        self.db.write(ops)?;
+
+        Ok(changes)
+    }
+
+    pub fn commit_write(&self, batch: WriteBatch) -> crate::Result<Option<Changes>> {
+        let mut ops = Vec::with_capacity(batch.documents.len());
+
+        // Prepare batch
+        let changes = self.prepare_batch(&mut ops, batch, false)?;
 
         // Submit write batch
         self.db.write(ops)?;
@@ -56,12 +71,9 @@ where
         &self,
         ops: &mut Vec<WriteOperation>,
         batch: WriteBatch,
+        tombstone_deletions: bool,
     ) -> crate::Result<Option<Changes>> {
         let mut bitmap_list = AHashMap::default();
-
-        let tombstone_deletions = self
-            .tombstone_deletions
-            .load(std::sync::atomic::Ordering::Relaxed);
         let mut tombstones = Vec::new();
 
         for document in batch.documents {

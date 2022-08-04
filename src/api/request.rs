@@ -1,12 +1,12 @@
 use actix_web::{
     http::{header::ContentType, StatusCode},
-    web, HttpResponse,
+    web, HttpResponse, ResponseError,
 };
 use jmap::types::jmap::JMAPId;
 use store::{ahash::AHashMap, tracing::debug, Store};
 
 use crate::{
-    api::{invocation::handle_method_calls, RequestError, RequestLimitError},
+    api::{invocation::handle_method_calls, Redirect, RequestError, RequestLimitError},
     authorization::Session,
     JMAPServer,
 };
@@ -44,6 +44,37 @@ where
         match serde_json::from_slice::<Request>(&request) {
             Ok(request) => {
                 if request.method_calls.len() < core.store.config.max_calls_in_request {
+                    // Make sure this node is still the leader
+                    if !core.is_leader() {
+                        // Redirect requests if at least one method requires write access
+                        // or if this node is behind on the log.
+                        let do_redirect = !core.is_up_to_date()
+                            || request
+                                .method_calls
+                                .iter()
+                                .any(|r| !r.method.is_read_only());
+
+                        if do_redirect {
+                            if let Some(leader_hostname) = core
+                                .cluster
+                                .as_ref()
+                                .unwrap()
+                                .leader_hostname
+                                .lock()
+                                .as_ref()
+                            {
+                                let redirect_uri = format!("{}/jmap", leader_hostname);
+                                debug!("Redirecting JMAP request to '{}'", redirect_uri);
+
+                                return Ok(Redirect::temporary(redirect_uri).error_response());
+                            } else {
+                                debug!("Rejecting request, no leader has been elected.");
+
+                                return Err(RequestError::unavailable());
+                            }
+                        }
+                    }
+
                     let result = handle_method_calls(request, core, session).await;
                     //println!("{}", serde_json::to_string_pretty(&result).unwrap());
 
