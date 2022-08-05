@@ -83,10 +83,10 @@ where
                     for document in bincode::deserialize::<Vec<Document>>(&value).map_err(|_| {
                         StoreError::SerializeError("Failed to deserialize tombstones".to_string())
                     })? {
-                        println!(
+                        /*println!(
                             "Committing delete document {} from account {}, {:?}",
                             document.document_id, write_batch.account_id, document.collection
-                        );
+                        );*/
                         write_batch.delete_document(document);
                     }
 
@@ -99,7 +99,7 @@ where
                         key: key.to_vec(),
                     });
                 } else if do_reset {
-                    println!("Deleting uncommitted leader update: {}", index);
+                    //println!("Deleting uncommitted leader update: {}", index);
                     log_batch.push(WriteOperation::Delete {
                         cf: ColumnFamily::Logs,
                         key: key.to_vec(),
@@ -113,14 +113,13 @@ where
                 store.db.write(log_batch)?;
             }
 
-            if !do_reset {
-                return Ok(());
+            if do_reset {
+                store.prepare_rollback_changes(apply_up_to, false)?;
+                store
+                    .db
+                    .delete(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)?;
             }
 
-            store.prepare_rollback_changes(apply_up_to, false)?;
-            store
-                .db
-                .delete(ColumnFamily::Values, LEADER_COMMIT_INDEX_KEY)?;
             Ok(())
         })
         .await

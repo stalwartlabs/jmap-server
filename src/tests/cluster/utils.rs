@@ -1,11 +1,11 @@
 use crate::{
     cluster::init::{init_cluster, start_cluster, ClusterInit},
-    server::http::{init_jmap_server, start_jmap_server},
+    server::http::{build_jmap_server, init_jmap_server},
     tests::{jmap::bypass_authentication, store::utils::StoreCompareWith},
     JMAPServer,
 };
 
-use actix_web::web;
+use actix_web::{dev::ServerHandle, web};
 use futures::future::join_all;
 use jmap::types::jmap::JMAPId;
 use jmap_client::{
@@ -22,7 +22,7 @@ use store::{
     rand::{self, Rng},
     AccountId, Store,
 };
-use tokio::time::sleep;
+use tokio::{sync::oneshot, time::sleep};
 
 use crate::tests::store::utils::{destroy_temp_dir, init_settings};
 
@@ -36,6 +36,7 @@ pub struct Peer<T> {
 pub struct Cluster<T> {
     pub peers: Vec<Peer<T>>,
     pub temp_dirs: Vec<PathBuf>,
+    pub handles: Vec<ServerHandle>,
     pub num_peers: u32,
     pub delete_if_exists: bool,
 }
@@ -84,9 +85,8 @@ impl<T> Peer<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn new(peer_num: u32, num_peers: u32, delete_if_exists: bool) -> Self {
-        let (settings, temp_dir) =
-            init_settings("st_cluster", peer_num, num_peers, delete_if_exists);
+    pub async fn new(name: &str, peer_num: u32, num_peers: u32, delete_if_exists: bool) -> Self {
+        let (settings, temp_dir) = init_settings(name, peer_num, num_peers, delete_if_exists);
 
         let (ipc, init) = init_cluster(&settings).unwrap();
         let jmap_server = init_jmap_server(&settings, ipc.into());
@@ -102,18 +102,23 @@ where
         }
     }
 
-    pub async fn start_cluster(self) -> (web::Data<JMAPServer<T>>, PathBuf) {
+    pub async fn start_cluster(self) -> (web::Data<JMAPServer<T>>, PathBuf, ServerHandle) {
         // Start cluster services
         start_cluster(self.init, self.jmap_server.clone(), &self.settings).await;
 
         // Start web server
         let server = self.jmap_server.clone();
         let settings = self.settings;
+        let _server = server.clone();
+        let (tx, rx) = oneshot::channel();
         actix_web::rt::spawn(async move {
-            start_jmap_server(server, settings).await.unwrap();
+            let server = build_jmap_server(server, settings).await.unwrap();
+            tx.send(server.handle()).unwrap();
+            server.await
         });
+        let handle = rx.await.unwrap();
 
-        (self.jmap_server, self.temp_dir)
+        (self.jmap_server, self.temp_dir, handle)
     }
 }
 
@@ -121,15 +126,16 @@ impl<T> Cluster<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub async fn new(num_peers: u32, delete_if_exists: bool) -> Self {
+    pub async fn new(name: &str, num_peers: u32, delete_if_exists: bool) -> Self {
         let mut peers = Vec::with_capacity(num_peers as usize);
         for peer_num in 1..=num_peers {
-            peers.push(Peer::new(peer_num, num_peers, delete_if_exists).await);
+            peers.push(Peer::new(name, peer_num, num_peers, delete_if_exists).await);
         }
 
         Cluster {
             peers,
             temp_dirs: vec![],
+            handles: vec![],
             num_peers,
             delete_if_exists,
         }
@@ -139,16 +145,24 @@ where
         let mut peers = Vec::new();
 
         for peer in self.peers.drain(..) {
-            let (server, temp_dir) = peer.start_cluster().await;
+            let (server, temp_dir, handle) = peer.start_cluster().await;
             self.temp_dirs.push(temp_dir);
+            self.handles.push(handle);
             peers.push(server);
         }
 
         Arc::new(peers)
     }
 
+    pub async fn stop_cluster(&self) {
+        for handler in &self.handles {
+            handler.stop(true).await;
+        }
+    }
+
     pub async fn extend_cluster(
         &mut self,
+        name: &str,
         peers: Arc<Vec<web::Data<JMAPServer<T>>>>,
         n: u32,
     ) -> Arc<Vec<web::Data<JMAPServer<T>>>> {
@@ -158,7 +172,8 @@ where
         };
 
         for peer_num in 1..=n {
-            let (server, temp_dir) = Peer::new(
+            let (server, temp_dir, handle) = Peer::new(
+                name,
                 peer_num + self.num_peers,
                 self.num_peers,
                 self.delete_if_exists,
@@ -167,6 +182,7 @@ where
             .start_cluster()
             .await;
             self.temp_dirs.push(temp_dir);
+            self.handles.push(handle);
             peers.push(server);
         }
 
@@ -177,7 +193,7 @@ where
 
     pub fn cleanup(self) {
         for temp_dir in self.temp_dirs {
-            destroy_temp_dir(temp_dir);
+            destroy_temp_dir(&temp_dir);
         }
     }
 }
@@ -187,13 +203,15 @@ impl Clients {
         let mut clients = Vec::with_capacity(num_peers);
         for peer_num in 1..=num_peers {
             clients.push(
-                Client::connect_with_trusted(
-                    &format!("http://127.0.0.1:{}/.well-known/jmap", 8000 + peer_num),
-                    Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
-                    ["127.0.0.1"],
-                )
-                .await
-                .unwrap(),
+                Client::new()
+                    .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
+                    .follow_redirects(["127.0.0.1"])
+                    .connect(&format!(
+                        "http://127.0.0.1:{}/.well-known/jmap",
+                        8000 + peer_num
+                    ))
+                    .await
+                    .unwrap(),
             );
         }
         Clients { clients }
@@ -630,7 +648,7 @@ where
         peer.shutdown().await;
     }
     drop(peers);
-    sleep(Duration::from_millis(1000)).await;
+    //sleep(Duration::from_millis(1000)).await;
 }
 
 pub async fn compact_log<T>(peers: Arc<Vec<web::Data<JMAPServer<T>>>>)

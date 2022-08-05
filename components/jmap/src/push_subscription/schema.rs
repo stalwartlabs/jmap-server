@@ -9,7 +9,7 @@ use store::{
 
 use crate::{orm, types::jmap::JMAPId, types::type_state::TypeState};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushSubscription {
     pub properties: VecMap<Property, Value>,
 }

@@ -16,7 +16,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     println!("Testing distributed CRUD operations...");
-    let mut cluster = Cluster::<T>::new(5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
     let peers = cluster.start_cluster().await;
 
     // Wait for leader to be elected
@@ -34,7 +34,15 @@ where
 
     for (batch_num, batch) in test_batch().into_iter().enumerate() {
         let leader = assert_leader_elected(&peers).await;
-        //let store = leader.store.clone();
+        if batch_num == 0 {
+            let client = &clients.clients[0];
+            // Create an account
+            client.domain_create("example.com").await.unwrap();
+            client
+                .individual_create("jdoe@example.com", "12345", "John Doe")
+                .await
+                .unwrap();
+        }
 
         let mailbox_map = mailbox_map.clone();
         let email_map = email_map.clone();
@@ -46,8 +54,6 @@ where
                 .await;
         }
 
-        // Notify peers of changes
-        //leader.commit_last_index().await;
         assert_cluster_updated(&peers).await;
 
         // Bring back previous offline leader
@@ -72,7 +78,7 @@ where
     println!("Compacting log...");
     compact_log(peers.clone()).await;
     println!("Adding peer to cluster...");
-    let peers = cluster.extend_cluster(peers, 1).await;
+    let peers = cluster.extend_cluster("st_cluster", peers, 1).await;
     assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers.clone(), false).await;
 

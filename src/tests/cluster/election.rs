@@ -10,7 +10,7 @@ where
 {
     // Test election.
     println!("Testing raft elections on a 5 nodes cluster...");
-    let mut cluster = Cluster::<T>::new(5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
     let peers = cluster.start_cluster().await;
 
     assert_cluster_updated(&peers).await;

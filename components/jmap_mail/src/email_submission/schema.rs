@@ -13,7 +13,7 @@ use store::{
     FieldId,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EmailSubmission {
     pub properties: VecMap<Property, Value>,
 }

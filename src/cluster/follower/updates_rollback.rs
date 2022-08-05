@@ -1,7 +1,7 @@
 use super::rpc::Response;
 use super::State;
 use crate::cluster::log::changes_merge::MergedChanges;
-use crate::cluster::log::document_delete::RaftStoreDelete;
+use crate::cluster::log::update_apply::RaftStoreApplyUpdate;
 use crate::cluster::log::AppendEntriesResponse;
 use crate::cluster::log::Update;
 use crate::JMAPServer;
@@ -100,6 +100,7 @@ where
                         account_id,
                         collection,
                         changes: serialized_changes,
+                        is_rollback: true,
                     }),
                 )
                     .into();

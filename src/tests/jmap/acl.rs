@@ -51,24 +51,23 @@ where
         .take_id();
 
     // Authenticate all accounts
-    let mut john_client = Client::connect(
-        admin_client.session_url(),
-        Credentials::basic("jdoe@example.com", "12345"),
-    )
-    .await
-    .unwrap();
-    let mut jane_client = Client::connect(
-        admin_client.session_url(),
-        Credentials::basic("jane.smith@example.com", "abcde"),
-    )
-    .await
-    .unwrap();
-    let mut bill_client = Client::connect(
-        admin_client.session_url(),
-        Credentials::basic("bill@example.com", "098765"),
-    )
-    .await
-    .unwrap();
+    let mut john_client = Client::new()
+        .credentials(Credentials::basic("jdoe@example.com", "12345"))
+        .connect(admin_client.session_url())
+        .await
+        .unwrap();
+
+    let mut jane_client = Client::new()
+        .credentials(Credentials::basic("jane.smith@example.com", "abcde"))
+        .connect(admin_client.session_url())
+        .await
+        .unwrap();
+
+    let mut bill_client = Client::new()
+        .credentials(Credentials::basic("bill@example.com", "098765"))
+        .connect(admin_client.session_url())
+        .await
+        .unwrap();
 
     // Insert two emails in each account
     let mut email_ids = AHashMap::default();

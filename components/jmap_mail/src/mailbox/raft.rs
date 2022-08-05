@@ -1,4 +1,4 @@
-use jmap::jmap_store::raft::RaftObject;
+use jmap::jmap_store::RaftObject;
 use store::{
     blob::BlobId, write::batch::WriteBatch, AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };

@@ -31,6 +31,20 @@ where
         self.merge(document, changes).map_err(|err| err.into())
     }
 
+    pub fn merge_full(self, document: &mut Document, mut changes: Self) -> store::Result<bool> {
+        if self.properties.k != changes.properties.k {
+            for property in &self.properties.k {
+                if !changes.has_property(property) {
+                    changes
+                        .properties
+                        .append(property.clone(), T::Value::default());
+                }
+            }
+        }
+
+        self.merge(document, changes)
+    }
+
     pub fn merge(mut self, document: &mut Document, changes: Self) -> store::Result<bool> {
         let indexed = T::indexed();
         let mut has_changes = false;

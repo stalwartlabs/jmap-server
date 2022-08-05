@@ -131,7 +131,7 @@ async fn jmap_stress_tests() {
 
     server.store.assert_is_empty();
 
-    destroy_temp_dir(temp_dir);
+    destroy_temp_dir(&temp_dir);
 }
 
 async fn create_mailbox(client: &Client, mailbox: &str) -> Vec<String> {

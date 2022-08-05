@@ -96,6 +96,7 @@ where
         direction: Direction,
     ) -> Result<Self::Iterator>;
     fn compact(&self, cf: ColumnFamily) -> Result<()>;
+    fn close(&self) -> Result<()>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

@@ -11,7 +11,6 @@ use jmap::{
 pub mod account;
 pub mod get;
 pub mod query;
-pub mod raft;
 pub mod set;
 
 pub trait CreateAccount: Sized {

@@ -25,7 +25,7 @@ where
         println!("Fuzzing cluster...");
     }
 
-    let mut cluster = Cluster::<T>::new(5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
     let peers = cluster.start_cluster().await;
     let mut actions = Cmds::default();
     let id_map: Arc<Mutex<AHashMap<(AccountId, Collection), AHashMap<JMAPId, String>>>> =
@@ -190,6 +190,9 @@ where
                     if is_replay {
                         panic!("No quorum to execute {:?}.", actions.cmds.last().unwrap());
                     } else {
+                        if matches!(action, Ac::InsertMailbox(_) | Ac::NewEmail(_)) {
+                            id_seq -= 1;
+                        }
                         println!(
                             "Skipping {:?} due to no quorum.",
                             actions.cmds.pop().unwrap()
@@ -200,9 +203,27 @@ where
 
                 let mut leader = None;
                 'o: for _ in 0..100 {
-                    for peer in peers.iter() {
+                    for (peer_num, peer) in peers.iter().enumerate() {
                         if !peer.is_offline() && peer.is_leader() {
                             leader = peer.into();
+
+                            for (pos, peer) in peers.iter().enumerate() {
+                                // Clients might try to contact an "offline" peer, redirect them
+                                // to the right leader.
+                                if pos == peer_num {
+                                    println!("Peer {} is leading.", peer_num + 1);
+                                } else {
+                                    println!(
+                                        "Peer {} has {:?}",
+                                        pos + 1,
+                                        peer.cluster.as_ref().unwrap().leader_hostname.lock()
+                                    );
+                                }
+                                if pos != peer_num && peer.is_offline() {
+                                    *peer.cluster.as_ref().unwrap().leader_hostname.lock() =
+                                        format!("http://127.0.0.1:{}", 8000 + peer_num + 1).into();
+                                }
+                            }
                             break 'o;
                         }
                     }
@@ -278,7 +299,6 @@ where
                             .insert(local_id, email_id);
                     }
                     Ac::UpdateEmail(local_id) => {
-                        //println!("{:?}", id_map.lock().get(&(account_id, Collection::Mail)));
                         let email_id = id_map
                             .lock()
                             .get(&(account_id, Collection::Mail))
@@ -360,7 +380,6 @@ where
 
                 success = true;
 
-                //leader.commit_last_index().await;
                 assert_cluster_updated(&peers).await;
                 assert_mirrored_stores(peers.clone(), true).await;
             }

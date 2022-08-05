@@ -2,6 +2,15 @@ use std::{io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::bufread::GzDecoder;
 
+use jmap::orm::TinyORM;
+use jmap::principal::schema::Principal;
+use jmap::push_subscription::schema::PushSubscription;
+use jmap_mail::email_submission::schema::EmailSubmission;
+use jmap_mail::identity::schema::Identity;
+use jmap_mail::mail::schema::Email;
+use jmap_mail::mailbox::schema::Mailbox;
+use jmap_mail::vacation_response::schema::VacationResponse;
+use store::serialize::key::ValueKey;
 use store::{ahash::AHashMap, blob::BLOB_HASH_LEN, serialize::leb128::Leb128};
 use store::{
     config::env_settings::EnvSettings,
@@ -114,14 +123,19 @@ pub fn deflate_artwork_data() -> Vec<u8> {
     result
 }
 
+pub fn make_temp_dir(name: &str, peer_num: u32) -> PathBuf {
+    let mut temp_dir = std::env::temp_dir();
+    temp_dir.push(format!("{}_{}", name, peer_num));
+    temp_dir
+}
+
 pub fn init_settings(
     name: &str,
     peer_num: u32,
     total_peers: u32,
     delete_if_exists: bool,
 ) -> (EnvSettings, PathBuf) {
-    let mut temp_dir = std::env::temp_dir();
-    temp_dir.push(format!("{}_{}", name, peer_num));
+    let temp_dir = make_temp_dir(name, peer_num);
 
     if delete_if_exists && temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).unwrap();
@@ -165,8 +179,10 @@ pub fn init_settings(
     (EnvSettings { args }, temp_dir)
 }
 
-pub fn destroy_temp_dir(temp_dir: PathBuf) {
-    std::fs::remove_dir_all(&temp_dir).unwrap();
+pub fn destroy_temp_dir(temp_dir: &PathBuf) {
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(temp_dir).unwrap();
+    }
 }
 
 #[allow(clippy::disallowed_types)]
@@ -299,7 +315,7 @@ where
                                 };
 
                                 if value != other_value {
-                                    /*if key
+                                    if key
                                         == ValueKey::serialize_value(
                                             account_id,
                                             collection,
@@ -309,26 +325,59 @@ where
                                         .into_boxed_slice()
                                     {
                                         match collection {
-                                            Collection::Principal => todo!(),
-                                            Collection::PushSubscription => todo!(),
+                                            Collection::Principal => assert_eq!(
+                                                TinyORM::<Principal>::deserialize(&value).unwrap(),
+                                                TinyORM::<Principal>::deserialize(&other_value)
+                                                    .unwrap()
+                                            ),
+                                            Collection::PushSubscription => assert_eq!(
+                                                TinyORM::<PushSubscription>::deserialize(&value)
+                                                    .unwrap(),
+                                                TinyORM::<PushSubscription>::deserialize(
+                                                    &other_value
+                                                )
+                                                .unwrap()
+                                            ),
                                             Collection::Mail => assert_eq!(
                                                 TinyORM::<Email>::deserialize(&value).unwrap(),
                                                 TinyORM::<Email>::deserialize(&other_value)
-                                                    .unwrap()
+                                                    .unwrap(),
+                                                "Account {}, Document {}",
+                                                account_id,
+                                                document_id
                                             ),
                                             Collection::Mailbox => assert_eq!(
                                                 TinyORM::<Mailbox>::deserialize(&value).unwrap(),
                                                 TinyORM::<Mailbox>::deserialize(&other_value)
+                                                    .unwrap(),
+                                                "Account {}, Document {}",
+                                                account_id,
+                                                document_id
+                                            ),
+                                            Collection::Identity => assert_eq!(
+                                                TinyORM::<Identity>::deserialize(&value).unwrap(),
+                                                TinyORM::<Identity>::deserialize(&other_value)
                                                     .unwrap()
                                             ),
-                                            Collection::Identity => todo!(),
-                                            Collection::EmailSubmission => todo!(),
-                                            Collection::VacationResponse => todo!(),
+                                            Collection::EmailSubmission => assert_eq!(
+                                                TinyORM::<EmailSubmission>::deserialize(&value)
+                                                    .unwrap(),
+                                                TinyORM::<EmailSubmission>::deserialize(
+                                                    &other_value
+                                                )
+                                                .unwrap()
+                                            ),
+                                            Collection::VacationResponse => assert_eq!(
+                                                TinyORM::<VacationResponse>::deserialize(&value)
+                                                    .unwrap(),
+                                                TinyORM::<VacationResponse>::deserialize(
+                                                    &other_value
+                                                )
+                                                .unwrap()
+                                            ),
                                             Collection::Thread | Collection::None => unreachable!(),
                                         }
-                                    } else */
-
-                                    if ASSERT {
+                                    } else if ASSERT {
                                         panic!(
                                             "{:?}/{}/{:?}/{}, key[{:?}] {:?} != {:?}",
                                             cf,

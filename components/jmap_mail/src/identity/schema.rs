@@ -6,7 +6,7 @@ use store::{core::vec_map::VecMap, FieldId};
 
 use crate::mail::schema::EmailAddress;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Identity {
     pub properties: VecMap<Property, Value>,
 }

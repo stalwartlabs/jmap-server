@@ -1,4 +1,4 @@
-use jmap::jmap_store::raft::RaftObject;
+use jmap::jmap_store::RaftObject;
 use store::blob::BlobId;
 use store::core::document::Document;
 use store::core::error::StoreError;

@@ -106,4 +106,12 @@ where
             .map(|cluster| cluster.state.load(Ordering::Relaxed) == RAFT_LOG_LEADER)
             .unwrap_or(true)
     }
+
+    #[cfg(test)]
+    pub async fn set_leader_term(&self, term: TermId) {
+        self.store.raft_term.store(term, Ordering::Relaxed);
+        self.store
+            .tombstone_deletions
+            .store(true, Ordering::Relaxed);
+    }
 }

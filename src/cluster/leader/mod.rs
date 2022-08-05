@@ -32,6 +32,7 @@ enum State {
         account_id: AccountId,
         collection: Collection,
         changes: MergedChanges,
+        is_rollback: bool,
     },
     AppendBlobs {
         pending_blob_ids: Vec<BlobId>,

@@ -42,7 +42,7 @@ where
 fn store_query() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_filter_test", true);
     query::test(db, true);
-    destroy_temp_dir(temp_dir);
+    destroy_temp_dir(&temp_dir);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn store_blobs() {
 
     blobs::test(db);
 
-    destroy_temp_dir(temp_dir);
+    destroy_temp_dir(&temp_dir);
 }
 
 #[test]
@@ -60,5 +60,5 @@ fn store_compact_log() {
 
     log::test(db);
 
-    destroy_temp_dir(temp_dir);
+    destroy_temp_dir(&temp_dir);
 }

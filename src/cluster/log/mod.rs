@@ -1,6 +1,5 @@
 pub mod changes_get;
 pub mod changes_merge;
-pub mod document_delete;
 pub mod entries_get;
 pub mod index_match;
 pub mod rollback_apply;
@@ -8,14 +7,14 @@ pub mod rollback_get;
 pub mod rollback_prepare;
 pub mod rollback_remove;
 pub mod update_apply;
+pub mod update_prepare;
 
 use super::rpc;
-use jmap::jmap_store::raft::RaftUpdate;
-use store::bincode;
 use store::blob::BlobId;
 use store::core::collection::Collection;
 use store::log::raft::{LogIndex, RaftId};
 use store::serialize::{StoreDeserialize, StoreSerialize};
+use store::{bincode, JMAPId};
 use store::{AccountId, DocumentId};
 use tokio::sync::oneshot;
 
@@ -40,6 +39,43 @@ pub enum Update {
         log: Vec<u8>,
     },
     Eof,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub enum RaftUpdate {
+    Insert {
+        jmap_id: JMAPId,
+        fields: Vec<u8>,
+        blobs: Vec<BlobId>,
+        term_index: Option<BlobId>,
+    },
+    Update {
+        jmap_id: JMAPId,
+        fields: Vec<u8>,
+    },
+    Delete {
+        document_id: DocumentId,
+    },
+}
+
+impl RaftUpdate {
+    pub fn size(&self) -> usize {
+        match self {
+            RaftUpdate::Insert {
+                fields,
+                blobs,
+                term_index,
+                ..
+            } => {
+                fields.len()
+                    + std::mem::size_of::<JMAPId>()
+                    + ((blobs.len() + term_index.as_ref().map(|_| 1).unwrap_or(0))
+                        * std::mem::size_of::<BlobId>())
+            }
+            RaftUpdate::Update { fields, .. } => fields.len() + std::mem::size_of::<JMAPId>(),
+            RaftUpdate::Delete { .. } => std::mem::size_of::<DocumentId>(),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -74,6 +110,7 @@ pub enum AppendEntriesResponse {
         account_id: AccountId,
         collection: Collection,
         changes: Vec<u8>,
+        is_rollback: bool,
     },
     FetchBlobs {
         blob_ids: Vec<BlobId>,

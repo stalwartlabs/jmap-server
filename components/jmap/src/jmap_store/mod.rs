@@ -1,14 +1,18 @@
 use crate::{orm, types::jmap::JMAPId};
 use core::hash::Hash;
 use std::fmt::Debug;
-use store::core::collection::Collection;
+use store::{
+    blob::BlobId,
+    core::{collection::Collection, document::Document},
+    write::batch::WriteBatch,
+    AccountId, DocumentId, JMAPStore, Store,
+};
 
 pub mod changes;
 pub mod copy;
 pub mod get;
 pub mod query;
 pub mod query_changes;
-pub mod raft;
 pub mod set;
 
 pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
@@ -31,4 +35,29 @@ pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
     fn required() -> &'static [Self::Property];
     fn indexed() -> &'static [(Self::Property, u64)];
     fn collection() -> Collection;
+}
+
+pub trait RaftObject<T>: Object
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    fn on_raft_update(
+        store: &JMAPStore<T>,
+        write_batch: &mut WriteBatch,
+        document: &mut Document,
+        jmap_id: store::JMAPId,
+        as_insert: Option<Vec<BlobId>>,
+    ) -> store::Result<()>;
+
+    fn get_jmap_id(
+        store: &JMAPStore<T>,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Option<store::JMAPId>>;
+
+    fn get_blobs(
+        store: &JMAPStore<T>,
+        account_id: AccountId,
+        document_id: DocumentId,
+    ) -> store::Result<Vec<BlobId>>;
 }

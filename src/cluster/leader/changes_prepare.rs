@@ -1,8 +1,8 @@
 use super::BATCH_MAX_SIZE;
 use crate::cluster::log::changes_merge::MergedChanges;
-use crate::cluster::log::Update;
+use crate::cluster::log::update_prepare::RaftStorePrepareUpdate;
+use crate::cluster::log::{RaftUpdate, Update};
 use crate::JMAPServer;
-use jmap::jmap_store::raft::JMAPRaftStore;
 use jmap::principal::schema::Principal;
 use jmap::push_subscription::schema::PushSubscription;
 use jmap_mail::email_submission::schema::EmailSubmission;
@@ -24,6 +24,7 @@ where
         account_id: AccountId,
         collection: Collection,
         changes: &mut MergedChanges,
+        is_follower_rollback: bool,
     ) -> store::Result<Vec<Update>> {
         let mut batch_size = 0;
         let mut updates = Vec::new();
@@ -75,19 +76,23 @@ where
                 })
                 .await?;
 
+            if updates.is_empty() {
+                updates.push(Update::Begin {
+                    account_id,
+                    collection,
+                });
+            }
             if let Some(item) = item {
-                if updates.is_empty() {
-                    updates.push(Update::Begin {
-                        account_id,
-                        collection,
-                    });
-                }
                 batch_size += item.size();
                 updates.push(Update::Document { update: item });
+            } else if is_follower_rollback {
+                updates.push(Update::Document {
+                    update: RaftUpdate::Delete { document_id },
+                });
             } else {
                 debug!(
-                    "Warning: Failed to fetch item in collection {:?}",
-                    collection,
+                    "Warning: Failed to fetch document {} in collection {:?}",
+                    document_id, collection,
                 );
             }
 

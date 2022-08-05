@@ -1,3 +1,6 @@
+use crate::cluster::log::update_apply::RaftStoreApplyUpdate;
+use crate::cluster::log::{PendingUpdate, PendingUpdates};
+use crate::JMAPServer;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::log::entry::Entry;
@@ -7,11 +10,6 @@ use store::serialize::{DeserializeBigEndian, StoreDeserialize, StoreSerialize};
 use store::write::batch::WriteBatch;
 use store::write::operation::WriteOperation;
 use store::{tracing::debug, AccountId, ColumnFamily, Direction, Store};
-
-use crate::cluster::log::document_delete::RaftStoreDelete;
-use crate::cluster::log::update_apply::RaftStoreApplyUpdate;
-use crate::cluster::log::{PendingUpdate, PendingUpdates};
-use crate::JMAPServer;
 
 impl<T> JMAPServer<T>
 where
@@ -130,11 +128,14 @@ where
                                 }
 
                                 for document_id in document_ids {
-                                    store.delete_document(
+                                    match store.delete_document(
                                         &mut write_batch,
                                         collection,
                                         document_id,
-                                    )?;
+                                    ) {
+                                        Ok(_) | Err(StoreError::NotFound(_)) => {}
+                                        Err(e) => return Err(e),
+                                    }
                                 }
                             }
                         }

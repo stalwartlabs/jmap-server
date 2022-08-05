@@ -246,6 +246,14 @@ impl<'x> Store<'x> for RocksDB {
             .map_err(|e| StoreError::InternalError(e.into_string()))?,
         })
     }
+
+    fn close(&self) -> Result<()> {
+        self.db
+            .flush()
+            .map_err(|e| StoreError::InternalError(e.to_string()))?;
+        self.db.cancel_all_background_work(true);
+        Ok(())
+    }
 }
 
 impl RocksDB {

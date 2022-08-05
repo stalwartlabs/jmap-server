@@ -180,9 +180,10 @@ where
                         account_id,
                         collection,
                         mut changes,
+                        is_rollback,
                     } => {
                         match core
-                            .prepare_changes(account_id, collection, &mut changes)
+                            .prepare_changes(account_id, collection, &mut changes, is_rollback)
                             .await
                         {
                             Ok(updates) => {
@@ -190,6 +191,7 @@ where
                                     account_id,
                                     collection,
                                     changes,
+                                    is_rollback,
                                 };
                                 Request::AppendEntries {
                                     term,
@@ -516,6 +518,7 @@ where
                         account_id,
                         collection,
                         changes,
+                        is_rollback,
                     } => {
                         let mut changes = if let Some(changes) = MergedChanges::from_bytes(&changes)
                         {
@@ -548,6 +551,7 @@ where
                             account_id,
                             collection,
                             changes,
+                            is_rollback,
                         };
                     }
                     AppendEntriesResponse::FetchBlobs { blob_ids } => {

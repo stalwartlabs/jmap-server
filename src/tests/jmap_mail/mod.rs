@@ -59,7 +59,7 @@ async fn jmap_mail_tests() {
     //mailbox::test(server.clone(), &mut client).await;
     search_snippet::test(server.clone(), &mut client).await;
 
-    destroy_temp_dir(temp_dir);
+    destroy_temp_dir(&temp_dir);
 }
 
 pub fn find_values(string: &str, name: &str) -> Vec<String> {

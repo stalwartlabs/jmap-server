@@ -16,7 +16,7 @@ pub async fn test<T>()
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut cluster = Cluster::<T>::new(5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
     let peers = cluster.start_cluster().await;
 
     let mut messages = build_thread_test_messages()
@@ -28,11 +28,12 @@ where
         messages.len()
     );
 
+    // Create the Inbox
+    let leader = assert_leader_elected(&peers).await;
+
     // Connect clients
     let clients = Arc::new(Clients::new(5).await);
 
-    // Create the Inbox
-    let leader = assert_leader_elected(&peers).await;
     let inbox_id = clients
         .insert_mailbox(0, 1, "Inbox".to_string(), Role::None)
         .await;
@@ -86,7 +87,7 @@ where
 
     // Add a new peer and send a snapshot to it.
     compact_log(peers.clone()).await;
-    let peers = cluster.extend_cluster(peers, 1).await;
+    let peers = cluster.extend_cluster("st_cluster", peers, 1).await;
     assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers.clone(), false).await;
 

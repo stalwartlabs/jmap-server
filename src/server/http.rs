@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use actix_cors::Cors;
-use actix_web::{middleware, web, App, HttpServer};
+use actix_web::{dev::Server, middleware, web, App, HttpServer};
 use jmap::{
     orm::{serialize::JMAPOrm, TinyORM},
     principal::schema::Principal,
@@ -125,10 +125,10 @@ where
     server
 }
 
-pub async fn start_jmap_server<T>(
+pub async fn build_jmap_server<T>(
     jmap_server: web::Data<JMAPServer<T>>,
     settings: EnvSettings,
-) -> std::io::Result<()>
+) -> std::io::Result<Server>
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -189,10 +189,20 @@ where
             .route("/jmap/ws", web::get().to(handle_ws::<T>))
             .route("/ingest", web::post().to(handle_ingest::<T>))
     });
-
     if let Some(tls_config) = tls_config {
-        server.bind_rustls(http_addr, tls_config)?.run().await
+        server.bind_rustls(http_addr, tls_config)
     } else {
-        server.bind(http_addr)?.run().await
+        server.bind(http_addr)
     }
+    .map(|s| s.run())
+}
+
+pub async fn start_jmap_server<T>(
+    jmap_server: web::Data<JMAPServer<T>>,
+    settings: EnvSettings,
+) -> std::io::Result<()>
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    build_jmap_server(jmap_server, settings).await?.await
 }

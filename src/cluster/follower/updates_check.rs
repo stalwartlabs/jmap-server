@@ -1,9 +1,8 @@
 use super::rpc::Response;
 use super::{RaftIndexes, State};
-use crate::cluster::log::AppendEntriesResponse;
 use crate::cluster::log::Update;
+use crate::cluster::log::{AppendEntriesResponse, RaftUpdate};
 use crate::JMAPServer;
-use jmap::jmap_store::raft::RaftUpdate;
 use store::ahash::AHashSet;
 use store::core::bitmap::Bitmap;
 use store::core::collection::Collection;

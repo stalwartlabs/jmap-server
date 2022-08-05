@@ -1,14 +1,15 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use actix_web::web;
+use actix_web::{dev::ServerHandle, web};
 use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
 use jmap_client::client::{Client, Credentials};
 use store::{core::acl::ACLToken, Store};
 use store_rocksdb::RocksDB;
+use tokio::sync::oneshot;
 
 use crate::{
     authorization::{auth::RemoteAddress, rate_limit::RateLimiter, Session},
-    server::http::{init_jmap_server, start_jmap_server},
+    server::http::{build_jmap_server, init_jmap_server},
     JMAPServer,
 };
 
@@ -22,13 +23,16 @@ pub mod references;
 pub mod stress_test;
 pub mod websocket;
 
-pub async fn init_jmap_tests<T>(test_name: &str) -> (web::Data<JMAPServer<T>>, Client, PathBuf)
+pub async fn init_jmap_tests_opts<T>(
+    test_name: &str,
+    peer_num: u32,
+    total_peers: u32,
+    delete_if_exists: bool,
+) -> (web::Data<JMAPServer<T>>, Client, PathBuf, ServerHandle)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    tracing_subscriber::fmt::init();
-
-    let (settings, temp_dir) = init_settings(test_name, 1, 1, true);
+    let (settings, temp_dir) = init_settings(test_name, peer_num, total_peers, delete_if_exists);
     let server = init_jmap_server::<T>(&settings, None);
     let session_url = format!(
         "http://{}/.well-known/jmap",
@@ -37,9 +41,13 @@ where
 
     // Start web server
     let _server = server.clone();
+    let (tx, rx) = oneshot::channel();
     actix_web::rt::spawn(async move {
-        start_jmap_server(_server, settings).await.unwrap();
+        let server = build_jmap_server(_server, settings).await.unwrap();
+        tx.send(server.handle()).unwrap();
+        server.await
     });
+    let handle = rx.await.unwrap();
 
     // Wait for server to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -48,15 +56,24 @@ where
     bypass_authentication(&server).await;
 
     // Create client
-    let mut client = Client::connect(
-        &session_url,
-        Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"),
-    )
-    .await
-    .unwrap();
+    let mut client = Client::new()
+        .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
+        .connect(&session_url)
+        .await
+        .unwrap();
     client.set_default_account_id(JMAPId::new(1));
 
-    (server, client, temp_dir)
+    (server, client, temp_dir, handle)
+}
+
+pub async fn init_jmap_tests<T>(test_name: &str) -> (web::Data<JMAPServer<T>>, Client, PathBuf)
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    tracing_subscriber::fmt::init();
+
+    let (server, client, tmp_dir, _) = init_jmap_tests_opts::<T>(test_name, 1, 1, false).await;
+    (server, client, tmp_dir)
 }
 
 pub async fn bypass_authentication<T>(server: &JMAPServer<T>)
@@ -95,5 +112,5 @@ async fn jmap_core_tests() {
     push_subscription::test(server.clone(), &mut client).await;
     websocket::test(server.clone(), &mut client).await;
 
-    destroy_temp_dir(temp_dir);
+    destroy_temp_dir(&temp_dir);
 }

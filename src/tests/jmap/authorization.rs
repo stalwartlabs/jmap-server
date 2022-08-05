@@ -39,11 +39,10 @@ where
 
     // Incorrect passwords should be rejected with a 401 error
     assert!(matches!(
-        Client::connect(
-            admin_client.session_url(),
-            Credentials::basic("jdoe@example.com", "abcde"),
-        )
-        .await,
+        Client::new()
+            .credentials(Credentials::basic("jdoe@example.com", "abcde"))
+            .connect(admin_client.session_url())
+            .await,
         Err(jmap_client::Error::Problem(ProblemDetails {
             status: Some(401),
             ..
@@ -54,11 +53,13 @@ where
     let mut n_401 = 0;
     let mut n_429 = 0;
     for n in 0..110 {
-        if let Err(jmap_client::Error::Problem(problem)) = Client::connect(
-            admin_client.session_url(),
-            Credentials::basic("jdoe@example.com", &format!("brute_force{}", n)),
-        )
-        .await
+        if let Err(jmap_client::Error::Problem(problem)) = Client::new()
+            .credentials(Credentials::basic(
+                "jdoe@example.com",
+                &format!("brute_force{}", n),
+            ))
+            .connect(admin_client.session_url())
+            .await
         {
             if problem.status().unwrap() == 401 {
                 n_401 += 1;
@@ -82,12 +83,11 @@ where
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Login with the correct credentials
-    let client = Client::connect(
-        admin_client.session_url(),
-        Credentials::basic("jdoe@example.com", "12345"),
-    )
-    .await
-    .unwrap();
+    let client = Client::new()
+        .credentials(Credentials::basic("jdoe@example.com", "12345"))
+        .connect(admin_client.session_url())
+        .await
+        .unwrap();
     assert_eq!(client.session().username(), "jdoe@example.com");
     assert_eq!(
         client.session().account(&account_id).unwrap().name(),

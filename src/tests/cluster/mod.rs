@@ -30,9 +30,9 @@ fn postmortem() {
 async fn test_cluster() {
     tracing_subscriber::fmt::init();
     //election::test::<RocksDB>().await;
-    crud::test::<RocksDB>().await;
+    //crud::test::<RocksDB>().await;
     //mail_thread_merge::test::<RocksDB>().await;
-    //log_conflict::test::<RocksDB>().await;
+    log_conflict::test::<RocksDB>().await;
 }
 
 #[actix_web::test]
@@ -40,4 +40,7 @@ async fn test_cluster() {
 async fn fuzz_cluster() {
     tracing_subscriber::fmt::init();
     fuzz::test::<RocksDB>(vec![]).await;
+
+    // Used to replay a fuzz test.
+    //fuzz::test::<RocksDB>(serde_json::from_slice(br#""#).unwrap()).await;
 }
