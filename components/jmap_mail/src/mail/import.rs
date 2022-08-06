@@ -538,10 +538,6 @@ where
         );
         document.blob(metadata_blob_id, IndexOptions::new());
 
-        // TODO search by "header exists"
-        // TODO use content language when available
-        // TODO index PDF, Doc, Excel, etc.
-
         // Build index
         message_data.build_index(document, true)
     }
@@ -906,18 +902,6 @@ impl MessageData {
                                 }
                             }
 
-                            //TODO review this
-                            /*if is_addr {
-                                if value.len() <= MAX_ID_LENGTH {
-                                    document.text(
-                                        header_name,
-                                        value.to_lowercase(),
-                                        Language::Unknown,
-                                        IndexOptions::new().keyword() | options,
-                                    );
-                                }
-                            } else {
-                            }*/
                             document.text(
                                 header_name,
                                 value,

@@ -139,5 +139,7 @@ static STEMMER_MAP: &[Option<Algorithm>] = &[
     None,                        // Latin = 64,
     None,                        // Slovak = 65,
     None,                        // Catalan = 66,
-    None,                        // Unknown = 67,
+    None,                        // Tagalog = 67,
+    None,                        // Armenian = 68,
+    None,                        // Unknown = 69,
 ];

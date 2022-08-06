@@ -135,8 +135,6 @@ impl<U> SetError<U> {
 
 impl<U> From<StoreError> for SetError<U> {
     fn from(error: StoreError) -> Self {
-        //TODO remove
-        println!("Failed store operation: {:?}", error);
         error!("Failed store operation: {:?}", error);
         if let StoreError::NotFound(_) = error {
             SetError::new(SetErrorType::NotFound, "Not found.")

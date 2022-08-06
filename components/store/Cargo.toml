@@ -19,8 +19,8 @@ lz4_flex = "0.9.2"
 chrono = { version = "0.4", features = ["serde"]}
 xxhash-rust = { version = "0.8.5", features = ["xxh3"] }
 naive-cityhash = "0.2.0"
-whatlang = "0.12" # Language detection
+whatlang = "0.16" # Language detection
 rust-stemmers = "1.2" # Stemmers
-tinysegmenter = "0.1" # Japanese stemmer
+tinysegmenter = "0.1" # Japanese tokenizer
 jieba-rs = "0.6" # Chinese stemmer
 ahash = {version = "0.7.6", features = ["serde"]}

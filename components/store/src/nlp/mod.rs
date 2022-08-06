@@ -73,6 +73,8 @@ pub enum Language {
     Latin = 64,
     Slovak = 65,
     Catalan = 66,
-    Unknown = 67,
-    None = 68,
+    Tagalog = 67,
+    Armenian = 68,
+    Unknown = 69,
+    None = 70,
 }

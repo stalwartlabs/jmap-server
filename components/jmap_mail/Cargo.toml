@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 jmap = { path = "../jmap" }
 store = { path = "../store" }
-#mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" } TODO remove
+#mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" } 
 #mail-builder = { git = "https://github.com/stalwartlabs/mail-builder" }
 mail-parser = { path = "/home/vagrant/code/mail-parser" }
 mail-builder = { path = "/home/vagrant/code/mail-builder" }

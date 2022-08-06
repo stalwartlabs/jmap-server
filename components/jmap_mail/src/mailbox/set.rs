@@ -23,6 +23,7 @@ use store::core::JMAPIdPrefix;
 use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
+use store::tracing::debug;
 use store::{AccountId, DocumentId, JMAPStore, LongInteger, SharedResource};
 use store::{SharedBitmap, Store};
 
@@ -246,21 +247,24 @@ where
             )? {
                 if on_destroy_remove_emails {
                     // Fetch results
+                    let _lock = self.lock_account(helper.account_id, Collection::Mail);
                     for message_document_id in message_doc_ids {
                         let mut document = Document::new(Collection::Mail, message_document_id);
                         // Fetch Email's ORM
-                        let current_fields = self
-                            .get_orm::<Email>(helper.account_id, message_document_id)?
-                            .ok_or_else(|| {
-                                StoreError::NotFound(format!(
-                                    "Failed to fetch Email ORM for {}:{}.",
-                                    helper.account_id, message_document_id
-                                ))
-                            })?;
+                        let current_fields = if let Some(current_fields) =
+                            self.get_orm::<Email>(helper.account_id, message_document_id)?
+                        {
+                            current_fields
+                        } else {
+                            debug!(
+                                "Email ORM for {}:{} not found",
+                                helper.account_id, message_document_id
+                            );
+                            continue;
+                        };
 
                         // If the message is in multiple mailboxes, untag it from the current mailbox,
                         // otherwise delete it.
-                        // TODO lock email collection as well
                         match current_fields.get_tags(&mail::schema::Property::MailboxIds) {
                             Some(tags) if tags.len() > 1 => {
                                 let thread_id = self
@@ -365,7 +369,7 @@ where
         for (property, value) in mailbox.properties {
             let value = match (property, value) {
                 (Property::Name, Value::Text { value }) => {
-                    if value.len() < 255 {
+                    if value.len() < helper.store.config.mailbox_name_max_len {
                         Value::Text { value }
                     } else {
                         return Err(SetError::invalid_property(

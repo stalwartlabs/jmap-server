@@ -152,8 +152,6 @@ where
             })),
         Ok(None) => Err(RequestError::forbidden()),
         Err(err) => {
-            //TODO
-            println!("Blob upload failed: {:?}", err);
             error!("Blob upload failed: {:?}", err);
             Err(RequestError::internal_server_error())
         }

@@ -125,6 +125,8 @@ where
                     Value::BodyValues { value } => Some(value),
                     _ => None,
                 });
+            let max_size_attachments = helper.store.config.mail_attachments_max_size;
+            let mut size_attachments = 0;
 
             for (property, value) in &item.properties {
                 match (property, value) {
@@ -228,7 +230,7 @@ where
                         }
 
                         if let Some(body_part) = value.first() {
-                            builder.text_body = body_part
+                            let text_body = body_part
                                 .parse(
                                     self,
                                     &helper.acl,
@@ -236,8 +238,20 @@ where
                                     body_values,
                                     "text/plain".into(),
                                 )?
-                                .0
-                                .into();
+                                .0;
+                            if max_size_attachments > 0 {
+                                size_attachments += text_body.size();
+                                if size_attachments > max_size_attachments {
+                                    return Err(SetError::invalid_property(
+                                        Property::TextBody,
+                                        format!(
+                                            "Message exceeds maximum size of {} bytes.",
+                                            max_size_attachments
+                                        ),
+                                    ));
+                                }
+                            }
+                            builder.text_body = text_body.into();
                         }
                     }
                     (Property::HtmlBody, Value::BodyPartList { value }) => {
@@ -254,7 +268,7 @@ where
                         }
 
                         if let Some(body_part) = value.first() {
-                            builder.html_body = body_part
+                            let html_body = body_part
                                 .parse(
                                     self,
                                     &helper.acl,
@@ -262,8 +276,20 @@ where
                                     body_values,
                                     "text/html".into(),
                                 )?
-                                .0
-                                .into();
+                                .0;
+                            if max_size_attachments > 0 {
+                                size_attachments += html_body.size();
+                                if size_attachments > max_size_attachments {
+                                    return Err(SetError::invalid_property(
+                                        Property::HtmlBody,
+                                        format!(
+                                            "Message exceeds maximum size of {} bytes.",
+                                            max_size_attachments
+                                        ),
+                                    ));
+                                }
+                            }
+                            builder.html_body = html_body.into();
                         }
                     }
                     (Property::Attachments, Value::BodyPartList { value }) => {
@@ -276,11 +302,22 @@ where
 
                         let mut attachments = Vec::with_capacity(value.len());
                         for attachment in value {
-                            attachments.push(
-                                attachment
-                                    .parse(self, &helper.acl, account_id, body_values, None)?
-                                    .0,
-                            );
+                            let attachment = attachment
+                                .parse(self, &helper.acl, account_id, body_values, None)?
+                                .0;
+                            if max_size_attachments > 0 {
+                                size_attachments += attachment.size();
+                                if size_attachments > max_size_attachments {
+                                    return Err(SetError::invalid_property(
+                                        Property::Attachments,
+                                        format!(
+                                            "Message exceeds maximum size of {} bytes.",
+                                            max_size_attachments
+                                        ),
+                                    ));
+                                }
+                            }
+                            attachments.push(attachment);
                         }
                         builder.attachments = attachments.into();
                     }
@@ -301,6 +338,20 @@ where
                                         body_values,
                                         None,
                                     )?;
+
+                                    if max_size_attachments > 0 {
+                                        size_attachments += sub_mime_part.size();
+                                        if size_attachments > max_size_attachments {
+                                            return Err(SetError::invalid_property(
+                                                Property::BodyStructure,
+                                                format!(
+                                                    "Message exceeds maximum size of {} bytes.",
+                                                    max_size_attachments
+                                                ),
+                                            ));
+                                        }
+                                    }
+
                                     if let Some(sub_parts) = sub_parts {
                                         stack.push((mime_part, it));
                                         mime_part = sub_mime_part;
@@ -464,7 +515,6 @@ where
             }
 
             // Parse message
-            // TODO: write parsed message directly to store, avoid parsing it again.
             let size = blob.len();
             self.mail_parse_item(
                 document,

@@ -103,7 +103,6 @@ where
     ) -> jmap::Result<SearchSnippetGetResponse>;
 }
 
-//TODO check snippets on HTML parts that were indexed as text/plain
 impl<T> JMAPMailSearchSnippet<T> for JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -372,7 +371,6 @@ where
                                 );
                             }
                         } else {
-                            //TODO errors are not displayed from components (not just here)
                             error!(
                                 "Corrupted term index for email {}/{}: Could not find message attachment {}.",
                                 account_id, document_id, part_id

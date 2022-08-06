@@ -32,7 +32,6 @@ impl IdAssigner {
     pub fn new(used_ids: Option<RoaringBitmap>) -> Self {
         let (next_id, freed_ids) = if let Some(used_ids) = used_ids {
             let next_id = used_ids.max().unwrap() + 1;
-            //TODO test properly
             let mut freed_ids = RoaringBitmap::from_sorted_iter(0..next_id).unwrap();
             freed_ids ^= used_ids;
             (

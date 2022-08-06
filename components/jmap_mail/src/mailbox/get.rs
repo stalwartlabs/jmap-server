@@ -146,7 +146,7 @@ where
                             .unwrap_or(0),
                     },
                     Property::UnreadEmails => Value::Number {
-                        value: self //TODO do not count messages in Trash
+                        value: self
                             .mailbox_unread_tags(
                                 account_id,
                                 document_id,

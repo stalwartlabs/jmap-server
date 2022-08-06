@@ -27,17 +27,16 @@ impl<'x> Iterator for IndoEuropeanTokenizer<'x> {
             if ch.is_alphanumeric() {
                 let mut is_uppercase = ch.is_uppercase();
                 let token_end = (&mut self.iterator)
-                    .filter(|(_, ch)| {
+                    .filter_map(|(pos, ch)| {
                         if ch.is_alphanumeric() {
                             if !is_uppercase && ch.is_uppercase() {
                                 is_uppercase = true;
                             }
-                            false
+                            None
                         } else {
-                            true
+                            pos.into()
                         }
                     })
-                    .map(|(pos, _)| pos)
                     .next()
                     .unwrap_or(self.text.len());
 
@@ -58,13 +57,6 @@ impl<'x> Iterator for IndoEuropeanTokenizer<'x> {
         }
         None
     }
-}
-
-pub fn new_tokenizer<'x>(
-    text: &'x str,
-    max_token_length: usize,
-) -> Box<dyn Iterator<Item = Token<'x>> + Send + 'x> {
-    Box::new(IndoEuropeanTokenizer::new(text, max_token_length))
 }
 
 #[cfg(test)]

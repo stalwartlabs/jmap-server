@@ -89,8 +89,6 @@ where
         })?;
 
         helper.destroy(|_id, helper, document| {
-            //TODO delete members
-            //TODO delete account messages
             if let Some(fields) =
                 self.get_orm::<Principal>(helper.account_id, document.document_id)?
             {
@@ -263,7 +261,6 @@ where
                 (Property::Secret, Value::Text { value })
                     if !value.is_empty() && [Type::Individual, Type::Domain].contains(&ptype) =>
                 {
-                    //TODO Scrypt is too slow
                     Value::Text {
                         value: value.to_string(), /*Scrypt
                                                   .hash_password(value.as_bytes(), &SaltString::generate(&mut OsRng))
@@ -312,7 +309,6 @@ where
                     self.acl_finish();
                     continue;
                 }
-                //TODO DKIM on mailsubmissions
                 (Property::DKIM, value @ Value::DKIM { .. }) if ptype == Type::Domain => value,
                 (Property::Quota, value @ (Value::Number { .. } | Value::Null)) => value,
                 (Property::Picture, value @ (Value::Blob { .. } | Value::Null)) => value,

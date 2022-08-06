@@ -1,11 +1,15 @@
+pub mod chinese;
 pub mod indo_european;
 pub mod japanese;
+pub mod word;
 
 use std::borrow::Cow;
 
 use crate::Language;
 
-use self::{indo_european::IndoEuropeanTokenizer, japanese::JapaneseTokenizer};
+use self::{
+    chinese::ChineseTokenizer, indo_european::IndoEuropeanTokenizer, japanese::JapaneseTokenizer,
+};
 
 #[derive(Debug, PartialEq)]
 pub struct Token<'x> {
@@ -26,10 +30,10 @@ impl<'x> Token<'x> {
     }
 }
 
-//TODO: Implement this for all languages
 enum LanguageTokenizer<'x> {
     IndoEuropean(IndoEuropeanTokenizer<'x>),
     Japanese(JapaneseTokenizer<'x>),
+    Chinese(ChineseTokenizer<'x>),
 }
 
 pub struct Tokenizer<'x> {
@@ -42,6 +46,9 @@ impl<'x> Tokenizer<'x> {
             tokenizer: match language {
                 Language::Japanese => {
                     LanguageTokenizer::Japanese(JapaneseTokenizer::new(text, max_token_length))
+                }
+                Language::Mandarin => {
+                    LanguageTokenizer::Chinese(ChineseTokenizer::new(text, max_token_length))
                 }
                 _ => LanguageTokenizer::IndoEuropean(IndoEuropeanTokenizer::new(
                     text,
@@ -58,6 +65,7 @@ impl<'x> Iterator for Tokenizer<'x> {
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.tokenizer {
             LanguageTokenizer::IndoEuropean(tokenizer) => tokenizer.next(),
+            LanguageTokenizer::Chinese(tokenizer) => tokenizer.next(),
             LanguageTokenizer::Japanese(tokenizer) => tokenizer.next(),
         }
     }

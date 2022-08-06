@@ -3,7 +3,7 @@ use crate::config::env_settings::EnvSettings;
 use super::BlobStore;
 
 pub struct S3BlobStore {}
-//TODO implement (do not send blobs over Raft when in S3 mode)
+
 impl BlobStore for S3BlobStore {
     fn new(_settings: &EnvSettings) -> crate::Result<Self> {
         todo!()

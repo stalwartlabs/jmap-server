@@ -93,7 +93,6 @@ where
                     removed = self.changes.updated;
                 } else {
                     for (index, id) in query_response.ids.into_iter().enumerate() {
-                        //TODO test up to id properly
                         if matches!(self.up_to_id, Some(up_to_id) if up_to_id == id) {
                             break;
                         } else if self.changes.created.contains(&id) {

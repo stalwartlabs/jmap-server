@@ -76,7 +76,10 @@ async fn handle_conn(
                 error!("Received unexpected RPC request from {}.", peer_addr);
                 return;
             }
-            Err(_) => todo!(),
+            Err(err) => {
+                debug!("RPC connection from {} failed: {}", peer_addr, err);
+                return;
+            }
         },
         Ok(None) => {
             debug!("RPC connection from {} closed before auth.", peer_addr);

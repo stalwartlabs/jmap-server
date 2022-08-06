@@ -33,7 +33,6 @@ impl CreateAccount for TinyORM<Principal> {
                 value: email.to_string(),
             },
         );
-        //TODO scrypt performance
         account.set(
             Property::Secret,
             Value::Text {

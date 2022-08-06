@@ -16,7 +16,7 @@ use store::nlp::Language;
 use store::read::comparator::{self, DocumentSetComparator, FieldComparator};
 use store::read::filter::{self, Query};
 use store::{roaring::RoaringBitmap, AccountId, JMAPStore, Store};
-use store::{Integer, LongInteger};
+use store::{FieldId, Integer, LongInteger};
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 pub struct QueryArguments {
@@ -213,9 +213,20 @@ where
                         }
                     };
 
-                    // TODO special case for message references
                     if let Some(value) = value {
-                        filter::Filter::eq(header.into(), Query::Keyword(value))
+                        filter::Filter::eq(
+                            if !matches!(
+                                header,
+                                RfcHeader::InReplyTo
+                                    | RfcHeader::References
+                                    | RfcHeader::ResentMessageId
+                            ) {
+                                header as FieldId
+                            } else {
+                                MessageField::MessageIdRef as FieldId
+                            },
+                            Query::Keyword(value),
+                        )
                     } else {
                         filter::Filter::eq(
                             MessageField::HasHeader.into(),

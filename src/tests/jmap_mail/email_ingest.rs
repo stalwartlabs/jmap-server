@@ -4,7 +4,6 @@ use jmap_client::{
     client::Client,
     core::set::{SetError, SetErrorType},
 };
-use jmap_mail::{INBOX_ID, TRASH_ID};
 use store::{core::collection::Collection, Store};
 
 use crate::{
@@ -290,16 +289,6 @@ where
 
     // Remove test data
     for account_id in [&account_id_1, &account_id_2, &account_id_3] {
-        //TODO remove mailbox deletion
-        client
-            .set_default_account_id(account_id)
-            .mailbox_destroy(&JMAPId::new(INBOX_ID as u64).to_string(), true)
-            .await
-            .unwrap();
-        client
-            .mailbox_destroy(&JMAPId::new(TRASH_ID as u64).to_string(), true)
-            .await
-            .unwrap();
         client
             .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
             .principal_destroy(account_id)

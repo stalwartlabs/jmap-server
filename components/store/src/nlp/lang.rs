@@ -100,6 +100,8 @@ impl LanguageDetector {
                 Lang::Lat => Language::Latin,
                 Lang::Slk => Language::Slovak,
                 Lang::Cat => Language::Catalan,
+                Lang::Tgl => Language::Tagalog,
+                Lang::Hye => Language::Armenian,
             };
             let confidence = info.confidence();
             let w = self
