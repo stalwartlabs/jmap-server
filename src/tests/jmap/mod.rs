@@ -72,7 +72,7 @@ where
 {
     tracing_subscriber::fmt::init();
 
-    let (server, client, tmp_dir, _) = init_jmap_tests_opts::<T>(test_name, 1, 1, false).await;
+    let (server, client, tmp_dir, _) = init_jmap_tests_opts::<T>(test_name, 1, 1, true).await;
     (server, client, tmp_dir)
 }
 
@@ -107,10 +107,10 @@ async fn jmap_core_tests() {
 
     // Run tests
     acl::test(server.clone(), &mut client).await;
-    authorization::test(server.clone(), &mut client).await;
-    event_source::test(server.clone(), &mut client).await;
-    push_subscription::test(server.clone(), &mut client).await;
-    websocket::test(server.clone(), &mut client).await;
+    //authorization::test(server.clone(), &mut client).await;
+    //event_source::test(server.clone(), &mut client).await;
+    //push_subscription::test(server.clone(), &mut client).await;
+    //websocket::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(&temp_dir);
 }

@@ -3,22 +3,25 @@ use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
-use jmap::principal::schema::{Principal, Property, Type, Value};
+use jmap::principal::schema::{Principal, Property, Type, Value, ACCOUNTS_TO_DELETE};
 use jmap::principal::store::JMAPPrincipals;
 use jmap::request::set::SetRequest;
 use jmap::request::set::SetResponse;
-use jmap::{sanitize_domain, sanitize_email};
+use jmap::types::jmap::JMAPId;
+use jmap::{sanitize_domain, sanitize_email, SUPERUSER_ID};
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
 use store::ahash::AHashSet;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
+use store::core::tag::Tag;
 use store::read::comparator::Comparator;
-use store::read::filter::{Filter, Query};
+use store::read::filter::{self, Filter, Query};
 use store::read::FilterMapper;
 use store::write::batch::WriteBatch;
-use store::{AccountId, DocumentId, JMAPStore, Store};
+use store::write::options::IndexOptions;
+use store::{DocumentId, JMAPStore, Store};
 
 pub trait JMAPSetPrincipal<T>
 where
@@ -27,8 +30,13 @@ where
     fn principal_set(&self, request: SetRequest<Principal>)
         -> jmap::Result<SetResponse<Principal>>;
 
-    fn principal_delete(&self, account_id: AccountId, document: &mut Document)
-        -> store::Result<()>;
+    fn principal_delete(
+        &self,
+        batch: &mut WriteBatch,
+        document: &mut Document,
+    ) -> store::Result<()>;
+
+    fn principal_purge(&self) -> store::Result<()>;
 }
 
 impl<T> JMAPSetPrincipal<T> for JMAPStore<T>
@@ -41,7 +49,23 @@ where
     ) -> jmap::Result<SetResponse<Principal>> {
         let mut helper = SetHelper::new(self, request)?;
 
+        let tagged_for_deletion_ids = self.get_tag(
+            SUPERUSER_ID,
+            Collection::Principal,
+            ACCOUNTS_TO_DELETE,
+            Tag::Static(ACCOUNTS_TO_DELETE),
+        )?;
+
         helper.create(|_create_id, item, helper, document| {
+            // Make sure the assigned principal Id is not scheduled for deletion
+            if let Some(tagged_for_deletion_ids) = &tagged_for_deletion_ids {
+                while tagged_for_deletion_ids.contains(document.document_id) {
+                    document.document_id = helper
+                        .store
+                        .assign_document_id(SUPERUSER_ID, Collection::Principal)?;
+                }
+            }
+
             // Set values
             TinyORM::<Principal>::new()
                 .principal_set(helper, item, None, document.document_id)?
@@ -53,7 +77,7 @@ where
         helper.update(|id, item, helper, document| {
             let document_id = id.get_document_id();
             let current_fields = self
-                .get_orm::<Principal>(helper.account_id, document_id)?
+                .get_orm::<Principal>(SUPERUSER_ID, document_id)?
                 .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
             let fields = TinyORM::track_changes(&current_fields).principal_set(
                 helper,
@@ -88,10 +112,62 @@ where
             Ok(None)
         })?;
 
-        helper.destroy(|_id, helper, document| {
-            if let Some(fields) =
-                self.get_orm::<Principal>(helper.account_id, document.document_id)?
-            {
+        helper.destroy(|id, helper, document| {
+            if let Some(fields) = self.get_orm::<Principal>(SUPERUSER_ID, document.document_id)? {
+                // Remove member from all principals
+                for document_id in self
+                    .query_store::<FilterMapper>(
+                        SUPERUSER_ID,
+                        Collection::Principal,
+                        filter::Filter::eq(
+                            Property::Members.into(),
+                            Query::Integer(document.document_id),
+                        ),
+                        Comparator::None,
+                    )?
+                    .into_bitmap()
+                {
+                    if let Some(fields) = self.get_orm::<Principal>(SUPERUSER_ID, document_id)? {
+                        if let Some(members) =
+                            fields.get(&Property::Members).and_then(|p| match p {
+                                Value::Members { value } if value.contains(&id) => Some(value),
+                                _ => None,
+                            })
+                        {
+                            let mut new_fields = TinyORM::track_changes(&fields);
+                            new_fields.set(
+                                Property::Members,
+                                if members.len() > 1 {
+                                    Value::Members {
+                                        value: members
+                                            .iter()
+                                            .filter(|m| *m != &id)
+                                            .cloned()
+                                            .collect::<Vec<_>>(),
+                                    }
+                                } else {
+                                    Value::Null
+                                },
+                            );
+                            let mut document = Document::new(Collection::Principal, document_id);
+                            fields.merge(&mut document, new_fields)?;
+                            helper.changes.update_document(document);
+                            helper
+                                .changes
+                                .log_update(Collection::Principal, JMAPId::from(document_id));
+                        }
+                    }
+                }
+
+                // Tag account for deletion
+                let mut tag_deletion = Document::new(Collection::Principal, document.document_id);
+                tag_deletion.tag(
+                    ACCOUNTS_TO_DELETE,
+                    Tag::Static(ACCOUNTS_TO_DELETE),
+                    IndexOptions::new(),
+                );
+                helper.changes.update_document(tag_deletion);
+
                 if let Some(Value::Text { value }) = fields.get(&Property::Email) {
                     helper.store.recipients.invalidate(value);
                 }
@@ -106,18 +182,47 @@ where
 
     fn principal_delete(
         &self,
-        account_id: AccountId,
+        batch: &mut WriteBatch,
         document: &mut Document,
     ) -> store::Result<()> {
         // Delete ORM
-        self.get_orm::<Principal>(account_id, document.document_id)?
+        self.get_orm::<Principal>(SUPERUSER_ID, document.document_id)?
             .ok_or_else(|| {
                 StoreError::NotFound(format!(
                     "Failed to fetch Principal ORM for {}:{}.",
-                    account_id, document.document_id
+                    SUPERUSER_ID, document.document_id
                 ))
             })?
             .delete(document);
+
+        // Tag account for deletion
+        let mut tag_deletion = Document::new(Collection::Principal, document.document_id);
+        tag_deletion.tag(
+            ACCOUNTS_TO_DELETE,
+            Tag::Static(ACCOUNTS_TO_DELETE),
+            IndexOptions::new(),
+        );
+        batch.update_document(tag_deletion);
+
+        Ok(())
+    }
+
+    fn principal_purge(&self) -> store::Result<()> {
+        if let Some(accounts_to_delete) = self.get_tag(
+            SUPERUSER_ID,
+            Collection::Principal,
+            ACCOUNTS_TO_DELETE,
+            Tag::Static(ACCOUNTS_TO_DELETE),
+        )? {
+            self.delete_accounts(&accounts_to_delete)?;
+            self.untag(
+                SUPERUSER_ID,
+                Collection::Principal,
+                ACCOUNTS_TO_DELETE,
+                Tag::Static(ACCOUNTS_TO_DELETE),
+                accounts_to_delete.iter(),
+            )?;
+        }
 
         Ok(())
     }
@@ -179,7 +284,7 @@ where
                             }) && !helper
                                 .store
                                 .query_store::<FilterMapper>(
-                                    helper.account_id,
+                                    SUPERUSER_ID,
                                     Collection::Principal,
                                     Filter::and(vec![
                                         Filter::eq(
@@ -332,7 +437,13 @@ where
                     });
                     for id in &value {
                         let account_id = id.get_document_id();
-                        if helper.document_ids.contains(account_id) {
+
+                        if account_id == document_id {
+                            return Err(SetError::invalid_property(
+                                property,
+                                "Cannot add a principal as its member.".to_string(),
+                            ));
+                        } else if helper.document_ids.contains(account_id) {
                             if current_members.as_ref().map_or(true, |l| !l.contains(id)) {
                                 helper.store.acl_tokens.invalidate(&account_id);
                             }
@@ -350,7 +461,7 @@ where
                     let individuals = helper
                         .store
                         .query_store::<FilterMapper>(
-                            helper.account_id,
+                            SUPERUSER_ID,
                             Collection::Principal,
                             Filter::eq(Property::Type.into(), Query::Keyword("i".to_string())),
                             Comparator::None,
@@ -362,6 +473,11 @@ where
                             return Err(SetError::invalid_property(
                                 property,
                                 format!("Principal '{}' is not an individual.", id),
+                            ));
+                        } else if id.get_document_id() == document_id {
+                            return Err(SetError::invalid_property(
+                                property,
+                                "Cannot add a principal as its member.".to_string(),
                             ));
                         }
                     }
@@ -401,7 +517,7 @@ where
                 if helper
                     .store
                     .query_store::<FilterMapper>(
-                        helper.account_id,
+                        SUPERUSER_ID,
                         Collection::Principal,
                         Filter::and(vec![
                             Filter::eq(Property::Name.into(), Query::Index(domain.to_string())),
@@ -422,7 +538,7 @@ where
             if !helper
                 .store
                 .query_store::<FilterMapper>(
-                    helper.account_id,
+                    SUPERUSER_ID,
                     Collection::Principal,
                     Filter::or(
                         validate_emails

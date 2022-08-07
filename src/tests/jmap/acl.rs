@@ -7,6 +7,7 @@ use jmap_client::{
     principal::ACL,
 };
 use jmap_mail::{INBOX_ID, TRASH_ID};
+use jmap_sharing::principal::set::JMAPSetPrincipal;
 use store::{ahash::AHashMap, Store};
 
 use crate::{
@@ -734,13 +735,52 @@ where
             .await,
     );
 
-    // Destroy test accounts
-    for user_id in [jane_id, john_id, bill_id, sales_id, domain_id] {
+    // Delete Jane's account and make sure her Id is removed from the Sales group
+    assert_eq!(
         admin_client
-            .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
-            .principal_destroy(&user_id)
+            .principal_get(
+                &sales_id,
+                [jmap_client::principal::Property::Members].into(),
+            )
             .await
-            .unwrap();
+            .unwrap()
+            .unwrap()
+            .members()
+            .unwrap(),
+        vec![jane_id.to_string()]
+    );
+    admin_client
+        .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
+        .principal_destroy(&jane_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        admin_client
+            .principal_get(
+                &sales_id,
+                [jmap_client::principal::Property::Members].into(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .members(),
+        None
+    );
+
+    // Check that Jane's id is not assigned to new accounts before the
+    // purge has taken place.
+    server.store.id_assigner.invalidate_all();
+    let tom_id = admin_client
+        .individual_create("tom@example.com", "098765", "Tom Foobar")
+        .await
+        .unwrap()
+        .take_id();
+    assert_ne!(tom_id, jane_id);
+
+    // Destroy test accounts
+    for principal_id in [tom_id, john_id, bill_id, sales_id, domain_id] {
+        admin_client.principal_destroy(&principal_id).await.unwrap();
     }
+    server.store.principal_purge().unwrap();
     server.store.assert_is_empty();
 }

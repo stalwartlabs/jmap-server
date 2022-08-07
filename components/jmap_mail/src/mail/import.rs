@@ -12,7 +12,9 @@ use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use mail_parser::decoders::html::html_to_text;
 use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::{HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader};
+use mail_parser::{
+    GetHeader, HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader,
+};
 use store::ahash::AHashMap;
 use store::ahash::AHashSet;
 use store::blob::BlobId;
@@ -364,7 +366,9 @@ where
         }
 
         // Build JMAP headers
-        for header in message.parts[0].headers.iter_mut() {
+        let root_part = &mut message.parts[0];
+        let message_language = root_part.get_language().unwrap_or(Language::Unknown);
+        for header in root_part.headers.iter_mut() {
             let header_name = if let HeaderName::Rfc(header_name) = &header.name {
                 *header_name
             } else {
@@ -407,7 +411,7 @@ where
                                 document.text(
                                     RfcHeader::Subject,
                                     text.to_string(),
-                                    Language::Unknown,
+                                    message_language,
                                     IndexOptions::new().full_text(0),
                                 );
                             }
@@ -415,7 +419,7 @@ where
                                 document.text(
                                     RfcHeader::Subject,
                                     list.first().unwrap().to_string(),
-                                    Language::Unknown,
+                                    message_language,
                                     IndexOptions::new().full_text(0),
                                 );
                             }
@@ -442,6 +446,7 @@ where
                 offset_end: message_part.offset_end,
                 encoding: message_part.encoding,
             };
+            let part_language = message_part.get_language().unwrap_or(message_language);
             let (mime_type, part_size) = match message_part.body {
                 PartType::Html(html) => {
                     let field = if message_data.text_body.contains(&part_id)
@@ -456,7 +461,7 @@ where
                     document.text(
                         field,
                         html_to_text(html.as_ref()),
-                        Language::Unknown,
+                        part_language,
                         IndexOptions::new().full_text((part_id + 1) as u32),
                     );
 
@@ -476,7 +481,7 @@ where
                     document.text(
                         field,
                         text.into_owned(),
-                        Language::Unknown,
+                        part_language,
                         IndexOptions::new().full_text((part_id + 1) as u32),
                     );
                     (MimePartType::Text { part }, text_len)
@@ -777,21 +782,24 @@ trait AddMessage {
 
 impl AddMessage for Document {
     fn add_message(&mut self, message: &mut Message, part_id: u32) {
+        let message_language = message.parts[0].get_language().unwrap_or(Language::Unknown);
+
         if let Some(HeaderValue::Text(subject)) = message.remove_header_rfc(RfcHeader::Subject) {
             self.text(
                 MessageField::Attachment,
                 subject.into_owned(),
-                Language::Unknown,
+                message_language,
                 IndexOptions::new().full_text(part_id << 16),
             );
         }
         for (sub_part_id, sub_part) in message.parts.drain(..).take(MAX_MESSAGE_PARTS).enumerate() {
+            let sub_part_language = sub_part.get_language().unwrap_or(message_language);
             match sub_part.body {
                 PartType::Text(text) => {
                     self.text(
                         MessageField::Attachment,
                         text.into_owned(),
-                        Language::Unknown,
+                        sub_part_language,
                         IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
                     );
                 }
@@ -799,7 +807,7 @@ impl AddMessage for Document {
                     self.text(
                         MessageField::Attachment,
                         html_to_text(&html),
-                        Language::Unknown,
+                        sub_part_language,
                         IndexOptions::new().full_text(part_id << 16 | (sub_part_id + 1) as u32),
                     );
                 }
@@ -983,6 +991,9 @@ impl MessageData {
             }
         }
 
+        // Link/Unlink raw message
+        document.blob(self.raw_message, IndexOptions::new() | options);
+
         Ok(())
     }
 }
@@ -1010,5 +1021,26 @@ impl EmailImportResponse {
         } else {
             None
         }
+    }
+}
+
+trait GetContentLanguage {
+    fn get_language(&self) -> Option<Language>;
+}
+
+impl GetContentLanguage for mail_parser::MessagePart<'_> {
+    fn get_language(&self) -> Option<Language> {
+        self.headers
+            .get_rfc(&RfcHeader::ContentLanguage)
+            .and_then(|v| {
+                Language::from_iso_639(match v {
+                    HeaderValue::Text(v) => v,
+                    HeaderValue::TextList(v) => v.first()?,
+                    _ => {
+                        return None;
+                    }
+                })
+                .into()
+            })
     }
 }

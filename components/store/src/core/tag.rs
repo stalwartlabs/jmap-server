@@ -5,7 +5,6 @@ pub enum Tag {
     Static(TagId),
     Id(Integer),
     Text(String),
-    Bytes(Vec<u8>),
     Default,
 }
 
@@ -22,7 +21,6 @@ impl Tag {
             Tag::Static(_) | Tag::Default => std::mem::size_of::<TagId>(),
             Tag::Id(_) => std::mem::size_of::<DocumentId>(),
             Tag::Text(text) => text.len(),
-            Tag::Bytes(bytes) => bytes.len(),
         }
     }
 

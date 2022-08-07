@@ -31,6 +31,8 @@ pub enum Property {
     Invalid = 14,
 }
 
+pub const ACCOUNTS_TO_DELETE: u8 = u8::MAX;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type {
     #[serde(rename = "individual")]

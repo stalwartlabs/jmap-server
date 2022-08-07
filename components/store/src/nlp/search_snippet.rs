@@ -149,7 +149,7 @@ mod tests {
                             "in Abidjan <mark>Côte</mark> d'Ivoire. He secretly called me on his bedside ",
                             "and told me that he has a sum of $7.5M (Seven Million five Hundred Thousand ",
                             "Dollars) left in a suspense account in a local bank here in Abidjan ",
-                            "<mark>Côte</mark> d'Ivoire, tha")
+                            "<mark>Côte</mark> d'Ivoire, that ")
                         ]
                     ),
                     (
@@ -159,7 +159,7 @@ mod tests {
                             "honorably seeking <mark>your</mark> assistance in the following ways. ", 
                             "1) To provide any bank account where this money would be transferred into. 2) ",
                             "To serve as the guardian of this fund. 3) To make arrangement for me to come ",
-                            "over to <mark>your</mark> <mark>country</mark>"
+                            "over to <mark>your</mark> "
                             )]
                     ),
                     (

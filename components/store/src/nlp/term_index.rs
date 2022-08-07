@@ -872,15 +872,15 @@ mod tests {
                 .len()
         );
 
-        let tests = [
+        for (words, field_id, match_phrase, match_count) in [
             (vec!["thomas", "clinton"], None, true, 4),
             (vec!["was", "the", "worse"], None, true, 3),
             (vec!["carri"], None, false, 2),
             (vec!["nothing", "floating"], None, true, 2),
-            (vec!["floating", "nothing"], None, false, 5),
+            (vec!["floating", "nothing"], None, false, 6),
             (vec!["floating", "nothing"], None, true, 0),
             (vec!["noth", "floating"], None, true, 0),
-            (vec!["noth", "floating"], None, false, 5),
+            (vec!["noth", "floating"], None, false, 6),
             (vec!["realli", "happi"], None, false, 5),
             (vec!["really", "happy"], None, true, 2),
             (vec!["should", "feel", "happy", "but"], None, true, 4),
@@ -893,9 +893,7 @@ mod tests {
             (vec!["love"], Some(ATTACHMENT), false, 5),
             (vec!["but"], None, false, 6),
             (vec!["but"], None, true, 6),
-        ];
-
-        for (words, field_id, match_phrase, match_count) in tests {
+        ] {
             let mut match_terms = Vec::new();
             for word in &words {
                 let stemmed_token = Stemmer::new(word, Language::English, 40)
@@ -926,11 +924,22 @@ mod tests {
                 result_len += r.terms.len();
             }
 
-            assert_eq!(
-                result_len, match_count,
-                "({:?}, {}) != {:?}",
-                words, match_phrase, result
-            );
+            if result_len != match_count {
+                for term_group in result {
+                    let part = &parts[term_group.part_id as usize].0;
+                    println!("-> Part id {}", term_group.part_id);
+                    for term in term_group.terms {
+                        println!(
+                            "[{}] ",
+                            &part[term.offset as usize..term.offset as usize + term.len as usize]
+                        );
+                    }
+                }
+                panic!(
+                    "Expected {}, got {} for words {:?}, match phrase {:?}.",
+                    match_count, result_len, words, match_phrase
+                );
+            }
 
             for term_group in &result {
                 'outer: for term in &term_group.terms {

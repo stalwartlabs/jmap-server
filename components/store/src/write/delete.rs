@@ -1,121 +1,113 @@
-use crate::{JMAPStore, Store};
+use roaring::RoaringBitmap;
+
+use crate::blob::BLOB_HASH_LEN;
+use crate::serialize::key::BitmapKey;
+use crate::serialize::leb128::Leb128;
+use crate::{AccountId, ColumnFamily, Direction, JMAPStore, Store};
+
+use super::operation::WriteOperation;
+
+const DELETE_BATCH_SIZE: usize = 500;
 
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    /*
-    //TODO delete blobs
-    fn delete_account(&self, account: AccountId) -> crate::Result<()> {
-        let mut batch = WriteBatch::default();
-        let mut batch_size = 0;
+    pub fn delete_accounts(&self, account_ids: &RoaringBitmap) -> crate::Result<()> {
+        let mut batch = Vec::with_capacity(64);
 
-        for (cf, prefix) in [
-            (self.get_handle("values")?, serialize_a_key_leb128(account)),
-            (self.get_handle("indexes")?, serialize_a_key_be(account)),
-            (self.get_handle("bitmaps")?, serialize_a_key_be(account)),
-        ] {
-            for (key, _) in self
-                .db
-                .iterator_cf(&cf, IteratorMode::From(&prefix, Direction::Forward))
-            {
-                if key.starts_with(&prefix) {
-                    batch.delete_cf(&cf, key);
-                    batch_size += 1;
-
-                    if batch_size == DELETE_BATCH_SIZE {
-                        self.db
-                            .write(batch)
-                            .map_err(|e| StoreError::InternalError(e.to_string()))?;
-                        batch = WriteBatch::default();
-                        batch_size = 0;
-                    }
+        // Delete values
+        for (key, _) in self
+            .db
+            .iterator(ColumnFamily::Values, &[], Direction::Forward)?
+        {
+            let mut bytes = key.iter();
+            if let Some(account_id) = AccountId::from_leb128_it(&mut bytes) {
+                let do_delete = if account_ids.contains(account_id) {
+                    true
+                } else if matches!(bytes.next(), Some(collection) if *collection == u8::MAX) {
+                    // Shared account
+                    matches!(AccountId::from_leb128_it(&mut bytes), Some(shared_account_id) if account_ids.contains(shared_account_id))
                 } else {
-                    break;
+                    false
+                };
+
+                if do_delete {
+                    batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Values,
+                        key: key.to_vec(),
+                    });
+                    if batch.len() == DELETE_BATCH_SIZE {
+                        self.db.write(batch)?;
+                        batch = Vec::with_capacity(64);
+                    }
                 }
             }
         }
 
-        if batch_size > 0 {
-            self.db
-                .write(batch)
-                .map_err(|e| StoreError::InternalError(e.to_string()))?;
+        // Delete indexes
+        for (key, _) in self
+            .db
+            .iterator(ColumnFamily::Indexes, &[], Direction::Forward)?
+        {
+            if let Some((account_id, _)) = AccountId::from_leb128_bytes(&key) {
+                if account_ids.contains(account_id) {
+                    batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Indexes,
+                        key: key.to_vec(),
+                    });
+                    if batch.len() == DELETE_BATCH_SIZE {
+                        self.db.write(batch)?;
+                        batch = Vec::with_capacity(64);
+                    }
+                }
+            }
+        }
+
+        // Delete linked blobs
+        for (key, _) in self
+            .db
+            .iterator(ColumnFamily::Blobs, &[], Direction::Forward)?
+        {
+            if let Some((account_id, _)) = key
+                .get(BLOB_HASH_LEN + 1..)
+                .and_then(AccountId::from_leb128_bytes)
+            {
+                if account_ids.contains(account_id) {
+                    batch.push(WriteOperation::Delete {
+                        cf: ColumnFamily::Blobs,
+                        key: key.to_vec(),
+                    });
+                    if batch.len() == DELETE_BATCH_SIZE {
+                        self.db.write(batch)?;
+                        batch = Vec::with_capacity(64);
+                    }
+                }
+            }
+        }
+
+        // Delete bitmaps
+        for (key, _) in self
+            .db
+            .iterator(ColumnFamily::Bitmaps, &[], Direction::Forward)?
+        {
+            if matches!(BitmapKey::deserialize_account_id(&key), Some(account_id) if account_ids.contains(account_id))
+            {
+                batch.push(WriteOperation::Delete {
+                    cf: ColumnFamily::Bitmaps,
+                    key: key.to_vec(),
+                });
+                if batch.len() == DELETE_BATCH_SIZE {
+                    self.db.write(batch)?;
+                    batch = Vec::with_capacity(64);
+                }
+            }
+        }
+
+        if !batch.is_empty() {
+            self.db.write(batch)?;
         }
 
         Ok(())
     }
-
-    fn delete_collection(&self, account: AccountId, collection: Collection) -> crate::Result<()> {
-        let mut batch = WriteBatch::default();
-        let mut batch_size = 0;
-
-        for (cf, prefix) in [
-            (
-                self.get_handle("values")?,
-                serialize_ac_key_leb128(account, collection),
-            ),
-            (
-                self.get_handle("indexes")?,
-                serialize_ac_key_be(account, collection),
-            ),
-        ] {
-            for (key, _) in self
-                .db
-                .iterator_cf(&cf, IteratorMode::From(&prefix, Direction::Forward))
-            {
-                if key.starts_with(&prefix) {
-                    batch.delete_cf(&cf, key);
-                    batch_size += 1;
-
-                    if batch_size == DELETE_BATCH_SIZE {
-                        self.db
-                            .write(batch)
-                            .map_err(|e| StoreError::InternalError(e.to_string()))?;
-                        batch = WriteBatch::default();
-                        batch_size = 0;
-                    }
-                } else {
-                    break;
-                }
-            }
-        }
-
-        let cf_bitmaps = self.get_handle("bitmaps")?;
-        let doc_list_key =
-            serialize_bm_internal(account, collection, BM_USED_IDS).into_boxed_slice();
-        let tombstone_key =
-            serialize_bm_internal(account, collection, BM_TOMBSTONED_IDS).into_boxed_slice();
-        let prefix = serialize_a_key_leb128(account);
-
-        for (key, _) in self
-            .db
-            .iterator_cf(&cf_bitmaps, IteratorMode::From(&prefix, Direction::Forward))
-        {
-            if !key.starts_with(&prefix) {
-                break;
-            } else if (key.len() > 3 && key[key.len() - 3] == collection)
-                || key == doc_list_key
-                || key == tombstone_key
-            {
-                batch.delete_cf(&cf_bitmaps, key);
-                batch_size += 1;
-
-                if batch_size == DELETE_BATCH_SIZE {
-                    self.db
-                        .write(batch)
-                        .map_err(|e| StoreError::InternalError(e.to_string()))?;
-                    batch = WriteBatch::default();
-                    batch_size = 0;
-                }
-            }
-        }
-
-        if batch_size > 0 {
-            self.db
-                .write(batch)
-                .map_err(|e| StoreError::InternalError(e.to_string()))?;
-        }
-
-        Ok(())
-    }*/
 }

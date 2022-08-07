@@ -3,8 +3,6 @@ jmap-server
 ===
 - Searching
   - Search by "Header exists" (might be already working?)
-  - Use Content-Language when available.
-  - Index PDF, Word and Excel.
   - Autodetect language in searches.
 - Test searchSnippets from HTML.
 - Mailbox
@@ -50,7 +48,9 @@ jmap-server
   - References pointing to updatedProperties in mailbox.
   - upToId in queryChanges.
   - IdAssigner.
+  - Fuzz testing.
   - Enron database.
+- Review all dependencies what kind of code they have.
 - Remove /home/vagrant/code/ references from Cargo.toml.
 - Remove print!() and println!() from everywhere.
 
@@ -81,4 +81,4 @@ Medium term
 - Sieve filters.
 - JMAP Contacts/Calendars.
 - Write email/set parsed message directly to store, avoid parsing it again.
-  
+- Index PDF, Word and Excel.

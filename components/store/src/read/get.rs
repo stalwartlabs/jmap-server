@@ -56,7 +56,16 @@ where
         field: FieldId,
         tag: Tag,
     ) -> crate::Result<Option<RoaringBitmap>> {
-        if let Some(document_ids) = self.get_document_ids(account_id, collection)? {
+        if let Some(tagged_docs) = self.db.get::<RoaringBitmap>(
+            ColumnFamily::Bitmaps,
+            &BitmapKey::serialize_tag(account_id, collection, field, &tag),
+        )? {
+            if !tagged_docs.is_empty() {
+                return Ok(Some(tagged_docs));
+            }
+        }
+
+        /*if let Some(document_ids) = self.get_document_ids(account_id, collection)? {
             if let Some(mut tagged_docs) = self.db.get::<RoaringBitmap>(
                 ColumnFamily::Bitmaps,
                 &BitmapKey::serialize_tag(account_id, collection, field, &tag),
@@ -66,7 +75,7 @@ where
                     return Ok(Some(tagged_docs));
                 }
             }
-        }
+        }*/
 
         Ok(None)
     }
@@ -79,7 +88,22 @@ where
         tags: &[Tag],
     ) -> crate::Result<Vec<Option<RoaringBitmap>>> {
         let mut result = Vec::with_capacity(tags.len());
-        if let Some(document_ids) = self.get_document_ids(account_id, collection)? {
+        for tagged_docs in self.db.multi_get::<RoaringBitmap, _>(
+            ColumnFamily::Bitmaps,
+            tags.iter()
+                .map(|tag| BitmapKey::serialize_tag(account_id, collection, field, tag))
+                .collect(),
+        )? {
+            if let Some(tagged_docs) = tagged_docs {
+                if !tagged_docs.is_empty() {
+                    result.push(Some(tagged_docs));
+                    continue;
+                }
+            }
+            result.push(None);
+        }
+
+        /*if let Some(document_ids) = self.get_document_ids(account_id, collection)? {
             for tagged_docs in self.db.multi_get::<RoaringBitmap, _>(
                 ColumnFamily::Bitmaps,
                 tags.iter()
@@ -95,7 +119,7 @@ where
                 }
                 result.push(None);
             }
-        }
+        }*/
 
         Ok(result)
     }

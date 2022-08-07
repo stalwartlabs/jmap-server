@@ -165,9 +165,7 @@ where
             Collection::Mailbox => {
                 self.mailbox_delete(write_batch.account_id, &mut document)?;
             }
-            Collection::Principal => {
-                self.principal_delete(write_batch.account_id, &mut document)?
-            }
+            Collection::Principal => self.principal_delete(write_batch, &mut document)?,
             Collection::PushSubscription => {
                 self.push_subscription_delete(write_batch.account_id, &mut document)?
             }

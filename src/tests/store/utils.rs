@@ -17,7 +17,7 @@ use store::{
     core::collection::Collection,
     roaring::RoaringBitmap,
     serialize::{
-        key::{BM_DOCUMENT_IDS, FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY},
+        key::{FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY},
         StoreDeserialize,
     },
     AccountId, ColumnFamily, DocumentId, JMAPStore, Store,
@@ -228,11 +228,9 @@ where
             {
                 match cf {
                     ColumnFamily::Bitmaps => {
-                        let (account_id, collection) = if key.last().unwrap() == &BM_DOCUMENT_IDS {
-                            (key[0] as AccountId, key[1].into())
-                        } else {
-                            (key[key.len() - 3] as AccountId, key[key.len() - 3].into())
-                        };
+                        let account_id = key[key.len() - 1] as AccountId;
+                        let collection = key[key.len() - 3].into();
+
                         if account_id != last_account_id || last_collection != collection {
                             last_account_id = account_id;
                             last_collection = collection;

@@ -47,30 +47,6 @@ impl<'x> Iterator for Stemmer<'x> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn stemmer() {
-        let inputs = [
-            (
-                "love loving lovingly loved lovely",
-                Language::English,
-                "love",
-            ),
-            ("querer queremos quer", Language::Spanish, "quer"),
-        ];
-
-        for (input, language, result) in inputs {
-            for token in Stemmer::new(input, language, 40) {
-                assert_eq!(token.stemmed_word.unwrap(), result);
-            }
-        }
-    }
-}
-
 static STEMMER_MAP: &[Option<Algorithm>] = &[
     None,                        // Esperanto = 0,
     Some(Algorithm::English),    // English = 1,
@@ -143,3 +119,27 @@ static STEMMER_MAP: &[Option<Algorithm>] = &[
     None,                        // Armenian = 68,
     None,                        // Unknown = 69,
 ];
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn stemmer() {
+        let inputs = [
+            (
+                "love loving lovingly loved lovely",
+                Language::English,
+                "love",
+            ),
+            ("querer queremos quer", Language::Spanish, "quer"),
+        ];
+
+        for (input, language, result) in inputs {
+            for token in Stemmer::new(input, language, 40) {
+                assert_eq!(token.stemmed_word.unwrap_or(token.word), result);
+                }
+        }
+        }
+}

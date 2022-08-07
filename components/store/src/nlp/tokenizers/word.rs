@@ -18,14 +18,18 @@ impl<'x> WordTokenizer<'x> {
 
 /// Parses text into tokens, used by non-IndoEuropean tokenizers.
 impl<'x> Iterator for WordTokenizer<'x> {
-    type Item = Token<'x>;
+    type Item = (Token<'x>, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
+        let mut is_ascii = true;
         while let Some((token_start, ch)) = self.iterator.next() {
             if ch.is_alphanumeric() {
                 let token_end = (&mut self.iterator)
                     .filter_map(|(pos, ch)| {
                         if ch.is_alphanumeric() {
+                            if is_ascii && !ch.is_ascii() {
+                                is_ascii = false;
+                            }
                             None
                         } else {
                             pos.into()
@@ -36,12 +40,15 @@ impl<'x> Iterator for WordTokenizer<'x> {
 
                 let token_len = token_end - token_start;
                 if token_end > token_start {
-                    return Token::new(
-                        token_start,
-                        token_len,
-                        self.text[token_start..token_end].into(),
+                    return (
+                        Token::new(
+                            token_start,
+                            token_len,
+                            self.text[token_start..token_end].into(),
+                        ),
+                        is_ascii,
                     )
-                    .into();
+                        .into();
                 }
             }
         }

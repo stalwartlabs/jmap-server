@@ -37,12 +37,109 @@ impl<'x> Iterator for JapaneseTokenizer<'x> {
                     return Token::new(offset_start, jp_token.len(), jp_token.into()).into();
                 }
             } else {
-                let token = self.word_tokenizer.next()?;
-                self.tokens = tinysegmenter::tokenize(token.word.as_ref()).into_iter();
-                self.token_offset = token.offset as usize;
-                self.token_len = token.len as usize;
-                self.token_len_cur = 0;
+                loop {
+                    let (token, is_ascii) = self.word_tokenizer.next()?;
+                    if !is_ascii {
+                        self.tokens = tinysegmenter::tokenize(token.word.as_ref()).into_iter();
+                        self.token_offset = token.offset as usize;
+                        self.token_len = token.len as usize;
+                        self.token_len_cur = 0;
+                        break;
+                    } else if token.len as usize <= self.max_token_length {
+                        return token.into();
+                    }
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn japanese_tokenizer() {
+        assert_eq!(
+            JapaneseTokenizer::new("お先に失礼します あなたの名前は何ですか 123 abc-872", 40)
+                .collect::<Vec<_>>(),
+            vec![
+                Token {
+                    word: "お先".into(),
+                    offset: 0,
+                    len: 6
+                },
+                Token {
+                    word: "に".into(),
+                    offset: 6,
+                    len: 3
+                },
+                Token {
+                    word: "失礼".into(),
+                    offset: 9,
+                    len: 6
+                },
+                Token {
+                    word: "し".into(),
+                    offset: 15,
+                    len: 3
+                },
+                Token {
+                    word: "ます".into(),
+                    offset: 18,
+                    len: 6
+                },
+                Token {
+                    word: "あなた".into(),
+                    offset: 25,
+                    len: 9
+                },
+                Token {
+                    word: "の".into(),
+                    offset: 34,
+                    len: 3
+                },
+                Token {
+                    word: "名前".into(),
+                    offset: 37,
+                    len: 6
+                },
+                Token {
+                    word: "は".into(),
+                    offset: 43,
+                    len: 3
+                },
+                Token {
+                    word: "何".into(),
+                    offset: 46,
+                    len: 3
+                },
+                Token {
+                    word: "です".into(),
+                    offset: 49,
+                    len: 6
+                },
+                Token {
+                    word: "か".into(),
+                    offset: 55,
+                    len: 3
+                },
+                Token {
+                    word: "123".into(),
+                    offset: 59,
+                    len: 3
+                },
+                Token {
+                    word: "abc".into(),
+                    offset: 63,
+                    len: 3
+                },
+                Token {
+                    word: "872".into(),
+                    offset: 67,
+                    len: 3
+                }
+            ]
+        );
     }
 }

@@ -2,7 +2,10 @@ use ahash::AHashMap;
 
 use crate::{
     blob::BlobId,
-    core::{bitmap::Bitmap, collection::Collection, document::MAX_TOKEN_LENGTH, error::StoreError},
+    core::{
+        bitmap::Bitmap, collection::Collection, document::MAX_TOKEN_LENGTH, error::StoreError,
+        tag::Tag,
+    },
     log::changes::ChangeId,
     nlp::{
         lang::{LanguageDetector, MIN_LANGUAGE_SCORE},
@@ -12,11 +15,11 @@ use crate::{
         Language,
     },
     serialize::{
-        bitmap::set_clear_bits,
+        bitmap::{clear_bits, set_clear_bits},
         key::{BitmapKey, BlobKey, IndexKey, LogKey, ValueKey},
         StoreDeserialize, StoreSerialize,
     },
-    AccountId, ColumnFamily, JMAPStore, Store,
+    AccountId, ColumnFamily, DocumentId, FieldId, JMAPStore, Store,
 };
 
 use super::{
@@ -512,5 +515,20 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    pub fn untag(
+        &self,
+        account_id: AccountId,
+        collection: Collection,
+        field: FieldId,
+        tag: Tag,
+        untag_document_ids: impl Iterator<Item = DocumentId>,
+    ) -> crate::Result<()> {
+        self.db.merge(
+            ColumnFamily::Bitmaps,
+            &BitmapKey::serialize_tag(account_id, collection, field, &tag),
+            &clear_bits(untag_document_ids),
+        )
     }
 }
