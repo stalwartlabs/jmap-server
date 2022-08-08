@@ -3,7 +3,7 @@ pub mod log;
 pub mod query;
 pub mod utils;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use store::{config::jmap::JMAPConfig, JMAPStore, Store};
 use store_rocksdb::RocksDB;
@@ -39,26 +39,13 @@ where
 }
 
 #[test]
-fn store_query() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_filter_test", true);
-    query::test(db, true);
-    destroy_temp_dir(&temp_dir);
-}
+fn store_tests() {
+    let (db, temp_dir) = init_db::<RocksDB>("strdb_store", true);
+    let db = Arc::new(db);
 
-#[test]
-fn store_blobs() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_blobs", true);
-
-    blobs::test(db);
-
-    destroy_temp_dir(&temp_dir);
-}
-
-#[test]
-fn store_compact_log() {
-    let (db, temp_dir) = init_db::<RocksDB>("strdb_log", true);
-
-    log::test(db);
+    //blobs::test(db.clone());
+    log::test(db.clone());
+    //query::test(db, true);
 
     destroy_temp_dir(&temp_dir);
 }

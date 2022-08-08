@@ -24,7 +24,7 @@ impl BlobStore for LocalBlobStore {
         base_path.push("blobs");
         Ok(LocalBlobStore {
             base_path,
-            hash_levels: vec![1],
+            hash_levels: vec![1], //TODO configure
         })
     }
 

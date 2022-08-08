@@ -16,6 +16,8 @@ pub mod s3;
 pub mod store;
 
 pub const BLOB_HASH_LEN: usize = 32;
+pub const BLOB_LOCAL: u8 = 0;
+pub const BLOB_EXTERNAL: u8 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BlobId {
@@ -72,7 +74,11 @@ impl Display for BlobId {
 impl StoreSerialize for BlobId {
     fn serialize(&self) -> Option<Vec<u8>> {
         let mut bytes = Vec::with_capacity(BLOB_HASH_LEN + 1);
-        bytes.push(if self.is_local() { 0 } else { 1 });
+        bytes.push(if self.is_local() {
+            BLOB_LOCAL
+        } else {
+            BLOB_EXTERNAL
+        });
         bytes.extend_from_slice(self.hash());
         bytes.into()
     }
@@ -80,8 +86,8 @@ impl StoreSerialize for BlobId {
 
 impl StoreDeserialize for BlobId {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        match bytes.get(0)? {
-            0 => BlobId::Local {
+        match *bytes.get(0)? {
+            BLOB_LOCAL => BlobId::Local {
                 hash: bytes.get(1..BLOB_HASH_LEN + 1)?.try_into().ok()?,
             },
             _ => BlobId::External {
@@ -124,38 +130,3 @@ impl BlobStoreWrapper {
         })
     }
 }
-
-/*
-pub struct UncommittedBlob<'x> {
-    pub blob_store: &'x BlobStoreWrapper,
-    pub blob_id: BlobId,
-    pub did_commit: bool,
-}
-
-impl UncommittedBlob<'_> {
-    pub fn new(blob_store: &BlobStoreWrapper, blob_id: BlobId) -> UncommittedBlob {
-        UncommittedBlob {
-            blob_store,
-            blob_id,
-            did_commit: false,
-        }
-    }
-
-    pub fn commit(&mut self) {
-        self.did_commit = true;
-    }
-}
-
-impl Drop for UncommittedBlob<'_> {
-    fn drop(&mut self) {
-        if !self.did_commit {
-            if let Err(err) = match self.blob_store {
-                BlobStoreWrapper::Local(local) => local.delete(&self.blob_id),
-                BlobStoreWrapper::S3(s3) => s3.delete(&self.blob_id),
-            } {
-                error!("Failed to delete blob {}: {:?}", self.blob_id, err);
-            }
-        }
-    }
-}
-*/

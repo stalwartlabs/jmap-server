@@ -1,4 +1,4 @@
-use super::RaftUpdate;
+use super::DocumentUpdate;
 use jmap::jmap_store::RaftObject;
 use jmap::orm::serialize::JMAPOrm;
 use jmap::orm::TinyORM;
@@ -33,13 +33,13 @@ where
         &self,
         write_batch: &mut WriteBatch,
         collection: Collection,
-        update: RaftUpdate,
+        update: DocumentUpdate,
     ) -> store::Result<()>;
 
     fn raft_apply_update<U>(
         &self,
         write_batch: &mut WriteBatch,
-        update: RaftUpdate,
+        update: DocumentUpdate,
     ) -> store::Result<()>
     where
         U: RaftObject<T> + 'static;
@@ -60,7 +60,7 @@ where
         &self,
         write_batch: &mut WriteBatch,
         collection: Collection,
-        update: RaftUpdate,
+        update: DocumentUpdate,
     ) -> store::Result<()> {
         match collection {
             Collection::Mail => self.raft_apply_update::<Email>(write_batch, update),
@@ -85,13 +85,13 @@ where
     fn raft_apply_update<U>(
         &self,
         write_batch: &mut WriteBatch,
-        update: RaftUpdate,
+        update: DocumentUpdate,
     ) -> store::Result<()>
     where
         U: RaftObject<T> + 'static,
     {
         match update {
-            RaftUpdate::Insert {
+            DocumentUpdate::Insert {
                 jmap_id,
                 fields,
                 blobs,
@@ -112,7 +112,7 @@ where
 
                 write_batch.insert_document(document);
             }
-            RaftUpdate::Update { jmap_id, fields } => {
+            DocumentUpdate::Update { jmap_id, fields } => {
                 let document_id = jmap_id.get_document_id();
                 let mut document = Document::new(U::collection(), document_id);
 
@@ -137,8 +137,8 @@ where
                     write_batch.update_document(document);
                 }
             }
-            RaftUpdate::Delete { document_id } => {
-                // Deletes received via RaftUpdate only happen during rollbacks
+            DocumentUpdate::Delete { document_id } => {
+                // Deletes received via DocumentUpdate only happen during rollbacks
                 // so if the item is not found, it is safe to ignore it as it
                 // was deleted on this node as well.
                 match self.delete_document(write_batch, U::collection(), document_id) {

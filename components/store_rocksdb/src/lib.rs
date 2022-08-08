@@ -20,8 +20,27 @@ pub struct RocksDB {
     db: DBWithThreadMode<MultiThreaded>,
 }
 
+pub struct RocksDBIterator<'x> {
+    it: DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>,
+}
+
+impl Iterator for RocksDBIterator<'_> {
+    type Item = (Box<[u8]>, Box<[u8]>);
+
+    #[allow(clippy::while_let_on_iterator)]
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(result) = self.it.next() {
+            if let Ok(item) = result {
+                return Some(item);
+            }
+        }
+        None
+    }
+}
+
 impl<'x> Store<'x> for RocksDB {
-    type Iterator = DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>;
+    type Iterator = RocksDBIterator<'x>;
 
     #[inline(always)]
     fn delete(&self, cf: store::ColumnFamily, key: &[u8]) -> Result<()> {
@@ -163,17 +182,19 @@ impl<'x> Store<'x> for RocksDB {
         cf: store::ColumnFamily,
         start: &[u8],
         direction: store::Direction,
-    ) -> Result<DBIteratorWithThreadMode<'x, DBWithThreadMode<MultiThreaded>>> {
-        Ok(self.db.iterator_cf(
-            &self.cf_handle(cf)?,
-            rocksdb::IteratorMode::From(
-                start,
-                match direction {
-                    store::Direction::Forward => rocksdb::Direction::Forward,
-                    store::Direction::Backward => rocksdb::Direction::Reverse,
-                },
+    ) -> Result<Self::Iterator> {
+        Ok(RocksDBIterator {
+            it: self.db.iterator_cf(
+                &self.cf_handle(cf)?,
+                rocksdb::IteratorMode::From(
+                    start,
+                    match direction {
+                        store::Direction::Forward => rocksdb::Direction::Forward,
+                        store::Direction::Backward => rocksdb::Direction::Reverse,
+                    },
+                ),
             ),
-        ))
+        })
     }
 
     fn compact(&self, cf: store::ColumnFamily) -> Result<()> {
@@ -204,7 +225,7 @@ impl<'x> Store<'x> for RocksDB {
             let mut cf_opts = Options::default();
             //cf_opts.set_max_write_buffer_number(16);
             cf_opts.set_merge_operator_associative("merge", bitmap_merge);
-            //cf_opts.set_compaction_filter("compact", bitmap_compact);
+            cf_opts.set_compaction_filter("compact", bitmap_compact);
             ColumnFamilyDescriptor::new("bitmaps", cf_opts)
         };
 
@@ -221,9 +242,11 @@ impl<'x> Store<'x> for RocksDB {
             ColumnFamilyDescriptor::new("indexes", cf_opts)
         };
 
-        // Term index
+        // Blobs
         let cf_blobs = {
-            let cf_opts = Options::default();
+            let mut cf_opts = Options::default();
+            cf_opts.set_enable_blob_files(true);
+            cf_opts.set_min_blob_size(settings.parse("blob-min-size").unwrap_or(16384));
             ColumnFamilyDescriptor::new("blobs", cf_opts)
         };
 
@@ -300,9 +323,9 @@ pub fn bitmap_merge(
     existing_val: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    /*print!(
+    /*println!(
         "Merge operands {:?}, has val {} -> ",
-        operands.size_hint().0,
+        operands.len(),
         existing_val.is_some(),
     );*/
 
@@ -357,3 +380,62 @@ pub fn bitmap_compact(
         _ => rocksdb::compaction_filter::Decision::Keep,
     }
 }
+
+/*
+#[cfg(test)]
+mod tests {
+    use std::{fs::remove_dir_all, path::Path};
+
+    use store::{
+        ahash::AHashMap,
+        config::env_settings::EnvSettings,
+        serialize::bitmap::{clear_bits, set_bits},
+        ColumnFamily, Store,
+    };
+
+    use crate::RocksDB;
+
+    #[test]
+    fn bitmap_remove() {
+        let path = Path::new("/tmp/rocksdb_test");
+        if path.exists() {
+            remove_dir_all(path).unwrap();
+        }
+        let mut settings = EnvSettings {
+            args: AHashMap::new(),
+        };
+        settings.set_value("db-path".to_string(), "/tmp/rocksdb_test".to_string());
+        let store = RocksDB::open(&settings).unwrap();
+
+        store
+            .merge(ColumnFamily::Bitmaps, b"abc", &set_bits([0].into_iter()))
+            .unwrap();
+
+        store
+            .merge(
+                ColumnFamily::Bitmaps,
+                b"abc",
+                &set_bits([1, 2, 3].into_iter()),
+            )
+            .unwrap();
+
+        assert!(store
+            .get::<Vec<u8>>(ColumnFamily::Bitmaps, b"abc")
+            .unwrap()
+            .is_some());
+
+        store
+            .merge(
+                ColumnFamily::Bitmaps,
+                b"abc",
+                &clear_bits([0, 1, 2, 3].into_iter()),
+            )
+            .unwrap();
+        store.compact(ColumnFamily::Bitmaps).unwrap();
+        assert!(store
+            .get::<Vec<u8>>(ColumnFamily::Bitmaps, b"abc")
+            .unwrap()
+            .is_none());
+    }
+}
+*/

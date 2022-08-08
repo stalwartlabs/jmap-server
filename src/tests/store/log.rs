@@ -8,16 +8,13 @@ use jmap_mail::mail::changes::JMAPMailChanges;
 use store::{
     ahash::AHashSet,
     core::{acl::ACLToken, collection::Collection, error::StoreError},
-    log::{
-        entry::Entry,
-        raft::{LogIndex, RaftId, TermId},
-    },
+    log::{entry::Entry, raft::RaftId},
     serialize::{key::LogKey, StoreDeserialize},
     write::batch::WriteBatch,
     AccountId, ColumnFamily, Direction, JMAPStore, Store,
 };
 
-pub fn test<T>(mail_store: JMAPStore<T>)
+pub fn test<T>(mail_store: Arc<JMAPStore<T>>)
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -96,15 +93,17 @@ pub fn assert_compaction<T>(mail_store: &JMAPStore<T>, num_accounts: usize)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    mail_store
-        .compact_log(
-            mail_store
-                .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))
-                .unwrap()
-                .unwrap()
-                .index,
-        )
-        .unwrap();
+    mail_store.compact_log(1).unwrap();
+
+    /*mail_store
+    .compact_log_up_to(
+        mail_store
+            .get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))
+            .unwrap()
+            .unwrap()
+            .index,
+    )
+    .unwrap();*/
 
     // Make sure compaction happened
     let mut total_change_entries = 0;

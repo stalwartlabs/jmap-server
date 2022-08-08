@@ -1,7 +1,7 @@
 use super::BATCH_MAX_SIZE;
 use crate::cluster::log::changes_merge::MergedChanges;
 use crate::cluster::log::update_prepare::RaftStorePrepareUpdate;
-use crate::cluster::log::{RaftUpdate, Update};
+use crate::cluster::log::{DocumentUpdate, Update};
 use crate::JMAPServer;
 use jmap::principal::schema::Principal;
 use jmap::push_subscription::schema::PushSubscription;
@@ -87,7 +87,7 @@ where
                 updates.push(Update::Document { update: item });
             } else if is_follower_rollback {
                 updates.push(Update::Document {
-                    update: RaftUpdate::Delete { document_id },
+                    update: DocumentUpdate::Delete { document_id },
                 });
             } else {
                 debug!(

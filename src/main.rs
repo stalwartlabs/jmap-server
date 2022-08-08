@@ -18,7 +18,7 @@ use cluster::{
 
 use authorization::{auth::RemoteAddress, rate_limit::RateLimiter};
 use server::http::{init_jmap_server, start_jmap_server};
-use services::{email_delivery, state_change};
+use services::{email_delivery, housekeeper, state_change};
 use store::{
     config::env_settings::EnvSettings,
     moka::future::Cache,
@@ -38,6 +38,7 @@ pub struct JMAPServer<T> {
     pub cluster: Option<ClusterIpc>,
     pub state_change: mpsc::Sender<state_change::Event>,
     pub email_delivery: mpsc::Sender<email_delivery::Event>,
+    pub housekeeper: mpsc::Sender<housekeeper::Event>,
 
     pub sessions: Cache<String, authorization::Session>,
     pub rate_limiters: Cache<RemoteAddress, Arc<RateLimiter>>,

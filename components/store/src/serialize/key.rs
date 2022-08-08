@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 
 use crate::{
-    blob::{BlobId, BLOB_HASH_LEN},
+    blob::{BlobId, BLOB_EXTERNAL, BLOB_HASH_LEN, BLOB_LOCAL},
     core::{collection::Collection, tag::Tag},
     log::{
         changes::ChangeId,
@@ -133,7 +133,11 @@ impl BlobKey {
         document: DocumentId,
     ) -> Vec<u8> {
         let mut key = Vec::with_capacity(BLOB_HASH_LEN + ACCOUNT_KEY_LEN + 1);
-        key.push(if id.is_local() { 0 } else { 1 });
+        key.push(if id.is_local() {
+            BLOB_LOCAL
+        } else {
+            BLOB_EXTERNAL
+        });
         key.extend_from_slice(id.hash());
         account.to_leb128_bytes(&mut key);
         key.push(collection.into());
@@ -143,7 +147,11 @@ impl BlobKey {
 
     pub fn serialize_prefix(id: &BlobId, account: AccountId) -> Vec<u8> {
         let mut key = Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<AccountId>() + 1);
-        key.push(if id.is_local() { 0 } else { 1 });
+        key.push(if id.is_local() {
+            BLOB_LOCAL
+        } else {
+            BLOB_EXTERNAL
+        });
         key.extend_from_slice(id.hash());
         if account != AccountId::MAX {
             account.to_leb128_bytes(&mut key);
@@ -157,7 +165,11 @@ impl BlobKey {
         collection: Collection,
     ) -> Vec<u8> {
         let mut key = Vec::with_capacity(BLOB_HASH_LEN + std::mem::size_of::<AccountId>() + 1);
-        key.push(if id.is_local() { 0 } else { 1 });
+        key.push(if id.is_local() {
+            BLOB_LOCAL
+        } else {
+            BLOB_EXTERNAL
+        });
         key.extend_from_slice(id.hash());
         account.to_leb128_bytes(&mut key);
         key.push(collection.into());
@@ -166,7 +178,11 @@ impl BlobKey {
 
     pub fn serialize(id: &BlobId) -> Vec<u8> {
         let mut key = Vec::with_capacity(BLOB_HASH_LEN + 1);
-        key.push(if id.is_local() { 0 } else { 1 });
+        key.push(if id.is_local() {
+            BLOB_LOCAL
+        } else {
+            BLOB_EXTERNAL
+        });
         key.extend_from_slice(id.hash());
         key
     }
@@ -420,7 +436,7 @@ impl LogKey {
 
     pub fn serialize_tombstone(index: LogIndex, account: AccountId) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(LogKey::TOMBSTONE_KEY_LEN + 1);
-        bytes.push(LogKey::PENDING_UPDATES_KEY_PREFIX);
+        bytes.push(LogKey::TOMBSTONE_KEY_PREFIX);
         bytes.extend_from_slice(&index.to_be_bytes());
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes

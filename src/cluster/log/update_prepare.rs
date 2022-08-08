@@ -1,4 +1,4 @@
-use super::RaftUpdate;
+use super::DocumentUpdate;
 use jmap::{jmap_store::RaftObject, orm::serialize::JMAPOrm};
 use store::serialize::StoreSerialize;
 use store::{core::error::StoreError, AccountId, DocumentId, JMAPStore, Store};
@@ -12,7 +12,7 @@ where
         account_id: AccountId,
         document_id: DocumentId,
         as_insert: bool,
-    ) -> store::Result<Option<RaftUpdate>>
+    ) -> store::Result<Option<DocumentUpdate>>
     where
         U: RaftObject<T> + 'static;
 }
@@ -26,7 +26,7 @@ where
         account_id: AccountId,
         document_id: DocumentId,
         as_insert: bool,
-    ) -> store::Result<Option<RaftUpdate>>
+    ) -> store::Result<Option<DocumentUpdate>>
     where
         U: RaftObject<T> + 'static,
     {
@@ -40,7 +40,7 @@ where
                 })?;
 
                 Some(if as_insert {
-                    RaftUpdate::Insert {
+                    DocumentUpdate::Insert {
                         blobs: U::get_blobs(self, account_id, document_id)?,
                         term_index: self.get_term_index_id(
                             account_id,
@@ -51,7 +51,7 @@ where
                         fields,
                     }
                 } else {
-                    RaftUpdate::Update { jmap_id, fields }
+                    DocumentUpdate::Update { jmap_id, fields }
                 })
             } else {
                 None

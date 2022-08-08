@@ -1,4 +1,5 @@
 use super::changes::ChangeId;
+use super::raft::LogIndex;
 use crate::core::bitmap::Bitmap;
 use crate::log::entry::Entry;
 use crate::log::raft::{RaftId, TermId};
@@ -12,13 +13,57 @@ use crate::{
     WriteOperation,
 };
 use ahash::AHashMap;
-use roaring::RoaringTreemap;
+use roaring::{RoaringBitmap, RoaringTreemap};
+use tracing::debug;
 
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn compact_log(&self, up_to: ChangeId) -> crate::Result<()> {
+    pub fn compact_bitmaps(&self) -> crate::Result<()> {
+        // This function is necessary as RocksDB does not call compaction filter on
+        // values that inserted using a merge.
+        for (key, value) in self
+            .db
+            .iterator(ColumnFamily::Bitmaps, &[], Direction::Forward)?
+        {
+            match RoaringBitmap::deserialize(&value) {
+                Some(bm) if bm.is_empty() => {
+                    self.db.delete(ColumnFamily::Bitmaps, &key)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn compact_log(&self, max_changes: u64) -> crate::Result<()> {
+        if let (Some(first_index), Some(last_index)) = (
+            self.get_next_raft_id(RaftId::new(0, 0))?.map(|v| v.index),
+            self.get_prev_raft_id(RaftId::new(TermId::MAX, LogIndex::MAX))?
+                .map(|v| v.index),
+        ) {
+            if last_index > first_index && last_index - first_index > max_changes {
+                debug!(
+                    "Compacting {} entries up to id {}.",
+                    last_index - first_index - max_changes,
+                    last_index - max_changes + 1
+                );
+                self.compact_log_up_to(last_index - max_changes + 1)?;
+            } else {
+                debug!(
+                    "No need to compact log, {} entries found.",
+                    last_index - first_index
+                );
+            }
+        } else {
+            debug!("No logs found to compact.");
+        }
+
+        Ok(())
+    }
+
+    pub fn compact_log_up_to(&self, up_to: ChangeId) -> crate::Result<()> {
         let mut current_account_id = 0;
         let mut current_collection = Collection::None;
 

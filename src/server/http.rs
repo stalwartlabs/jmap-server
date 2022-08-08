@@ -29,6 +29,7 @@ use crate::{
     server::{event_source::handle_jmap_event_source, tls::load_tls_config, websocket::handle_ws},
     services::{
         email_delivery::{init_email_delivery, spawn_email_delivery},
+        housekeeper::{init_housekeeper, spawn_housekeeper},
         state_change::{init_state_manager, spawn_state_manager},
     },
     JMAPServer, DEFAULT_HTTP_PORT,
@@ -87,8 +88,10 @@ where
     }
 
     let (email_tx, email_rx) = init_email_delivery();
+    let (housekeeper_tx, housekeeper_rx) = init_housekeeper();
     let (change_tx, change_rx) = init_state_manager();
     let is_in_cluster = cluster.is_some();
+
     let server = web::Data::new(JMAPServer {
         base_session,
         store,
@@ -103,6 +106,7 @@ where
             .unwrap(),
         state_change: change_tx,
         email_delivery: email_tx.clone(),
+        housekeeper: housekeeper_tx,
         sessions: Cache::builder()
             .initial_capacity(128)
             .time_to_live(ONE_HOUR_EXPIRY)
@@ -121,6 +125,9 @@ where
 
     // Spawn email delivery service
     spawn_email_delivery(server.clone(), settings, email_tx, email_rx);
+
+    // Spawn housekeeper
+    spawn_housekeeper(server.clone(), settings, housekeeper_rx);
 
     server
 }

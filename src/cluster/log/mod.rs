@@ -25,7 +25,7 @@ pub enum Update {
         collection: Collection,
     },
     Document {
-        update: RaftUpdate,
+        update: DocumentUpdate,
     },
     Change {
         change: Vec<u8>,
@@ -42,7 +42,7 @@ pub enum Update {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub enum RaftUpdate {
+pub enum DocumentUpdate {
     Insert {
         jmap_id: JMAPId,
         fields: Vec<u8>,
@@ -58,10 +58,10 @@ pub enum RaftUpdate {
     },
 }
 
-impl RaftUpdate {
+impl DocumentUpdate {
     pub fn size(&self) -> usize {
         match self {
-            RaftUpdate::Insert {
+            DocumentUpdate::Insert {
                 fields,
                 blobs,
                 term_index,
@@ -72,8 +72,8 @@ impl RaftUpdate {
                     + ((blobs.len() + term_index.as_ref().map(|_| 1).unwrap_or(0))
                         * std::mem::size_of::<BlobId>())
             }
-            RaftUpdate::Update { fields, .. } => fields.len() + std::mem::size_of::<JMAPId>(),
-            RaftUpdate::Delete { .. } => std::mem::size_of::<DocumentId>(),
+            DocumentUpdate::Update { fields, .. } => fields.len() + std::mem::size_of::<JMAPId>(),
+            DocumentUpdate::Delete { .. } => std::mem::size_of::<DocumentId>(),
         }
     }
 }
@@ -133,7 +133,7 @@ pub enum PendingUpdate {
         collection: Collection,
     },
     Update {
-        update: RaftUpdate,
+        update: DocumentUpdate,
     },
     Delete {
         document_ids: Vec<DocumentId>,

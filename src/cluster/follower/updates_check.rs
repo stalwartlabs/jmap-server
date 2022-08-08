@@ -1,7 +1,7 @@
 use super::rpc::Response;
 use super::{RaftIndexes, State};
 use crate::cluster::log::Update;
-use crate::cluster::log::{AppendEntriesResponse, RaftUpdate};
+use crate::cluster::log::{AppendEntriesResponse, DocumentUpdate};
 use crate::JMAPServer;
 use store::ahash::AHashSet;
 use store::core::bitmap::Bitmap;
@@ -29,7 +29,7 @@ where
                     match update {
                         Update::Document {
                             update:
-                                RaftUpdate::Insert {
+                                DocumentUpdate::Insert {
                                     blobs, term_index, ..
                                 },
                         } if !blobs.is_empty() || term_index.is_some() => {

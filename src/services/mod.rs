@@ -1,4 +1,5 @@
 pub mod email_delivery;
+pub mod housekeeper;
 pub mod push_subscription;
 pub mod state_change;
 

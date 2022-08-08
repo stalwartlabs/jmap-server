@@ -6,5 +6,5 @@ publish = false
 
 [dependencies]
 store = { path = "../store" }
-rocksdb = "0.18"
+rocksdb = "0.19"
 

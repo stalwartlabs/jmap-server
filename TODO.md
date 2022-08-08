@@ -8,17 +8,14 @@ jmap-server
 - Mailbox
   - Do not count messages in Trash for Mailbox/unreadEmails.
 - Principals
-  - Delete members on deletion.
-  - Delete account data on deletion.
   - Argon password encryption.
   - Use DKIM on emailSubmissions.
 - Blobs
   - Configure hash_level in LocalBlobStore.
-  - Configura max blob size.
+  - Configure max blob size.
   - S3 connector.
   - Do not replicate blobs when using S3.
   - Escape filenames in src/api/blob.
-  - Tests.
 - Housekeeping tasks
   - Blob deletion.
   - Log compaction.
@@ -41,6 +38,7 @@ jmap-server
   - Encrypt packets.
   - Something better than cluster key?
   - Configure MAX_BATCH_SIZE, MAX_FRAME_LENGTH, etc..
+  - Test read replicas.
 - Testing
   - Test webmail client using Enron db.
   - Run cleanup tasks after calling principal destroy.

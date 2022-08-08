@@ -75,12 +75,10 @@ const FIELDS_OPTIONS: [FieldType; 20] = [
 ];
 
 #[allow(clippy::mutex_atomic)]
-pub fn test<T>(db: JMAPStore<T>, do_insert: bool)
+pub fn test<T>(db: Arc<JMAPStore<T>>, do_insert: bool)
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let db = Arc::new(db);
-
     rayon::ThreadPoolBuilder::new()
         .num_threads(8)
         .build()

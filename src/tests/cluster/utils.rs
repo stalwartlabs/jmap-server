@@ -659,7 +659,7 @@ where
 
     join_all(peers.iter().map(|peer| {
         let store = peer.store.clone();
-        tokio::task::spawn_blocking(move || store.compact_log(last_log.index).unwrap())
+        tokio::task::spawn_blocking(move || store.compact_log_up_to(last_log.index).unwrap())
     }))
     .await;
 }
