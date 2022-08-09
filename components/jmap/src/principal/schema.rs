@@ -69,15 +69,23 @@ pub enum Value {
     Type { value: Type },
     DKIM { value: DKIM },
     Members { value: Vec<JMAPId> },
-    ACLSet(Vec<ACLUpdate>),
-    ACLGet(VecMap<String, Vec<ACL>>),
+    ACL(VecMap<String, Vec<ACL>>),
+    Patch(Patch),
     Null,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Patch {
+    ACL(Vec<ACLUpdate>),
+    Members(VecMap<JMAPId, bool>),
+    Aliases(VecMap<String, bool>),
 }
 
 #[derive(Clone, Debug)]
 pub enum Filter {
     Email { value: String },
     Name { value: String },
+    DomainName { value: String },
     Text { value: String },
     Type { value: Type },
     Timezone { value: String },

@@ -5,7 +5,6 @@ use super::env_settings::EnvSettings;
 pub struct JMAPConfig {
     pub blob_temp_ttl: u64,
     pub default_language: Language,
-    pub api_key: String,
 
     pub max_size_upload: usize,
     pub max_concurrent_upload: usize,
@@ -30,9 +29,8 @@ pub struct JMAPConfig {
 }
 
 impl From<&EnvSettings> for JMAPConfig {
-    fn from(settings: &EnvSettings) -> Self {
+    fn from(_settings: &EnvSettings) -> Self {
         JMAPConfig {
-            api_key: settings.get("api-key").unwrap_or_default(),
             max_size_upload: 50000000,
             max_concurrent_upload: 4, // 4 used in tests, move to init tests
             max_concurrent_requests: 8, // 8 used in tests, move to init tests

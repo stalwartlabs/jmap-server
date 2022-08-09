@@ -8,7 +8,7 @@ use crate::{
     types::{blob::JMAPBlob, jmap::JMAPId, json_pointer::JSONPointer},
 };
 
-use super::schema::{Filter, Principal, Property, Type, Value, DKIM};
+use super::schema::{Filter, Patch, Principal, Property, Type, Value, DKIM};
 
 // Principal de/serialization
 impl Serialize for Principal {
@@ -29,8 +29,8 @@ impl Serialize for Principal {
                 Value::Members { value } => map.serialize_entry(name, value)?,
                 Value::Blob { value } => map.serialize_entry(name, value)?,
                 Value::DKIM { value } => map.serialize_entry(name, value)?,
-                Value::ACLGet(value) => map.serialize_entry(name, value)?,
-                Value::ACLSet(_) => (),
+                Value::ACL(value) => map.serialize_entry(name, value)?,
+                Value::Patch(_) => (),
             }
         }
 
@@ -53,6 +53,8 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
     {
         let mut properties: VecMap<Property, Value> = VecMap::new();
         let mut acls = Vec::new();
+        let mut patch_members = VecMap::new();
+        let mut patch_aliases = VecMap::new();
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
@@ -183,52 +185,83 @@ impl<'de> serde::de::Visitor<'de> for PrincipalVisitor {
                             .unwrap_or_default(),
                     });
                 }
-                key => match JSONPointer::parse(key) {
-                    Some(JSONPointer::Path(path))
-                        if path.len() >= 2
-                            && path
-                                .get(0)
-                                .and_then(|p| p.to_string())
-                                .map(Property::parse)
-                                .unwrap_or(Property::Invalid)
-                                == Property::ACL =>
-                    {
-                        if let Some(account_id) = path
-                            .get(1)
-                            .and_then(|p| p.to_string())
-                            .map(|p| p.to_string())
-                        {
-                            if path.len() > 2 {
-                                if let Some(acl) =
-                                    path.get(2).and_then(|p| p.to_string()).map(ACL::parse)
-                                {
-                                    if acl != ACL::None_ {
-                                        acls.push(ACLUpdate::Set {
-                                            account_id,
-                                            acl,
-                                            is_set: map
-                                                .next_value::<Option<bool>>()?
-                                                .unwrap_or(false),
+                key => {
+                    match JSONPointer::parse(key) {
+                        Some(JSONPointer::Path(path)) if path.len() >= 2 => {
+                            match (
+                                path.get(0)
+                                    .and_then(|p| p.to_string())
+                                    .map(Property::parse)
+                                    .unwrap_or(Property::Invalid),
+                                path.get(1).and_then(|p| p.to_string()),
+                            ) {
+                                (Property::ACL, Some(account_id)) => {
+                                    if path.len() > 2 {
+                                        if let Some(acl) =
+                                            path.get(2).and_then(|p| p.to_string()).map(ACL::parse)
+                                        {
+                                            if acl != ACL::None_ {
+                                                acls.push(ACLUpdate::Set {
+                                                    account_id: account_id.to_string(),
+                                                    acl,
+                                                    is_set: map
+                                                        .next_value::<Option<bool>>()?
+                                                        .unwrap_or(false),
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        acls.push(ACLUpdate::Update {
+                                            account_id: account_id.to_string(),
+                                            acls: map
+                                                .next_value::<Option<Vec<ACL>>>()?
+                                                .unwrap_or_default(),
                                         });
                                     }
+                                    continue;
                                 }
-                            } else {
-                                acls.push(ACLUpdate::Update {
-                                    account_id,
-                                    acls: map.next_value::<Option<Vec<ACL>>>()?.unwrap_or_default(),
-                                });
+                                (Property::Aliases, Some(alias)) => {
+                                    patch_aliases.append(
+                                        alias.to_string(),
+                                        map.next_value::<Option<bool>>()?.unwrap_or(false),
+                                    );
+                                    continue;
+                                }
+                                (Property::Members, Some(account_id)) => {
+                                    if let Some(account_id) = JMAPId::parse(account_id) {
+                                        patch_members.append(
+                                            account_id,
+                                            map.next_value::<Option<bool>>()?.unwrap_or(false),
+                                        );
+                                        continue;
+                                    }
+                                }
+                                _ => (),
                             }
                         }
+                        _ => (),
                     }
-                    _ => {
-                        map.next_value::<IgnoredAny>()?;
-                    }
-                },
+                    map.next_value::<IgnoredAny>()?;
+                }
             }
         }
 
         if !acls.is_empty() {
-            properties.append(Property::ACL, Value::ACLSet(acls));
+            properties.append(Property::ACL, Value::Patch(Patch::ACL(acls)));
+        }
+
+        if !patch_aliases.is_empty() {
+            properties.append(
+                Property::Aliases,
+                Value::Patch(Patch::Aliases(patch_aliases)),
+            );
+        }
+
+        if !patch_members.is_empty() {
+            properties.append(
+                Property::Members,
+                Value::Patch(Patch::Members(patch_members)),
+            );
         }
 
         Ok(Principal { properties })
@@ -302,6 +335,9 @@ impl<'de> serde::de::Visitor<'de> for FilterVisitor {
                     value: map.next_value()?,
                 },
                 "name" => Filter::Name {
+                    value: map.next_value()?,
+                },
+                "domainName" => Filter::DomainName {
                     value: map.next_value()?,
                 },
                 "text" => Filter::Text {

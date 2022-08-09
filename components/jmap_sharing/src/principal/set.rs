@@ -3,12 +3,12 @@ use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::acl::ACLUpdate;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
-use jmap::principal::schema::{Principal, Property, Type, Value, ACCOUNTS_TO_DELETE};
+use jmap::principal::schema::{Patch, Principal, Property, Type, Value, ACCOUNTS_TO_DELETE};
 use jmap::principal::store::JMAPPrincipals;
 use jmap::request::set::SetRequest;
 use jmap::request::set::SetResponse;
 use jmap::types::jmap::JMAPId;
-use jmap::{sanitize_domain, sanitize_email, SUPERUSER_ID};
+use jmap::{sanitize_domain, sanitize_email, INGEST_ID, SUPERUSER_ID};
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
 use store::ahash::AHashSet;
@@ -113,6 +113,10 @@ where
         })?;
 
         helper.destroy(|id, helper, document| {
+            if [SUPERUSER_ID, INGEST_ID].contains(&document.document_id) {
+                return Err(SetError::forbidden("Cannot delete system accounts."));
+            }
+
             if let Some(fields) = self.get_orm::<Principal>(SUPERUSER_ID, document.document_id)? {
                 // Remove member from all principals
                 for document_id in self
@@ -316,7 +320,9 @@ where
                     }
                     Value::Text { value }
                 }
+
                 (Property::Description, value @ (Value::Text { .. } | Value::Null)) => value,
+
                 (Property::Email, Value::Text { value }) if ptype != Type::Domain => {
                     if let Some(email) = sanitize_email(&value) {
                         if current_fields.map_or(true, |v| match v.get(&Property::Email) {
@@ -333,16 +339,19 @@ where
                         ));
                     }
                 }
+
                 (Property::Timezone, value @ (Value::Text { .. } | Value::Null))
                     if ![Type::Domain, Type::List].contains(&ptype) =>
                 {
                     value
                 }
+
                 (Property::Capabilities, value @ (Value::TextList { .. } | Value::Null))
                     if ![Type::Domain, Type::List].contains(&ptype) =>
                 {
                     value
                 }
+
                 (Property::Aliases, Value::TextList { value }) if ptype != Type::Domain => {
                     let mut aliases = Vec::with_capacity(value.len());
                     for email in value {
@@ -363,6 +372,43 @@ where
                     }
                     Value::TextList { value: aliases }
                 }
+
+                (Property::Aliases, Value::Patch(Patch::Aliases(value)))
+                    if ptype != Type::Domain =>
+                {
+                    let mut aliases = match current_fields {
+                        Some(v) => match v.get(&Property::Aliases) {
+                            Some(Value::TextList { value }) => value.to_vec(),
+                            _ => vec![],
+                        },
+                        None => vec![],
+                    };
+
+                    for (email, do_set) in value {
+                        if do_set {
+                            if let Some(email) = sanitize_email(&email) {
+                                if !aliases.contains(&email) {
+                                    validate_emails.push(email.clone());
+                                    aliases.push(email);
+                                }
+                            } else {
+                                return Err(SetError::invalid_property(
+                                    property,
+                                    "One or more invalid e-mail addresses.".to_string(),
+                                ));
+                            }
+                        } else {
+                            aliases.retain(|v| v != &email);
+                        }
+                    }
+
+                    if !aliases.is_empty() {
+                        Value::TextList { value: aliases }
+                    } else {
+                        Value::Null
+                    }
+                }
+
                 (Property::Secret, Value::Text { value })
                     if !value.is_empty() && [Type::Individual, Type::Domain].contains(&ptype) =>
                 {
@@ -378,12 +424,14 @@ where
                                                   .to_string()*/
                     }
                 }
+
                 (Property::Secret, Value::Text { value })
                     if !value.is_empty() && ptype == Type::Domain =>
                 {
                     Value::Text { value }
                 }
-                (Property::ACL, Value::ACLSet(value)) => {
+
+                (Property::ACL, Value::Patch(Patch::ACL(value))) => {
                     for acl_update in &value {
                         match acl_update {
                             ACLUpdate::Replace { acls } => {
@@ -414,9 +462,13 @@ where
                     self.acl_finish();
                     continue;
                 }
+
                 (Property::DKIM, value @ Value::DKIM { .. }) if ptype == Type::Domain => value,
+
                 (Property::Quota, value @ (Value::Number { .. } | Value::Null)) => value,
+
                 (Property::Picture, value @ (Value::Blob { .. } | Value::Null)) => value,
+
                 (Property::Members, Value::Members { value }) if ptype == Type::Group => {
                     let current_members = current_fields.as_ref().and_then(|f| {
                         f.get(&Property::Members).and_then(|current_members| {
@@ -457,6 +509,47 @@ where
 
                     Value::Members { value }
                 }
+
+                (Property::Members, Value::Patch(Patch::Members(value)))
+                    if ptype == Type::Group =>
+                {
+                    let mut members = match current_fields {
+                        Some(v) => match v.get(&Property::Members) {
+                            Some(Value::Members { value }) => value.to_vec(),
+                            _ => vec![],
+                        },
+                        None => vec![],
+                    };
+
+                    for (id, do_set) in value {
+                        let account_id = id.get_document_id();
+
+                        if do_set {
+                            if !members.contains(&id) {
+                                if account_id == document_id {
+                                    return Err(SetError::invalid_property(
+                                        property,
+                                        "Cannot add a principal as its member.".to_string(),
+                                    ));
+                                } else if helper.document_ids.contains(account_id) {
+                                    members.push(id);
+                                    helper.store.acl_tokens.invalidate(&account_id);
+                                } else {
+                                    return Err(SetError::invalid_property(
+                                        property,
+                                        format!("Principal '{}' does not exist.", id),
+                                    ));
+                                }
+                            }
+                        } else if let Some(pos) = members.iter().position(|id_| id_ == &id) {
+                            helper.store.acl_tokens.invalidate(&account_id);
+                            members.swap_remove(pos);
+                        }
+                    }
+
+                    Value::Members { value: members }
+                }
+
                 (Property::Members, Value::Members { value }) if ptype == Type::List => {
                     let individuals = helper
                         .store
@@ -484,6 +577,50 @@ where
 
                     Value::Members { value }
                 }
+
+                (Property::Members, Value::Patch(Patch::Members(value))) if ptype == Type::List => {
+                    let mut members = match current_fields {
+                        Some(v) => match v.get(&Property::Members) {
+                            Some(Value::Members { value }) => value.to_vec(),
+                            _ => vec![],
+                        },
+                        None => vec![],
+                    };
+
+                    let individuals = helper
+                        .store
+                        .query_store::<FilterMapper>(
+                            SUPERUSER_ID,
+                            Collection::Principal,
+                            Filter::eq(Property::Type.into(), Query::Keyword("i".to_string())),
+                            Comparator::None,
+                        )?
+                        .into_bitmap();
+
+                    for (id, do_set) in value {
+                        if do_set {
+                            if !members.contains(&id) {
+                                if !individuals.contains(id.get_document_id()) {
+                                    return Err(SetError::invalid_property(
+                                        property,
+                                        format!("Principal '{}' is not an individual.", id),
+                                    ));
+                                } else if id.get_document_id() == document_id {
+                                    return Err(SetError::invalid_property(
+                                        property,
+                                        "Cannot add a principal as its member.".to_string(),
+                                    ));
+                                }
+                                members.push(id);
+                            }
+                        } else {
+                            members.retain(|m| m != &id);
+                        }
+                    }
+
+                    Value::Members { value: members }
+                }
+
                 (
                     Property::Email
                     | Property::Secret

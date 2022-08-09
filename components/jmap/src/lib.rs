@@ -35,6 +35,7 @@ pub enum URI {
 pub type Result<T> = std::result::Result<T, MethodError>;
 
 pub const SUPERUSER_ID: AccountId = 0;
+pub const INGEST_ID: AccountId = 1;
 
 pub fn from_timestamp(timestamp: i64) -> DateTime<Utc> {
     DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc)

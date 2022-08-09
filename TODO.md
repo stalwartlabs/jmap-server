@@ -16,10 +16,6 @@ jmap-server
   - S3 connector.
   - Do not replicate blobs when using S3.
   - Escape filenames in src/api/blob.
-- Housekeeping tasks
-  - Blob deletion.
-  - Log compaction.
-  - Account deletion.
 - Read configuration from EnvSettings.
 - Fix logging from subcrates.
 - Set readOnly on shared accounts for jmap session.
@@ -49,7 +45,7 @@ jmap-server
   - Fuzz testing.
   - Enron database.
 - Review all dependencies what kind of code they have.
-- Remove /home/vagrant/code/ references from Cargo.toml.
+- Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).
 - Remove print!() and println!() from everywhere.
 
 imap-server

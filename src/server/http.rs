@@ -56,20 +56,36 @@ where
         .unwrap()
         .map_or(true, |ids| !ids.contains(SUPERUSER_ID))
     {
-        let mut document = Document::new(Collection::Principal, SUPERUSER_ID);
-        TinyORM::<Principal>::new_account(
-            "admin",
-            &settings
-                .get("set-admin-password")
-                .unwrap_or_else(|| "changeme".to_string()),
-            "Administrator",
-        )
-        .insert(&mut document)
-        .unwrap();
         #[cfg(not(test))]
-        store
-            .write(WriteBatch::insert(SUPERUSER_ID, document))
-            .unwrap();
+        {
+            let mut batch = WriteBatch::new(SUPERUSER_ID);
+            for (pos, (id, name)) in [("admin", "Administrator"), ("ingest", "Ingest account")]
+                .into_iter()
+                .enumerate()
+            {
+                let account_id = store
+                    .assign_document_id(SUPERUSER_ID, Collection::Principal)
+                    .expect("Failed to generate account id.");
+                if account_id != pos as u32 {
+                    panic!(
+                        "Failed to generate account id, expected id {} but got {}.",
+                        pos, account_id
+                    );
+                }
+                let mut document = Document::new(Collection::Principal, account_id);
+                TinyORM::<Principal>::new_account(
+                    id,
+                    &settings
+                        .get(&format!("set-{}-password", id))
+                        .unwrap_or_else(|| "changeme".to_string()),
+                    name,
+                )
+                .insert(&mut document)
+                .unwrap();
+                batch.insert_document(document);
+            }
+            store.write(batch).expect("Failed to write to database.");
+        }
     } else if let Some(secret) = settings.get("set-admin-password") {
         // Reset admin password
         let mut batch = WriteBatch::new(SUPERUSER_ID);

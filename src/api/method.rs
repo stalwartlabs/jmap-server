@@ -275,6 +275,12 @@ impl Request {
                         ) => {
                             return response.eval_json_pointer(&rr.path);
                         }
+                        (Method::GetPrincipal, Response::GetPrincipal(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
+                        (Method::QueryPrincipal, Response::QueryPrincipal(response)) => {
+                            return response.eval_json_pointer(&rr.path);
+                        }
                         _ => {
                             break;
                         }
@@ -320,6 +326,12 @@ impl Request {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
             }
             Request::SetEmailSubmission(request) => {
+                request.eval_references(&mut eval_result_ref, &response.created_ids)?;
+            }
+            Request::GetPrincipal(request) => {
+                request.eval_result_references(&mut eval_result_ref)?;
+            }
+            Request::SetPrincipal(request) => {
                 request.eval_references(&mut eval_result_ref, &response.created_ids)?;
             }
             _ => (),

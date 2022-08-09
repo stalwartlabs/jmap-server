@@ -104,58 +104,64 @@ where
             {
                 if let Some(session) = core.sessions.get(&token.to_string()) {
                     authorized = session.into();
-                } else if mechanism.eq_ignore_ascii_case("basic") {
+                } else {
                     // Before authenticating enforce rate limit for anonymous requests
                     core.is_anonymous_allowed(
                         req.remote_address(core.store.config.use_forwarded_header),
                     )
                     .await?;
 
-                    // Decode the base64 encoded credentials
-                    if let Some((login, secret)) = base64::decode(token)
-                        .ok()
-                        .and_then(|token| String::from_utf8(token).ok())
-                        .and_then(|token| {
-                            token.split_once(':').map(|(login, secret)| {
-                                (login.trim().to_lowercase(), secret.to_string())
+                    if mechanism.eq_ignore_ascii_case("basic") {
+                        // Decode the base64 encoded credentials
+                        if let Some((login, secret)) = base64::decode(token)
+                            .ok()
+                            .and_then(|token| String::from_utf8(token).ok())
+                            .and_then(|token| {
+                                token.split_once(':').map(|(login, secret)| {
+                                    (login.trim().to_lowercase(), secret.to_string())
+                                })
                             })
-                        })
-                    {
-                        let store = core.store.clone();
-                        match core
-                            .spawn_worker(move || {
-                                // Validate password
-                                Ok(
-                                    if let Some(account_id) = store.authenticate(&login, &secret)? {
-                                        Session::new(
-                                            account_id,
-                                            store.get_acl_token(account_id)?.as_ref(),
-                                        )
-                                        .into()
-                                    } else {
-                                        None
-                                    },
-                                )
-                            })
-                            .await
                         {
-                            Ok(Some(session)) => {
-                                // Basic authentication successful, add token to session store
-                                core.sessions
-                                    .insert(token.to_string(), session.clone())
-                                    .await;
-                                authorized = session.into();
+                            let store = core.store.clone();
+                            match core
+                                .spawn_worker(move || {
+                                    // Validate password
+                                    Ok(
+                                        if let Some(account_id) =
+                                            store.authenticate(&login, &secret)?
+                                        {
+                                            Session::new(
+                                                account_id,
+                                                store.get_acl_token(account_id)?.as_ref(),
+                                            )
+                                            .into()
+                                        } else {
+                                            None
+                                        },
+                                    )
+                                })
+                                .await
+                            {
+                                Ok(Some(session)) => {
+                                    // Basic authentication successful, add token to session store
+                                    core.sessions
+                                        .insert(token.to_string(), session.clone())
+                                        .await;
+                                    authorized = session.into();
+                                }
+                                Ok(None) => {
+                                    return service.call(req).await;
+                                }
+                                Err(err) => {
+                                    error!("Store error during authentication: {}", err);
+                                    return Err(RequestError::internal_server_error().into());
+                                }
                             }
-                            Ok(None) => {
-                                return service.call(req).await;
-                            }
-                            Err(err) => {
-                                error!("Store error during authentication: {}", err);
-                                return Err(RequestError::internal_server_error().into());
-                            }
+                        } else {
+                            debug!("Failed to decode Basic auth request.",);
                         }
-                    } else {
-                        debug!("Failed to decode Basic auth request.",);
+                    } else if mechanism.eq_ignore_ascii_case("bearer") {
+                        // Validate bearer token
                     }
                 }
             }

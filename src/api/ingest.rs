@@ -1,12 +1,13 @@
 use actix_web::{
     http::{header::ContentType, StatusCode},
-    web, HttpResponse,
+    web, HttpResponse, ResponseError,
 };
 use jmap::{
     orm::TinyORM,
     principal::schema::Type,
     sanitize_email,
     types::{jmap::JMAPId, type_state::TypeState},
+    INGEST_ID, SUPERUSER_ID,
 };
 use jmap_mail::{
     mail::{
@@ -29,6 +30,8 @@ use store::{
 };
 
 use crate::{
+    api::RequestError,
+    authorization::Session,
     services::{email_delivery, state_change::StateChange},
     JMAPServer,
 };
@@ -38,7 +41,6 @@ use crate::{
 pub struct Params {
     from: Option<String>,
     to: String,
-    api_key: String,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -55,7 +57,9 @@ pub enum DeliveryStatus {
     Success,
     #[serde(rename = "failure")]
     Failure,
-    #[serde(rename = "temporary_failure")]
+    #[serde(rename = "notFound")]
+    NotFound,
+    #[serde(rename = "temporaryFailure")]
     TemporaryFailure,
 }
 
@@ -71,6 +75,9 @@ pub enum Status {
         permanent: bool,
         reason: String,
     },
+    NotFound {
+        email: String,
+    },
 }
 
 impl Status {
@@ -83,16 +90,13 @@ impl Status {
     }
 
     pub fn not_found(email: String) -> Status {
-        Status::Failure {
-            email,
-            permanent: true,
-            reason: "Recipient does not exist.".to_string(),
-        }
+        Status::NotFound { email }
     }
 }
 
 pub async fn handle_ingest<T>(
     params: web::Query<Params>,
+    session: Session,
     bytes: web::Bytes,
     core: web::Data<JMAPServer<T>>,
 ) -> HttpResponse
@@ -100,9 +104,9 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     // Validate API key
-    if core.store.config.api_key.is_empty() || core.store.config.api_key != params.api_key {
-        debug!("Invalid API key");
-        return HttpResponse::Unauthorized().finish();
+    if ![INGEST_ID, SUPERUSER_ID].contains(&session.account_id()) {
+        debug!("Account not authorized for message ingestion.");
+        return RequestError::unauthorized().error_response();
     }
 
     // Ingest message
@@ -181,6 +185,13 @@ where
                         DeliveryStatus::TemporaryFailure
                     },
                     reason: reason.into(),
+                });
+            }
+            Status::NotFound { email } => {
+                response.push(Dsn {
+                    to: email,
+                    status: DeliveryStatus::NotFound,
+                    reason: "Recipient not found.".to_string().into(),
                 });
             }
         }

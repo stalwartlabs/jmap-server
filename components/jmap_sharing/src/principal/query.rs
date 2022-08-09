@@ -27,10 +27,13 @@ where
         helper.parse_filter(|filter| {
             Ok(match filter {
                 Filter::Email { value } => {
-                    filter::Filter::eq(Property::Email.into(), Query::Tokenize(value))
+                    filter::Filter::eq(Property::Email.into(), Query::Index(value))
                 }
                 Filter::Name { value } => {
                     filter::Filter::eq(Property::Name.into(), Query::Tokenize(value))
+                }
+                Filter::DomainName { value } => {
+                    filter::Filter::eq(Property::Name.into(), Query::Index(value))
                 }
                 Filter::Timezone { value } => {
                     filter::Filter::eq(Property::Timezone.into(), Query::Tokenize(value))

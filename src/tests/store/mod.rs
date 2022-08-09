@@ -43,9 +43,9 @@ fn store_tests() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_store", true);
     let db = Arc::new(db);
 
-    //blobs::test(db.clone());
+    blobs::test(db.clone());
     log::test(db.clone());
-    //query::test(db, true);
+    query::test(db, true);
 
     destroy_temp_dir(&temp_dir);
 }

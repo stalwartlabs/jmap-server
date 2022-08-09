@@ -46,7 +46,7 @@ where
                                     acl_get.append(email, acls);
                                 }
                             }
-                            Value::ACLGet(acl_get)
+                            Value::ACL(acl_get)
                         }
 
                         Property::Secret => Value::Null,

@@ -173,6 +173,9 @@ pub enum Method {
     SetEmailSubmission,
     GetVacationResponse,
     SetVacationResponse,
+    GetPrincipal,
+    SetPrincipal,
+    QueryPrincipal,
     Error,
 }
 
@@ -213,6 +216,9 @@ impl serde::Serialize for Method {
             Method::SetEmailSubmission => "EmailSubmission/set",
             Method::GetVacationResponse => "VacationResponse/get",
             Method::SetVacationResponse => "VacationResponse/set",
+            Method::GetPrincipal => "Principal/get",
+            Method::SetPrincipal => "Principal/set",
+            Method::QueryPrincipal => "Principal/query",
             Method::Error => "error",
         })
     }
@@ -262,6 +268,9 @@ impl<'de> serde::de::Visitor<'de> for MethodVisitor {
             "EmailSubmission/set" => Method::SetEmailSubmission,
             "VacationResponse/get" => Method::GetVacationResponse,
             "VacationResponse/set" => Method::SetVacationResponse,
+            "Principal/get" => Method::GetPrincipal,
+            "Principal/set" => Method::SetPrincipal,
+            "Principal/query" => Method::QueryPrincipal,
             _ => Method::Error,
         })
     }
