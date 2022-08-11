@@ -16,7 +16,7 @@ pub struct WriteBatch {
     pub account_id: AccountId,
     pub changes: VecMap<Collection, Change>,
     pub documents: Vec<WriteAction>,
-    pub linked_batch: Option<Box<WriteBatch>>,
+    pub linked_batch: Vec<WriteBatch>,
 }
 
 #[derive(Default)]
@@ -33,7 +33,7 @@ impl WriteBatch {
             account_id,
             changes: VecMap::new(),
             documents: Vec::new(),
-            linked_batch: None,
+            linked_batch: Vec::new(),
         }
     }
 
@@ -42,7 +42,7 @@ impl WriteBatch {
             account_id,
             changes: VecMap::new(),
             documents: vec![WriteAction::Insert(document)],
-            linked_batch: None,
+            linked_batch: Vec::new(),
         }
     }
 
@@ -51,7 +51,7 @@ impl WriteBatch {
             account_id,
             changes: VecMap::new(),
             documents: vec![WriteAction::Delete(Document::new(collection, document_id))],
-            linked_batch: None,
+            linked_batch: Vec::new(),
         }
     }
 
@@ -115,12 +115,12 @@ impl WriteBatch {
             account_id: self.account_id,
             changes: std::mem::take(&mut self.changes),
             documents: std::mem::take(&mut self.documents),
-            linked_batch: self.linked_batch.take(),
+            linked_batch: std::mem::take(&mut self.linked_batch),
         }
     }
 
-    pub fn set_linked_batch(&mut self, batch: WriteBatch) {
-        self.linked_batch = Box::new(batch).into();
+    pub fn add_linked_batch(&mut self, batch: WriteBatch) {
+        self.linked_batch.push(batch);
     }
 }
 

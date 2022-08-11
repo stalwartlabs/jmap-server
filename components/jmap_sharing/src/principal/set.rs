@@ -752,7 +752,7 @@ where
                 batch.log_insert(Collection::Mailbox, document.document_id);
                 batch.insert_document(document);
             }
-            helper.changes.set_linked_batch(batch);
+            helper.changes.add_linked_batch(batch);
         }
 
         Ok(self)

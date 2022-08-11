@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::schema::{Mailbox, Property, Value};
 use crate::mail::schema::Email;
 use crate::mail::set::JMAPSetMail;
@@ -246,8 +248,21 @@ where
                 Tag::Id(document_id),
             )? {
                 if on_destroy_remove_emails {
-                    // Fetch results
-                    let _lock = self.lock_account(helper.account_id, Collection::Mail);
+                    // Try locking the collection before deleting the messages
+                    let _lock = match self.try_lock_collection(
+                        helper.account_id,
+                        Collection::Mail,
+                        Duration::from_secs(1),
+                    ) {
+                        Some(lock) => lock,
+                        None => {
+                            return Err(SetError::new(
+                                SetErrorType::RateLimit,
+                                "Resource busy, please try again in a few momentss.",
+                            ));
+                        }
+                    };
+
                     for message_document_id in message_doc_ids {
                         let mut document = Document::new(Collection::Mail, message_document_id);
                         // Fetch Email's ORM

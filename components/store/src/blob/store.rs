@@ -191,4 +191,28 @@ where
 
         Ok(false)
     }
+
+    pub fn blob_any_linked_document(
+        &self,
+        blob_id: &BlobId,
+        account_id: AccountId,
+        collection: Collection,
+    ) -> crate::Result<Option<DocumentId>> {
+        let prefix = BlobKey::serialize_collection(blob_id, account_id, collection);
+
+        if let Some((key, _)) = self
+            .db
+            .iterator(ColumnFamily::Blobs, &prefix, Direction::Forward)?
+            .next()
+        {
+            if key.starts_with(&prefix) && key.len() > prefix.len() {
+                if let Some((document_id, _)) = DocumentId::from_leb128_bytes(&key[prefix.len()..])
+                {
+                    return Ok(Some(document_id));
+                }
+            }
+        }
+
+        Ok(None)
+    }
 }

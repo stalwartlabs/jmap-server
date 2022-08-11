@@ -45,8 +45,8 @@ where
             .load(std::sync::atomic::Ordering::Relaxed);
 
         // Prepare linked batch
-        if let Some(linked_batch) = batch.linked_batch.take() {
-            self.prepare_batch(&mut ops, *linked_batch, tombstone_deletions)?;
+        for sub_batch in batch.linked_batch.drain(..) {
+            self.prepare_batch(&mut ops, sub_batch, tombstone_deletions)?;
         }
 
         // Prepare main batch

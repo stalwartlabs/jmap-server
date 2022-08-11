@@ -5,6 +5,7 @@ use jmap::error::method::MethodError;
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::changes::JMAPChanges;
 use jmap::jmap_store::Object;
+use jmap::orm::serialize::JMAPOrm;
 use jmap::orm::TinyORM;
 use jmap::request::{ACLEnforce, MaybeIdReference, MaybeResultReference, ResultReference};
 use jmap::types::blob::JMAPBlob;
@@ -187,6 +188,61 @@ where
                     }
                 }
 
+                // Make sure the message does not exist already
+                {
+                    let _lock = self.lock_collection(account_id, Collection::Mail);
+                    if let Some(document_id) = self.blob_any_linked_document(
+                        &item.blob_id.id,
+                        account_id,
+                        Collection::Mail,
+                    )? {
+                        if let (Some(thread_id), Some(current_fields)) = (
+                            self.get_document_value::<DocumentId>(
+                                account_id,
+                                Collection::Mail,
+                                document_id,
+                                MessageField::ThreadId.into(),
+                            )?,
+                            self.get_orm::<Email>(account_id, document_id)?,
+                        ) {
+                            let email_id = JMAPId::from_parts(thread_id, document_id);
+                            let mut fields = TinyORM::track_changes(&current_fields);
+                            for mailbox_id in mailbox_ids.keys() {
+                                fields.tag(
+                                    Property::MailboxIds,
+                                    Tag::Id(mailbox_id.get_document_id()),
+                                );
+                            }
+                            let added_mailboxes =
+                                current_fields.get_added_tags(&fields, &Property::MailboxIds);
+                            if !added_mailboxes.is_empty() {
+                                let mut batch = WriteBatch::new(account_id);
+                                let mut document = Document::new(Collection::Mail, document_id);
+
+                                for added_mailbox in added_mailboxes {
+                                    batch.log_child_update(
+                                        Collection::Mailbox,
+                                        added_mailbox.as_id(),
+                                    );
+                                }
+                                current_fields.merge(&mut document, fields)?;
+                                debug_assert!(!document.is_empty());
+                                batch.update_document(document);
+                                batch.log_update(Collection::Mail, email_id);
+                                self.write(batch)?;
+                            }
+
+                            let mut email = Email::default();
+                            email.insert(Property::Id, email_id);
+                            email.insert(Property::BlobId, JMAPBlob::new(item.blob_id.id));
+                            email.insert(Property::ThreadId, JMAPId::from(thread_id));
+
+                            created.append(id, email);
+                            continue 'outer;
+                        }
+                    }
+                }
+
                 match self.mail_blob_get(account_id, &acl, &item.blob_id)? {
                     BlobResult::Blob(blob) => {
                         created.append(
@@ -311,7 +367,7 @@ where
         orm.insert(&mut document)?;
 
         // Lock account while threads are merged
-        let _lock = self.lock_account(batch.account_id, Collection::Mail);
+        let _lock = self.lock_collection(batch.account_id, Collection::Mail);
 
         // Obtain thread Id
         let thread_id = self.mail_set_thread(&mut batch, &mut document)?;

@@ -1,12 +1,13 @@
 use core::hash::Hash;
-use std::{collections::hash_map::DefaultHasher, hash::Hasher};
+use std::{hash::Hasher, time::Duration};
 
+use ahash::AHasher;
 use parking_lot::{Mutex, MutexGuard};
 
 pub struct MutexMap<T: Default> {
     map: Box<[Mutex<T>]>,
     mask: u64,
-    hasher: DefaultHasher,
+    hasher: AHasher,
 }
 
 pub struct MutexMapLockError;
@@ -22,7 +23,7 @@ impl<T: Default> MutexMap<T> {
                 .collect::<Vec<Mutex<T>>>()
                 .into_boxed_slice(),
             mask: (size - 1) as u64,
-            hasher: DefaultHasher::new(),
+            hasher: AHasher::default(),
         }
     }
 
@@ -34,6 +35,14 @@ impl<T: Default> MutexMap<T> {
         self.map[hash as usize].lock()
     }
 
+    pub fn try_lock<U>(&self, key: U, timeout: Duration) -> Option<MutexGuard<'_, T>>
+    where
+        U: Into<u64> + Copy,
+    {
+        let hash = key.into() & self.mask;
+        self.map[hash as usize].try_lock_for(timeout)
+    }
+
     pub fn lock_hash<U>(&self, key: U) -> MutexGuard<'_, T>
     where
         U: Hash,
@@ -42,5 +51,15 @@ impl<T: Default> MutexMap<T> {
         key.hash(&mut hasher);
         let hash = hasher.finish() & self.mask;
         self.map[hash as usize].lock()
+    }
+
+    pub fn try_lock_hash<U>(&self, key: U, timeout: Duration) -> Option<MutexGuard<'_, T>>
+    where
+        U: Hash,
+    {
+        let mut hasher = self.hasher.clone();
+        key.hash(&mut hasher);
+        let hash = hasher.finish() & self.mask;
+        self.map[hash as usize].try_lock_for(timeout)
     }
 }

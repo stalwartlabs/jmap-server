@@ -398,7 +398,7 @@ where
         };
 
         // Lock account while threads are merged
-        let _lock = self.lock_account(account_id, Collection::Mail);
+        let _lock = self.lock_collection(account_id, Collection::Mail);
 
         // Obtain thread Id
         match self.mail_set_thread(&mut batch, &mut document) {

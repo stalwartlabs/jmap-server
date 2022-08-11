@@ -23,8 +23,6 @@ jmap-server
 - OAuth authentication with Raft support.
 - Base32 encoding of ids and blobIds.
 - Binaries
-  - Postfix ingest
-  - Admin binary.
   - Maildir/Mbox import binary.
 - Email Delivery
   - Be notified of shutdowns and lost leaderships (all modules).

@@ -181,8 +181,23 @@ where
     }
 
     #[inline(always)]
-    pub fn lock_account(&self, account: AccountId, collection: Collection) -> MutexGuard<'_, ()> {
+    pub fn lock_collection(
+        &self,
+        account: AccountId,
+        collection: Collection,
+    ) -> MutexGuard<'_, ()> {
         self.account_lock.lock_hash((account, collection))
+    }
+
+    #[inline(always)]
+    pub fn try_lock_collection(
+        &self,
+        account: AccountId,
+        collection: Collection,
+        timeout: Duration,
+    ) -> Option<MutexGuard<'_, ()>> {
+        self.account_lock
+            .try_lock_hash((account, collection), timeout)
     }
 }
 

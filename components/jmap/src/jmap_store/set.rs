@@ -76,7 +76,7 @@ where
             .unwrap_or_default();
         Ok(SetHelper {
             store,
-            lock: store.lock_account(account_id, collection),
+            lock: store.lock_collection(account_id, collection),
             changes: WriteBatch::new(account_id),
             document_ids: store
                 .get_document_ids(account_id, collection)?

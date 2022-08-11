@@ -101,12 +101,16 @@ where
     let account_id = id.get_document_id();
 
     // Rate limit uploads
-    let _upload_req = core
-        .rate_limiters
-        .get(&RemoteAddress::AccountId(session.account_id()))
-        .unwrap()
-        .is_upload_allowed(core.store.config.max_concurrent_upload)
-        .ok_or_else(|| RequestError::limit(RequestLimitError::Concurrent))?;
+    let _upload_req = if session.account_id() != SUPERUSER_ID {
+        core.rate_limiters
+            .get(&RemoteAddress::AccountId(session.account_id()))
+            .unwrap()
+            .is_upload_allowed(core.store.config.max_concurrent_upload)
+            .ok_or_else(|| RequestError::limit(RequestLimitError::Concurrent))?
+            .into()
+    } else {
+        None
+    };
 
     #[cfg(test)]
     {

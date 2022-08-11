@@ -231,7 +231,7 @@ where
             fields.insert(document)?;
 
             // Lock collection
-            let lock = self.lock_account(helper.account_id, Collection::Mail);
+            let lock = self.lock_collection(helper.account_id, Collection::Mail);
 
             // Obtain thread Id
             let thread_id = self.mail_set_thread(&mut helper.changes, document)?;
