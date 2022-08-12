@@ -1,7 +1,7 @@
 use crate::error::method::MethodError;
 use crate::error::set::SetError;
 use crate::jmap_store::set::SetObject;
-use crate::request::ArgumentSerializer;
+use crate::request::ArgumentDeserializer;
 use crate::types::jmap::JMAPId;
 use crate::types::state::JMAPState;
 use crate::types::type_state::TypeState;

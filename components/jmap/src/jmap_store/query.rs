@@ -13,7 +13,7 @@ use store::{
 use crate::{
     error::method::MethodError,
     request::{
-        query::{self, QueryRequest, QueryResponse},
+        query::{self, FilterDeserializer, QueryRequest, QueryResponse},
         ACLEnforce,
     },
     types::jmap::JMAPId,
@@ -36,7 +36,7 @@ where
 
 pub trait QueryObject: Object {
     type QueryArguments;
-    type Filter: for<'de> serde::Deserialize<'de>;
+    type Filter: FilterDeserializer;
     type Comparator: for<'de> serde::Deserialize<'de>;
 }
 
@@ -113,17 +113,24 @@ where
                         query::Filter::FilterCondition(cond) => {
                             state.terms.push(parse_fnc(cond)?);
                         }
+                        query::Filter::Empty => (),
                     }
                 }
 
-                filter = Filter::Operator(FilterOperator {
-                    operator: state.op,
-                    conditions: state.terms,
-                });
+                filter = if !state.terms.is_empty() {
+                    Filter::Operator(FilterOperator {
+                        operator: state.op,
+                        conditions: state.terms,
+                    })
+                } else {
+                    Filter::None
+                };
 
                 if let Some(prev_state) = state_stack.pop() {
                     state = prev_state;
-                    state.terms.push(filter);
+                    if !matches!(filter, Filter::None) {
+                        state.terms.push(filter);
+                    }
                 } else {
                     break 'outer;
                 }

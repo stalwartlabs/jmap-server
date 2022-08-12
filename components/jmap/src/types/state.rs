@@ -1,5 +1,10 @@
-use super::{hex_reader, HexWriter};
-use store::{log::changes::ChangeId, serialize::leb128::Leb128};
+use store::{
+    log::changes::ChangeId,
+    serialize::{
+        base32::{Base32Reader, Base32Writer},
+        leb128::Leb128,
+    },
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JMAPIntermediateState {
@@ -55,9 +60,12 @@ impl JMAPState {
     pub fn parse(id: &str) -> Option<Self> {
         match id.as_bytes().get(0)? {
             b'n' => JMAPState::Initial.into(),
-            b's' => JMAPState::Exact(ChangeId::from_str_radix(id.get(1..)?, 16).ok()?).into(),
+            b's' => JMAPState::Exact(ChangeId::from_leb128_it(&mut Base32Reader::new(
+                id.get(1..)?.as_bytes(),
+            ))?)
+            .into(),
             b'r' => {
-                let mut it = hex_reader(id, 1);
+                let mut it = Base32Reader::new(id.get(1..)?.as_bytes());
 
                 let from_id = ChangeId::from_leb128_it(&mut it)?;
                 let to_id = from_id.checked_add(ChangeId::from_leb128_it(&mut it)?)?;
@@ -117,12 +125,18 @@ impl<'de> serde::Deserialize<'de> for JMAPState {
 
 impl std::fmt::Display for JMAPState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut writer = Base32Writer::with_capacity(10);
+
         match self {
-            JMAPState::Initial => write!(f, "n"),
-            JMAPState::Exact(id) => write!(f, "s{:02x}", id),
+            JMAPState::Initial => {
+                writer.push_char('n');
+            }
+            JMAPState::Exact(id) => {
+                writer.push_char('s');
+                id.to_leb128_writer(&mut writer).unwrap();
+            }
             JMAPState::Intermediate(intermediate) => {
-                let mut writer = HexWriter::with_capacity(10);
-                writer.result.push('r');
+                writer.push_char('r');
                 intermediate.from_id.to_leb128_writer(&mut writer).unwrap();
                 (intermediate.to_id - intermediate.from_id)
                     .to_leb128_writer(&mut writer)
@@ -131,9 +145,10 @@ impl std::fmt::Display for JMAPState {
                     .items_sent
                     .to_leb128_writer(&mut writer)
                     .unwrap();
-                write!(f, "{}", writer.result)
             }
         }
+
+        f.write_str(&writer.finalize())
     }
 }
 

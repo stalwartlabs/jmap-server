@@ -188,9 +188,8 @@ where
         App::new()
             .wrap(SessionFactory::new(jmap_server.clone()))
             .wrap(
-                Cors::default()
-                    .allow_any_origin()
-                    .allowed_methods(vec!["GET", "POST", "OPTIONS"]),
+                Cors::permissive(), //.allow_any_origin()
+                                    //.allowed_methods(vec!["GET", "POST", "OPTIONS"]),
             )
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())

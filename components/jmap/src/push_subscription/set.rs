@@ -1,10 +1,10 @@
 use crate::error::set::{SetError, SetErrorType};
-use crate::from_timestamp;
 use crate::jmap_store::set::SetHelper;
 use crate::jmap_store::Object;
 use crate::orm::{serialize::JMAPOrm, TinyORM};
 use crate::request::set::SetResponse;
 use crate::request::ResultReference;
+use crate::types::date::JMAPDate;
 use crate::types::jmap::JMAPId;
 use crate::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::chrono::Utc;
@@ -109,7 +109,7 @@ where
             fields.set(
                 Property::Expires,
                 Value::DateTime {
-                    value: from_timestamp(
+                    value: JMAPDate::from_timestamp(
                         if expires > current_time && (expires - current_time) > EXPIRES_MAX {
                             current_time + EXPIRES_MAX
                         } else {
@@ -187,7 +187,7 @@ where
                 fields.set(
                     Property::Expires,
                     Value::DateTime {
-                        value: from_timestamp(
+                        value: JMAPDate::from_timestamp(
                             if expires > current_time && (expires - current_time) > EXPIRES_MAX {
                                 current_time + EXPIRES_MAX
                             } else {

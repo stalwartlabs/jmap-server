@@ -10,7 +10,7 @@ use crate::{
     types::{jmap::JMAPId, state::JMAPState},
 };
 
-use super::{ArgumentSerializer, MaybeResultReference, ResultReference};
+use super::{ArgumentDeserializer, MaybeResultReference, ResultReference};
 
 #[derive(Debug, Clone, Default)]
 pub struct GetRequest<O: GetObject> {

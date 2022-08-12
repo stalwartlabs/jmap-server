@@ -1,13 +1,11 @@
 use std::fmt::Display;
 
-use jmap::{orm, types::jmap::JMAPId};
-use serde::{Deserialize, Serialize};
-use store::{
-    ahash::AHashSet,
-    chrono::{DateTime, Utc},
-    core::vec_map::VecMap,
-    FieldId,
+use jmap::{
+    orm,
+    types::{date::JMAPDate, jmap::JMAPId},
 };
+use serde::{Deserialize, Serialize};
+use store::{ahash::AHashSet, core::vec_map::VecMap, FieldId};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VacationResponse {
@@ -19,7 +17,7 @@ pub enum Value {
     Id { value: JMAPId },
     Text { value: String },
     Bool { value: bool },
-    DateTime { value: DateTime<Utc> },
+    DateTime { value: JMAPDate },
     SentResponses { value: AHashSet<String> },
     Null,
 }

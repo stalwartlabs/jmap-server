@@ -1,3 +1,4 @@
+pub mod base32;
 pub mod bitmap;
 pub mod key;
 pub mod leb128;

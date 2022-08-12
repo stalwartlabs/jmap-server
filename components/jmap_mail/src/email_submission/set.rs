@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use crate::identity;
 use crate::identity::schema::Identity;
 use crate::mail::schema::Email;
@@ -7,6 +9,7 @@ use jmap::error::set::{SetError, SetErrorType};
 
 use jmap::jmap_store::Object;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
+use jmap::types::date::JMAPDate;
 use jmap::types::jmap::JMAPId;
 use store::ahash::{AHashMap, AHashSet};
 
@@ -19,7 +22,6 @@ use store::core::document::Document;
 use store::core::vec_map::VecMap;
 
 use store::blob::BlobId;
-use store::chrono::{DateTime, Utc};
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::serialize::{StoreDeserialize, StoreSerialize};
@@ -174,7 +176,10 @@ where
                 })?;
 
             // Make sure the envelope address matches the identity email address
-            let mut send_at = Utc::now();
+            let mut send_at = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0) as i64;
             let mut envelope = if let Some(envelope) = envelope {
                 if !envelope.mail_from.email.eq_ignore_ascii_case(&mail_from) {
                     return Err(SetError::invalid_property(
@@ -192,11 +197,10 @@ where
                         .get("HOLDFOR")
                         .and_then(|s| s.as_ref().and_then(|s| s.parse::<u64>().ok()))
                     {
-                        send_at
-                            .checked_add_signed(store::chrono::Duration::seconds(hold_for as i64));
+                        send_at += hold_for as i64;
                     } else if let Some(Some(hold_until)) = parameters.get("HOLDUNTIL") {
-                        if let Ok(hold_until) = DateTime::parse_from_rfc3339(hold_until) {
-                            send_at = hold_until.into();
+                        if let Some(hold_until) = JMAPDate::parse(hold_until) {
+                            send_at = hold_until.timestamp();
                         }
                     }
                 }
@@ -215,7 +219,12 @@ where
             }
 
             // Set the sentAt property
-            fields.set(Property::SendAt, Value::DateTime { value: send_at });
+            fields.set(
+                Property::SendAt,
+                Value::DateTime {
+                    value: JMAPDate::from_timestamp(send_at),
+                },
+            );
 
             // Fetch message data
             let mut message_data = MessageData::deserialize(

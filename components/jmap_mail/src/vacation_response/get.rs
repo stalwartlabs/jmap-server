@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper, SharedDocsFnc};
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::get::{GetRequest, GetResponse};
@@ -6,7 +8,6 @@ use store::ahash::AHashSet;
 
 use mail_builder::headers::address::Address;
 use mail_builder::MessageBuilder;
-use store::chrono::Utc;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
@@ -117,11 +118,14 @@ where
                 vr.get(&Property::IsEnabled),
                 Some(Value::Bool { value: true })
             ) {
-                let now = Utc::now();
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0) as i64;
                 if !matches!(vr.get(&Property::FromDate), Some(Value::DateTime { value: from_date })
-                        if from_date > &now)
+                        if from_date.timestamp() > now)
                     && !matches!(vr.get(&Property::ToDate), Some(Value::DateTime { value: to_date })
-                        if to_date < &now)
+                        if to_date.timestamp() < now)
                 {
                     let address = to.to_string();
 

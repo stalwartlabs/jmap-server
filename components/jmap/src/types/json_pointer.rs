@@ -118,6 +118,22 @@ impl JSONPointer {
             _ => None,
         }
     }
+
+    pub fn is_item_query(&self, name: &str) -> bool {
+        match self {
+            JSONPointer::String(property) => property == name,
+            JSONPointer::Path(path) if path.len() == 2 => {
+                if let (Some(JSONPointer::String(property)), Some(JSONPointer::Wildcard)) =
+                    (path.get(0), path.get(1))
+                {
+                    property == name
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
 }
 
 struct JSONPointerVisitor;

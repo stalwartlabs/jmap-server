@@ -71,16 +71,12 @@ where
 
 impl JSONPointerEval for ChangesResponseArguments {
     fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
-        if let JSONPointer::String(property) = ptr {
-            if property == "updatedProperties" {
-                Some(if let Some(updated_properties) = &self.updated_properties {
-                    updated_properties.iter().map(|p| *p as u64).collect()
-                } else {
-                    Vec::with_capacity(0)
-                })
+        if ptr.is_item_query("updatedProperties") {
+            Some(if let Some(updated_properties) = &self.updated_properties {
+                updated_properties.iter().map(|p| *p as u64).collect()
             } else {
-                None
-            }
+                Vec::with_capacity(0)
+            })
         } else {
             None
         }

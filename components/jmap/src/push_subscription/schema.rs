@@ -1,13 +1,13 @@
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
-use store::{
-    chrono::{DateTime, Utc},
-    core::vec_map::VecMap,
-    FieldId,
-};
+use store::{core::vec_map::VecMap, FieldId};
 
-use crate::{orm, types::jmap::JMAPId, types::type_state::TypeState};
+use crate::{
+    orm,
+    types::type_state::TypeState,
+    types::{date::JMAPDate, jmap::JMAPId},
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushSubscription {
@@ -24,7 +24,7 @@ pub struct Keys {
 pub enum Value {
     Id { value: JMAPId },
     Text { value: String },
-    DateTime { value: DateTime<Utc> },
+    DateTime { value: JMAPDate },
     Types { value: Vec<TypeState> },
     Keys { value: Keys },
     Null,

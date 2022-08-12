@@ -336,7 +336,7 @@ impl<'de> serde::Deserialize<'de> for MaybeIdReference {
     }
 }
 
-pub trait ArgumentSerializer {
+pub trait ArgumentDeserializer {
     fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
         property: &'z str,
@@ -344,7 +344,7 @@ pub trait ArgumentSerializer {
     ) -> Result<(), String>;
 }
 
-impl ArgumentSerializer for () {
+impl ArgumentDeserializer for () {
     fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
         _property: &'z str,

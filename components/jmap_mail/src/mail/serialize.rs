@@ -1,16 +1,14 @@
 use std::{borrow::Cow, fmt};
 
 use jmap::{
-    request::{ArgumentSerializer, MaybeIdReference, MaybeResultReference},
-    types::json_pointer::JSONPointer,
+    request::{
+        query::FilterDeserializer, ArgumentDeserializer, MaybeIdReference, MaybeResultReference,
+    },
     types::{blob::JMAPBlob, jmap::JMAPId},
+    types::{date::JMAPDate, json_pointer::JSONPointer},
 };
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
-use store::{
-    ahash::AHashSet,
-    chrono::{DateTime, Utc},
-    core::vec_map::VecMap,
-};
+use store::{ahash::AHashSet, core::vec_map::VecMap};
 
 use super::{
     get::GetArguments,
@@ -140,12 +138,12 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                     }
                 }
                 "sentAt" => {
-                    if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
+                    if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
                         properties.append(Property::SentAt, Value::Date { value });
                     }
                 }
                 "receivedAt" => {
-                    if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
+                    if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
                         properties.append(Property::ReceivedAt, Value::Date { value });
                     }
                 }
@@ -698,7 +696,7 @@ impl<'de> Deserialize<'de> for Keyword {
 }
 
 // Argument serializers
-impl ArgumentSerializer for GetArguments {
+impl ArgumentDeserializer for GetArguments {
     fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
         property: &'z str,
@@ -734,113 +732,92 @@ impl ArgumentSerializer for GetArguments {
 }
 
 // Filter deserializer
-struct FilterVisitor;
-
-impl<'de> serde::de::Visitor<'de> for FilterVisitor {
-    type Value = Filter;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail object")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        Ok(
-            match map
-                .next_key::<&str>()?
-                .ok_or_else(|| serde::de::Error::custom("Missing filter property"))?
-            {
-                "inMailbox" => Filter::InMailbox {
-                    value: map.next_value()?,
-                },
-                "inMailboxOtherThan" => Filter::InMailboxOtherThan {
-                    value: map.next_value()?,
-                },
-                "before" => Filter::Before {
-                    value: map.next_value()?,
-                },
-                "after" => Filter::After {
-                    value: map.next_value()?,
-                },
-                "minSize" => Filter::MinSize {
-                    value: map.next_value()?,
-                },
-                "maxSize" => Filter::MaxSize {
-                    value: map.next_value()?,
-                },
-                "allInThreadHaveKeyword" => Filter::AllInThreadHaveKeyword {
-                    value: map.next_value()?,
-                },
-                "someInThreadHaveKeyword" => Filter::SomeInThreadHaveKeyword {
-                    value: map.next_value()?,
-                },
-                "noneInThreadHaveKeyword" => Filter::NoneInThreadHaveKeyword {
-                    value: map.next_value()?,
-                },
-                "hasKeyword" => Filter::HasKeyword {
-                    value: map.next_value()?,
-                },
-                "notKeyword" => Filter::NotKeyword {
-                    value: map.next_value()?,
-                },
-                "hasAttachment" => Filter::HasAttachment {
-                    value: map.next_value()?,
-                },
-                "text" => Filter::Text {
-                    value: map.next_value()?,
-                },
-                "from" => Filter::From {
-                    value: map.next_value()?,
-                },
-                "to" => Filter::To {
-                    value: map.next_value()?,
-                },
-                "cc" => Filter::Cc {
-                    value: map.next_value()?,
-                },
-                "bcc" => Filter::Bcc {
-                    value: map.next_value()?,
-                },
-                "subject" => Filter::Subject {
-                    value: map.next_value()?,
-                },
-                "body" => Filter::Body {
-                    value: map.next_value()?,
-                },
-                "header" => Filter::Header {
-                    value: map.next_value()?,
-                },
-
-                // Non-standard
-                "id" => Filter::Id {
-                    value: map.next_value()?,
-                },
-                "sentBefore" => Filter::SentBefore {
-                    value: map.next_value()?,
-                },
-                "sentAfter" => Filter::SentAfter {
-                    value: map.next_value()?,
-                },
-                "inThread" => Filter::InThread {
-                    value: map.next_value()?,
-                },
-
-                unsupported => Filter::Unsupported {
-                    value: unsupported.to_string(),
-                },
+impl FilterDeserializer for Filter {
+    fn deserialize<'x>(property: &str, map: &mut impl serde::de::MapAccess<'x>) -> Option<Self> {
+        match property {
+            "inMailbox" => Filter::InMailbox {
+                value: map.next_value().ok()?,
             },
-        )
-    }
-}
+            "inMailboxOtherThan" => Filter::InMailboxOtherThan {
+                value: map.next_value().ok()?,
+            },
+            "before" => Filter::Before {
+                value: map.next_value().ok()?,
+            },
+            "after" => Filter::After {
+                value: map.next_value().ok()?,
+            },
+            "minSize" => Filter::MinSize {
+                value: map.next_value().ok()?,
+            },
+            "maxSize" => Filter::MaxSize {
+                value: map.next_value().ok()?,
+            },
+            "allInThreadHaveKeyword" => Filter::AllInThreadHaveKeyword {
+                value: map.next_value().ok()?,
+            },
+            "someInThreadHaveKeyword" => Filter::SomeInThreadHaveKeyword {
+                value: map.next_value().ok()?,
+            },
+            "noneInThreadHaveKeyword" => Filter::NoneInThreadHaveKeyword {
+                value: map.next_value().ok()?,
+            },
+            "hasKeyword" => Filter::HasKeyword {
+                value: map.next_value().ok()?,
+            },
+            "notKeyword" => Filter::NotKeyword {
+                value: map.next_value().ok()?,
+            },
+            "hasAttachment" => Filter::HasAttachment {
+                value: map.next_value().ok()?,
+            },
+            "text" => Filter::Text {
+                value: map.next_value().ok()?,
+            },
+            "from" => Filter::From {
+                value: map.next_value().ok()?,
+            },
+            "to" => Filter::To {
+                value: map.next_value().ok()?,
+            },
+            "cc" => Filter::Cc {
+                value: map.next_value().ok()?,
+            },
+            "bcc" => Filter::Bcc {
+                value: map.next_value().ok()?,
+            },
+            "subject" => Filter::Subject {
+                value: map.next_value().ok()?,
+            },
+            "body" => Filter::Body {
+                value: map.next_value().ok()?,
+            },
+            "header" => Filter::Header {
+                value: map.next_value().ok()?,
+            },
 
-impl<'de> Deserialize<'de> for Filter {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(FilterVisitor)
+            // Non-standard
+            "id" => Filter::Id {
+                value: map.next_value().ok()?,
+            },
+            "sentBefore" => Filter::SentBefore {
+                value: map.next_value().ok()?,
+            },
+            "sentAfter" => Filter::SentAfter {
+                value: map.next_value().ok()?,
+            },
+            "inThread" => Filter::InThread {
+                value: map.next_value().ok()?,
+            },
+
+            unsupported => {
+                map.next_value::<IgnoredAny>().ok()?;
+                Filter::Unsupported {
+                    value: unsupported.to_string(),
+                }
+            }
+        }
+        .into()
     }
 }
 

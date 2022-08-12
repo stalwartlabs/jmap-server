@@ -9,6 +9,7 @@ use jmap::orm::serialize::JMAPOrm;
 use jmap::orm::TinyORM;
 use jmap::request::{ACLEnforce, MaybeIdReference, MaybeResultReference, ResultReference};
 use jmap::types::blob::JMAPBlob;
+use jmap::types::date::JMAPDate;
 use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use mail_parser::decoders::html::html_to_text;
@@ -19,7 +20,6 @@ use mail_parser::{
 use store::ahash::AHashMap;
 use store::ahash::AHashSet;
 use store::blob::BlobId;
-use store::chrono::DateTime;
 use store::core::acl::{ACLToken, ACL};
 use store::core::collection::Collection;
 use store::core::document::{Document, MAX_ID_LENGTH, MAX_SORT_FIELD_LENGTH};
@@ -68,7 +68,7 @@ pub struct EmailImport {
     pub blob_id: JMAPBlob,
     pub mailbox_ids: Option<MaybeResultReference<VecMap<MaybeIdReference, bool>>>,
     pub keywords: Option<VecMap<Keyword, bool>>,
-    pub received_at: Option<DateTime<store::chrono::Utc>>,
+    pub received_at: Option<JMAPDate>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

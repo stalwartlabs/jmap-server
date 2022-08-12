@@ -5,6 +5,7 @@ use store::core::{acl::ACL, vec_map::VecMap};
 
 use crate::{
     orm::acl::ACLUpdate,
+    request::query::FilterDeserializer,
     types::{blob::JMAPBlob, jmap::JMAPId, json_pointer::JSONPointer},
 };
 
@@ -313,64 +314,43 @@ impl<'de> Deserialize<'de> for Property {
 }
 
 // Filter deserializer
-struct FilterVisitor;
-
-impl<'de> serde::de::Visitor<'de> for FilterVisitor {
-    type Value = Filter;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid Principal filter")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        Ok(
-            match map
-                .next_key::<&str>()?
-                .ok_or_else(|| serde::de::Error::custom("Missing filter property"))?
-            {
-                "email" => Filter::Email {
-                    value: map.next_value()?,
-                },
-                "name" => Filter::Name {
-                    value: map.next_value()?,
-                },
-                "domainName" => Filter::DomainName {
-                    value: map.next_value()?,
-                },
-                "text" => Filter::Text {
-                    value: map.next_value()?,
-                },
-                "type" => Filter::Type {
-                    value: map.next_value()?,
-                },
-                "timezone" => Filter::Timezone {
-                    value: map.next_value()?,
-                },
-                "members" => Filter::Members {
-                    value: map.next_value()?,
-                },
-                "quotaLowerThan" => Filter::QuotaLt {
-                    value: map.next_value()?,
-                },
-                "quotaGreaterThan" => Filter::QuotaGt {
-                    value: map.next_value()?,
-                },
-                unsupported => Filter::Unsupported {
-                    value: unsupported.to_string(),
-                },
+impl FilterDeserializer for Filter {
+    fn deserialize<'x>(property: &str, map: &mut impl serde::de::MapAccess<'x>) -> Option<Self> {
+        match property {
+            "email" => Filter::Email {
+                value: map.next_value().ok()?,
             },
-        )
-    }
-}
-
-impl<'de> Deserialize<'de> for Filter {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(FilterVisitor)
+            "name" => Filter::Name {
+                value: map.next_value().ok()?,
+            },
+            "domainName" => Filter::DomainName {
+                value: map.next_value().ok()?,
+            },
+            "text" => Filter::Text {
+                value: map.next_value().ok()?,
+            },
+            "type" => Filter::Type {
+                value: map.next_value().ok()?,
+            },
+            "timezone" => Filter::Timezone {
+                value: map.next_value().ok()?,
+            },
+            "members" => Filter::Members {
+                value: map.next_value().ok()?,
+            },
+            "quotaLowerThan" => Filter::QuotaLt {
+                value: map.next_value().ok()?,
+            },
+            "quotaGreaterThan" => Filter::QuotaGt {
+                value: map.next_value().ok()?,
+            },
+            unsupported => {
+                map.next_value::<IgnoredAny>().ok()?;
+                Filter::Unsupported {
+                    value: unsupported.to_string(),
+                }
+            }
+        }
+        .into()
     }
 }

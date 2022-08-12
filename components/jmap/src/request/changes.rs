@@ -72,14 +72,26 @@ impl<O: ChangesObject> ChangesResponse<O> {
 
 impl<O: ChangesObject> JSONPointerEval for ChangesResponse<O> {
     fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
-        if let JSONPointer::String(property) = ptr {
-            match property.as_str() {
-                "created" => Some(self.created.iter().map(Into::into).collect()),
-                "updated" => Some(self.updated.iter().map(Into::into).collect()),
-                _ => self.arguments.eval_json_pointer(ptr),
+        let property = match ptr {
+            JSONPointer::String(property) => property,
+            JSONPointer::Path(path) if path.len() == 2 => {
+                if let (Some(JSONPointer::String(property)), Some(JSONPointer::Wildcard)) =
+                    (path.get(0), path.get(1))
+                {
+                    property
+                } else {
+                    return None;
+                }
             }
-        } else {
-            None
+            _ => {
+                return None;
+            }
+        };
+
+        match property.as_str() {
+            "created" => Some(self.created.iter().map(Into::into).collect()),
+            "updated" => Some(self.updated.iter().map(Into::into).collect()),
+            _ => self.arguments.eval_json_pointer(ptr),
         }
     }
 }

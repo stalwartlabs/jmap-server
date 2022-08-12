@@ -10,14 +10,13 @@ use super::{
 use crate::mail::{MessageData, MessageField, MimePart, MimePartType};
 use jmap::{
     error::method::MethodError,
-    from_timestamp,
     jmap_store::get::{GetHelper, GetObject},
     orm::serialize::JMAPOrm,
     request::{
         get::{GetRequest, GetResponse},
         ACLEnforce, MaybeIdReference,
     },
-    types::{blob::JMAPBlob, jmap::JMAPId},
+    types::{blob::JMAPBlob, date::JMAPDate, jmap::JMAPId},
     SUPERUSER_ID,
 };
 use mail_parser::{
@@ -339,7 +338,7 @@ where
                     }
                     .into(),
                     Property::ReceivedAt => Value::Date {
-                        value: from_timestamp(message_data.received_at),
+                        value: JMAPDate::from_timestamp(message_data.received_at),
                     }
                     .into(),
                     Property::MessageId | Property::InReplyTo | Property::References => {

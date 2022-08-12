@@ -6,7 +6,7 @@ use crate::{
     error::method::MethodError,
     request::{
         get::{GetRequest, GetResponse},
-        ACLEnforce, ArgumentSerializer,
+        ACLEnforce, ArgumentDeserializer,
     },
     types::jmap::JMAPId,
 };
@@ -30,7 +30,7 @@ where
 }
 
 pub trait GetObject: Object {
-    type GetArguments: Default + ArgumentSerializer;
+    type GetArguments: Default + ArgumentDeserializer;
 
     fn get_as_id(&self, property: &Self::Property) -> Option<Vec<JMAPId>>;
     fn default_properties() -> Vec<Self::Property>;

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use jmap::from_timestamp;
+use jmap::types::date::JMAPDate;
 use mail_parser::{
     parsers::{
         fields::{
@@ -416,7 +416,7 @@ impl IntoForm for Vec<super::HeaderValue> {
                     super::HeaderValue::TextList(value),
                 ) => Value::TextList { value }.into(),
                 (HeaderForm::Date, super::HeaderValue::Timestamp(ts)) => Value::Date {
-                    value: from_timestamp(ts),
+                    value: JMAPDate::from_timestamp(ts),
                 }
                 .into(),
                 (HeaderForm::Addresses, super::HeaderValue::Addresses(value)) => {
@@ -455,7 +455,7 @@ impl IntoForm for Vec<super::HeaderValue> {
                 HeaderForm::Date => Value::DateList {
                     value: self
                         .into_iter()
-                        .filter_map(|v| v.into_timestamp().map(from_timestamp))
+                        .filter_map(|v| v.into_timestamp().map(JMAPDate::from_timestamp))
                         .collect(),
                 }
                 .into(),

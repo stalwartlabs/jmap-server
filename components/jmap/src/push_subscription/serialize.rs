@@ -1,12 +1,9 @@
 use std::{borrow::Cow, fmt};
 
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
-use store::{
-    chrono::{DateTime, Utc},
-    core::vec_map::VecMap,
-};
+use store::core::vec_map::VecMap;
 
-use crate::types::type_state::TypeState;
+use crate::types::{date::JMAPDate, type_state::TypeState};
 
 use super::schema::{Keys, Property, PushSubscription, Value};
 
@@ -128,7 +125,7 @@ impl<'de> serde::de::Visitor<'de> for PushSubscriptionVisitor {
                 "expires" => {
                     properties.append(
                         Property::Expires,
-                        if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
+                        if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
                             Value::DateTime { value }
                         } else {
                             Value::Null

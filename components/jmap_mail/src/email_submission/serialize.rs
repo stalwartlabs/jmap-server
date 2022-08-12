@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use jmap::request::{ArgumentSerializer, MaybeIdReference};
+use jmap::request::{query::FilterDeserializer, ArgumentDeserializer, MaybeIdReference};
 use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::core::vec_map::VecMap;
 
@@ -158,7 +158,7 @@ impl<'de> Deserialize<'de> for EmailSubmission {
 }
 
 // Argument serializer
-impl ArgumentSerializer for SetArguments {
+impl ArgumentDeserializer for SetArguments {
     fn deserialize<'x: 'y, 'y, 'z>(
         &'y mut self,
         property: &'z str,
@@ -178,55 +178,34 @@ impl ArgumentSerializer for SetArguments {
 }
 
 // Filter deserializer
-struct FilterVisitor;
-
-impl<'de> serde::de::Visitor<'de> for FilterVisitor {
-    type Value = Filter;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP e-mail submission filter")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        Ok(
-            match map
-                .next_key::<&str>()?
-                .ok_or_else(|| serde::de::Error::custom("Missing filter property"))?
-            {
-                "identityIds" => Filter::IdentityIds {
-                    value: map.next_value()?,
-                },
-                "emailIds" => Filter::EmailIds {
-                    value: map.next_value()?,
-                },
-                "threadIds" => Filter::ThreadIds {
-                    value: map.next_value()?,
-                },
-                "undoStatus" => Filter::UndoStatus {
-                    value: map.next_value()?,
-                },
-                "before" => Filter::Before {
-                    value: map.next_value()?,
-                },
-                "after" => Filter::After {
-                    value: map.next_value()?,
-                },
-                unsupported => Filter::Unsupported {
-                    value: unsupported.to_string(),
-                },
+impl FilterDeserializer for Filter {
+    fn deserialize<'x>(property: &str, map: &mut impl serde::de::MapAccess<'x>) -> Option<Self> {
+        match property {
+            "identityIds" => Filter::IdentityIds {
+                value: map.next_value().ok()?,
             },
-        )
-    }
-}
-
-impl<'de> Deserialize<'de> for Filter {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(FilterVisitor)
+            "emailIds" => Filter::EmailIds {
+                value: map.next_value().ok()?,
+            },
+            "threadIds" => Filter::ThreadIds {
+                value: map.next_value().ok()?,
+            },
+            "undoStatus" => Filter::UndoStatus {
+                value: map.next_value().ok()?,
+            },
+            "before" => Filter::Before {
+                value: map.next_value().ok()?,
+            },
+            "after" => Filter::After {
+                value: map.next_value().ok()?,
+            },
+            unsupported => {
+                map.next_value::<IgnoredAny>().ok()?;
+                Filter::Unsupported {
+                    value: unsupported.to_string(),
+                }
+            }
+        }
+        .into()
     }
 }

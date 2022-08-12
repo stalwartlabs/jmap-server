@@ -22,8 +22,6 @@ jmap-server
 - Control the amount of data stored from all set requests (ORM values, headers, etc.)
 - OAuth authentication with Raft support.
 - Base32 encoding of ids and blobIds.
-- Binaries
-  - Maildir/Mbox import binary.
 - Email Delivery
   - Be notified of shutdowns and lost leaderships (all modules).
   - On startup load all pending deliveries.
@@ -35,7 +33,6 @@ jmap-server
   - Test read replicas.
 - Testing
   - Test webmail client using Enron db.
-  - Run cleanup tasks after calling principal destroy.
   - Set harcoded settings in EnvSettings.
   - References pointing to updatedProperties in mailbox.
   - upToId in queryChanges.

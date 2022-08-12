@@ -1,7 +1,7 @@
 use std::{borrow::Cow, fmt};
 
+use jmap::types::date::JMAPDate;
 use serde::{ser::SerializeMap, Deserialize, Serialize};
-use store::chrono::{DateTime, Utc};
 use store::core::vec_map::VecMap;
 
 use super::schema::{Property, VacationResponse, Value};
@@ -122,7 +122,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                 "fromDate" => {
                     properties.append(
                         Property::FromDate,
-                        if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
+                        if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
                             Value::DateTime { value }
                         } else {
                             Value::Null
@@ -132,7 +132,7 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                 "toDate" => {
                     properties.append(
                         Property::ToDate,
-                        if let Some(value) = map.next_value::<Option<DateTime<Utc>>>()? {
+                        if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
                             Value::DateTime { value }
                         } else {
                             Value::Null

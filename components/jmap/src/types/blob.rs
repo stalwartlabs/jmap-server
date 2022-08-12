@@ -1,9 +1,8 @@
 use std::io::Write;
 
 use store::blob::{BlobId, BLOB_HASH_LEN};
+use store::serialize::base32::{Base32Reader, Base32Writer};
 use store::serialize::leb128::Leb128;
-
-use super::{hex_reader, HexWriter};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JMAPBlob {
@@ -49,7 +48,7 @@ impl JMAPBlob {
             }
         };
 
-        let mut it = hex_reader(id, 1);
+        let mut it = Base32Reader::new(id.get(1..)?.as_bytes());
         let mut hash = [0; BLOB_HASH_LEN];
 
         for byte in hash.iter_mut().take(BLOB_HASH_LEN) {
@@ -145,9 +144,11 @@ impl<'de> serde::Deserialize<'de> for JMAPBlob {
 impl std::fmt::Display for JMAPBlob {
     #[allow(clippy::unused_io_amount)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut writer = HexWriter::with_capacity(40);
+        let mut writer;
         if let Some(section) = &self.section {
-            writer.result.push(char::from(if self.id.is_local() {
+            writer =
+                Base32Writer::with_capacity(BLOB_HASH_LEN + (std::mem::size_of::<u32>() * 2) + 1);
+            writer.push_char(char::from(if self.id.is_local() {
                 b'c' + section.encoding
             } else {
                 b'h' + section.encoding
@@ -156,11 +157,11 @@ impl std::fmt::Display for JMAPBlob {
             section.offset_start.to_leb128_writer(&mut writer).unwrap();
             section.size.to_leb128_writer(&mut writer).unwrap();
         } else {
-            writer
-                .result
-                .push(if self.id.is_local() { 'a' } else { 'b' });
+            writer = Base32Writer::with_capacity(BLOB_HASH_LEN + 1);
+            writer.push_char(if self.id.is_local() { 'a' } else { 'b' });
             writer.write(self.id.hash()).unwrap();
         }
-        write!(f, "{}", writer.result)
+
+        f.write_str(&writer.finalize())
     }
 }

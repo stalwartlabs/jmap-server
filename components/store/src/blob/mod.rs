@@ -1,10 +1,10 @@
-use std::{convert::TryInto, fmt::Display, ops::Range};
+use std::{convert::TryInto, fmt::Display, io::Write, ops::Range};
 
 use sha2::{Digest, Sha256};
 
 use crate::{
     config::env_settings::EnvSettings,
-    serialize::{StoreDeserialize, StoreSerialize},
+    serialize::{base32::Base32Writer, StoreDeserialize, StoreSerialize},
     write::mutex_map::MutexMap,
 };
 
@@ -64,10 +64,10 @@ impl BlobId {
 
 impl Display for BlobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&base32::encode(
-            base32::Alphabet::RFC4648 { padding: false },
-            self.hash(),
-        ))
+        let bytes = self.hash();
+        let mut writer = Base32Writer::with_capacity(bytes.len());
+        writer.write_all(bytes).unwrap();
+        f.write_str(&writer.finalize())
     }
 }
 

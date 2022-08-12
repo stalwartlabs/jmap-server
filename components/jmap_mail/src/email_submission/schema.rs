@@ -3,15 +3,10 @@ use std::fmt::Display;
 use jmap::{
     orm,
     request::ResultReference,
-    types::{blob::JMAPBlob, jmap::JMAPId},
+    types::{blob::JMAPBlob, date::JMAPDate, jmap::JMAPId},
 };
 use serde::{Deserialize, Serialize};
-use store::{
-    ahash::AHashMap,
-    chrono::{DateTime, Utc},
-    core::vec_map::VecMap,
-    FieldId,
-};
+use store::{ahash::AHashMap, core::vec_map::VecMap, FieldId};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EmailSubmission {
@@ -27,7 +22,7 @@ pub enum Value {
         value: String,
     },
     DateTime {
-        value: DateTime<Utc>,
+        value: JMAPDate,
     },
     UndoStatus {
         value: UndoStatus,
@@ -238,8 +233,8 @@ pub enum Filter {
     EmailIds { value: Vec<JMAPId> },
     ThreadIds { value: Vec<JMAPId> },
     UndoStatus { value: UndoStatus },
-    Before { value: DateTime<Utc> },
-    After { value: DateTime<Utc> },
+    Before { value: JMAPDate },
+    After { value: JMAPDate },
     Unsupported { value: String },
 }
 

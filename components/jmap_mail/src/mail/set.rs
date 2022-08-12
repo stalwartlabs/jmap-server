@@ -214,7 +214,7 @@ where
                         builder = builder.subject(value);
                     }
                     (Property::SentAt, Value::Date { value }) => {
-                        builder = builder.date(value);
+                        builder = builder.date(Date::new(value.timestamp()));
                     }
                     (Property::TextBody, Value::BodyPartList { value }) => {
                         if item.properties.contains_key(&Property::BodyStructure) {
@@ -381,11 +381,14 @@ where
                                 .headers(header.header.as_str(), value.iter().map(Raw::from));
                         }
                         (HeaderForm::Date, Value::Date { value }) => {
-                            builder = builder.header(header.header.as_str(), Date::from(value));
+                            builder = builder
+                                .header(header.header.as_str(), Date::new(value.timestamp()));
                         }
                         (HeaderForm::Date, Value::DateList { value }) => {
-                            builder = builder
-                                .headers(header.header.as_str(), value.iter().map(Date::from));
+                            builder = builder.headers(
+                                header.header.as_str(),
+                                value.iter().map(|v| Date::new(v.timestamp())),
+                            );
                         }
                         (HeaderForm::Text, Value::Text { value }) => {
                             builder = builder.header(header.header.as_str(), Text::from(value));

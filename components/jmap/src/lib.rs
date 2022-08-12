@@ -9,10 +9,7 @@ pub mod types;
 pub use base64;
 
 use error::method::MethodError;
-use store::{
-    chrono::{DateTime, NaiveDateTime, Utc},
-    AccountId,
-};
+use store::AccountId;
 
 #[derive(Debug, Clone, serde::Serialize, Hash, PartialEq, Eq)]
 pub enum URI {
@@ -36,10 +33,6 @@ pub type Result<T> = std::result::Result<T, MethodError>;
 
 pub const SUPERUSER_ID: AccountId = 0;
 pub const INGEST_ID: AccountId = 1;
-
-pub fn from_timestamp(timestamp: i64) -> DateTime<Utc> {
-    DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(timestamp, 0), Utc)
-}
 
 // Basic email sanitizer
 pub fn sanitize_email(email: &str) -> Option<String> {

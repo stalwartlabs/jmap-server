@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use jmap::{
     request::{MaybeIdReference, ResultReference},
-    types::{blob::JMAPBlob, jmap::JMAPId},
+    types::{blob::JMAPBlob, date::JMAPDate, jmap::JMAPId},
 };
 use mail_parser::{
     parsers::header::{parse_header_name, HeaderParserResult},
@@ -11,7 +11,6 @@ use mail_parser::{
 
 use store::{
     blob::BlobId,
-    chrono::{DateTime, Utc},
     core::{tag::Tag, vec_map::VecMap},
     FieldId,
 };
@@ -527,10 +526,10 @@ pub enum Value {
         value: Vec<Vec<String>>,
     },
     Date {
-        value: DateTime<Utc>,
+        value: JMAPDate,
     },
     DateList {
-        value: Vec<DateTime<Utc>>,
+        value: Vec<JMAPDate>,
     },
     Addresses {
         value: Vec<EmailAddress>,
@@ -720,8 +719,8 @@ impl TryFrom<&str> for Property {
 pub enum Filter {
     InMailbox { value: JMAPId },
     InMailboxOtherThan { value: Vec<JMAPId> },
-    Before { value: DateTime<Utc> },
-    After { value: DateTime<Utc> },
+    Before { value: JMAPDate },
+    After { value: JMAPDate },
     MinSize { value: u32 },
     MaxSize { value: u32 },
     AllInThreadHaveKeyword { value: Keyword },
@@ -742,8 +741,8 @@ pub enum Filter {
 
     // Non-standard
     Id { value: Vec<JMAPId> },
-    SentBefore { value: DateTime<Utc> },
-    SentAfter { value: DateTime<Utc> },
+    SentBefore { value: JMAPDate },
+    SentAfter { value: JMAPDate },
     InThread { value: JMAPId },
 }
 

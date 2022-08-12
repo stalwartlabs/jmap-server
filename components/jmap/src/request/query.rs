@@ -1,5 +1,10 @@
-use std::sync::Arc;
+use std::{
+    borrow::Cow,
+    fmt::{self, Debug},
+    sync::Arc,
+};
 
+use serde::Deserialize;
 use store::core::acl::ACLToken;
 
 use crate::{
@@ -48,26 +53,23 @@ pub struct QueryRequest<O: QueryObject> {
     pub arguments: O::QueryArguments,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(untagged)]
-pub enum Filter<T> {
+#[derive(Debug, Clone)]
+pub enum Filter<T: FilterDeserializer> {
     FilterOperator(FilterOperator<T>),
     FilterCondition(T),
+    Empty,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct FilterOperator<T> {
+#[derive(Debug, Clone)]
+pub struct FilterOperator<T: FilterDeserializer> {
     pub operator: Operator,
     pub conditions: Vec<Filter<T>>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
-    #[serde(rename = "AND")]
     And,
-    #[serde(rename = "OR")]
     Or,
-    #[serde(rename = "NOT")]
     Not,
 }
 
@@ -119,14 +121,76 @@ pub struct QueryResponse {
 
 impl JSONPointerEval for QueryResponse {
     fn eval_json_pointer(&self, ptr: &JSONPointer) -> Option<Vec<u64>> {
-        if let JSONPointer::String(property) = ptr {
-            if property == "ids" {
-                Some(self.ids.iter().map(Into::into).collect())
-            } else {
-                None
-            }
+        if ptr.is_item_query("ids") {
+            Some(self.ids.iter().map(Into::into).collect())
         } else {
             None
         }
+    }
+}
+
+// Filter deserializer
+struct FilterVisitor<T> {
+    phantom: std::marker::PhantomData<T>,
+}
+
+pub trait FilterDeserializer: Sized + Debug {
+    fn deserialize<'x>(property: &str, map: &mut impl serde::de::MapAccess<'x>) -> Option<Self>;
+}
+
+impl<'de, T: FilterDeserializer> serde::de::Visitor<'de> for FilterVisitor<T> {
+    type Value = Filter<T>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid JMAP e-mail filter")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut operator = Operator::And;
+        let mut conditions = Vec::new();
+
+        while let Some(key) = map.next_key::<Cow<str>>()? {
+            match key.as_ref() {
+                "operator" => {
+                    operator = match map.next_value::<&str>()? {
+                        "AND" => Operator::And,
+                        "OR" => Operator::Or,
+                        "NOT" => Operator::Not,
+                        _ => Operator::And,
+                    };
+                }
+                "conditions" => {
+                    conditions = map.next_value()?;
+                }
+                property => {
+                    if let Some(value) = T::deserialize(property, &mut map) {
+                        conditions.push(Filter::FilterCondition(value));
+                    }
+                }
+            }
+        }
+
+        Ok(match conditions.len() {
+            1 if operator != Operator::Not => conditions.pop().unwrap(),
+            0 => Filter::Empty,
+            _ => Filter::FilterOperator(FilterOperator {
+                operator,
+                conditions,
+            }),
+        })
+    }
+}
+
+impl<'de, T: FilterDeserializer> Deserialize<'de> for Filter<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(FilterVisitor {
+            phantom: std::marker::PhantomData,
+        })
     }
 }
