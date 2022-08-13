@@ -1,11 +1,19 @@
-use super::{Protocol, MAX_FRAME_LENGTH};
+use super::Protocol;
 use actix_web::web::{self, Buf};
 use store::bincode;
 use store::serialize::leb128::Leb128;
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Default)]
-pub struct RpcEncoder {}
+pub struct RpcEncoder {
+    max_frame_length: usize,
+}
+
+impl RpcEncoder {
+    pub fn new(max_frame_length: usize) -> Self {
+        Self { max_frame_length }
+    }
+}
 
 impl Decoder for RpcEncoder {
     type Item = Protocol;
@@ -24,7 +32,7 @@ impl Decoder for RpcEncoder {
             )
         })?;
 
-        if frame_len > MAX_FRAME_LENGTH {
+        if frame_len > self.max_frame_length {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Frame of length {} is too large.", frame_len),

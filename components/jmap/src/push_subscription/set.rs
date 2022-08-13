@@ -17,7 +17,6 @@ use store::{AccountId, JMAPStore, Store};
 use super::schema::{Property, PushSubscription, Value};
 
 const EXPIRES_MAX: i64 = 7 * 24 * 3600; // 7 days
-const MAX_SUBSCRIPTIONS: u64 = 100;
 const VERIFICATION_CODE_LEN: usize = 32;
 
 impl SetObject for PushSubscription {
@@ -57,7 +56,7 @@ where
 
         helper.create(|_create_id, item, helper, document| {
             // Limit the number of subscriptions
-            if helper.document_ids.len() > MAX_SUBSCRIPTIONS {
+            if helper.document_ids.len() as usize >= helper.store.config.subscription_max_total {
                 return Err(SetError::new(
                     SetErrorType::Forbidden,
                     "There are too many subscriptions, please delete some before adding a new one."

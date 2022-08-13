@@ -127,7 +127,7 @@ where
     }
 
     pub fn is_enabled(&self) -> bool {
-        !self.key.is_empty()
+        !self.config.key.is_empty()
     }
 
     pub fn shard_status(&self) -> (u32, u32) {

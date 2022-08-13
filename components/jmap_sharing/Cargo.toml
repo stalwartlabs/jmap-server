@@ -10,4 +10,7 @@ jmap_mail = { path = "../jmap_mail" }
 store = { path = "../store" }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-argon2 = "0.4.0"
+rust-argon2 = "1.0"
+
+[features]
+debug = []

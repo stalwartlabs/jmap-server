@@ -8,7 +8,8 @@ use jmap::{
 use jmap_mail::email_submission::schema::{
     Delivered, DeliveryStatus, Displayed, EmailSubmission, Property, UndoStatus, Value,
 };
-use mail_send::{smtp::message::Message, Transport};
+use jmap_mail::mail_send::{smtp::message::Message, Transport};
+use jmap_sharing::principal::get::JMAPGetPrincipal;
 use store::{
     ahash::AHashMap,
     blob::BlobId,
@@ -38,6 +39,8 @@ pub enum Event {
         message: Vec<u8>,
     },
     RelayReady,
+    Reload,
+    Start,
     Stop,
 }
 
@@ -96,8 +99,12 @@ pub fn spawn_email_delivery<T>(
                     }
                 }
                 Event::Stop => {
+                    if let Err(err) = relay_tx.send(Event::Reload).await {
+                        error!("Error sending event to relay: {}", err);
+                    }
                     queue.clear();
                 }
+                Event::Start => (),
                 event => {
                     if is_ready {
                         if let Err(err) = relay_tx.send(event).await {
@@ -131,6 +138,7 @@ where
             client = client.credentials(username, secret);
         }
         let is_tls = smtp_relay.tls;
+        let mut dkim_map = AHashMap::new();
 
         while let Some(event) = rx.recv().await {
             match event {
@@ -213,6 +221,50 @@ where
                                     continue;
                                 };
 
+                                // Fetch dkim settings
+                                let domain_name = envelope
+                                    .mail_from
+                                    .email
+                                    .split_once('@')
+                                    .unwrap()
+                                    .1
+                                    .to_string();
+                                let dkim = if let Some(dkim) = dkim_map.get(&domain_name) {
+                                    dkim
+                                } else {
+                                    match core.store.dkim_get(domain_name.clone()) {
+                                        Ok(dkim) => {
+                                            dkim_map.insert(
+                                                domain_name.clone(),
+                                                if let Some(dkim) = dkim {
+                                                    dkim.headers([
+                                                        "From",
+                                                        "To",
+                                                        "Subject",
+                                                        "Date",
+                                                        "Cc",
+                                                        "Bcc",
+                                                        "Message-ID",
+                                                        "References",
+                                                        "In-Reply-To",
+                                                    ])
+                                                    .into()
+                                                } else {
+                                                    None
+                                                },
+                                            );
+                                            dkim_map.get(&domain_name).unwrap()
+                                        }
+                                        Err(err) => {
+                                            error!(
+                                                "Error getting DKIM settings for domain '{}': {}",
+                                                domain_name, err
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                };
+
                                 // Create delivery status list
                                 let mut delivery_status =
                                     AHashMap::with_capacity(envelope.rcpt_to.len());
@@ -274,8 +326,32 @@ where
 
                                     // Do not submit message if no recipients were accepted
                                     if accepted_rcpt {
+                                        // Sign message
+                                        let mut headers = None;
+                                        if let Some(dkim) = dkim {
+                                            match dkim.sign(&raw_message) {
+                                                Ok(signature) => {
+                                                    headers = signature.to_header().into();
+                                                }
+                                                Err(err) => {
+                                                    error!(
+                                                        "Error signing message for domain '{}': {}",
+                                                        domain_name, err
+                                                    );
+                                                }
+                                            }
+                                        }
+
                                         // Send message
-                                        match client.data(raw_message.as_ref()).await {
+                                        let result = if let Some(headers) = headers {
+                                            client
+                                                .data_with_headers(headers.as_bytes(), &raw_message)
+                                                .await
+                                        } else {
+                                            client.data(&raw_message).await
+                                        };
+
+                                        match result {
                                             Ok(_) => UndoStatus::Final,
                                             Err(err) => {
                                                 let err = err.to_string();
@@ -445,6 +521,9 @@ where
                             error!("Failed to connect to relay server: {}", err);
                         }
                     }
+                }
+                Event::Reload => {
+                    dkim_map.clear();
                 }
                 _ => (),
             }

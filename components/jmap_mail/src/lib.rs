@@ -6,7 +6,7 @@ pub mod thread;
 pub mod vacation_response;
 
 pub use mail_parser;
-use store::DocumentId;
+pub use mail_send;
 
-pub const INBOX_ID: DocumentId = 0;
-pub const TRASH_ID: DocumentId = 1;
+pub const INBOX_ID: store::DocumentId = 0;
+pub const TRASH_ID: store::DocumentId = 1;

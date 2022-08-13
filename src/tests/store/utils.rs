@@ -154,7 +154,17 @@ pub fn init_settings(
             ("query-max-results".to_string(), "100000".to_string()),
             ("http-port".to_string(), (8000 + peer_num).to_string()),
             ("smtp-relay".to_string(), "!127.0.0.1:9999".to_string()),
-            ("api-key".to_string(), "SECRET_API_KEY".to_string()),
+            ("max-concurrent-uploads".to_string(), "4".to_string()),
+            ("max-concurrent-requests".to_string(), "8".to_string()),
+            ("rate-limit-anonymous".to_string(), "100/60".to_string()),
+            ("push-attempt-interval".to_string(), "500".to_string()),
+            ("push-throttle".to_string(), "500".to_string()),
+            ("event-source-throttle".to_string(), "500".to_string()),
+            ("ws-throttle".to_string(), "500".to_string()),
+            (
+                "rate-limit-authenticated".to_string(),
+                "1000/60".to_string(),
+            ),
         ]
         .into_iter(),
     );

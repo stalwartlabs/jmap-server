@@ -6,7 +6,6 @@ use store::rand::Rng;
 use store::tracing::debug;
 use store::Store;
 
-pub const ELECTION_TIMEOUT: u64 = 1000;
 pub const ELECTION_TIMEOUT_RAND_FROM: u64 = 50;
 pub const ELECTION_TIMEOUT_RAND_TO: u64 = 300;
 
@@ -50,7 +49,7 @@ where
 
     pub async fn start_election_timer(&mut self, now: bool) {
         self.state = State::Wait {
-            election_due: election_timeout(now),
+            election_due: self.election_timeout(now),
         };
         self.reset_votes();
         self.core.set_follower(None).await;
@@ -58,7 +57,7 @@ where
 
     pub async fn run_for_election(&mut self, now: bool) {
         self.state = State::Candidate {
-            election_due: election_timeout(now),
+            election_due: self.election_timeout(now),
         };
         self.term += 1;
         self.reset_votes();
@@ -82,22 +81,25 @@ where
                 {
                     election_due
                 }
-                _ => election_timeout(false),
+                _ => self.election_timeout(false),
             },
         };
         debug!("[{}] Stepping down for term {}.", self.addr, self.term);
     }
 
+    pub fn election_timeout(&self, now: bool) -> Instant {
+        Instant::now()
+            + Duration::from_millis(
+                if now {
+                    0
+                } else {
+                    self.config.raft_election_timeout
+                } + store::rand::thread_rng()
+                    .gen_range(ELECTION_TIMEOUT_RAND_FROM..ELECTION_TIMEOUT_RAND_TO),
+            )
+    }
+
     pub fn is_candidate(&self) -> bool {
         matches!(self.state, State::Candidate { .. })
     }
-}
-
-pub fn election_timeout(now: bool) -> Instant {
-    Instant::now()
-        + Duration::from_millis(
-            if now { 0 } else { ELECTION_TIMEOUT }
-                + store::rand::thread_rng()
-                    .gen_range(ELECTION_TIMEOUT_RAND_FROM..ELECTION_TIMEOUT_RAND_TO),
-        )
 }

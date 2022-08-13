@@ -4,6 +4,7 @@ use jmap_sharing::principal::account::JMAPAccountStore;
 use std::time::{Duration, Instant, SystemTime};
 use store::{
     ahash::AHashMap,
+    config::env_settings::EnvSettings,
     core::bitmap::Bitmap,
     log::changes::ChangeId,
     tracing::{debug, error},
@@ -80,12 +81,13 @@ pub fn init_state_manager() -> (mpsc::Sender<Event>, mpsc::Receiver<Event>) {
 
 pub fn spawn_state_manager<T>(
     core: web::Data<JMAPServer<T>>,
+    settings: &EnvSettings,
     mut started: bool,
     mut change_rx: mpsc::Receiver<Event>,
 ) where
     T: for<'x> Store<'x> + 'static,
 {
-    let push_tx = spawn_push_manager();
+    let push_tx = spawn_push_manager(settings);
 
     tokio::spawn(async move {
         let mut subscribers: AHashMap<AccountId, AHashMap<DocumentId, Subscriber>> =

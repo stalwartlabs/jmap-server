@@ -8,7 +8,8 @@ use jmap::principal::store::JMAPPrincipals;
 use jmap::request::set::SetRequest;
 use jmap::request::set::SetResponse;
 use jmap::types::jmap::JMAPId;
-use jmap::{sanitize_domain, sanitize_email, INGEST_ID, SUPERUSER_ID};
+use jmap::{sanitize_domain, sanitize_email, SUPERUSER_ID};
+use jmap_mail::mail_send::dkim::DKIM;
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::CreateMailbox;
 use store::ahash::AHashSet;
@@ -16,12 +17,13 @@ use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
+use store::rand::Rng;
 use store::read::comparator::Comparator;
 use store::read::filter::{self, Filter, Query};
 use store::read::FilterMapper;
 use store::write::batch::WriteBatch;
 use store::write::options::IndexOptions;
-use store::{DocumentId, JMAPStore, Store};
+use store::{rand, DocumentId, JMAPStore, Store};
 
 pub trait JMAPSetPrincipal<T>
 where
@@ -113,7 +115,8 @@ where
         })?;
 
         helper.destroy(|id, helper, document| {
-            if [SUPERUSER_ID, INGEST_ID].contains(&document.document_id) {
+            #[cfg(not(feature = "debug"))]
+            if [SUPERUSER_ID, jmap::INGEST_ID].contains(&document.document_id) {
                 return Err(SetError::forbidden("Cannot delete system accounts."));
             }
 
@@ -410,25 +413,44 @@ where
                 }
 
                 (Property::Secret, Value::Text { value })
-                    if !value.is_empty() && [Type::Individual, Type::Domain].contains(&ptype) =>
+                    if !value.is_empty() && ptype == Type::Individual =>
                 {
                     Value::Text {
-                        value: value.to_string(), /*Scrypt
-                                                  .hash_password(value.as_bytes(), &SaltString::generate(&mut OsRng))
-                                                  .map_err(|_| {
-                                                      SetError::invalid_property(
-                                                          property,
-                                                          "Failed to hash password.".to_string(),
-                                                      )
-                                                  })?
-                                                  .to_string()*/
+                        value: argon2::hash_encoded(
+                            value.as_bytes(),
+                            &rand::thread_rng().gen::<[u8; 10]>(),
+                            &argon2::Config::default(),
+                        )
+                        .map_err(|_| {
+                            SetError::invalid_property(
+                                property,
+                                "Failed to generate password hash.".to_string(),
+                            )
+                        })?,
                     }
                 }
 
                 (Property::Secret, Value::Text { value })
                     if !value.is_empty() && ptype == Type::Domain =>
                 {
-                    Value::Text { value }
+                    // Validate DKIM key
+                    match DKIM::from_pkcs1_pem(&value) {
+                        Ok(_) => {
+                            self.tag(Property::DKIM, Tag::Default);
+                            Value::Text { value }
+                        }
+                        Err(err) => {
+                            return Err(SetError::invalid_property(
+                                property,
+                                format!("Invalid DKIM key: {}", err),
+                            ));
+                        }
+                    }
+                }
+
+                (Property::Secret, Value::Null) if ptype == Type::Domain => {
+                    self.untag(&Property::DKIM, &Tag::Default);
+                    Value::Null
                 }
 
                 (Property::ACL, Value::Patch(Patch::ACL(value))) => {

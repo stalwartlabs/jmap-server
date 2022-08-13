@@ -2,7 +2,7 @@ use crate::{blob::BlobId, nlp::Language, write::field::Field, DocumentId, FieldI
 
 use super::{acl::Permission, collection::Collection, number::Number, tag::Tag};
 
-pub const MAX_TOKEN_LENGTH: usize = 40;
+pub const MAX_TOKEN_LENGTH: usize = 25;
 pub const MAX_ID_LENGTH: usize = 100;
 pub const MAX_SORT_FIELD_LENGTH: usize = 255;
 

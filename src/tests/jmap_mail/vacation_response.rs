@@ -72,6 +72,7 @@ where
     assert_message_delivery(
         &mut smtp_rx,
         MockMessage::new("<jdoe@example.com>", ["<bill@example.com>"], "@Kokomo"),
+        false,
     )
     .await;
 
@@ -137,6 +138,7 @@ where
             ["<jane_smith@example.com>"],
             "@Kokomo",
         ),
+        false,
     )
     .await;
 

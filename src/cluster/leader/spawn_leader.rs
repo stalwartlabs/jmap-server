@@ -1,4 +1,4 @@
-use crate::cluster::leader::{State, BATCH_MAX_SIZE};
+use crate::cluster::leader::State;
 use crate::cluster::log::changes_merge::MergedChanges;
 use crate::cluster::log::entries_get::RaftStoreEntries;
 use crate::cluster::log::{AppendEntriesRequest, AppendEntriesResponse};
@@ -25,6 +25,7 @@ where
         peer: &Peer,
         mut log_index_rx: watch::Receiver<Event>,
         mut init_rx: Option<watch::Receiver<bool>>,
+        max_batch_size: usize,
     ) {
         let peer_tx = peer.tx.clone();
         let mut online_rx = peer.online_rx.clone();
@@ -140,7 +141,7 @@ where
                                         follower_last_index,
                                         uncommitted_index,
                                         pending_changes,
-                                        BATCH_MAX_SIZE,
+                                        max_batch_size,
                                     )
                                 })
                                 .await
@@ -183,7 +184,13 @@ where
                         is_rollback,
                     } => {
                         match core
-                            .prepare_changes(account_id, collection, &mut changes, is_rollback)
+                            .prepare_changes(
+                                account_id,
+                                collection,
+                                &mut changes,
+                                is_rollback,
+                                max_batch_size,
+                            )
                             .await
                         {
                             Ok(updates) => {
@@ -216,7 +223,7 @@ where
                             break;
                         }
 
-                        match core.prepare_blobs(pending_blob_ids).await {
+                        match core.prepare_blobs(pending_blob_ids, max_batch_size).await {
                             Ok((updates, pending_blob_ids)) => {
                                 state = State::AppendBlobs { pending_blob_ids };
                                 Request::AppendEntries {

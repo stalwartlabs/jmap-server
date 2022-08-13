@@ -59,7 +59,7 @@ async fn jmap_mail_tests() {
     //email_get::test(server.clone(), &mut client).await;
     //email_parse::test(server.clone(), &mut client).await;
     //email_set::test(server.clone(), &mut client).await;
-    email_query::test(server.clone(), &mut client).await;
+    //email_query::test(server.clone(), &mut client).await;
     //email_copy::test(server.clone(), &mut client).await;
     //email_submission::test(server.clone(), &mut client).await;
     //email_ingest::test(server.clone(), &mut client).await;

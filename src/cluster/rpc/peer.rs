@@ -11,23 +11,27 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::cluster::rpc::{
-    Request, Response, RPC_INACTIVITY_TIMEOUT, RPC_MAX_BACKOFF_MS, RPC_MAX_CONNECT_ATTEMPTS,
-};
-use crate::cluster::{Event, PeerId, IPC_CHANNEL_BUFFER};
+use crate::cluster::rpc::{Request, Response};
+use crate::cluster::{Config, Event, PeerId, IPC_CHANNEL_BUFFER};
 
 use super::serialize::RpcEncoder;
-use super::{Protocol, RpcEvent, RPC_TIMEOUT_MS};
+use super::{Protocol, RpcEvent};
 
 pub fn spawn_peer_rpc(
     main_tx: mpsc::Sender<Event>,
     local_peer_id: PeerId,
-    key: String,
+    config: &Config,
     peer_id: PeerId,
     peer_addr: SocketAddr,
 ) -> (mpsc::Sender<RpcEvent>, watch::Receiver<bool>) {
     let (event_tx, mut event_rx) = mpsc::channel::<RpcEvent>(IPC_CHANNEL_BUFFER);
     let (online_tx, online_rx) = watch::channel(false);
+
+    let key = config.key.to_string();
+    let rpc_inactivity_timeout = config.rpc_inactivity_timeout;
+    let rpc_retries_max = config.rpc_retries_max;
+    let rpc_timeout = config.rpc_timeout;
+    let rpc_backoff_max = config.rpc_backoff_max;
 
     tokio::spawn(async move {
         let mut conn_ = None;
@@ -35,7 +39,7 @@ pub fn spawn_peer_rpc(
 
         'main: loop {
             let mut message = match time::timeout(
-                Duration::from_millis(RPC_INACTIVITY_TIMEOUT),
+                Duration::from_millis(rpc_inactivity_timeout),
                 event_rx.recv(),
             )
             .await
@@ -69,6 +73,7 @@ pub fn spawn_peer_rpc(
                             peer_id: local_peer_id,
                             key: key.clone(),
                         },
+                        rpc_timeout,
                     )
                     .await
                     {
@@ -83,7 +88,7 @@ pub fn spawn_peer_rpc(
                                 }
                             }
 
-                            if connection_attempts < RPC_MAX_CONNECT_ATTEMPTS {
+                            if connection_attempts < rpc_retries_max {
                                 // Connection established, send message.
                                 break 'retry;
                             } else {
@@ -96,7 +101,7 @@ pub fn spawn_peer_rpc(
                             // Keep retrying.
                             connection_attempts += 1;
 
-                            if connection_attempts == RPC_MAX_CONNECT_ATTEMPTS {
+                            if connection_attempts == rpc_retries_max {
                                 // Give up trying to deliver the message,
                                 // notify task that the message could not be sent.
                                 message.failed();
@@ -109,7 +114,7 @@ pub fn spawn_peer_rpc(
                             let mut next_attempt_ms = std::cmp::min(
                                 2u64.pow(connection_attempts)
                                     + store::rand::thread_rng().gen_range(0..1000),
-                                RPC_MAX_BACKOFF_MS,
+                                rpc_backoff_max,
                             );
 
                             error!(
@@ -222,8 +227,9 @@ pub fn spawn_peer_rpc(
 async fn connect_peer(
     addr: SocketAddr,
     auth_frame: Request,
+    rpc_timeout: u64,
 ) -> std::io::Result<Framed<TcpStream, RpcEncoder>> {
-    time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), async {
+    time::timeout(Duration::from_millis(rpc_timeout), async {
         let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcEncoder::default());
         if let Response::Pong = send_rpc(&mut conn, auth_frame).await? {
             Ok(conn)

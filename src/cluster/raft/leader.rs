@@ -1,6 +1,6 @@
 use super::{Cluster, PeerId};
 use super::{State, RAFT_LOG_LEADER};
-use crate::services::state_change;
+use crate::services::{email_delivery, state_change};
 use crate::JMAPServer;
 use std::sync::atomic::Ordering;
 use store::log::raft::TermId;
@@ -56,7 +56,14 @@ where
         self.peers
             .iter()
             .filter(|p| p.is_in_shard(self.shard_id))
-            .for_each(|p| self.spawn_raft_leader(p, event_rx.clone(), init_rx.clone().into()));
+            .for_each(|p| {
+                self.spawn_raft_leader(
+                    p,
+                    event_rx.clone(),
+                    init_rx.clone().into(),
+                    self.config.raft_batch_max,
+                )
+            });
         self.state = State::Leader {
             tx: event_tx,
             rx: event_rx,
@@ -67,7 +74,12 @@ where
 
     pub fn add_follower(&self, peer_id: PeerId) {
         if let State::Leader { rx, .. } = &self.state {
-            self.spawn_raft_leader(self.get_peer(peer_id).unwrap(), rx.clone(), None)
+            self.spawn_raft_leader(
+                self.get_peer(peer_id).unwrap(),
+                rx.clone(),
+                None,
+                self.config.raft_batch_max,
+            )
         }
     }
 }
@@ -96,6 +108,11 @@ where
         self.state_change
             .clone()
             .send(state_change::Event::Start)
+            .await
+            .ok();
+        self.email_delivery
+            .clone()
+            .send(email_delivery::Event::Start)
             .await
             .ok();
     }

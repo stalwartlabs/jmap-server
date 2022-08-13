@@ -5,13 +5,13 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{config::env_settings::EnvSettings, StoreError};
+use crate::config::env_settings::EnvSettings;
 
 use super::{BlobId, BlobStore};
 
 pub struct LocalBlobStore {
     pub base_path: PathBuf,
-    pub hash_levels: Vec<usize>,
+    pub hash_levels: usize,
 }
 
 impl BlobStore for LocalBlobStore {
@@ -24,7 +24,7 @@ impl BlobStore for LocalBlobStore {
         base_path.push("blobs");
         Ok(LocalBlobStore {
             base_path,
-            hash_levels: vec![1], //TODO configure
+            hash_levels: std::cmp::min(settings.parse("blob-nested-levels").unwrap_or(2), 5),
         })
     }
 
@@ -89,22 +89,10 @@ impl BlobStore for LocalBlobStore {
 impl LocalBlobStore {
     fn get_path(&self, blob_id: &BlobId) -> crate::Result<PathBuf> {
         let mut path = self.base_path.clone();
-        let mut hash_pos = 0;
-        for hash_level in &self.hash_levels {
-            let mut path_buf = String::with_capacity(10);
-            for _ in 0..*hash_level {
-                path_buf.push_str(&format!(
-                    "{:02x}",
-                    blob_id
-                        .hash()
-                        .get(hash_pos)
-                        .ok_or_else(|| StoreError::InternalError("Invalid hash".to_string()))?
-                ));
-                hash_pos += 1;
-            }
-            path.push(path_buf);
+        let hash = blob_id.hash();
+        for byte in hash.iter().take(self.hash_levels) {
+            path.push(format!("{:x}", byte));
         }
-
         path.push(blob_id.to_string());
 
         Ok(path)

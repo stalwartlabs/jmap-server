@@ -3,7 +3,6 @@ use super::{
     rpc::{Request, Response},
     Cluster, Peer, PeerId,
 };
-use crate::cluster::raft::election::election_timeout;
 use store::log::raft::{LogIndex, RaftId, TermId};
 use store::tracing::{debug, error, info};
 use store::Store;
@@ -24,7 +23,7 @@ where
     pub async fn vote_for(&mut self, peer_id: PeerId) {
         self.state = State::VotedFor {
             peer_id,
-            election_due: election_timeout(false),
+            election_due: self.election_timeout(false),
         };
         self.reset_votes();
         self.core.set_follower(None).await;

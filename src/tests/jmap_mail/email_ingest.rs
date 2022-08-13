@@ -4,6 +4,7 @@ use jmap_client::{
     client::Client,
     core::set::{SetError, SetErrorType},
 };
+use jmap_sharing::principal::set::JMAPSetPrincipal;
 use store::{core::collection::Collection, Store};
 
 use crate::{
@@ -282,8 +283,8 @@ where
         .await,
         vec![Dsn {
             to: "unknown@example.com".to_string(),
-            status: DeliveryStatus::Failure,
-            reason: "Recipient does not exist.".to_string().into()
+            status: DeliveryStatus::NotFound,
+            reason: "Recipient not found.".to_string().into()
         }]
     );
 
@@ -297,5 +298,6 @@ where
     }
     client.principal_destroy(&list_id).await.unwrap();
     client.principal_destroy(&domain_id).await.unwrap();
+    server.store.principal_purge().unwrap();
     server.store.assert_is_empty();
 }

@@ -8,7 +8,7 @@ use tokio::time::{self};
 use crate::{
     api::{RequestError, StateChangeResponse},
     authorization::Session,
-    services::{LONG_SLUMBER_MS, THROTTLE_MS},
+    services::LONG_SLUMBER_MS,
     JMAPServer,
 };
 
@@ -77,6 +77,7 @@ where
     };
     let mut response = StateChangeResponse::new();
     let close_after_state = matches!(params.closeafter, CloseAfter::State);
+    let throttle_ms = core.store.config.event_source_throttle;
 
     // Register with state manager
     let mut change_rx = if let Some(change_rx) = core
@@ -92,7 +93,7 @@ where
         .insert_header(("Content-Type", "text/event-stream"))
         .insert_header(("Cache-Control", "no-store"))
         .streaming::<_, std::io::Error>(stream! {
-            let mut last_message = Instant::now() - Duration::from_millis(THROTTLE_MS);
+            let mut last_message = Instant::now() - Duration::from_millis(throttle_ms);
             let mut timeout = Duration::from_millis(LONG_SLUMBER_MS);
 
             loop {
@@ -114,7 +115,7 @@ where
 
                 timeout = if !response.changed.is_empty() {
                     let elapsed = last_message.elapsed().as_millis() as u64;
-                    if elapsed >= THROTTLE_MS {
+                    if elapsed >= throttle_ms {
                         last_message = Instant::now();
                         yield Ok(web::Bytes::from(format!(
                             "event: state\ndata: {}\n\n",
@@ -130,7 +131,7 @@ where
                             ping.as_ref().map(|p| p.interval).unwrap_or(LONG_SLUMBER_MS),
                         )
                     } else {
-                        Duration::from_millis(THROTTLE_MS - elapsed)
+                        Duration::from_millis(throttle_ms - elapsed)
                     }
                 } else if let Some(ping) = &mut ping {
                     let elapsed = ping.last_ping.elapsed().as_millis() as u64;

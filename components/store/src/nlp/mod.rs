@@ -81,7 +81,7 @@ pub enum Language {
 }
 
 impl Language {
-    pub fn from_iso_639(code: &str) -> Self {
+    pub fn from_iso_639(code: &str) -> Option<Self> {
         match code.split_once('-').map(|c| c.0).unwrap_or(code) {
             "en" => Language::English,
             "es" => Language::Spanish,
@@ -130,7 +130,8 @@ impl Language {
             "zu" => Language::Zulu,
             "sn" => Language::Shona,
             "ak" => Language::Akan,
-            _ => Language::Unknown,
+            _ => return None,
         }
+        .into()
     }
 }

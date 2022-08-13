@@ -105,7 +105,7 @@ where
         core.rate_limiters
             .get(&RemoteAddress::AccountId(session.account_id()))
             .unwrap()
-            .is_upload_allowed(core.store.config.max_concurrent_upload)
+            .is_upload_allowed(core.store.config.max_concurrent_uploads)
             .ok_or_else(|| RequestError::limit(RequestLimitError::Concurrent))?
             .into()
     } else {
@@ -118,6 +118,10 @@ where
         if bytes == b"sleep"[..] {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
+    }
+
+    if bytes.len() > core.store.config.max_size_upload {
+        return Err(RequestError::limit(RequestLimitError::Size));
     }
 
     let store = core.store.clone();

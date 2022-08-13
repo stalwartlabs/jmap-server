@@ -1096,6 +1096,7 @@ impl GetContentLanguage for mail_parser::MessagePart<'_> {
                         return None;
                     }
                 })
+                .unwrap_or(Language::Unknown)
                 .into()
             })
     }

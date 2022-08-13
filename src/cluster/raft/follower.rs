@@ -1,6 +1,6 @@
 use super::{Cluster, PeerId};
 use super::{State, RAFT_LOG_BEHIND, RAFT_LOG_LEADER, RAFT_LOG_UPDATED};
-use crate::services::state_change;
+use crate::services::{email_delivery, state_change};
 use crate::JMAPServer;
 use std::sync::atomic::Ordering;
 use store::tracing::debug;
@@ -63,6 +63,11 @@ where
         self.state_change
             .clone()
             .send(state_change::Event::Stop)
+            .await
+            .ok();
+        self.email_delivery
+            .clone()
+            .send(email_delivery::Event::Stop)
             .await
             .ok();
     }

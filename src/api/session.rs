@@ -235,7 +235,7 @@ impl CoreCapabilities {
     pub fn new(config: &JMAPConfig) -> Self {
         CoreCapabilities {
             max_size_upload: config.max_size_upload,
-            max_concurrent_upload: config.max_concurrent_upload,
+            max_concurrent_upload: config.max_concurrent_uploads,
             max_size_request: config.max_size_request,
             max_concurrent_requests: config.max_concurrent_requests,
             max_calls_in_request: config.max_calls_in_request,

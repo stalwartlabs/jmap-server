@@ -1,4 +1,3 @@
-use super::BATCH_MAX_SIZE;
 use crate::cluster::log::changes_merge::MergedChanges;
 use crate::cluster::log::update_prepare::RaftStorePrepareUpdate;
 use crate::cluster::log::{DocumentUpdate, Update};
@@ -25,6 +24,7 @@ where
         collection: Collection,
         changes: &mut MergedChanges,
         is_follower_rollback: bool,
+        max_batch_size: usize,
     ) -> store::Result<Vec<Update>> {
         let mut batch_size = 0;
         let mut updates = Vec::new();
@@ -96,7 +96,7 @@ where
                 );
             }
 
-            if batch_size >= BATCH_MAX_SIZE {
+            if batch_size >= max_batch_size {
                 break;
             }
         }

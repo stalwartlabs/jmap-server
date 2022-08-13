@@ -1,4 +1,4 @@
-use super::{state_change::StateChange, LONG_SLUMBER_MS, THROTTLE_MS};
+use super::{state_change::StateChange, LONG_SLUMBER_MS};
 use crate::{api::StateChangeResponse, cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 use jmap::{
     base64,
@@ -13,6 +13,7 @@ use std::{
 };
 use store::{
     ahash::{AHashMap, AHashSet},
+    config::env_settings::EnvSettings,
     core::{bitmap::Bitmap, collection::Collection, error::StoreError},
     tracing::debug,
     AccountId, DocumentId, Store,
@@ -93,18 +94,16 @@ pub struct PushServer {
     in_flight: bool,
 }
 
-#[cfg(test)]
-const PUSH_ATTEMPT_INTERVAL_MS: u64 = 500;
-#[cfg(not(test))]
-const PUSH_ATTEMPT_INTERVAL_MS: u64 = 60 * 1000;
-const PUSH_MAX_ATTEMPTS: u32 = 3;
-const PUSH_TIMEOUT_MS: u64 = 10 * 1000;
-const RETRY_MS: u64 = 1000;
-const VERIFY_WAIT_MS: u64 = 60 * 1000;
-
-pub fn spawn_push_manager() -> mpsc::Sender<Event> {
+pub fn spawn_push_manager(settings: &EnvSettings) -> mpsc::Sender<Event> {
     let (push_tx_, mut push_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
     let push_tx = push_tx_.clone();
+
+    let push_attempt_interval: u64 = settings.parse("push-attempt-interval").unwrap_or(60 * 1000);
+    let push_attempts_max: u32 = settings.parse("push-attempts-max").unwrap_or(3);
+    let push_retry_interval: u64 = settings.parse("push-retry-interval").unwrap_or(1000);
+    let push_timeout: u64 = settings.parse("push-timeout").unwrap_or(10 * 1000);
+    let push_verify_timeout: u64 = settings.parse("push-attempt-interval").unwrap_or(60 * 1000);
+    let push_throttle: u64 = settings.parse("push-throttle").unwrap_or(1000);
 
     tokio::spawn(async move {
         let mut subscriptions = AHashMap::default();
@@ -138,14 +137,14 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                         if url.contains("skip_checks") {
                                             last_verify.insert(
                                                 account_id,
-                                                current_time - (VERIFY_WAIT_MS + 1),
+                                                current_time - (push_verify_timeout + 1),
                                             );
                                         }
 
                                         if last_verify
                                             .get(&account_id)
                                             .map(|last_verify| {
-                                                current_time - *last_verify > VERIFY_WAIT_MS
+                                                current_time - *last_verify > push_verify_timeout
                                             })
                                             .unwrap_or(true)
                                         {
@@ -162,6 +161,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                                         code
                                                     ),
                                                     keys,
+                                                    push_timeout,
                                                 )
                                                 .await;
                                             });
@@ -171,7 +171,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                             debug!(
                                                 concat!(
                                                     "Failed to verify push subscription: ",
-                                                    "Too many requests for from accountId {}."
+                                                    "Too many requests from accountId {}."
                                                 ),
                                                 account_id
                                             );
@@ -185,7 +185,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                                 keys,
                                                 num_attempts: 0,
                                                 last_request: Instant::now()
-                                                    - Duration::from_millis(THROTTLE_MS + 1),
+                                                    - Duration::from_millis(push_throttle + 1),
                                                 state_changes: Vec::new(),
                                                 in_flight: false,
                                             });
@@ -206,12 +206,12 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
 
                                     if !subscription.in_flight
                                         && ((subscription.num_attempts == 0
-                                            && last_request > THROTTLE_MS)
-                                            || ((1..PUSH_MAX_ATTEMPTS)
+                                            && last_request > push_throttle)
+                                            || ((1..push_attempts_max)
                                                 .contains(&subscription.num_attempts)
-                                                && last_request > PUSH_ATTEMPT_INTERVAL_MS))
+                                                && last_request > push_attempt_interval))
                                     {
-                                        subscription.send(id, push_tx.clone());
+                                        subscription.send(id, push_tx.clone(), push_timeout);
                                         retry_ids.remove(&id);
                                     } else {
                                         retry_ids.insert(id);
@@ -251,7 +251,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
             retry_timeout = if !retry_ids.is_empty() {
                 let last_retry_elapsed = last_retry.elapsed().as_millis() as u64;
 
-                if last_retry_elapsed >= RETRY_MS {
+                if last_retry_elapsed >= push_retry_interval {
                     let mut remove_ids = Vec::with_capacity(retry_ids.len());
 
                     for retry_id in &retry_ids {
@@ -260,12 +260,13 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                                 subscription.last_request.elapsed().as_millis() as u64;
 
                             if !subscription.in_flight
-                                && ((subscription.num_attempts == 0 && last_request >= THROTTLE_MS)
+                                && ((subscription.num_attempts == 0
+                                    && last_request >= push_throttle)
                                     || (subscription.num_attempts > 0
-                                        && last_request >= PUSH_ATTEMPT_INTERVAL_MS))
+                                        && last_request >= push_attempt_interval))
                             {
-                                if subscription.num_attempts < PUSH_MAX_ATTEMPTS {
-                                    subscription.send(*retry_id, push_tx.clone());
+                                if subscription.num_attempts < push_attempts_max {
+                                    subscription.send(*retry_id, push_tx.clone(), push_timeout);
                                 } else {
                                     debug!(
                                         concat!(
@@ -289,13 +290,13 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
                             retry_ids.remove(&remove_id);
                         }
                         last_retry = Instant::now();
-                        Duration::from_millis(RETRY_MS)
+                        Duration::from_millis(push_retry_interval)
                     } else {
                         retry_ids.clear();
                         Duration::from_millis(LONG_SLUMBER_MS)
                     }
                 } else {
-                    Duration::from_millis(RETRY_MS - last_retry_elapsed)
+                    Duration::from_millis(push_retry_interval - last_retry_elapsed)
                 }
             } else {
                 Duration::from_millis(LONG_SLUMBER_MS)
@@ -308,7 +309,7 @@ pub fn spawn_push_manager() -> mpsc::Sender<Event> {
 }
 
 impl PushServer {
-    fn send(&mut self, id: store::JMAPId, push_tx: mpsc::Sender<Event>) {
+    fn send(&mut self, id: store::JMAPId, push_tx: mpsc::Sender<Event>, push_timeout: u64) {
         let url = self.url.clone();
         let keys = self.keys.clone();
         let state_changes = std::mem::take(&mut self.state_changes);
@@ -331,7 +332,14 @@ impl PushServer {
 
             push_tx
                 .send(
-                    if http_request(url, serde_json::to_string(&response).unwrap(), keys).await {
+                    if http_request(
+                        url,
+                        serde_json::to_string(&response).unwrap(),
+                        keys,
+                        push_timeout,
+                    )
+                    .await
+                    {
                         Event::DeliverySuccess { id }
                     } else {
                         Event::DeliveryFailure { id, state_changes }
@@ -343,8 +351,13 @@ impl PushServer {
     }
 }
 
-async fn http_request(url: String, mut body: String, keys: Option<EncriptionKeys>) -> bool {
-    let client_builder = reqwest::Client::builder().timeout(Duration::from_millis(PUSH_TIMEOUT_MS));
+async fn http_request(
+    url: String,
+    mut body: String,
+    keys: Option<EncriptionKeys>,
+    push_timeout: u64,
+) -> bool {
+    let client_builder = reqwest::Client::builder().timeout(Duration::from_millis(push_timeout));
 
     #[cfg(test)]
     let client_builder = client_builder.danger_accept_invalid_certs(true);

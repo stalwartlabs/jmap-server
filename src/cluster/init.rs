@@ -1,8 +1,6 @@
 use crate::{
     cluster::{
-        gossip::{spawn::spawn_quidnunc, PING_INTERVAL},
-        rpc::listener::spawn_rpc,
-        Cluster, Peer, PeerId, PeerList,
+        gossip::spawn::spawn_quidnunc, rpc::listener::spawn_rpc, Cluster, Peer, PeerId, PeerList,
     },
     JMAPServer, DEFAULT_RPC_PORT,
 };
@@ -22,7 +20,7 @@ use store::{
 use store::{tracing::debug, Store};
 use tokio::sync::{mpsc, watch};
 
-use super::{ClusterIpc, Event, IPC_CHANNEL_BUFFER, RAFT_LOG_BEHIND};
+use super::{ClusterIpc, Config, Event, IPC_CHANNEL_BUFFER, RAFT_LOG_BEHIND};
 
 pub struct ClusterInit {
     main_rx: mpsc::Receiver<Event>,
@@ -86,13 +84,15 @@ pub async fn start_cluster<T>(
         bind_addr,
         shutdown_rx.clone(),
         main_tx.clone(),
-        cluster.key.clone(),
+        &cluster.config,
     )
     .await;
     spawn_quidnunc(bind_addr, shutdown_rx.clone(), gossip_rx, main_tx.clone()).await;
 
+    let ping_interval = settings.parse("peer-ping-interval").unwrap_or(500);
+
     tokio::spawn(async move {
-        let mut wait_timeout = Duration::from_millis(PING_INTERVAL);
+        let mut wait_timeout = Duration::from_millis(ping_interval);
         let mut last_ping = Instant::now();
 
         #[cfg(test)]
@@ -122,7 +122,7 @@ pub async fn start_cluster<T>(
                                 last_ping = Instant::now();
                             } else {
                                 last_ping =
-                                    Instant::now() - Duration::from_millis(PING_INTERVAL + 50);
+                                    Instant::now() - Duration::from_millis(ping_interval + 50);
                                 for peer in &mut cluster.peers {
                                     peer.state = crate::cluster::gossip::State::Suspected;
                                 }
@@ -167,9 +167,9 @@ pub async fn start_cluster<T>(
 
             if !cluster.peers.is_empty() {
                 let time_since_last_ping = last_ping.elapsed().as_millis() as u64;
-                let time_to_next_ping = if time_since_last_ping >= PING_INTERVAL {
+                let time_to_next_ping = if time_since_last_ping >= ping_interval {
                     #[cfg(test)]
-                    if time_since_last_ping > (PING_INTERVAL + 200) {
+                    if time_since_last_ping > (ping_interval + 200) {
                         error!(
                             "[{}] Possible event loop block: {}ms since last ping.",
                             cluster.addr, time_since_last_ping
@@ -181,9 +181,9 @@ pub async fn start_cluster<T>(
                         break;
                     }
                     last_ping = Instant::now();
-                    PING_INTERVAL
+                    ping_interval
                 } else {
-                    PING_INTERVAL - time_since_last_ping
+                    ping_interval - time_since_last_ping
                 };
 
                 let time = Instant::now();
@@ -228,7 +228,7 @@ where
         gossip_tx: mpsc::Sender<(SocketAddr, crate::cluster::gossip::request::Request)>,
         commit_index_tx: watch::Sender<LogIndex>,
     ) -> Self {
-        let key = settings.get("cluster").unwrap();
+        let config = Config::new(settings);
 
         // Obtain public addresses to advertise
         let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
@@ -303,12 +303,12 @@ where
             generation: generation.finish(),
             epoch: 0,
             addr,
-            key,
+            config,
             hostname,
             term: last_log.term,
             uncommitted_index: last_log.index,
             last_log,
-            state: crate::cluster::raft::State::default(),
+            state: crate::cluster::raft::State::init(),
             core,
             peers: vec![],
             last_peer_pinged: u32::MAX as usize,
@@ -358,5 +358,22 @@ where
         }
 
         cluster
+    }
+}
+
+impl Config {
+    pub fn new(settings: &EnvSettings) -> Self {
+        Config {
+            key: settings.get("cluster").unwrap(),
+            raft_batch_max: settings.parse("raft-batch-max").unwrap_or(10 * 1024 * 1024),
+            raft_election_timeout: settings.parse("raft-election-timeout").unwrap_or(1000),
+            rpc_frame_max: settings.parse("rpc-frame-max").unwrap_or(50 * 1024 * 1024),
+            rpc_inactivity_timeout: settings
+                .parse("rpc-inactivity-timeout")
+                .unwrap_or(5 * 60 * 1000),
+            rpc_timeout: settings.parse("rpc-timeout").unwrap_or(1000),
+            rpc_retries_max: settings.parse("rpc-retries-max").unwrap_or(5),
+            rpc_backoff_max: settings.parse("rpc-backoff-max").unwrap_or(3 * 60 * 1000),
+        }
     }
 }

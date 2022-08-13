@@ -29,7 +29,13 @@ where
     test_dir.push("jmap_mail_snippet");
 
     // Import test messages
-    for email_name in ["html", "subpart", "text_plain", "text_plain_chinese"] {
+    for email_name in [
+        "html",
+        "subpart",
+        "mixed",
+        "text_plain",
+        "text_plain_chinese",
+    ] {
         let mut file_name = test_dir.clone();
         file_name.push(format!("{}.eml", email_name));
         let email_id = client
@@ -58,7 +64,8 @@ where
                 "d'Ivoire. He <mark>secretly</mark> <mark>called</mark> me on his bedside ",
                 "and told me that he has a sum of $7.5M (Seven Million five Hundred Thousand",
                 " Dollars) left in a suspense account in a local bank here in Abidjan Côte ",
-                "d'Ivoire, that he used my name a")),
+                "d'Ivoire, that he used my name a"
+            )),
         ),
         (
             Filter::text("côte").into(),
@@ -91,11 +98,12 @@ where
         (
             Filter::text("孫子兵法").into(),
             "text_plain_chinese",
-            Some("<mark>孫子兵法</mark>"),
+            Some("<mark>孫</mark><mark>子</mark><mark>兵法</mark>"),
             Some(concat!(
-                "&lt;&quot;<mark>孫子兵法</mark>：&quot;&gt; 孫子曰：兵者，國之大事，死生之地，",
-                "存亡之道，不可不察也。 孫子曰：凡用兵之法，馳車千駟，革車千乘，帶甲十萬；千里饋糧，",
-                "則內外之費賓客之用，")),
+                "&lt;&quot;<mark>孫</mark><mark>子</mark><mark>兵法</mark>：&quot;&gt; ",
+                "<mark>孫</mark><mark>子</mark>曰：兵者，國之大事，死生之地，存亡之道，",
+                "不可不察也。 <mark>孫</mark><mark>子</mark>曰：凡用兵之法，馳車千駟"
+            )),
         ),
         (
             Filter::text("cia").into(),
@@ -112,6 +120,17 @@ where
             "&quot;wir leben&quot;, sprach ein Redner, &quot;in steter Furcht vor Menschen und ",
             "Tieren, eine Beute der Hunde, der Adler, ja fast aller Raubtiere! ",
             "Unsere stete Angst ist är")),
+        ),
+        (
+            Filter::text("es:galería vasto biblioteca").into(),
+            "mixed",
+            Some("<mark>Biblioteca</mark> de Babel"),
+            Some(concat!(
+                "llaman la *<mark>Biblioteca</mark>*) se compone de un número indefinido, y tal ",
+                "vez infinito, de <mark>galerías</mark> hexagonales, con <mark>vastos</mark> ",
+                "pozos de ventilación en el medio, cercados por barandas bajísimas. Desde ",
+                "cualquier hexágono se "
+            )),
         ),
     ] {
         let mut request = client.build();
@@ -134,7 +153,7 @@ where
             .unwrap();
         let snippet = response
             .snippet(email_ids.get(email_name).unwrap())
-            .unwrap();
+            .unwrap_or_else(|| panic!("No snippet for {}", email_name));
         assert_eq!(snippet_subject, snippet.subject());
         assert_eq!(snippet_preview, snippet.preview());
         assert!(

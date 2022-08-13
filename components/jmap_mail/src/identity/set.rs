@@ -4,7 +4,7 @@ use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
 use jmap::request::set::SetResponse;
-use jmap::request::{ACLEnforce, ResultReference};
+use jmap::request::ResultReference;
 use jmap::types::jmap::JMAPId;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use jmap::{principal, sanitize_email, SUPERUSER_ID};
@@ -63,26 +63,25 @@ where
                                     "Invalid e-mail address.".to_string(),
                                 )
                             })?;
-                            if !helper.acl.is_member(SUPERUSER_ID)
-                                && !helper
-                                    .store
-                                    .query_store::<FilterMapper>(
-                                        SUPERUSER_ID,
-                                        Collection::Principal,
-                                        Filter::or(vec![
-                                            Filter::eq(
-                                                principal::schema::Property::Email.into(),
-                                                Query::Index(value.clone()),
-                                            ),
-                                            Filter::eq(
-                                                principal::schema::Property::Aliases.into(),
-                                                Query::Index(value.clone()),
-                                            ),
-                                        ]),
-                                        Comparator::None,
-                                    )?
-                                    .into_iter()
-                                    .any(|id| id.get_document_id() == helper.account_id)
+                            if !helper
+                                .store
+                                .query_store::<FilterMapper>(
+                                    SUPERUSER_ID,
+                                    Collection::Principal,
+                                    Filter::or(vec![
+                                        Filter::eq(
+                                            principal::schema::Property::Email.into(),
+                                            Query::Index(value.clone()),
+                                        ),
+                                        Filter::eq(
+                                            principal::schema::Property::Aliases.into(),
+                                            Query::Index(value.clone()),
+                                        ),
+                                    ]),
+                                    Comparator::None,
+                                )?
+                                .into_iter()
+                                .any(|id| id.get_document_id() == helper.account_id)
                             {
                                 return Err(SetError::invalid_property(
                                     Property::Email,

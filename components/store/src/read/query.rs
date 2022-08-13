@@ -120,18 +120,14 @@ where
                                     &document_ids,
                                 );
                             }
-                            Query::Match {
-                                text,
-                                language,
-                                match_phrase,
-                            } => {
-                                if match_phrase {
+                            Query::Match(text) => {
+                                if text.match_phrase {
                                     let mut phrase: Vec<String> = Vec::new();
                                     let field = filter_cond.field;
 
                                     // Retrieve the Term Index for each candidate and match the exact phrase
                                     if let Some(candidates) = self.get_bitmaps_intersection(
-                                        Tokenizer::new(&text, language, MAX_TOKEN_LENGTH)
+                                        Tokenizer::new(&text.text, text.language, MAX_TOKEN_LENGTH)
                                             .into_iter()
                                             .filter_map(|token| {
                                                 let word = token.word.into_owned();
@@ -193,7 +189,9 @@ where
                                     let mut requested_keys = AHashSet::default();
                                     let mut text_bitmap = None;
 
-                                    for token in Stemmer::new(&text, language, MAX_TOKEN_LENGTH) {
+                                    for token in
+                                        Stemmer::new(&text.text, text.language, MAX_TOKEN_LENGTH)
+                                    {
                                         let mut keys = Vec::new();
 
                                         for (word, is_exact) in [

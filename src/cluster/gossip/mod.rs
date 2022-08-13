@@ -16,7 +16,6 @@ use store::log::raft::{LogIndex, TermId};
 use store::tracing::error;
 use store::Store;
 
-pub const PING_INTERVAL: u64 = 500;
 const UDP_MAX_PAYLOAD: usize = 65500;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

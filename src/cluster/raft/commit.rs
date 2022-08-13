@@ -1,4 +1,3 @@
-use super::COMMIT_TIMEOUT_MS;
 use super::{Cluster, PeerId};
 use crate::JMAPServer;
 use std::time::{Duration, Instant};
@@ -76,9 +75,10 @@ where
                     .await
                     .is_ok()
                 {
+                    let commit_timeout = self.store.config.raft_commit_timeout;
                     let mut commit_index_rx = cluster.commit_index_rx.clone();
                     let wait_start = Instant::now();
-                    let mut wait_timeout = Duration::from_millis(COMMIT_TIMEOUT_MS);
+                    let mut wait_timeout = Duration::from_millis(commit_timeout);
 
                     loop {
                         match time::timeout(wait_timeout, commit_index_rx.changed()).await {
@@ -93,11 +93,10 @@ where
                                 }
 
                                 let wait_elapsed = wait_start.elapsed().as_millis() as u64;
-                                if wait_elapsed >= COMMIT_TIMEOUT_MS {
+                                if wait_elapsed >= commit_timeout {
                                     break;
                                 }
-                                wait_timeout =
-                                    Duration::from_millis(COMMIT_TIMEOUT_MS - wait_elapsed);
+                                wait_timeout = Duration::from_millis(commit_timeout - wait_elapsed);
                             }
                             Ok(Err(err)) => {
                                 error!(
@@ -109,7 +108,7 @@ where
                             Err(_) => {
                                 error!(
                                     "Failed to commit index {}, timeout after {} ms.",
-                                    index, COMMIT_TIMEOUT_MS
+                                    index, commit_timeout
                                 );
                                 break;
                             }

@@ -45,7 +45,7 @@ where
                                     let (tx, online_rx) = spawn_peer_rpc(
                                         self.tx.clone(),
                                         self.peer_id,
-                                        self.key.clone(),
+                                        &self.config,
                                         peer.peer_id,
                                         peer.addr,
                                     );

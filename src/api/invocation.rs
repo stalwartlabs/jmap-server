@@ -89,31 +89,39 @@ where
                             }
 
                             // Notify E-mail delivery service of changes
-                            if let method::Response::SetEmailSubmission(submission_response) =
-                                &method_response
-                            {
-                                if let Err(err) = core
-                                    .notify_email_delivery(email_delivery::Event::new_submission(
-                                        submission_response.account_id(),
-                                        created_ids
-                                            .as_ref()
-                                            .map(|created_ids| {
+                            match &method_response {
+                                method::Response::SetEmailSubmission(submission_response) => {
+                                    if let Err(err) = core
+                                        .notify_email_delivery(
+                                            email_delivery::Event::new_submission(
+                                                submission_response.account_id(),
                                                 created_ids
-                                                    .values()
+                                                    .as_ref()
+                                                    .map(|created_ids| {
+                                                        created_ids
+                                                            .values()
+                                                            .map(|id| id.get_document_id())
+                                                            .collect()
+                                                    })
+                                                    .unwrap_or_default(),
+                                                submission_response
+                                                    .updated
+                                                    .keys()
                                                     .map(|id| id.get_document_id())
-                                                    .collect()
-                                            })
-                                            .unwrap_or_default(),
-                                        submission_response
-                                            .updated
-                                            .keys()
-                                            .map(|id| id.get_document_id())
-                                            .collect(),
-                                    ))
-                                    .await
-                                {
-                                    error!("No e-mail delivery configured or something else happened: {}", err);
+                                                    .collect(),
+                                            ),
+                                        )
+                                        .await
+                                    {
+                                        error!("No e-mail delivery configured or something else happened: {}", err);
+                                    }
                                 }
+                                method::Response::SetPrincipal(_) => {
+                                    core.notify_email_delivery(email_delivery::Event::Reload)
+                                        .await
+                                        .ok();
+                                }
+                                _ => {}
                             }
 
                             // Add created ids to response

@@ -79,22 +79,9 @@ where
                         return Ok(None);
                     }
 
-                    if password_hash == password {
-                        Ok(Some(account_id))
-                    } else {
-                        debug!(
-                            "Login failed: Invalid password for account {}.",
-                            JMAPId::from(account_id)
-                        );
-
-                        Ok(None)
-                    }
-
-                    /*if let Ok(password_hash) = PasswordHash::new(&password_hash) {
-                        if Scrypt
-                            .verify_password(password.as_bytes(), &password_hash)
-                            .is_ok()
-                        {
+                    if let Ok(matches) = argon2::verify_encoded(&password_hash, password.as_bytes())
+                    {
+                        if matches {
                             Ok(Some(account_id))
                         } else {
                             debug!(
@@ -109,7 +96,7 @@ where
                             JMAPId::from(account_id)
                         );
                         Ok(None)
-                    }*/
+                    }
                 } else {
                     debug!(
                         "Account {} has no email or secret",

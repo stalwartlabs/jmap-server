@@ -1,4 +1,3 @@
-use super::BATCH_MAX_SIZE;
 use crate::cluster::log::Update;
 use crate::JMAPServer;
 use store::blob::BlobId;
@@ -12,6 +11,7 @@ where
     pub async fn prepare_blobs(
         &self,
         pending_blob_ids: Vec<BlobId>,
+        max_batch_size: usize,
     ) -> store::Result<(Vec<Update>, Vec<BlobId>)> {
         let store = self.store.clone();
         self.spawn_worker(move || {
@@ -20,7 +20,7 @@ where
             let mut bytes_sent = 0;
 
             for pending_blob_id in pending_blob_ids {
-                if bytes_sent < BATCH_MAX_SIZE {
+                if bytes_sent < max_batch_size {
                     let blob = store::lz4_flex::compress_prepend_size(
                         &store.blob_get(&pending_blob_id)?.ok_or_else(|| {
                             StoreError::InternalError(format!(

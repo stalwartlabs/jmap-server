@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use actix_web::web;
-use jmap::types::jmap::JMAPId;
+use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
 use jmap_client::{
     client::Client,
     core::set::{SetError, SetErrorType, SetObject},
@@ -9,6 +9,7 @@ use jmap_client::{
     mailbox::Role,
     Error,
 };
+use jmap_sharing::principal::set::JMAPSetPrincipal;
 use store::{ahash::AHashMap, chrono::DateTime, parking_lot::Mutex, Store};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -50,6 +51,22 @@ pub struct MockSMTPSettings {
     pub do_stop: bool,
 }
 
+const TEST_DKIM_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
+jxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v/RtdC2UzJ1lWT947qR+Rcac2gb
+to/NMqJ0fzfVjH4OuKhitdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB
+AoGBALmn+XwWk7akvkUlqb+dOxyLB9i5VBVfje89Teolwc9YJT36BGN/l4e0l6QX
+/1//6DWUTB3KI6wFcm7TWJcxbS0tcKZX7FsJvUz1SbQnkS54DJck1EZO/BLa5ckJ
+gAYIaqlA9C0ZwM6i58lLlPadX/rtHb7pWzeNcZHjKrjM461ZAkEA+itss2nRlmyO
+n1/5yDyCluST4dQfO8kAB3toSEVc7DeFeDhnC1mZdjASZNvdHS4gbLIA1hUGEF9m
+3hKsGUMMPwJBAPW5v/U+AWTADFCS22t72NUurgzeAbzb1HWMqO4y4+9Hpjk5wvL/
+eVYizyuce3/fGke7aRYw/ADKygMJdW8H/OcCQQDz5OQb4j2QDpPZc0Nc4QlbvMsj
+7p7otWRO5xRa6SzXqqV3+F0VpqvDmshEBkoCydaYwc2o6WQ5EBmExeV8124XAkEA
+qZzGsIxVP+sEVRWZmW6KNFSdVUpk3qzK0Tz/WjQMe5z0UunY9Ax9/4PVhp/j61bf
+eAYXunajbBSOLlx4D+TunwJBANkPI5S9iylsbLs6NkaMHV6k5ioHBBmgCak95JGX
+GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
+-----END RSA PRIVATE KEY-----"#;
+
 #[allow(clippy::disallowed_types)]
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
 where
@@ -59,22 +76,44 @@ where
     // Start mock SMTP server
     let (mut smtp_rx, smtp_settings) = spawn_mock_smtp_server();
 
-    // Create mailbox
-    let mailbox_id = client
+    // Create an identity without using a valid address should fail
+    match client
         .set_default_account_id(JMAPId::new(1).to_string())
+        .identity_create("John Doe", "jdoe@example.com")
+        .await
+        .unwrap_err()
+    {
+        Error::Set(err) => assert_eq!(err.error(), &SetErrorType::InvalidProperties),
+        err => panic!("Unexpected error: {:?}", err),
+    }
+
+    // Create a domain and a test account
+    let domain_id = client
+        .set_default_account_id(JMAPId::new(0))
+        .domain_create("example.com")
+        .await
+        .unwrap()
+        .take_id();
+    let account_id = client
+        .individual_create("jdoe@example.com", "12345", "John Doe")
+        .await
+        .unwrap()
+        .take_id();
+    let identity_id = client
+        .set_default_account_id(&account_id)
+        .identity_create("John Doe", "jdoe@example.com")
+        .await
+        .unwrap()
+        .take_id();
+
+    // Create test mailboxes
+    let mailbox_id = client
         .mailbox_create("JMAP EmailSubmission", None::<String>, Role::None)
         .await
         .unwrap()
         .take_id();
     let mailbox_id_2 = client
         .mailbox_create("JMAP EmailSubmission 2", None::<String>, Role::None)
-        .await
-        .unwrap()
-        .take_id();
-
-    // Create an identity
-    let identity_id = client
-        .identity_create("John Doe", "jdoe@example.com")
         .await
         .unwrap()
         .take_id();
@@ -140,7 +179,8 @@ where
     ));
 
     // Submit a valid message submission
-    let email_body = "From: jdoe@example.com\nTo: jane_smith@example.com\nSubject: hey\n\ntest";
+    let email_body =
+        "From: jdoe@example.com\r\nTo: jane_smith@example.com\r\nSubject: hey\r\n\r\ntest";
     let email_id = client
         .email_import(
             email_body.as_bytes().to_vec(),
@@ -164,6 +204,7 @@ where
             ["<jane_smith@example.com>"],
             email_body,
         ),
+        false,
     )
     .await;
 
@@ -196,6 +237,7 @@ where
             ],
             email_body,
         ),
+        false,
     )
     .await;
 
@@ -240,6 +282,7 @@ where
     assert_message_delivery(
         &mut smtp_rx,
         MockMessage::new("<jdoe@example.com>", ["<tim@foobar.com>"], email_body),
+        false,
     )
     .await;
 
@@ -334,6 +377,14 @@ where
     );
     smtp_settings.lock().fail_message = false;
 
+    // Enable DKIM for the domain
+    client
+        .set_default_account_id(JMAPId::from(SUPERUSER_ID))
+        .domain_enable_dkim(&domain_id, TEST_DKIM_KEY, "my-selector", None)
+        .await
+        .unwrap();
+    client.set_default_account_id(&account_id);
+
     // Confirm that the sendAt property is updated when using FUTURERELEASE
     let email_submission_id = client
         .email_submission_create_envelope(
@@ -352,6 +403,7 @@ where
             ["<jane_smith@example.com>"],
             email_body,
         ),
+        true,
     )
     .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -406,19 +458,13 @@ where
         .is_none());
 
     // Destroy the created mailbox, identity and all submissions
-    client.mailbox_destroy(&mailbox_id, true).await.unwrap();
-    client.mailbox_destroy(&mailbox_id_2, true).await.unwrap();
-    client.identity_destroy(&identity_id).await.unwrap();
-    let mut request = client.build();
-    let result_ref = request.query_email_submission().result_reference();
-    request.set_email_submission().destroy_ref(result_ref);
-    let response = request.send().await.unwrap();
-    response
-        .unwrap_method_responses()
-        .pop()
-        .unwrap()
-        .unwrap_set_email_submission()
+    client
+        .set_default_account_id(JMAPId::from(SUPERUSER_ID))
+        .principal_destroy(&account_id)
+        .await
         .unwrap();
+    client.principal_destroy(&domain_id).await.unwrap();
+    server.store.principal_purge().unwrap();
     server.store.assert_is_empty();
 }
 
@@ -534,15 +580,30 @@ pub fn spawn_mock_smtp_server() -> (mpsc::Receiver<MockMessage>, Arc<Mutex<MockS
 pub async fn assert_message_delivery(
     event_rx: &mut mpsc::Receiver<MockMessage>,
     expected_message: MockMessage,
+    expect_dkim: bool,
 ) {
     match tokio::time::timeout(Duration::from_millis(3000), event_rx.recv()).await {
         Ok(Some(message)) => {
+            assert_eq!(message.mail_from, expected_message.mail_from);
+            assert_eq!(message.rcpt_to, expected_message.rcpt_to);
+
             if let Some(needle) = expected_message.message.strip_prefix('@') {
-                assert_eq!(message.mail_from, expected_message.mail_from);
-                assert_eq!(message.rcpt_to, expected_message.rcpt_to);
                 assert!(message.message.contains(needle));
             } else {
-                assert_eq!(message, expected_message);
+                let message = if expect_dkim {
+                    if message.message.starts_with("DKIM-Signature:") {
+                        message.message.split_once('\n').unwrap().1
+                    } else {
+                        panic!(
+                            "Expected DKIM-Signature header but got: {}",
+                            message.message
+                        );
+                    }
+                } else {
+                    &message.message
+                };
+
+                assert_eq!(message, expected_message.message);
             }
         }
         result => {

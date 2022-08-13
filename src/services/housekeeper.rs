@@ -57,7 +57,7 @@ pub fn spawn_housekeeper<T>(
             .get("schedule-compact-db")
             .unwrap_or_else(|| "0 4 *".to_string()),
     );
-    let max_log_entries: u64 = settings.parse("max-changelog-entries").unwrap_or(5000);
+    let max_log_entries: u64 = settings.parse("max-changelog-entries").unwrap_or(10000);
 
     tokio::spawn(async move {
         debug!("Housekeeper task started.");

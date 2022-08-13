@@ -122,7 +122,7 @@ impl BlobStoreWrapper {
     pub fn new(settings: &EnvSettings) -> crate::Result<Self> {
         Ok(BlobStoreWrapper {
             lock: MutexMap::with_capacity(1024),
-            store: if !settings.contains_key("s3-config") {
+            store: if !settings.contains_key("blob-s3") {
                 BlobStoreType::Local(LocalBlobStore::new(settings)?)
             } else {
                 BlobStoreType::S3(S3BlobStore::new(settings)?)

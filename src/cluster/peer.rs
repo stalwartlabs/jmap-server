@@ -12,7 +12,7 @@ impl Peer {
         let (tx, online_rx) = spawn_peer_rpc(
             cluster.tx.clone(),
             cluster.peer_id,
-            cluster.key.clone(),
+            &cluster.config,
             peer_id,
             addr,
         );
@@ -50,7 +50,7 @@ impl Peer {
         let (tx, online_rx) = spawn_peer_rpc(
             cluster.tx.clone(),
             cluster.peer_id,
-            cluster.key.clone(),
+            &cluster.config,
             peer.peer_id,
             peer.addr,
         );

@@ -3,8 +3,16 @@ use jmap::orm::serialize::JMAPOrm;
 use jmap::principal::schema::{Principal, Property, Value};
 use jmap::principal::store::JMAPPrincipals;
 use jmap::request::get::{GetRequest, GetResponse};
+use jmap::SUPERUSER_ID;
+use jmap_mail::mail_send::dkim::DKIM;
+use store::core::collection::Collection;
 use store::core::error::StoreError;
+use store::core::tag::Tag;
 use store::core::vec_map::VecMap;
+use store::core::JMAPIdPrefix;
+use store::read::comparator::Comparator;
+use store::read::filter::{Filter, Query};
+use store::read::FilterMapper;
 use store::JMAPStore;
 use store::Store;
 
@@ -14,6 +22,7 @@ where
 {
     fn principal_get(&self, request: GetRequest<Principal>)
         -> jmap::Result<GetResponse<Principal>>;
+    fn dkim_get(&self, domain_name: String) -> store::Result<Option<DKIM<'_>>>;
 }
 
 impl<T> JMAPGetPrincipal<T> for JMAPStore<T>
@@ -58,5 +67,50 @@ where
                 properties: principal,
             }))
         })
+    }
+
+    fn dkim_get(&self, domain_name: String) -> store::Result<Option<DKIM<'_>>> {
+        if let Some(domain_id) = self
+            .query_store::<FilterMapper>(
+                SUPERUSER_ID,
+                Collection::Principal,
+                Filter::and(vec![
+                    Filter::eq(Property::DKIM.into(), Query::Tag(Tag::Default)),
+                    Filter::eq(Property::Name.into(), Query::Index(domain_name.clone())),
+                ]),
+                Comparator::None,
+            )?
+            .next()
+        {
+            if let Some((Value::Text { value: dkim }, dkim_settings)) = self
+                .get_orm::<Principal>(SUPERUSER_ID, domain_id.get_document_id())?
+                .map(|mut p| {
+                    (
+                        p.remove(&Property::Secret).unwrap_or(Value::Null),
+                        p.remove(&Property::DKIM).unwrap_or(Value::Null),
+                    )
+                })
+            {
+                let mut dkim = DKIM::from_pkcs1_pem(&dkim)
+                    .map_err(|err| {
+                        StoreError::InternalError(format!("Failed to DKIM sign: {}", err))
+                    })?
+                    .domain(domain_name)
+                    .selector("default");
+
+                if let Value::DKIM { value } = dkim_settings {
+                    if let Some(expiration) = value.dkim_expiration {
+                        dkim = dkim.expiration(expiration as u64);
+                    }
+                    if let Some(selector) = value.dkim_selector {
+                        dkim = dkim.selector(selector);
+                    }
+                }
+
+                return Ok(Some(dkim));
+            }
+        }
+
+        Ok(None)
     }
 }

@@ -51,7 +51,7 @@ where
     pub hostname: String,
 
     // Cluster key
-    pub key: String,
+    pub config: Config,
 
     // Peer list
     pub peers: Vec<Peer>,
@@ -68,6 +68,17 @@ where
     pub last_log: RaftId,
     pub uncommitted_index: LogIndex,
     pub state: raft::State,
+}
+
+pub struct Config {
+    pub key: String,
+    pub raft_batch_max: usize,       // 10 * 1024 * 1024
+    pub raft_election_timeout: u64,  // 1000
+    pub rpc_frame_max: usize,        // 50 * 1024 * 1024
+    pub rpc_inactivity_timeout: u64, // 5 * 60 * 1000
+    pub rpc_timeout: u64,            // 1000
+    pub rpc_retries_max: u32,        // 5
+    pub rpc_backoff_max: u64,        // 3 * 60 * 1000 (1 minute)
 }
 
 #[derive(Debug)]

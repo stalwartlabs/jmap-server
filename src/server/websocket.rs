@@ -3,7 +3,7 @@ use crate::api::request::Request;
 use crate::api::response::{serialize_hex, Response};
 use crate::api::{method, RequestError, RequestErrorType, RequestLimitError};
 use crate::authorization::Session;
-use crate::services::{LONG_SLUMBER_MS, THROTTLE_MS};
+use crate::services::LONG_SLUMBER_MS;
 use crate::JMAPServer;
 use actix::{Actor, ActorContext, AsyncContext, Handler, Message, StreamHandler};
 use actix_web::{web, HttpRequest, HttpResponse};
@@ -19,9 +19,6 @@ use store::core::bitmap::Bitmap;
 use store::core::vec_map::VecMap;
 use store::tracing::log::debug;
 use store::Store;
-
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, serde::Deserialize)]
 struct WebSocketRequest {
@@ -168,8 +165,12 @@ where
     }
 
     fn hb(&self, ctx: &mut <Self as Actor>::Context) {
-        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
-            if Instant::now().duration_since(act.hb) > CLIENT_TIMEOUT {
+        let heartbeat_interval =
+            Duration::from_millis(self.core.store.config.ws_heartbeat_interval);
+        let client_timeout = Duration::from_millis(self.core.store.config.ws_client_timeout);
+
+        ctx.run_interval(heartbeat_interval, move |act, ctx| {
+            if Instant::now().duration_since(act.hb) > client_timeout {
                 debug!("Websocket Client heartbeat failed, disconnecting!");
                 ctx.stop();
                 return;
@@ -294,6 +295,7 @@ where
                             WebSocketMessage::PushEnable(request) => {
                                 let core = self.core.clone();
                                 let account_id = self.session.account_id();
+                                let throttle_ms = core.store.config.ws_throttle;
                                 let types = if let Some(data_types) = request.data_types {
                                     if !data_types.is_empty() {
                                         data_types.into()
@@ -315,7 +317,7 @@ where
                                     };
 
                                     let mut last_message =
-                                        Instant::now() - Duration::from_millis(THROTTLE_MS);
+                                        Instant::now() - Duration::from_millis(throttle_ms);
                                     let mut timeout = Duration::from_millis(LONG_SLUMBER_MS);
                                     let mut response = WebSocketStateChange::new(None);
 
@@ -339,14 +341,14 @@ where
 
                                         timeout = if !response.changed.is_empty() {
                                             let elapsed = last_message.elapsed().as_millis() as u64;
-                                            if elapsed >= THROTTLE_MS {
+                                            if elapsed >= throttle_ms {
                                                 last_message = Instant::now();
                                                 yield response;
 
                                                 response = WebSocketStateChange::new(None);
                                                 Duration::from_millis(LONG_SLUMBER_MS)
                                             } else {
-                                                Duration::from_millis(THROTTLE_MS - elapsed)
+                                                Duration::from_millis(throttle_ms - elapsed)
                                             }
                                         } else {
                                             Duration::from_millis(LONG_SLUMBER_MS)

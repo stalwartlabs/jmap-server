@@ -10,12 +10,6 @@ use store::log::raft::{RaftId, TermId};
 use store::tracing::error;
 use tokio::sync::oneshot;
 
-const RPC_TIMEOUT_MS: u64 = 1000;
-const RPC_MAX_BACKOFF_MS: u64 = 3 * 60 * 1000; // 1 minute
-const RPC_MAX_CONNECT_ATTEMPTS: u32 = 5;
-const RPC_INACTIVITY_TIMEOUT: u64 = 5 * 60 * 1000; //TODO configure
-const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Request {
     UpdatePeers {

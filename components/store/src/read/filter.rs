@@ -1,6 +1,10 @@
 use roaring::RoaringBitmap;
 
-use crate::{core::tag::Tag, nlp::Language, FieldId, Float, Integer, LongInteger};
+use crate::{
+    core::tag::Tag,
+    nlp::{lang::LanguageDetector, Language},
+    FieldId, Float, Integer, LongInteger,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ComparisonOperator {
@@ -117,25 +121,50 @@ pub enum Query {
     Keyword(String),
     Tokenize(String),
     Index(String),
-    Match {
-        text: String,
-        language: Language,
-        match_phrase: bool,
-    },
+    Match(Text),
     Integer(Integer),
     LongInteger(LongInteger),
     Float(Float),
     Tag(Tag),
 }
 
-impl Query {
-    pub fn match_text(text: String, language: Language) -> Self {
-        Query::Match {
+#[derive(Debug)]
+pub struct Text {
+    pub text: String,
+    pub language: Language,
+    pub match_phrase: bool,
+}
+
+impl Text {
+    pub fn new(mut text: String, mut language: Language) -> Self {
+        let match_phrase = (text.starts_with('"') && text.ends_with('"'))
+            || (text.starts_with('\'') && text.ends_with('\''));
+
+        if !match_phrase && language == Language::Unknown {
+            language = if let Some((l, t)) = text
+                .split_once(':')
+                .and_then(|(l, t)| (Language::from_iso_639(l)?, t.to_string()).into())
+            {
+                text = t;
+                l
+            } else {
+                LanguageDetector::detect_single(&text)
+                    .and_then(|(l, c)| if c > 0.3 { Some(l) } else { None })
+                    .unwrap_or(Language::Unknown)
+            };
+        }
+
+        Text {
             language,
-            match_phrase: (text.starts_with('"') && text.ends_with('"'))
-                || (text.starts_with('\'') && text.ends_with('\'')),
+            match_phrase,
             text,
         }
+    }
+}
+
+impl Query {
+    pub fn match_text(text: String, language: Language) -> Self {
+        Query::Match(Text::new(text, language))
     }
 
     pub fn match_english(text: String) -> Self {

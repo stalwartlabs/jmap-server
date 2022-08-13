@@ -18,7 +18,7 @@ use store::{
         error::StoreError,
     },
     nlp::{search_snippet::generate_snippet, stemmer::Stemmer, tokenizers::Tokenizer, Language},
-    read::filter::LogicalOperator,
+    read::filter::{LogicalOperator, Text},
     serialize::StoreDeserialize,
     tracing::error,
     JMAPStore, Store,
@@ -167,7 +167,7 @@ where
                                 include_term = !include_term;
                             }
                             if include_term {
-                                terms.push(value);
+                                terms.push(Text::new(value, Language::Unknown));
                             }
                         }
                         _ => (),
@@ -252,11 +252,8 @@ where
 
             // Tokenize and stem terms
             for term in &terms {
-                let language = Language::English; //TODO detect
-                let match_phrase_term = (term.starts_with('"') && term.ends_with('"'))
-                    || (term.starts_with('\'') && term.ends_with('\''));
-                if !match_phrase_term {
-                    for token in Stemmer::new(term, language, MAX_TOKEN_LENGTH) {
+                if !term.match_phrase {
+                    for token in Stemmer::new(&term.text, term.language, MAX_TOKEN_LENGTH) {
                         match_terms.push(term_index.get_match_term(
                             token.word.as_ref(),
                             token.stemmed_word.as_ref().map(|w| w.as_ref()),
@@ -264,7 +261,7 @@ where
                     }
                 } else {
                     match_phrase = true;
-                    for token in Tokenizer::new(term, language, MAX_TOKEN_LENGTH) {
+                    for token in Tokenizer::new(&term.text, term.language, MAX_TOKEN_LENGTH) {
                         match_terms.push(term_index.get_match_term(token.word.as_ref(), None));
                     }
                 }

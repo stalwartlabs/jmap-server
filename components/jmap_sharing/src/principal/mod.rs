@@ -1,12 +1,8 @@
-use argon2::{
-    password_hash::{rand_core::OsRng, SaltString},
-    Argon2, PasswordHasher,
-};
-
 use jmap::{
     orm::TinyORM,
     principal::schema::{Principal, Property, Type, Value},
 };
+use store::rand::{self, Rng};
 
 pub mod account;
 pub mod get;
@@ -36,11 +32,12 @@ impl CreateAccount for TinyORM<Principal> {
         account.set(
             Property::Secret,
             Value::Text {
-                value: secret.to_string(),
-                /*value: Scrypt
-                .hash_password(secret.as_bytes(), &SaltString::generate(&mut OsRng))
-                .unwrap()
-                .to_string(),*/
+                value: argon2::hash_encoded(
+                    secret.as_bytes(),
+                    &rand::thread_rng().gen::<[u8; 10]>(),
+                    &argon2::Config::default(),
+                )
+                .unwrap_or_default(),
             },
         );
         account.set(
@@ -56,10 +53,12 @@ impl CreateAccount for TinyORM<Principal> {
         self.set(
             Property::Secret,
             Value::Text {
-                value: Argon2::default()
-                    .hash_password(secret.as_bytes(), &SaltString::generate(&mut OsRng))
-                    .unwrap()
-                    .to_string(),
+                value: argon2::hash_encoded(
+                    secret.as_bytes(),
+                    &rand::thread_rng().gen::<[u8; 10]>(),
+                    &argon2::Config::default(),
+                )
+                .unwrap_or_default(),
             },
         );
         self

@@ -16,8 +16,6 @@ use store::core::collection::Collection;
 use store::log::raft::{LogIndex, RaftId};
 use store::AccountId;
 
-const BATCH_MAX_SIZE: usize = 10 * 1024 * 1024; //TODO configure
-
 #[derive(Debug)]
 enum State {
     BecomeLeader,

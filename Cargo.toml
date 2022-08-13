@@ -10,7 +10,6 @@ store_rocksdb = { path = "components/store_rocksdb" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 jmap_sharing = { path = "components/jmap_sharing" }
-mail-send = { path = "/home/vagrant/code/mail-send" } 
 tracing-subscriber = "0.2"
 actix = "0.13"
 actix-web = { version = "4", features = ["rustls"] }
@@ -33,6 +32,7 @@ ece = "2.2"
 
 [dev-dependencies]
 jmap_mail = { path = "components/jmap_mail", features = ["debug"] }
+jmap_sharing = { path = "components/jmap_sharing", features = ["debug"] }
 jmap-client = { path = "/home/vagrant/code/jmap-client", features = ["websockets", "debug"] } 
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }

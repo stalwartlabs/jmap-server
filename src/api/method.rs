@@ -463,7 +463,42 @@ impl Response {
                 response.account_id = None;
                 Changes::None
             }
-            _ => Changes::None,
+            Response::SetPrincipal(response) => {
+                if let Some(change_id) = response.has_changes() {
+                    Changes::Item {
+                        created_ids: None,
+                        change_id,
+                        state_change: None,
+                        next_call: None,
+                    }
+                } else {
+                    Changes::None
+                }
+            }
+            Response::GetMailbox(_)
+            | Response::ChangesMailbox(_)
+            | Response::QueryMailbox(_)
+            | Response::QueryChangesMailbox(_)
+            | Response::GetThread(_)
+            | Response::ChangesThread(_)
+            | Response::GetEmail(_)
+            | Response::ChangesEmail(_)
+            | Response::QueryEmail(_)
+            | Response::QueryChangesEmail(_)
+            | Response::ParseEmail(_)
+            | Response::GetSearchSnippet(_)
+            | Response::GetIdentity(_)
+            | Response::ChangesIdentity(_)
+            | Response::GetEmailSubmission(_)
+            | Response::ChangesEmailSubmission(_)
+            | Response::QueryEmailSubmission(_)
+            | Response::QueryChangesEmailSubmission(_)
+            | Response::GetVacationResponse(_)
+            | Response::GetPrincipal(_)
+            | Response::QueryPrincipal(_)
+            | Response::CopyBlob(_)
+            | Response::Echo(_)
+            | Response::Error(_) => Changes::None,
         }
     }
 }

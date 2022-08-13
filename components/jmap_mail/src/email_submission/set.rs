@@ -1,34 +1,28 @@
-use std::time::SystemTime;
-
+use super::schema::{Address, EmailSubmission, Envelope, Property, Value};
 use crate::identity;
 use crate::identity::schema::Identity;
 use crate::mail::schema::Email;
 use crate::mail::{MessageData, MessageField};
-
 use jmap::error::set::{SetError, SetErrorType};
-
+use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
 use jmap::orm::{serialize::JMAPOrm, TinyORM};
-use jmap::types::date::JMAPDate;
-use jmap::types::jmap::JMAPId;
-use store::ahash::{AHashMap, AHashSet};
-
-use jmap::jmap_store::set::SetHelper;
 use jmap::request::set::SetResponse;
 use jmap::request::{MaybeIdReference, MaybeResultReference, ResultReference};
+use jmap::types::date::JMAPDate;
+use jmap::types::jmap::JMAPId;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use mail_parser::RfcHeader;
-use store::core::document::Document;
-use store::core::vec_map::VecMap;
-
+use std::time::SystemTime;
+use store::ahash::{AHashMap, AHashSet};
 use store::blob::BlobId;
 use store::core::collection::Collection;
+use store::core::document::Document;
 use store::core::error::StoreError;
+use store::core::vec_map::VecMap;
 use store::serialize::{StoreDeserialize, StoreSerialize};
 use store::write::options::{IndexOptions, Options};
 use store::{AccountId, JMAPStore, Store};
-
-use super::schema::{Address, EmailSubmission, Envelope, Property, Value};
 
 #[derive(Debug, Clone, Default)]
 pub struct SetArguments {

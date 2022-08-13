@@ -9,21 +9,24 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::cluster::Event;
+use crate::cluster::{Config, Event};
 
 use super::serialize::RpcEncoder;
-use super::{Protocol, Request, Response, RPC_TIMEOUT_MS};
+use super::{Protocol, Request, Response};
 
 pub async fn spawn_rpc(
     bind_addr: SocketAddr,
     mut shutdown_rx: watch::Receiver<bool>,
     main_tx: mpsc::Sender<Event>,
-    key: String,
+    config: &Config,
 ) {
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
         panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
     });
+
+    let key = config.key.to_string();
+    let rpc_timeout = config.rpc_timeout;
 
     tokio::spawn(async move {
         loop {
@@ -35,7 +38,7 @@ pub async fn spawn_rpc(
                             let key = key.clone();
                             let shutdown_rx = shutdown_rx.clone();
                             tokio::spawn(async move {
-                                handle_conn(stream, shutdown_rx, main_tx, key).await;
+                                handle_conn(stream, shutdown_rx, main_tx, key, rpc_timeout).await;
                             });
                         }
                         Err(err) => {
@@ -57,11 +60,12 @@ async fn handle_conn(
     mut shutdown_rx: watch::Receiver<bool>,
     main_tx: mpsc::Sender<Event>,
     auth_key: String,
+    rpc_timeout: u64,
 ) {
     let peer_addr = stream.peer_addr().unwrap();
     let mut frames = Framed::new(stream, RpcEncoder::default());
 
-    let peer_id = match time::timeout(Duration::from_millis(RPC_TIMEOUT_MS), frames.next()).await {
+    let peer_id = match time::timeout(Duration::from_millis(rpc_timeout), frames.next()).await {
         Ok(Some(result)) => match result {
             Ok(Protocol::Request(Request::Auth { peer_id, key })) => {
                 if auth_key == key {

@@ -137,7 +137,7 @@ where
     });
 
     // Spawn TypeState manager
-    spawn_state_manager(server.clone(), !is_in_cluster, change_rx);
+    spawn_state_manager(server.clone(), settings, !is_in_cluster, change_rx);
 
     // Spawn email delivery service
     spawn_email_delivery(server.clone(), settings, email_tx, email_rx);
@@ -184,13 +184,17 @@ where
         }
     );
 
+    let strict_cors = settings.parse("strict-cors").unwrap_or(false);
     let server = HttpServer::new(move || {
         App::new()
             .wrap(SessionFactory::new(jmap_server.clone()))
-            .wrap(
-                Cors::permissive(), //.allow_any_origin()
-                                    //.allowed_methods(vec!["GET", "POST", "OPTIONS"]),
-            )
+            .wrap(if strict_cors {
+                Cors::default()
+                    .allow_any_origin()
+                    .allowed_methods(vec!["GET", "POST", "OPTIONS"])
+            } else {
+                Cors::permissive()
+            })
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())
             .app_data(jmap_server.clone())
