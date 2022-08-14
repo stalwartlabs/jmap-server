@@ -47,7 +47,7 @@ where
                 let blob_external = blob_external.clone();
                 s.spawn_fifo(move |_| {
                     db_.blob_store(&blob_external, blob_2).unwrap();
-                    db_.blob_link_ephimeral(&blob_external, 1).unwrap();
+                    db_.blob_link_ephemeral(&blob_external, 1).unwrap();
                 });
             }
         });
@@ -72,7 +72,7 @@ where
     expected_count.insert(blob_local.clone(), (1, 1));
     assert_eq!(expected_count, db.get_all_blobs());
 
-    // Expire ephimeral link to blob_local and check counts
+    // Expire ephemeral link to blob_local and check counts
     db.db
         .set(
             ColumnFamily::Blobs,
@@ -94,7 +94,7 @@ where
     expected_count.remove(&blob_local);
     assert_eq!(expected_count, db.get_all_blobs());
 
-    // Force expire both ephimeral links to blob_external
+    // Force expire both ephemeral links to blob_external
     for account_id in [0, 1] {
         db.db
             .set(
@@ -121,7 +121,7 @@ where
         let mut result = AHashMap::new();
         let mut blob_id = vec![0u8; BLOB_HASH_LEN + 1];
         let mut blob_link_count = u32::MAX;
-        let mut blob_ephimeral_count = u32::MAX;
+        let mut blob_ephemeral_count = u32::MAX;
 
         for (key, _) in self
             .db
@@ -132,18 +132,18 @@ where
                 if blob_link_count != u32::MAX {
                     result.insert(
                         BlobId::deserialize(&blob_id).unwrap(),
-                        (blob_link_count, blob_ephimeral_count),
+                        (blob_link_count, blob_ephemeral_count),
                     );
                 }
                 blob_link_count = 0;
-                blob_ephimeral_count = 0;
+                blob_ephemeral_count = 0;
                 blob_id.copy_from_slice(&key[..BLOB_HASH_LEN + 1]);
             }
 
             if key.len() > BLOB_HASH_LEN + 1 {
                 if let Some(bytes_read) = skip_leb128_value(&key[BLOB_HASH_LEN + 1..]) {
                     if key.len() == BLOB_HASH_LEN + 1 + bytes_read {
-                        blob_ephimeral_count += 1;
+                        blob_ephemeral_count += 1;
                     } else {
                         blob_link_count += 1;
                     }
@@ -154,7 +154,7 @@ where
         if blob_link_count != u32::MAX {
             result.insert(
                 BlobId::deserialize(&blob_id).unwrap(),
-                (blob_link_count, blob_ephimeral_count),
+                (blob_link_count, blob_ephemeral_count),
             );
         }
 

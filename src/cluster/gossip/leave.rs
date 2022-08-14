@@ -1,6 +1,7 @@
 use super::request::Request;
 use super::{Cluster, PeerStatus};
 use crate::cluster::gossip::State;
+use store::log::raft::LogIndex;
 use store::tracing::debug;
 use store::Store;
 
@@ -21,9 +22,15 @@ where
 
     pub async fn handle_leave(&mut self, peers: Vec<PeerStatus>) -> store::Result<()> {
         if let Some(peer) = peers.first() {
-            let is_leader_leaving =
-                matches!(self.leader_peer_id(), Some(leader_id) if peer.peer_id == leader_id);
+            let (is_leader_leaving, is_leading) = match self.state {
+                crate::cluster::raft::State::Leader { .. } => (false, true),
+                crate::cluster::raft::State::Follower { peer_id, .. } => {
+                    (peer.peer_id == peer_id, false)
+                }
+                _ => (false, false),
+            };
 
+            let mut peer_commit_index = LogIndex::MAX;
             for local_peer in self.peers.iter_mut() {
                 if local_peer.peer_id == peer.peer_id {
                     debug!(
@@ -31,13 +38,27 @@ where
                         if is_leader_leaving { "Leader" } else { "Peer" },
                         local_peer.addr
                     );
+
+                    if is_leading
+                        && local_peer.is_in_shard(self.shard_id)
+                        && peer.last_log_index > local_peer.last_log_index
+                    {
+                        peer_commit_index = peer.last_log_index;
+                    }
+
                     local_peer.state = State::Left;
                     local_peer.epoch = peer.epoch;
                     local_peer.last_log_index = peer.last_log_index;
                     local_peer.last_log_term = peer.last_log_term;
-                    //TODO advance local commit index
+
                     break;
                 }
+            }
+
+            // Advance local commit index
+            if peer_commit_index != LogIndex::MAX {
+                self.advance_commit_index(peer.peer_id, peer_commit_index)
+                    .await?;
             }
 
             if is_leader_leaving {

@@ -18,7 +18,7 @@ where
         let mut indexes = Vec::with_capacity(self.peers.len() + 1);
         for peer in self.peers.iter_mut() {
             if peer.is_in_shard(self.shard_id) {
-                if peer.peer_id == peer_id {
+                if peer.peer_id == peer_id && commit_index > peer.commit_index {
                     peer.commit_index = commit_index;
                 }
                 indexes.push(peer.commit_index.wrapping_add(1));

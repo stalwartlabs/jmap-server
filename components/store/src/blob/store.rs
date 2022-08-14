@@ -79,7 +79,7 @@ where
             .exists(ColumnFamily::Blobs, &BlobKey::serialize(blob_id))
     }
 
-    pub fn blob_link_ephimeral(
+    pub fn blob_link_ephemeral(
         &self,
         blob_id: &BlobId,
         account_id: AccountId,

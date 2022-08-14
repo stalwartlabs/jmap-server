@@ -2,6 +2,7 @@ use self::gossip::PeerInfo;
 use crate::JMAPServer;
 use actix_web::web;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::{net::SocketAddr, sync::atomic::AtomicU8, time::Instant};
 use store::log::raft::{LogIndex, RaftId, TermId};
 use store::{
@@ -10,6 +11,7 @@ use store::{
     Store,
 };
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio_rustls::TlsConnector;
 
 pub mod follower;
 pub mod gossip;
@@ -74,11 +76,11 @@ pub struct Config {
     pub key: String,
     pub raft_batch_max: usize,       // 10 * 1024 * 1024
     pub raft_election_timeout: u64,  // 1000
-    pub rpc_frame_max: usize,        // 50 * 1024 * 1024
     pub rpc_inactivity_timeout: u64, // 5 * 60 * 1000
     pub rpc_timeout: u64,            // 1000
     pub rpc_retries_max: u32,        // 5
     pub rpc_backoff_max: u64,        // 3 * 60 * 1000 (1 minute)
+    pub tls_connector: Arc<TlsConnector>,
 }
 
 #[derive(Debug)]

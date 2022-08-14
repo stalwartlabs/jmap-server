@@ -1,4 +1,6 @@
 use futures::{stream::StreamExt, SinkExt};
+use rustls::ServerName;
+use std::sync::Arc;
 use std::time::Instant;
 use std::{net::SocketAddr, time::Duration};
 use store::rand::Rng;
@@ -9,6 +11,8 @@ use tokio::{
     sync::mpsc,
     time::{self},
 };
+use tokio_rustls::client::TlsStream;
+use tokio_rustls::TlsConnector;
 use tokio_util::codec::Framed;
 
 use crate::cluster::rpc::{Request, Response};
@@ -32,6 +36,7 @@ pub fn spawn_peer_rpc(
     let rpc_retries_max = config.rpc_retries_max;
     let rpc_timeout = config.rpc_timeout;
     let rpc_backoff_max = config.rpc_backoff_max;
+    let tls_connector = config.tls_connector.clone();
 
     tokio::spawn(async move {
         let mut conn_ = None;
@@ -68,6 +73,7 @@ pub fn spawn_peer_rpc(
                 'retry: loop {
                     // Connect and authenticate with peer.
                     match connect_peer(
+                        tls_connector.clone(),
                         peer_addr,
                         Request::Auth {
                             peer_id: local_peer_id,
@@ -225,12 +231,21 @@ pub fn spawn_peer_rpc(
 }
 
 async fn connect_peer(
+    tls_connector: Arc<TlsConnector>,
     addr: SocketAddr,
     auth_frame: Request,
     rpc_timeout: u64,
-) -> std::io::Result<Framed<TcpStream, RpcEncoder>> {
+) -> std::io::Result<Framed<TlsStream<TcpStream>, RpcEncoder>> {
     time::timeout(Duration::from_millis(rpc_timeout), async {
-        let mut conn = Framed::new(TcpStream::connect(&addr).await?, RpcEncoder::default());
+        let stream = TcpStream::connect(&addr).await?;
+        let domain = ServerName::try_from(addr.ip().to_string().as_str()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::Other, "Failed to parse TLS domain.")
+        })?;
+
+        let mut conn = Framed::new(
+            tls_connector.connect(domain, stream).await?,
+            RpcEncoder::default(),
+        );
         if let Response::Pong = send_rpc(&mut conn, auth_frame).await? {
             Ok(conn)
         } else {
@@ -250,7 +265,7 @@ async fn connect_peer(
 }
 
 async fn send_rpc(
-    conn: &mut Framed<TcpStream, RpcEncoder>,
+    conn: &mut Framed<TlsStream<TcpStream>, RpcEncoder>,
     request: Request,
 ) -> std::io::Result<Response> {
     conn.send(Protocol::Request(request)).await?;

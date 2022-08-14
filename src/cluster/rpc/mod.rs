@@ -2,6 +2,7 @@ pub mod listener;
 pub mod peer;
 pub mod request;
 pub mod serialize;
+pub mod tls;
 
 use super::log::{AppendEntriesRequest, AppendEntriesResponse};
 use super::{gossip::PeerInfo, PeerId};

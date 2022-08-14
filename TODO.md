@@ -11,14 +11,13 @@ jmap-server
   - Escape filenames in src/api/blob.
 - Cluster
   - Advance local commit index on Raft leave request.
-  - Encrypt packets.
-  - Something better than cluster key?
 - General
   - Fix logging from subcrates.
   - Set readOnly on shared accounts for jmap session.
   - Control the amount of data stored from all set requests (ORM values, headers, etc.)
   - OAuth authentication with Raft support.
   - Graceful shutdowns
+  - Replace expect and panic with print during startup.
 - Testing
   - Cluster read replicas
   - Webmail client using Enron db.
@@ -58,6 +57,7 @@ Medium term
 - JMAP Contacts/Calendars.
 - Write email/set parsed message directly to store, avoid parsing it again.
 - Index PDF, Word and Excel.
+- Use unique nonce for each packet.
 
 
 Settings
@@ -137,9 +137,11 @@ Settings
   - raft-batch-max: 10 * 1024 * 1024
   - raft-commit-timeout: 1000
   - raft-election-timeout: 1000
-  - rpc-frame-max: 50 * 1024 * 1024
   - rpc-inactivity-timeout: 5 * 60 * 1000
   - rpc-timeout: 1000
   - rpc-retries-max: 5
   - rpc-backoff-max: 3 * 60 * 1000 (1 minute)
+  - rpc-cert-path
+  - rpc-cert-key
+  - rpc-allow-invalid-certs: false
 

@@ -9,6 +9,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     net::{SocketAddr, ToSocketAddrs},
+    sync::Arc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -19,8 +20,12 @@ use store::{
 };
 use store::{tracing::debug, Store};
 use tokio::sync::{mpsc, watch};
+use tokio_rustls::TlsConnector;
 
-use super::{ClusterIpc, Config, Event, IPC_CHANNEL_BUFFER, RAFT_LOG_BEHIND};
+use super::{
+    rpc::tls::load_tls_client_config, ClusterIpc, Config, Event, IPC_CHANNEL_BUFFER,
+    RAFT_LOG_BEHIND,
+};
 
 pub struct ClusterInit {
     main_rx: mpsc::Receiver<Event>,
@@ -84,10 +89,18 @@ pub async fn start_cluster<T>(
         bind_addr,
         shutdown_rx.clone(),
         main_tx.clone(),
+        settings,
         &cluster.config,
     )
     .await;
-    spawn_quidnunc(bind_addr, shutdown_rx.clone(), gossip_rx, main_tx.clone()).await;
+    spawn_quidnunc(
+        bind_addr,
+        shutdown_rx.clone(),
+        gossip_rx,
+        main_tx.clone(),
+        &cluster.config,
+    )
+    .await;
 
     let ping_interval = settings.parse("peer-ping-interval").unwrap_or(500);
 
@@ -367,13 +380,15 @@ impl Config {
             key: settings.get("cluster").unwrap(),
             raft_batch_max: settings.parse("raft-batch-max").unwrap_or(10 * 1024 * 1024),
             raft_election_timeout: settings.parse("raft-election-timeout").unwrap_or(1000),
-            rpc_frame_max: settings.parse("rpc-frame-max").unwrap_or(50 * 1024 * 1024),
             rpc_inactivity_timeout: settings
                 .parse("rpc-inactivity-timeout")
                 .unwrap_or(5 * 60 * 1000),
             rpc_timeout: settings.parse("rpc-timeout").unwrap_or(1000),
             rpc_retries_max: settings.parse("rpc-retries-max").unwrap_or(5),
             rpc_backoff_max: settings.parse("rpc-backoff-max").unwrap_or(3 * 60 * 1000),
+            tls_connector: Arc::new(TlsConnector::from(Arc::new(load_tls_client_config(
+                settings.parse("rpc-allow-invalid-certs").unwrap_or(false),
+            )))),
         }
     }
 }

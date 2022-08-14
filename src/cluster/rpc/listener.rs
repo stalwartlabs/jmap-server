@@ -1,5 +1,7 @@
 use futures::{stream::StreamExt, SinkExt};
+use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
+use store::config::env_settings::EnvSettings;
 use store::tracing::{debug, error};
 use tokio::sync::watch;
 use tokio::{
@@ -7,19 +9,36 @@ use tokio::{
     sync::{mpsc, oneshot},
     time::{self},
 };
+use tokio_rustls::server::TlsStream;
+use tokio_rustls::TlsAcceptor;
 use tokio_util::codec::Framed;
 
 use crate::cluster::{Config, Event};
 
 use super::serialize::RpcEncoder;
+use super::tls::load_tls_server_config;
 use super::{Protocol, Request, Response};
 
 pub async fn spawn_rpc(
     bind_addr: SocketAddr,
     mut shutdown_rx: watch::Receiver<bool>,
     main_tx: mpsc::Sender<Event>,
+    settings: &EnvSettings,
     config: &Config,
 ) {
+    // Build TLS acceptor
+    let (cert_path, key_path) = if let (Some(cert_path), Some(key_path)) =
+        (settings.get("rpc-cert-path"), settings.get("rpc-key-path"))
+    {
+        (cert_path, key_path)
+    } else {
+        panic!("Missing TLS 'rpc-cert-path' and/or 'rpc-key-path' parameters.");
+    };
+
+    let tls_acceptor = Arc::new(TlsAcceptor::from(Arc::new(load_tls_server_config(
+        &cert_path, &key_path,
+    ))));
+
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
         panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
@@ -37,8 +56,19 @@ pub async fn spawn_rpc(
                             let main_tx = main_tx.clone();
                             let key = key.clone();
                             let shutdown_rx = shutdown_rx.clone();
+                            let tls_acceptor = tls_acceptor.clone();
+
                             tokio::spawn(async move {
-                                handle_conn(stream, shutdown_rx, main_tx, key, rpc_timeout).await;
+                                let peer_addr = stream.peer_addr().unwrap();
+                                let stream = match tls_acceptor.accept(stream).await {
+                                    Ok(stream) => stream,
+                                    Err(e) => {
+                                        debug!("Failed to accept TLS connection: {}", e);
+                                        return;
+                                    }
+                                };
+
+                                handle_conn(stream, peer_addr, shutdown_rx, main_tx, key, rpc_timeout).await;
                             });
                         }
                         Err(err) => {
@@ -56,13 +86,13 @@ pub async fn spawn_rpc(
 }
 
 async fn handle_conn(
-    stream: TcpStream,
+    stream: TlsStream<TcpStream>,
+    peer_addr: SocketAddr,
     mut shutdown_rx: watch::Receiver<bool>,
     main_tx: mpsc::Sender<Event>,
     auth_key: String,
     rpc_timeout: u64,
 ) {
-    let peer_addr = stream.peer_addr().unwrap();
     let mut frames = Framed::new(stream, RpcEncoder::default());
 
     let peer_id = match time::timeout(Duration::from_millis(rpc_timeout), frames.next()).await {

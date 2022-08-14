@@ -6,6 +6,7 @@ use std::{
 
 use ahash::AHashMap;
 
+#[derive(Debug)]
 pub struct EnvSettings {
     pub args: AHashMap<String, String>,
 }

@@ -136,7 +136,7 @@ where
                     let blob = bytes.to_vec();
                     let blob_id = BlobId::new_external(&blob);
                     store.blob_store(&blob_id, blob)?;
-                    store.blob_link_ephimeral(&blob_id, account_id)?;
+                    store.blob_link_ephemeral(&blob_id, account_id)?;
                     JMAPBlob::new(blob_id).into()
                 } else {
                     None
@@ -212,7 +212,7 @@ where
                     continue;
                 }
             }
-            self.blob_link_ephimeral(&blob_id.id, account_id)?;
+            self.blob_link_ephemeral(&blob_id.id, account_id)?;
             copied.append(blob_id.clone(), blob_id);
         }
 

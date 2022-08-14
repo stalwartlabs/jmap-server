@@ -1,6 +1,13 @@
+use std::time::SystemTime;
+
 use super::{EpochId, GenerationId, PeerId, PeerStatus, UDP_MAX_PAYLOAD};
+use aes_gcm_siv::aead::Aead;
+use aes_gcm_siv::{AeadInPlace, Aes256GcmSiv, KeyInit, Nonce};
 use store::log::raft::{LogIndex, TermId};
 use store::serialize::leb128::Leb128;
+use store::sha2::{Digest, Sha256};
+
+const ENCRYPT_TAG_LEN: usize = 16;
 
 #[derive(Debug)]
 pub enum Request {
@@ -64,17 +71,33 @@ impl Request {
         let (flag, peers) = match self {
             Request::Join { id, port } => {
                 let mut bytes = Vec::with_capacity(
-                    std::mem::size_of::<usize>() + std::mem::size_of::<u16>() + 1,
+                    std::mem::size_of::<usize>()
+                        + std::mem::size_of::<u64>()
+                        + std::mem::size_of::<u16>()
+                        + ENCRYPT_TAG_LEN
+                        + 1,
                 );
                 bytes.push(Self::JOIN as u8);
                 id.to_leb128_bytes(&mut bytes);
                 port.to_leb128_bytes(&mut bytes);
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+                    .to_leb128_bytes(&mut bytes);
                 return bytes;
             }
             Request::JoinReply { id } => {
-                let mut bytes = Vec::with_capacity(std::mem::size_of::<usize>() + 1);
+                let mut bytes = Vec::with_capacity(
+                    std::mem::size_of::<usize>() + std::mem::size_of::<u64>() + ENCRYPT_TAG_LEN + 1,
+                );
                 bytes.push(Self::JOIN_REPLY as u8);
                 id.to_leb128_bytes(&mut bytes);
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+                    .to_leb128_bytes(&mut bytes);
                 return bytes;
             }
             Request::Ping(peers) => (Self::PING, peers),
@@ -85,7 +108,9 @@ impl Request {
         debug_assert!(!peers.is_empty());
 
         let mut bytes = Vec::with_capacity(
-            std::mem::size_of::<usize>() + (peers.len() * std::mem::size_of::<PeerStatus>()),
+            std::mem::size_of::<usize>()
+                + (peers.len() * std::mem::size_of::<PeerStatus>())
+                + ENCRYPT_TAG_LEN,
         );
         (flag + peers.len()).to_leb128_bytes(&mut bytes);
 
@@ -98,5 +123,34 @@ impl Request {
         }
 
         bytes
+    }
+}
+
+pub struct RequestEncryptor {
+    aes: Aes256GcmSiv,
+}
+
+impl RequestEncryptor {
+    pub fn new(key: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(key);
+
+        RequestEncryptor {
+            aes: Aes256GcmSiv::new(&hasher.finalize()),
+        }
+    }
+
+    #[allow(clippy::ptr_arg)]
+    pub fn encrypt(&self, bytes: &mut Vec<u8>, nonce: &[u8]) -> Result<(), String> {
+        self.aes
+            .encrypt_in_place(Nonce::from_slice(nonce), b"", bytes)
+            .map_err(|e| e.to_string())
+    }
+
+    #[allow(clippy::ptr_arg)]
+    pub fn decrypt(&self, bytes: &[u8], nonce: &[u8]) -> Result<Vec<u8>, String> {
+        self.aes
+            .decrypt(Nonce::from_slice(nonce), bytes)
+            .map_err(|e| e.to_string())
     }
 }

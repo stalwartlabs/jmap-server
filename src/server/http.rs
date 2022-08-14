@@ -25,8 +25,8 @@ use crate::{
         session::{handle_jmap_session, Session},
     },
     authorization::auth::SessionFactory,
-    cluster::ClusterIpc,
-    server::{event_source::handle_jmap_event_source, tls::load_tls_config, websocket::handle_ws},
+    cluster::{rpc::tls::load_tls_server_config, ClusterIpc},
+    server::{event_source::handle_jmap_event_source, websocket::handle_ws},
     services::{
         email_delivery::{init_email_delivery, spawn_email_delivery},
         housekeeper::{init_housekeeper, spawn_housekeeper},
@@ -163,7 +163,7 @@ where
 
     // Obtain TLS path
     let tls_config = if let Some(cert_path) = settings.get("cert-path") {
-        load_tls_config(
+        load_tls_server_config(
             &cert_path,
             &settings
                 .get("key-path")

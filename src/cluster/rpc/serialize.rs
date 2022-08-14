@@ -5,15 +5,9 @@ use store::serialize::leb128::Leb128;
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Default)]
-pub struct RpcEncoder {
-    max_frame_length: usize,
-}
+pub struct RpcEncoder {}
 
-impl RpcEncoder {
-    pub fn new(max_frame_length: usize) -> Self {
-        Self { max_frame_length }
-    }
-}
+const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024;
 
 impl Decoder for RpcEncoder {
     type Item = Protocol;
@@ -32,7 +26,7 @@ impl Decoder for RpcEncoder {
             )
         })?;
 
-        if frame_len > self.max_frame_length {
+        if frame_len > MAX_FRAME_LENGTH {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Frame of length {} is too large.", frame_len),

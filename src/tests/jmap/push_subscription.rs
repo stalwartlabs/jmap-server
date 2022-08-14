@@ -16,8 +16,8 @@ use store::{ahash::AHashSet, Store};
 use tokio::sync::mpsc;
 
 use crate::{
-    api::StateChangeResponse, server::tls::load_tls_config, tests::store::utils::StoreCompareWith,
-    JMAPServer,
+    api::StateChangeResponse, cluster::rpc::tls::load_tls_server_config,
+    tests::store::utils::StoreCompareWith, JMAPServer,
 };
 
 pub async fn test<T>(server: web::Data<JMAPServer<T>>, client: &mut Client)
@@ -59,7 +59,7 @@ where
                 .app_data(data.clone())
                 .route("/push", web::post().to(handle_push))
         })
-        .bind_rustls("127.0.0.1:9000", load_tls_config(&cert, &key))?
+        .bind_rustls("127.0.0.1:9000", load_tls_server_config(&cert, &key))?
         .run()
         .await
     });
