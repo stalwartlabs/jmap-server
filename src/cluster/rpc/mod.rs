@@ -18,7 +18,7 @@ pub enum Request {
     },
     Auth {
         peer_id: PeerId,
-        key: String,
+        response: Vec<u8>,
     },
     Vote {
         term: TermId,
@@ -38,6 +38,7 @@ pub enum Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
+    Auth { challenge: [u8; 12] },
     UpdatePeers { peers: Vec<PeerInfo> },
     Vote { term: TermId, vote_granted: bool },
     StepDown { term: TermId },

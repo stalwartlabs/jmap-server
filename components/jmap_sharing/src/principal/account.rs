@@ -25,6 +25,7 @@ pub trait JMAPAccountStore {
         &self,
         account_id: AccountId,
     ) -> store::Result<Option<(String, String, Type)>>;
+    fn get_account_secret_hash(&self, account_id: AccountId) -> store::Result<Option<String>>;
     fn expand_rcpt(&self, email: String) -> store::Result<Arc<RecipientType>>;
 }
 
@@ -209,6 +210,30 @@ where
                     })
                     .unwrap_or(Type::Individual),
             )))
+        } else {
+            debug!(
+                "Account details failed: ORM for account {} does not exist.",
+                JMAPId::from(account_id)
+            );
+            Ok(None)
+        }
+    }
+
+    // Used as nonce for token encryption
+    fn get_account_secret_hash(&self, account_id: AccountId) -> store::Result<Option<String>> {
+        if let Some(mut fields) = self.get_orm::<Principal>(SUPERUSER_ID, account_id)? {
+            Ok(Some(
+                fields
+                    .remove(&Property::Secret)
+                    .and_then(|v| {
+                        if let Value::Text { value } = v {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default(),
+            ))
         } else {
             debug!(
                 "Account details failed: ORM for account {} does not exist.",

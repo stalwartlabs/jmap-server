@@ -10,7 +10,8 @@ pub mod write;
 use crate::core::acl::ACL;
 use crate::core::{acl::ACLToken, collection::Collection, error::StoreError};
 use crate::nlp::Language;
-use blob::BlobStoreWrapper;
+use blob::local::LocalBlobStore;
+use blob::BlobStore;
 use config::{env_settings::EnvSettings, jmap::JMAPConfig};
 use log::raft::{LogIndex, RaftId};
 use moka::sync::Cache;
@@ -30,6 +31,7 @@ use write::{
 
 pub use ahash;
 pub use bincode;
+pub use blake3;
 pub use chrono;
 pub use lz4_flex;
 pub use moka;
@@ -116,7 +118,7 @@ pub enum RecipientType {
 
 pub struct JMAPStore<T> {
     pub db: T,
-    pub blob: BlobStoreWrapper,
+    pub blob_store: LocalBlobStore,
     pub config: JMAPConfig,
 
     pub account_lock: MutexMap<()>,
@@ -138,7 +140,7 @@ where
     pub fn new(db: T, config: JMAPConfig, settings: &EnvSettings) -> Self {
         let mut store = Self {
             config,
-            blob: BlobStoreWrapper::new(settings).unwrap(),
+            blob_store: LocalBlobStore::new(settings).unwrap(),
             id_assigner: Cache::builder()
                 .initial_capacity(128)
                 .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))

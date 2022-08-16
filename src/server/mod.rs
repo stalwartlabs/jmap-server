@@ -2,8 +2,8 @@ pub mod event_source;
 pub mod http;
 pub mod websocket;
 
-use crate::cluster::Event;
-use crate::JMAPServer;
+use crate::services::{email_delivery, housekeeper, state_change};
+use crate::{cluster, JMAPServer};
 use store::core::error::StoreError;
 use store::tracing::error;
 use store::ColumnFamily;
@@ -96,9 +96,36 @@ where
 
     pub async fn shutdown(&self) {
         if let Some(cluster) = &self.cluster {
-            if cluster.tx.send(Event::Shutdown).await.is_err() {
+            if cluster.tx.send(cluster::Event::Shutdown).await.is_err() {
                 error!("Failed to send shutdown event to cluster.");
             }
+        }
+
+        if self
+            .state_change
+            .send(state_change::Event::Stop)
+            .await
+            .is_err()
+        {
+            error!("Failed to send shutdown event to state manager.");
+        }
+
+        if self
+            .housekeeper
+            .send(housekeeper::Event::Exit)
+            .await
+            .is_err()
+        {
+            error!("Failed to send shutdown event to housekeeper task.");
+        }
+
+        if self
+            .email_delivery
+            .send(email_delivery::Event::Stop)
+            .await
+            .is_err()
+        {
+            error!("Failed to send shutdown event to e-mail delivery task.");
         }
     }
 
@@ -112,7 +139,7 @@ where
             .as_ref()
             .unwrap()
             .tx
-            .send(Event::SetOffline {
+            .send(cluster::Event::SetOffline {
                 is_offline,
                 notify_peers,
             })

@@ -4,7 +4,7 @@ use rust_stemmers::Algorithm;
 
 use crate::nlp::{tokenizers::Tokenizer, Language};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct StemmedToken<'x> {
     pub word: Cow<'x, str>,
     pub stemmed_word: Option<Cow<'x, str>>,
@@ -139,7 +139,7 @@ mod tests {
         for (input, language, result) in inputs {
             for token in Stemmer::new(input, language, 40) {
                 assert_eq!(token.stemmed_word.unwrap_or(token.word), result);
-                }
+            }
         }
-        }
+    }
 }

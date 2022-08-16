@@ -3,6 +3,7 @@ use rustls::ServerName;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{net::SocketAddr, time::Duration};
+use store::blake3;
 use store::rand::Rng;
 use store::tracing::{debug, error};
 use tokio::sync::watch;
@@ -37,6 +38,7 @@ pub fn spawn_peer_rpc(
     let rpc_timeout = config.rpc_timeout;
     let rpc_backoff_max = config.rpc_backoff_max;
     let tls_connector = config.tls_connector.clone();
+    let tls_domain = config.tls_domain.clone();
 
     tokio::spawn(async move {
         let mut conn_ = None;
@@ -75,10 +77,9 @@ pub fn spawn_peer_rpc(
                     match connect_peer(
                         tls_connector.clone(),
                         peer_addr,
-                        Request::Auth {
-                            peer_id: local_peer_id,
-                            key: key.clone(),
-                        },
+                        &tls_domain,
+                        &key,
+                        local_peer_id,
                         rpc_timeout,
                     )
                     .await
@@ -233,25 +234,53 @@ pub fn spawn_peer_rpc(
 async fn connect_peer(
     tls_connector: Arc<TlsConnector>,
     addr: SocketAddr,
-    auth_frame: Request,
+    addr_domain: &str,
+    auth_key: &str,
+    peer_id: PeerId,
     rpc_timeout: u64,
 ) -> std::io::Result<Framed<TlsStream<TcpStream>, RpcEncoder>> {
     time::timeout(Duration::from_millis(rpc_timeout), async {
+        // Connect to peer
         let stream = TcpStream::connect(&addr).await?;
-        let domain = ServerName::try_from(addr.ip().to_string().as_str()).map_err(|_| {
+        let domain = ServerName::try_from(addr_domain).map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::Other, "Failed to parse TLS domain.")
         })?;
 
+        // Upgrade to TLS
         let mut conn = Framed::new(
             tls_connector.connect(domain, stream).await?,
             RpcEncoder::default(),
         );
-        if let Response::Pong = send_rpc(&mut conn, auth_frame).await? {
-            Ok(conn)
+
+        // Expect auth challenge
+        if let Response::Auth { challenge } = read_rpc(&mut conn).await? {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(auth_key.as_bytes());
+            hasher.update(&challenge);
+
+            if let Response::Pong = send_rpc(
+                &mut conn,
+                Request::Auth {
+                    peer_id,
+                    response: hasher.finalize().as_bytes().to_vec(),
+                },
+            )
+            .await?
+            {
+                Ok(conn)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Failed to authenticate peer.",
+                ))
+            }
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "Failed to authenticate peer.",
+                concat!(
+                    "Expected auth challenge, got an invalid response ",
+                    "while authenticating with peer."
+                ),
             ))
         }
     })
@@ -269,6 +298,12 @@ async fn send_rpc(
     request: Request,
 ) -> std::io::Result<Response> {
     conn.send(Protocol::Request(request)).await?;
+    read_rpc(conn).await
+}
+
+async fn read_rpc(
+    conn: &mut Framed<TlsStream<TcpStream>, RpcEncoder>,
+) -> std::io::Result<Response> {
     match conn.next().await {
         Some(Ok(Protocol::Response(response))) => Ok(response),
         Some(Ok(invalid)) => Err(std::io::Error::new(

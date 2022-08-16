@@ -1,6 +1,7 @@
+use crate::authorization::SymmetricEncrypt;
 use crate::cluster::Config;
 
-use super::request::{Request, RequestEncryptor};
+use super::request::Request;
 use super::{Event, UDP_MAX_PAYLOAD};
 use std::{net::SocketAddr, sync::Arc};
 use store::tracing::{debug, error};
@@ -36,7 +37,10 @@ pub async fn spawn_quidnunc(
     // least exchange new nonces over TCP periodically.
 
     let nonce_ = Arc::new(b"428934328968".to_vec());
-    let encryptor_ = Arc::new(RequestEncryptor::new(config.key.as_bytes()));
+    let encryptor_ = Arc::new(SymmetricEncrypt::new(
+        config.key.as_bytes(),
+        "gossipmonger context key",
+    ));
 
     let socket = socket_.clone();
     let encryptor = encryptor_.clone();
@@ -46,7 +50,7 @@ pub async fn spawn_quidnunc(
         while let Some((target_addr, response)) = gossip_rx.recv().await {
             // Encrypt packets
             let mut bytes = response.to_bytes();
-            match encryptor.encrypt(&mut bytes, &nonce) {
+            match encryptor.encrypt_in_place(&mut bytes, &nonce) {
                 Ok(_) => {
                     if let Err(err) = socket.send_to(&bytes, &target_addr).await {
                         error!("Failed to send UDP packet to {}: {}", target_addr, err);

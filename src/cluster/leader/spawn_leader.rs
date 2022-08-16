@@ -326,7 +326,8 @@ where
                         Response::AppendEntries(response) => response,
                         response @ (Response::UpdatePeers { .. }
                         | Response::Vote { .. }
-                        | Response::Pong) => {
+                        | Response::Pong
+                        | Response::Auth { .. }) => {
                             error!(
                                 "Unexpected response from peer {}: {:?}",
                                 peer_name, response

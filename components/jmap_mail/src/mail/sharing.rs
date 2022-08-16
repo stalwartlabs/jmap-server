@@ -86,22 +86,5 @@ where
                 None
             },
         ))
-        /*let shared_resource = SharedResource::new(
-            owner_id,
-            shared_to.first().copied().unwrap(),
-            Collection::Mail,
-            acl,
-        );
-
-        if let Some(shared_documents) = self.shared_documents.get(&shared_resource) {
-            Ok(shared_documents)
-        } else {
-            // Avoid deadlocks
-            let shared_documents = ,
-            );
-            self.shared_documents
-                .insert(shared_resource, shared_documents.clone());
-            Ok(shared_documents)
-        }*/
     }
 }

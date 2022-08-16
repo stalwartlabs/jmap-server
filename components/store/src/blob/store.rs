@@ -11,7 +11,7 @@ use crate::{
     AccountId, ColumnFamily, Direction, DocumentId, JMAPStore, Store,
 };
 
-use super::{BlobId, BlobStore, BlobStoreType};
+use super::{BlobId, BlobStore};
 
 impl<T> JMAPStore<T>
 where
@@ -21,7 +21,7 @@ where
         let key = BlobKey::serialize(blob_id);
 
         // Lock blob hash
-        let _lock = self.blob.lock.lock_hash(blob_id);
+        let _lock = self.blob_store.lock.lock_hash(blob_id);
 
         // Blob already exists, return.
         if self.db.exists(ColumnFamily::Blobs, &key)? {
@@ -30,10 +30,7 @@ where
 
         // Write blob
         let value = if blob_id.is_external() {
-            match &self.blob.store {
-                BlobStoreType::Local(local_store) => local_store.put(blob_id, &bytes)?,
-                BlobStoreType::S3(s3_store) => s3_store.put(blob_id, &bytes)?,
-            };
+            self.blob_store.put(blob_id, &bytes)?;
             Vec::new()
         } else {
             bytes
@@ -61,10 +58,7 @@ where
         if let Err(err) = self.db.write(batch) {
             // There was a problem writing to the store, delete blob.
             if blob_id.is_external() {
-                if let Err(err) = match &self.blob.store {
-                    BlobStoreType::Local(local_store) => local_store.delete(blob_id),
-                    BlobStoreType::S3(s3_store) => s3_store.delete(blob_id),
-                } {
+                if let Err(err) = self.blob_store.delete(blob_id) {
                     error!("Failed to delete blob {}: {:?}", blob_id, err);
                 }
             }
@@ -99,10 +93,7 @@ where
 
     pub fn blob_get(&self, blob_id: &BlobId) -> crate::Result<Option<Vec<u8>>> {
         if !blob_id.is_local() {
-            match &self.blob.store {
-                BlobStoreType::Local(local_store) => local_store.get(blob_id),
-                BlobStoreType::S3(s3_store) => s3_store.get(blob_id),
-            }
+            self.blob_store.get(blob_id)
         } else {
             self.db
                 .get(ColumnFamily::Blobs, &BlobKey::serialize(blob_id))
@@ -115,10 +106,7 @@ where
         range: Range<u32>,
     ) -> crate::Result<Option<Vec<u8>>> {
         if !blob_id.is_local() {
-            match &self.blob.store {
-                BlobStoreType::Local(local_store) => local_store.get_range(blob_id, range),
-                BlobStoreType::S3(s3_store) => s3_store.get_range(blob_id, range),
-            }
+            self.blob_store.get_range(blob_id, range)
         } else {
             Ok(self
                 .db

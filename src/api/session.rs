@@ -5,11 +5,12 @@ use actix_web::{
     http::{header::ContentType, StatusCode},
     web, HttpResponse,
 };
-use jmap::{principal::schema::Type, types::jmap::JMAPId, URI};
+use jmap::{principal::schema::Type, request::ACLEnforce, types::jmap::JMAPId, URI};
+use jmap_mail::mail::sharing::JMAPShareMail;
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
-    core::vec_map::VecMap,
+    core::{acl::ACL, vec_map::VecMap},
     Store,
 };
 
@@ -38,6 +39,8 @@ pub struct Session {
     #[serde(rename(serialize = "state"))]
     #[serde(serialize_with = "serialize_hex")]
     state: u32,
+    #[serde(skip)]
+    base_url: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -121,11 +124,15 @@ struct VacationResponseCapabilities {}
 impl Session {
     pub fn new(settings: &EnvSettings, config: &JMAPConfig) -> Session {
         let hostname = settings.get("hostname").unwrap();
-        let (prefix, is_tls) = if settings.contains_key("cert-path") {
-            ("https", true)
-        } else {
-            ("http", false)
-        };
+        let base_url = format!(
+            "{}://{}",
+            if settings.contains_key("cert-path") {
+                "https"
+            } else {
+                "http"
+            },
+            hostname
+        );
 
         Session {
             capabilities: VecMap::from_iter([
@@ -133,22 +140,23 @@ impl Session {
                 (URI::Mail, Capabilities::Mail(MailCapabilities::new(config))),
                 (
                     URI::WebSocket,
-                    Capabilities::WebSocket(WebSocketCapabilities::new(&hostname, is_tls)),
+                    Capabilities::WebSocket(WebSocketCapabilities::new(&base_url)),
                 ),
             ]),
             accounts: VecMap::new(),
             primary_accounts: VecMap::new(),
             username: "".to_string(),
-            api_url: format!("{}://{}/jmap/", prefix, hostname),
+            api_url: format!("{}/jmap/", base_url),
             download_url: format!(
-                "{}://{}/jmap/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}",
-                prefix, hostname
+                "{}/jmap/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}",
+                base_url
             ),
-            upload_url: format!("{}://{}/jmap/upload/{{accountId}}/", prefix, hostname),
+            upload_url: format!("{}/jmap/upload/{{accountId}}/", base_url),
             event_source_url: format!(
-                "{}://{}/jmap/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}",
-                prefix, hostname
+                "{}/jmap/eventsource/?types={{types}}&closeafter={{closeafter}}&ping={{ping}}",
+                base_url
             ),
+            base_url,
             state: 0,
         }
     }
@@ -199,6 +207,10 @@ impl Session {
 
     pub fn api_url(&self) -> &str {
         &self.api_url
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 }
 
@@ -251,13 +263,9 @@ impl CoreCapabilities {
 }
 
 impl WebSocketCapabilities {
-    pub fn new(hostname: &str, is_tls: bool) -> Self {
+    pub fn new(base_url: &str) -> Self {
         WebSocketCapabilities {
-            url: format!(
-                "{}://{}/jmap/ws",
-                if is_tls { "wss" } else { "ws" },
-                hostname
-            ),
+            url: format!("{}/jmap/ws", base_url),
             supports_push: true,
         }
     }
@@ -323,11 +331,22 @@ where
                     }
                     response.set_primary_account(session.account_id().into(), email, name, None);
                 } else {
+                    let is_readonly = if !acl.is_member(*id) {
+                        store
+                            .mail_shared_folders(*id, &acl.member_of, ACL::AddItems)
+                            .ok()
+                            .as_ref()
+                            .and_then(|v| v.as_ref().as_ref().map(|v| v.is_empty()))
+                            .unwrap_or(true)
+                    } else {
+                        false
+                    };
+
                     response.add_account(
                         (*id).into(),
                         if !name.is_empty() { name } else { email },
                         matches!(ptype, Type::Individual),
-                        false,
+                        is_readonly,
                         Some(&[URI::Core, URI::Mail, URI::WebSocket]),
                     );
                 }

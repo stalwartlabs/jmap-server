@@ -339,7 +339,7 @@ pub fn bitmap_merge(
     };
 
     for op in operands.iter() {
-        match *op.get(0)? {
+        match *op.first()? {
             IS_BITMAP => {
                 if let Some(union_bm) = deserialize_bitmap(op) {
                     //print!("Bitmap union");

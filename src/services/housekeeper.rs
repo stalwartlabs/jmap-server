@@ -165,7 +165,7 @@ impl SimpleCron {
                     panic!("Invalid hour: {}", hour);
                 }
             } else if pos == 2 {
-                if value.as_bytes().get(0).expect("Failed to parse weekday") == &b'*' {
+                if value.as_bytes().first().expect("Failed to parse weekday") == &b'*' {
                     return SimpleCron::EveryDay { hour, minute };
                 } else {
                     let day = value.parse::<u32>().expect("Failed to parse weekday.");

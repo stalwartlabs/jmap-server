@@ -456,7 +456,7 @@ impl TermIndex {
 
         if block_len > 0 {
             let bitpacker = TermIndexPacker::with_block_len(block_len);
-            let num_bits = *bytes.get(0).ok_or(Error::DataCorruption)?;
+            let num_bits = *bytes.first().ok_or(Error::DataCorruption)?;
             let bytes_read = ((num_bits as usize) * block_len / 8) + 1;
             let mut decompressed = vec![0u32; block_len];
 

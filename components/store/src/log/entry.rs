@@ -44,7 +44,7 @@ impl Entry {
 
 impl StoreDeserialize for Entry {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        match *bytes.get(0)? {
+        match *bytes.first()? {
             batch::Change::ENTRY => Entry::Item {
                 account_id: AccountId::from_le_bytes(
                     bytes

@@ -161,6 +161,11 @@ pub fn init_settings(
             ("push-throttle".to_string(), "500".to_string()),
             ("event-source-throttle".to_string(), "500".to_string()),
             ("ws-throttle".to_string(), "500".to_string()),
+            ("oauth-user-code-expiry".to_string(), "1".to_string()),
+            ("oauth-token-expiry".to_string(), "1".to_string()),
+            ("oauth-refresh-token-expiry".to_string(), "3".to_string()),
+            ("oauth-refresh-token-renew".to_string(), "2".to_string()),
+            ("oauth-max-attempts".to_string(), "1".to_string()),
             (
                 "rate-limit-authenticated".to_string(),
                 "1000/60".to_string(),
@@ -178,7 +183,7 @@ pub fn init_settings(
         pem_dir.set_file_name("key.pem");
         let key = pem_dir.to_str().unwrap().to_string();
 
-        args.insert("cluster".to_string(), "secret_key".to_string());
+        args.insert("rpc-key".to_string(), "secret_key".to_string());
         args.insert("rpc-cert-path".to_string(), cert);
         args.insert("rpc-key-path".to_string(), key);
         args.insert("rpc-port".to_string(), (9000 + peer_num).to_string());

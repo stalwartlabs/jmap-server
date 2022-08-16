@@ -81,6 +81,7 @@ pub struct Config {
     pub rpc_retries_max: u32,        // 5
     pub rpc_backoff_max: u64,        // 3 * 60 * 1000 (1 minute)
     pub tls_connector: Arc<TlsConnector>,
+    pub tls_domain: String,
 }
 
 #[derive(Debug)]

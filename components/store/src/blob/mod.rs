@@ -5,14 +5,10 @@ use sha2::{Digest, Sha256};
 use crate::{
     config::env_settings::EnvSettings,
     serialize::{base32::Base32Writer, StoreDeserialize, StoreSerialize},
-    write::mutex_map::MutexMap,
 };
-
-use self::{local::LocalBlobStore, s3::S3BlobStore};
 
 pub mod local;
 pub mod purge;
-pub mod s3;
 pub mod store;
 
 pub const BLOB_HASH_LEN: usize = 32;
@@ -86,7 +82,7 @@ impl StoreSerialize for BlobId {
 
 impl StoreDeserialize for BlobId {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        match *bytes.get(0)? {
+        match *bytes.first()? {
             BLOB_LOCAL => BlobId::Local {
                 hash: bytes.get(1..BLOB_HASH_LEN + 1)?.try_into().ok()?,
             },
@@ -106,27 +102,4 @@ pub trait BlobStore: Sized {
     }
     fn put(&self, blob_id: &BlobId, blob: &[u8]) -> crate::Result<bool>;
     fn delete(&self, blob_id: &BlobId) -> crate::Result<bool>;
-}
-
-pub struct BlobStoreWrapper {
-    pub lock: MutexMap<()>,
-    pub store: BlobStoreType,
-}
-
-pub enum BlobStoreType {
-    Local(LocalBlobStore),
-    S3(S3BlobStore),
-}
-
-impl BlobStoreWrapper {
-    pub fn new(settings: &EnvSettings) -> crate::Result<Self> {
-        Ok(BlobStoreWrapper {
-            lock: MutexMap::with_capacity(1024),
-            store: if !settings.contains_key("blob-s3") {
-                BlobStoreType::Local(LocalBlobStore::new(settings)?)
-            } else {
-                BlobStoreType::S3(S3BlobStore::new(settings)?)
-            },
-        })
-    }
 }

@@ -18,6 +18,7 @@ use super::store::utils::{destroy_temp_dir, init_settings};
 pub mod acl;
 pub mod authorization;
 pub mod event_source;
+pub mod oauth;
 pub mod push_subscription;
 pub mod references;
 pub mod stress_test;
@@ -106,7 +107,8 @@ async fn jmap_core_tests() {
     let (server, mut client, temp_dir) = init_jmap_tests::<RocksDB>("jmap_tests").await;
 
     // Run tests
-    acl::test(server.clone(), &mut client).await;
+    oauth::test(server.clone(), &mut client).await;
+    //acl::test(server.clone(), &mut client).await;
     //authorization::test(server.clone(), &mut client).await;
     //event_source::test(server.clone(), &mut client).await;
     //push_subscription::test(server.clone(), &mut client).await;

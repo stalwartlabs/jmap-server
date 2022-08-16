@@ -3,9 +3,13 @@ use std::{borrow::Cow, vec::IntoIter};
 use jieba_rs::Jieba;
 
 use super::{word::WordTokenizer, Token};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref JIEBA: Jieba = Jieba::new();
+}
 
 pub struct ChineseTokenizer<'x> {
-    jieba: Jieba,
     word_tokenizer: WordTokenizer<'x>,
     tokens: IntoIter<&'x str>,
     token_offset: usize,
@@ -17,7 +21,6 @@ pub struct ChineseTokenizer<'x> {
 impl<'x> ChineseTokenizer<'x> {
     pub fn new(text: &str, max_token_length: usize) -> ChineseTokenizer {
         ChineseTokenizer {
-            jieba: Jieba::new(),
             word_tokenizer: WordTokenizer::new(text),
             tokens: Vec::new().into_iter(),
             max_token_length,
@@ -48,7 +51,7 @@ impl<'x> Iterator for ChineseTokenizer<'x> {
                             Cow::Borrowed(word) => word,
                             Cow::Owned(_) => unreachable!(),
                         };
-                        self.tokens = self.jieba.cut(word, false).into_iter();
+                        self.tokens = JIEBA.cut(word, false).into_iter();
                         self.token_offset = token.offset as usize;
                         self.token_len = token.len as usize;
                         self.token_len_cur = 0;

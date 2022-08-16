@@ -32,6 +32,8 @@ futures = "0.3"
 rayon = "1.5.1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"]}
 ece = "2.2"
+signal-hook = "0.3.14"
+signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
 
 [dev-dependencies]
 jmap_mail = { path = "components/jmap_mail", features = ["debug"] }

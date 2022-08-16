@@ -355,7 +355,7 @@ impl QueryResponse {
             } else if position >= 0 {
                 self.position = position;
             } else {
-                let position = position.abs() as usize;
+                let position = position.unsigned_abs() as usize;
                 let start_offset = if position < self.ids.len() {
                     self.ids.len() - position
                 } else {

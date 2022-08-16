@@ -9,17 +9,22 @@ pub mod services;
 #[cfg(test)]
 pub mod tests;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use cluster::{
     init::{init_cluster, start_cluster},
     ClusterIpc,
 };
 
-use authorization::{auth::RemoteAddress, rate_limit::RateLimiter};
-use server::http::{init_jmap_server, start_jmap_server};
+use authorization::{auth::RemoteAddress, oauth, rate_limit::RateLimiter};
+use futures::StreamExt;
+use server::http::{build_jmap_server, init_jmap_server};
 use services::{email_delivery, housekeeper, state_change};
-use store::{config::env_settings::EnvSettings, moka::future::Cache, tracing::info, JMAPStore};
+use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+use signal_hook_tokio::Signals;
+use store::{
+    config::env_settings::EnvSettings, moka::future::Cache, tracing::info, JMAPStore, Store,
+};
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
 
@@ -35,6 +40,9 @@ pub struct JMAPServer<T> {
     pub email_delivery: mpsc::Sender<email_delivery::Event>,
     pub housekeeper: mpsc::Sender<housekeeper::Event>,
 
+    pub oauth: Box<oauth::OAuth>,
+    pub oauth_status: Cache<String, Arc<oauth::OAuthStatus>>,
+
     pub sessions: Cache<String, authorization::Session>,
     pub rate_limiters: Cache<RemoteAddress, Arc<RateLimiter>>,
 
@@ -42,7 +50,7 @@ pub struct JMAPServer<T> {
     pub is_offline: std::sync::atomic::AtomicBool,
 }
 
-#[tokio::main]
+#[actix_web::main]
 async fn main() -> std::io::Result<()> {
     //TODO logging
     tracing_subscriber::fmt::init();
@@ -64,16 +72,54 @@ async fn main() -> std::io::Result<()> {
         settings.set_value("hostname".to_string(), default_hostname);
     }
 
-    // Start JMAP server
-    start_jmap_server(
-        if let Some((cluster_ipc, cluster_init)) = init_cluster(&settings) {
-            let server = init_jmap_server::<RocksDB>(&settings, cluster_ipc.into());
-            start_cluster(cluster_init, server.clone(), &settings).await;
-            server
-        } else {
-            init_jmap_server::<RocksDB>(&settings, None)
-        },
-        settings,
-    )
-    .await
+    // Init JMAP server
+    let core = if let Some((cluster_ipc, cluster_init)) = init_cluster(&settings) {
+        let core = init_jmap_server::<RocksDB>(&settings, cluster_ipc.into());
+        start_cluster(cluster_init, core.clone(), &settings).await;
+        core
+    } else {
+        init_jmap_server::<RocksDB>(&settings, None)
+    };
+    let server = build_jmap_server(core.clone(), settings)
+        .await
+        .expect("Failed to start JMAP server");
+    let server_handle = server.handle();
+
+    // Start web server
+    actix_web::rt::spawn(async move { server.await });
+
+    // Wait for shutdown signal
+    let mut signals = Signals::new(&[SIGHUP, SIGTERM, SIGINT, SIGQUIT])?;
+
+    while let Some(signal) = signals.next().await {
+        match signal {
+            SIGHUP => {
+                // Reload configuration
+            }
+            SIGTERM | SIGINT | SIGQUIT => {
+                // Shutdown the system
+                info!(
+                    "Shutting down Stalwart JMAP server v{}...",
+                    env!("CARGO_PKG_VERSION")
+                );
+
+                // Stop web server
+                server_handle.stop(true).await;
+
+                // Stop services
+                core.shutdown().await;
+
+                // Wait for services to finish
+                tokio::time::sleep(Duration::from_secs(1)).await;
+
+                // Flush DB
+                core.store.db.close().expect("Failed to close database");
+
+                break;
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    Ok(())
 }

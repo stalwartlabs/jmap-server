@@ -34,7 +34,7 @@ pub struct ClusterInit {
 }
 
 pub fn init_cluster(settings: &EnvSettings) -> Option<(ClusterIpc, ClusterInit)> {
-    if settings.get("cluster").is_some() {
+    if settings.get("rpc-key").is_some() {
         let (main_tx, main_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
         let (commit_index_tx, commit_index_rx) = watch::channel(LogIndex::MAX);
         (
@@ -376,8 +376,9 @@ where
 
 impl Config {
     pub fn new(settings: &EnvSettings) -> Self {
+        let tls_domain = settings.get("rpc-tls-domain");
         Config {
-            key: settings.get("cluster").unwrap(),
+            key: settings.get("rpc-key").unwrap(),
             raft_batch_max: settings.parse("raft-batch-max").unwrap_or(10 * 1024 * 1024),
             raft_election_timeout: settings.parse("raft-election-timeout").unwrap_or(1000),
             rpc_inactivity_timeout: settings
@@ -387,8 +388,9 @@ impl Config {
             rpc_retries_max: settings.parse("rpc-retries-max").unwrap_or(5),
             rpc_backoff_max: settings.parse("rpc-backoff-max").unwrap_or(3 * 60 * 1000),
             tls_connector: Arc::new(TlsConnector::from(Arc::new(load_tls_client_config(
-                settings.parse("rpc-allow-invalid-certs").unwrap_or(false),
+                tls_domain.is_none(),
             )))),
+            tls_domain: tls_domain.unwrap_or_else(|| "localhost".to_string()),
         }
     }
 }

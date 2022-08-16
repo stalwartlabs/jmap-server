@@ -38,7 +38,7 @@ impl JMAPBlob {
     where
         Self: Sized,
     {
-        let (is_local, encoding) = match id.as_bytes().get(0)? {
+        let (is_local, encoding) = match id.as_bytes().first()? {
             b'b' => (false, None),
             b'a' => (true, None),
             b @ b'c'..=b'g' => (true, Some(*b - b'c')),

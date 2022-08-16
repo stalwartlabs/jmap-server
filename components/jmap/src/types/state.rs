@@ -58,7 +58,7 @@ impl JMAPState {
     }
 
     pub fn parse(id: &str) -> Option<Self> {
-        match id.as_bytes().get(0)? {
+        match id.as_bytes().first()? {
             b'n' => JMAPState::Initial.into(),
             b's' => JMAPState::Exact(ChangeId::from_leb128_it(&mut Base32Reader::new(
                 id.get(1..)?.as_bytes(),

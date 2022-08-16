@@ -48,7 +48,7 @@ pub fn deserialize_bitmap(bytes: &[u8]) -> Option<RoaringBitmap> {
 
 impl StoreDeserialize for RoaringBitmap {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        match *bytes.get(0)? {
+        match *bytes.first()? {
             IS_BITMAP => deserialize_bitmap(bytes),
             IS_BITLIST => {
                 let mut bm = RoaringBitmap::new();

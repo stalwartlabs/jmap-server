@@ -374,7 +374,7 @@ where
                             | (HeaderName::Rfc(_), HeaderForm::Raw, Some(raw_message)) => {
                                 if let Some(offsets) = message_data
                                     .mime_parts
-                                    .get(0)
+                                    .first()
                                     .and_then(|h| h.raw_headers.get_raw_header(&header.header))
                                 {
                                     header
@@ -394,7 +394,7 @@ where
                         }
                     }
                     Property::Headers => Value::Headers {
-                        value: if let Some(root_part) = message_data.mime_parts.get(0) {
+                        value: if let Some(root_part) = message_data.mime_parts.first() {
                             root_part.as_email_headers(raw_message.as_ref().unwrap())
                         } else {
                             Vec::new()
@@ -411,7 +411,7 @@ where
                             };
 
                             let mime_part = parts
-                                .get(0)
+                                .first()
                                 .and_then(|p| message_data.mime_parts.get(*p))
                                 .ok_or_else(|| {
                                     StoreError::DataCorruption(format!(
@@ -855,7 +855,7 @@ impl AsBodyStructure for Vec<MimePart> {
         base_blob_id: &JMAPBlob,
     ) -> Option<EmailBodyPart> {
         let mut stack = Vec::new();
-        let root_part = self.get(0)?;
+        let root_part = self.first()?;
         let mut body_structure = root_part.as_body_part(0, properties, message_raw, base_blob_id);
 
         if let MimePartType::MultiPart {

@@ -23,11 +23,7 @@ impl EnvSettings {
         let mut current_key: Option<String> = None;
 
         for arg in env::args().into_iter().skip(1) {
-            if arg.contains('=') {
-                let mut parts = arg.splitn(2, '=');
-                let key = parts.next().unwrap();
-                let value = parts.next().unwrap();
-
+            if let Some((key, value)) = arg.split_once('=') {
                 if let Some(key) = key.strip_prefix("--") {
                     args.insert(key.to_lowercase(), value.to_string());
                 } else {

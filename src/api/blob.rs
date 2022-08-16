@@ -51,22 +51,23 @@ where
         })
         .await
     {
-        Ok(BlobResult::Blob(bytes)) => {
-            Ok(HttpResponse::build(StatusCode::OK)
-                .insert_header((
-                    "Content-Type",
-                    params
-                        .into_inner()
-                        .accept
-                        .unwrap_or_else(|| "application/octet-stream".to_string()),
-                ))
-                .insert_header((
-                    "Content-Disposition",
-                    format!("attachment; filename=\"{}\"", filename), //TODO escape filename
-                ))
-                .insert_header(("Cache-Control", "private, immutable, max-age=31536000"))
-                .body(bytes))
-        }
+        Ok(BlobResult::Blob(bytes)) => Ok(HttpResponse::build(StatusCode::OK)
+            .insert_header((
+                "Content-Type",
+                params
+                    .into_inner()
+                    .accept
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+            ))
+            .insert_header((
+                "Content-Disposition",
+                format!(
+                    "attachment; filename=\"{}\"",
+                    filename.replace('\"', "\\\"")
+                ),
+            ))
+            .insert_header(("Cache-Control", "private, immutable, max-age=31536000"))
+            .body(bytes)),
         Ok(BlobResult::NotFound) => Err(RequestError::not_found()),
         Ok(BlobResult::Unauthorized) => Err(RequestError::forbidden()),
         Err(err) => {

@@ -5,11 +5,12 @@ use std::{
     path::PathBuf,
 };
 
-use crate::config::env_settings::EnvSettings;
+use crate::{config::env_settings::EnvSettings, write::mutex_map::MutexMap};
 
 use super::{BlobId, BlobStore};
 
 pub struct LocalBlobStore {
+    pub lock: MutexMap<()>,
     pub base_path: PathBuf,
     pub hash_levels: usize,
 }
@@ -23,6 +24,7 @@ impl BlobStore for LocalBlobStore {
         );
         base_path.push("blobs");
         Ok(LocalBlobStore {
+            lock: MutexMap::with_capacity(1024),
             base_path,
             hash_levels: std::cmp::min(settings.parse("blob-nested-levels").unwrap_or(2), 5),
         })

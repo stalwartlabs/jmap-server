@@ -12,6 +12,7 @@ use store::{
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     core::{collection::Collection, document::Document},
     moka::future::Cache,
+    rand::{distributions::Alphanumeric, thread_rng, Rng},
     tracing::info,
     write::batch::WriteBatch,
     JMAPStore, Store,
@@ -24,7 +25,13 @@ use crate::{
         request::handle_jmap_request,
         session::{handle_jmap_session, Session},
     },
-    authorization::auth::SessionFactory,
+    authorization::{
+        auth::SessionFactory,
+        oauth::{
+            handle_client_auth, handle_client_auth_post, handle_device_auth, handle_oauth_metadata,
+            handle_token_request, OAuth, OAuthMetadata,
+        },
+    },
     cluster::{rpc::tls::load_tls_server_config, ClusterIpc},
     server::{event_source::handle_jmap_event_source, websocket::handle_ws},
     services::{
@@ -109,7 +116,6 @@ where
     let is_in_cluster = cluster.is_some();
 
     let server = web::Data::new(JMAPServer {
-        base_session,
         store,
         worker_pool: rayon::ThreadPoolBuilder::new()
             .num_threads(
@@ -123,6 +129,29 @@ where
         state_change: change_tx,
         email_delivery: email_tx.clone(),
         housekeeper: housekeeper_tx,
+        oauth: Box::new(OAuth {
+            key: settings
+                .get("rpc-key")
+                .or_else(|| settings.get("oauth-key"))
+                .unwrap_or_else(|| {
+                    thread_rng()
+                        .sample_iter(Alphanumeric)
+                        .take(40)
+                        .map(char::from)
+                        .collect::<String>()
+                }),
+            expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
+            expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
+            expiry_refresh_token: settings
+                .parse("oauth-refresh-token-expiry")
+                .unwrap_or(30 * 86400),
+            expiry_refresh_token_renew: settings
+                .parse("oauth-refresh-token-renew")
+                .unwrap_or(4 * 86400),
+            max_auth_attempts: settings.parse("oauth-max-attempts").unwrap_or(3),
+            metadata: serde_json::to_string(&OAuthMetadata::new(base_session.base_url()))
+                .expect("Failed to serialize OAuth metadata."),
+        }),
         sessions: Cache::builder()
             .initial_capacity(128)
             .time_to_live(ONE_HOUR_EXPIRY)
@@ -131,7 +160,9 @@ where
             .initial_capacity(128)
             .time_to_idle(ONE_HOUR_EXPIRY)
             .build(),
+        oauth_status: Cache::builder().time_to_live(ONE_HOUR_EXPIRY).build(),
         cluster,
+        base_session,
         #[cfg(test)]
         is_offline: false.into(),
     });
@@ -175,7 +206,8 @@ where
     };
 
     info!(
-        "Starting JMAP server at {} ({})...",
+        "Starting Stalwart JMAP server v{} at {} ({})...",
+        env!("CARGO_PKG_VERSION"),
         http_addr,
         if tls_config.is_some() {
             "https"
@@ -214,6 +246,14 @@ where
             )
             .route("/jmap/ws", web::get().to(handle_ws::<T>))
             .route("/ingest", web::post().to(handle_ingest::<T>))
+            .route("/auth", web::get().to(handle_client_auth::<T>))
+            .route("/auth", web::post().to(handle_client_auth_post::<T>))
+            .route("/auth/device", web::post().to(handle_device_auth::<T>))
+            .route("/auth/token", web::post().to(handle_token_request::<T>))
+            .route(
+                "/.well-known/oauth-authorization-server",
+                web::get().to(handle_oauth_metadata::<T>),
+            )
     });
     if let Some(tls_config) = tls_config {
         server.bind_rustls(http_addr, tls_config)
@@ -221,14 +261,4 @@ where
         server.bind(http_addr)
     }
     .map(|s| s.run())
-}
-
-pub async fn start_jmap_server<T>(
-    jmap_server: web::Data<JMAPServer<T>>,
-    settings: EnvSettings,
-) -> std::io::Result<()>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    build_jmap_server(jmap_server, settings).await?.await
 }

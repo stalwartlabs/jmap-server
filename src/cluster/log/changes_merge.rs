@@ -93,7 +93,7 @@ impl MergedChanges {
     }
 
     pub fn deserialize_changes(&mut self, bytes: &[u8]) -> Option<()> {
-        match *bytes.get(0)? {
+        match *bytes.first()? {
             batch::Change::ENTRY => {
                 let mut bytes_it = bytes.get(1..)?.iter();
                 let total_inserts = usize::from_leb128_it(&mut bytes_it)?;

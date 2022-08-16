@@ -7,7 +7,7 @@ use crate::serialize::StoreDeserialize;
 use crate::WriteOperation;
 use crate::{ColumnFamily, Direction, JMAPStore, Store, StoreError};
 
-use super::{BlobId, BlobStore, BlobStoreType, BLOB_EXTERNAL, BLOB_HASH_LEN};
+use super::{BlobId, BlobStore, BLOB_EXTERNAL, BLOB_HASH_LEN};
 
 impl<T> JMAPStore<T>
 where
@@ -36,7 +36,7 @@ where
                 batch = self.delete_blobs(batch, &blob_id, blob_link_count)?;
                 blob_link_count = 0;
                 blob_id.copy_from_slice(&key[..BLOB_HASH_LEN + 1]);
-                _blob_lock = self.blob.lock.lock_hash(&blob_id).into();
+                _blob_lock = self.blob_store.lock.lock_hash(&blob_id).into();
             }
 
             // Blob link
@@ -89,10 +89,7 @@ where
             if blob_id[0] == BLOB_EXTERNAL {
                 let blob_id = BlobId::deserialize(blob_id).unwrap();
 
-                if let Err(err) = match &self.blob.store {
-                    BlobStoreType::Local(local_store) => local_store.delete(&blob_id),
-                    BlobStoreType::S3(s3_store) => s3_store.delete(&blob_id),
-                } {
+                if let Err(err) = self.blob_store.delete(&blob_id) {
                     error!("Failed to delete blob {}: {:?}", blob_id, err);
                 }
             }

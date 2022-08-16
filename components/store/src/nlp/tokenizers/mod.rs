@@ -11,7 +11,7 @@ use self::{
     chinese::ChineseTokenizer, indo_european::IndoEuropeanTokenizer, japanese::JapaneseTokenizer,
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Token<'x> {
     pub word: Cow<'x, str>,
     pub offset: u32, // Word offset in the text part

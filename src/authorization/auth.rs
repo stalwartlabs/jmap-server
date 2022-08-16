@@ -15,6 +15,7 @@ use futures_util::future::LocalBoxFuture;
 use jmap::{base64, types::jmap::JMAPId};
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
+    core::error::StoreError,
     tracing::{debug, error},
     AccountId, Store,
 };
@@ -71,7 +72,9 @@ where
                     || request_path.starts_with("/jmap/upload")
                     || request_path.starts_with("/jmap/ws")
                     || request_path.starts_with("/jmap/eventsource")
-                    || request_path.starts_with("/ingest");
+                    || request_path.starts_with("/ingest")
+                    || request_path.starts_with("/auth")
+                    || request_path.starts_with("/.well-known/oauth-authorization-server");
 
                 // Redirect requests to /jmap are evaluated after parsing
                 if do_redirect {
@@ -111,7 +114,7 @@ where
                     )
                     .await?;
 
-                    if mechanism.eq_ignore_ascii_case("basic") {
+                    let session = if mechanism.eq_ignore_ascii_case("basic") {
                         // Decode the base64 encoded credentials
                         if let Some((login, secret)) = base64::decode(token)
                             .ok()
@@ -123,45 +126,64 @@ where
                             })
                         {
                             let store = core.store.clone();
-                            match core
-                                .spawn_worker(move || {
-                                    // Validate password
-                                    Ok(
-                                        if let Some(account_id) =
-                                            store.authenticate(&login, &secret)?
-                                        {
-                                            Session::new(
-                                                account_id,
-                                                store.get_acl_token(account_id)?.as_ref(),
-                                            )
-                                            .into()
-                                        } else {
-                                            None
-                                        },
-                                    )
-                                })
-                                .await
-                            {
-                                Ok(Some(session)) => {
-                                    // Basic authentication successful, add token to session store
-                                    core.sessions
-                                        .insert(token.to_string(), session.clone())
-                                        .await;
-                                    authorized = session.into();
-                                }
-                                Ok(None) => {
-                                    return service.call(req).await;
-                                }
-                                Err(err) => {
-                                    error!("Store error during authentication: {}", err);
-                                    return Err(RequestError::internal_server_error().into());
-                                }
-                            }
+                            core.spawn_worker(move || {
+                                // Validate password
+                                Ok(
+                                    if let Some(account_id) = store.authenticate(&login, &secret)? {
+                                        Session::new(
+                                            account_id,
+                                            store.get_acl_token(account_id)?.as_ref(),
+                                        )
+                                        .into()
+                                    } else {
+                                        None
+                                    },
+                                )
+                            })
+                            .await
                         } else {
                             debug!("Failed to decode Basic auth request.",);
+                            Ok(None)
                         }
                     } else if mechanism.eq_ignore_ascii_case("bearer") {
-                        // Validate bearer token
+                        // Validate OAuth bearer token
+                        match core.validate_access_token("access_token", token).await {
+                            Ok((account_id, _, _)) => {
+                                let store = core.store.clone();
+                                core.spawn_worker(move || {
+                                    Ok(Session::new(
+                                        account_id,
+                                        store.get_acl_token(account_id)?.as_ref(),
+                                    )
+                                    .into())
+                                })
+                                .await
+                            }
+                            Err(StoreError::DeserializeError(e)) => {
+                                debug!("Failed to deserialize access token: {}", e);
+                                Ok(None)
+                            }
+                            Err(err) => Err(err),
+                        }
+                    } else {
+                        Ok(None)
+                    };
+
+                    match session {
+                        Ok(Some(session)) => {
+                            // Authentication successful, add token to session store
+                            core.sessions
+                                .insert(token.to_string(), session.clone())
+                                .await;
+                            authorized = session.into();
+                        }
+                        Ok(None) => {
+                            return service.call(req).await;
+                        }
+                        Err(err) => {
+                            error!("Store error during authentication: {}", err);
+                            return Err(RequestError::internal_server_error().into());
+                        }
                     }
                 }
             }

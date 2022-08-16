@@ -1,22 +1,10 @@
 
 jmap-server
 ===
-- Searching
-  - Search by "Header exists" (might be already working?)
-- Mailbox
-  - Do not count messages in Trash for Mailbox/unreadEmails.
-- Blobs
-  - S3 connector.
-  - Do not replicate blobs when using S3.
-  - Escape filenames in src/api/blob.
-- Cluster
-  - Advance local commit index on Raft leave request.
 - General
   - Fix logging from subcrates.
-  - Set readOnly on shared accounts for jmap session.
   - Control the amount of data stored from all set requests (ORM values, headers, etc.)
   - OAuth authentication with Raft support.
-  - Graceful shutdowns
   - Replace expect and panic with print during startup.
 - Testing
   - Cluster read replicas
@@ -79,11 +67,6 @@ Settings
   - http-port: 8080
   - worker-pool-size: Number of CPUs
   - strict-cors: false
-- Cluster
-  - cluster: Cluster key
-  - rpc-port: 7911
-  - shard-id: 0
-  - seed-nodes: 127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914
 - E-mail Submissions
   - smtp-relay: user:pass@hostname:port
   - smtp-relay-timeout: 60000
@@ -108,6 +91,7 @@ Settings
   - rate-limit-anonymous: 100/60
   - use-forwarded-header: false
   - subscription-max-total: 100
+  - oauth-key: <String>
 - Websockets
   - ws-client-timeout: 10 seconds
   - ws-heartbeat-interval: 5 seconds
@@ -132,7 +116,9 @@ Settings
   - push-throttle: 1000
 
 - Cluster
-  - key: <String>
+  - seed-nodes: 127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914
+  - rpc-port: 7911
+  - rpc-key: <String>
   - peer-ping-interval: 500
   - raft-batch-max: 10 * 1024 * 1024
   - raft-commit-timeout: 1000
@@ -143,5 +129,15 @@ Settings
   - rpc-backoff-max: 3 * 60 * 1000 (1 minute)
   - rpc-cert-path
   - rpc-cert-key
-  - rpc-allow-invalid-certs: false
+  - rpc-tls-domain: false
 
+
+            expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
+            expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
+            expiry_refresh_token: settings
+                .parse("oauth-refresh-token-expiry")
+                .unwrap_or(30 * 86400),
+            expiry_refresh_token_renew: settings
+                .parse("oauth-refresh-token-renew")
+                .unwrap_or(4 * 86400),
+            max_auth_attempts: settings.parse("oauth-max-attempts").unwrap_or(3),

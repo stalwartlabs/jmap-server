@@ -1,7 +1,9 @@
 use futures::{stream::StreamExt, SinkExt};
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
+use store::blake3;
 use store::config::env_settings::EnvSettings;
+use store::rand::{self, Rng};
 use store::tracing::{debug, error};
 use tokio::sync::watch;
 use tokio::{
@@ -95,10 +97,27 @@ async fn handle_conn(
 ) {
     let mut frames = Framed::new(stream, RpcEncoder::default());
 
-    let peer_id = match time::timeout(Duration::from_millis(rpc_timeout), frames.next()).await {
+    // Build authentication challenge
+    let challenge = rand::thread_rng().gen::<[u8; 12]>();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(auth_key.as_bytes());
+    hasher.update(&challenge);
+    let challenge_response = hasher.finalize();
+
+    let peer_id = match time::timeout(Duration::from_millis(rpc_timeout), async {
+        match frames
+            .send(Protocol::Response(Response::Auth { challenge }))
+            .await
+        {
+            Ok(_) => frames.next().await,
+            Err(_) => None,
+        }
+    })
+    .await
+    {
         Ok(Some(result)) => match result {
-            Ok(Protocol::Request(Request::Auth { peer_id, key })) => {
-                if auth_key == key {
+            Ok(Protocol::Request(Request::Auth { peer_id, response })) => {
+                if challenge_response.as_bytes() == &response[..] {
                     debug!("Authenticated peer {}.", peer_id);
                     peer_id
                 } else {
