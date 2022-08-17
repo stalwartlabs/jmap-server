@@ -7,6 +7,7 @@ use jmap_client::{
     mailbox::query::Filter,
 };
 use jmap_sharing::principal::set::JMAPSetPrincipal;
+use reqwest::{header, redirect::Policy};
 use serde::de::DeserializeOwned;
 use store::{ahash::AHashMap, Store};
 
@@ -42,6 +43,88 @@ where
     ))
     .await;
     //println!("OAuth metadata: {:#?}", metadata);
+
+    // ------------------------
+    // Authorization code flow
+    // ------------------------
+
+    // Build authorization request
+    let auth_endpoint = format!(
+        "{}?response_type=token&client_id=OAuthyMcOAuthFace&state=xyz&redirect_uri=https://localhost",
+        metadata.authorization_endpoint
+    );
+    let mut auth_request = AHashMap::from_iter([
+        ("email".to_string(), "jdoe@example.com".to_string()),
+        ("password".to_string(), "wrong_pass".to_string()),
+        (
+            "code".to_string(),
+            parse_code_input(get_bytes(&auth_endpoint).await),
+        ),
+    ]);
+
+    // Exceeding the max failed attempts should redirect with an access_denied code
+    assert_eq!(
+        post_expect_redirect(&metadata.authorization_endpoint, &auth_request).await,
+        "https://localhost?error=access_denied&state=xyz"
+    );
+
+    // Authenticate with the correct password
+    auth_request.insert("password".to_string(), "abcde".to_string());
+    auth_request.insert(
+        "code".to_string(),
+        parse_code_input(get_bytes(&auth_endpoint).await),
+    );
+    let code = parse_code_redirect(
+        post_expect_redirect(&metadata.authorization_endpoint, &auth_request).await,
+        "xyz",
+    );
+
+    // Both client_id and redirect_uri have to match
+    let mut token_params = AHashMap::from_iter([
+        ("client_id".to_string(), "invalid_client".to_string()),
+        ("redirect_uri".to_string(), "https://localhost".to_string()),
+        ("grant_type".to_string(), "authorization_code".to_string()),
+        ("code".to_string(), code),
+    ]);
+    assert_eq!(
+        post::<TokenResponse>(&metadata.token_endpoint, &token_params).await,
+        TokenResponse::Error {
+            error: ErrorType::InvalidClient
+        }
+    );
+    token_params.insert("client_id".to_string(), "OAuthyMcOAuthFace".to_string());
+    token_params.insert(
+        "redirect_uri".to_string(),
+        "https://some-other.url".to_string(),
+    );
+    assert_eq!(
+        post::<TokenResponse>(&metadata.token_endpoint, &token_params).await,
+        TokenResponse::Error {
+            error: ErrorType::InvalidClient
+        }
+    );
+
+    // Obtain token
+    token_params.insert("redirect_uri".to_string(), "https://localhost".to_string());
+    let (token, _, _) = unwrap_token_response(post(&metadata.token_endpoint, &token_params).await);
+
+    // Connect to account using token and attempt to search
+    let john_client = Client::new()
+        .credentials(Credentials::bearer(&token))
+        .connect(admin_client.session_url())
+        .await
+        .unwrap();
+    assert_eq!(john_client.default_account_id(), john_id);
+    assert!(!john_client
+        .mailbox_query(None::<Filter>, None::<Vec<_>>)
+        .await
+        .unwrap()
+        .ids()
+        .is_empty());
+
+    // ------------------------
+    // Device code flow
+    // ------------------------
 
     // Request a device code
     let device_code_params = AHashMap::from_iter([("client_id".to_string(), "1234".to_string())]);
@@ -228,22 +311,44 @@ async fn post<T: DeserializeOwned>(url: &str, params: &AHashMap<String, String>)
     serde_json::from_slice(&post_bytes(url, params).await).unwrap()
 }
 
+async fn post_expect_redirect(url: &str, params: &AHashMap<String, String>) -> String {
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_millis(200))
+        .danger_accept_invalid_certs(true)
+        .redirect(Policy::none())
+        .build()
+        .unwrap_or_default()
+        .post(url)
+        .form(params)
+        .send()
+        .await
+        .unwrap();
+    response
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string()
+}
+
+async fn get_bytes(url: &str) -> Bytes {
+    reqwest::Client::builder()
+        .timeout(Duration::from_millis(200))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap_or_default()
+        .get(url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap()
+}
+
 async fn get<T: DeserializeOwned>(url: &str) -> T {
-    serde_json::from_slice(
-        &reqwest::Client::builder()
-            .timeout(Duration::from_millis(200))
-            .danger_accept_invalid_certs(true)
-            .build()
-            .unwrap_or_default()
-            .get(url)
-            .send()
-            .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap(),
-    )
-    .unwrap()
+    serde_json::from_slice(&get_bytes(url).await).unwrap()
 }
 
 async fn assert_client_auth(
@@ -279,6 +384,25 @@ async fn assert_unauthorized(client: &Client, token: &str) {
             assert!(err.contains("Unauthorized"), "{}", err);
         }
     }
+}
+
+fn parse_code_input(bytes: Bytes) -> String {
+    let html = String::from_utf8_lossy(&bytes).into_owned();
+    if let Some((_, code)) = html.split_once("name=\"code\" value=\"") {
+        if let Some((code, _)) = code.split_once("\"") {
+            return code.to_string();
+        }
+    }
+    panic!("Could not parse code input: {}", html);
+}
+
+fn parse_code_redirect(uri: String, state: &str) -> String {
+    if let Some(code) = uri.strip_prefix("https://localhost?code=") {
+        if let Some(code) = code.strip_suffix(&format!("&state={}", state)) {
+            return code.to_string();
+        }
+    }
+    panic!("Invalid redirect URI: {}", uri);
 }
 
 fn unwrap_token_response(response: TokenResponse) -> (String, Option<String>, u64) {

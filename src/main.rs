@@ -41,7 +41,7 @@ pub struct JMAPServer<T> {
     pub housekeeper: mpsc::Sender<housekeeper::Event>,
 
     pub oauth: Box<oauth::OAuth>,
-    pub oauth_status: Cache<String, Arc<oauth::OAuthStatus>>,
+    pub oauth_codes: Cache<String, Arc<oauth::OAuthCode>>,
 
     pub sessions: Cache<String, authorization::Session>,
     pub rate_limiters: Cache<RemoteAddress, Arc<RateLimiter>>,

@@ -1,5 +1,4 @@
 use std::{
-    hash::{Hash, Hasher},
     sync::{
         atomic::{self, AtomicU32},
         Arc,
@@ -7,13 +6,15 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use actix_web::{web, HttpResponse};
+use crate::JMAPServer;
+use actix_web::{http::header, web, HttpResponse};
 use jmap::base64;
 use jmap_sharing::principal::account::JMAPAccountStore;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 use store::{
-    ahash::AHasher,
+    bincode, blake3,
     core::error::StoreError,
     rand::{
         distributions::{Alphanumeric, Standard},
@@ -24,15 +25,21 @@ use store::{
     AccountId, Store,
 };
 
-use crate::JMAPServer;
-
 use super::SymmetricEncrypt;
 
 const OAUTH_HTML_HEADER: &str = include_str!("../../resources/oauth_header.html");
 const OAUTH_HTML_FOOTER: &str = include_str!("../../resources/oauth_footer.html");
-const OAUTH_HTML_LOGIN: &str = include_str!("../../resources/oauth_login.html");
+const OAUTH_HTML_LOGIN_HEADER_CLIENT: &str =
+    include_str!("../../resources/oauth_login_hdr_client.html");
+const OAUTH_HTML_LOGIN_HEADER_DEVICE: &str =
+    include_str!("../../resources/oauth_login_hdr_device.html");
+const OAUTH_HTML_LOGIN_HEADER_FAILED: &str =
+    include_str!("../../resources/oauth_login_hdr_failed.html");
+const OAUTH_HTML_LOGIN_FORM: &str = include_str!("../../resources/oauth_login.html");
+const OAUTH_HTML_LOGIN_CODE: &str = include_str!("../../resources/oauth_login_code.html");
+const OAUTH_HTML_LOGIN_CODE_HIDDEN: &str =
+    include_str!("../../resources/oauth_login_code_hidden.html");
 const OAUTH_HTML_LOGIN_SUCCESS: &str = include_str!("../../resources/oauth_login_success.html");
-const OAUTH_HTML_LOGIN_FAILED: &str = include_str!("../../resources/oauth_login_failed.html");
 const OAUTH_HTML_ERROR: &str = include_str!("../../resources/oauth_error.html");
 
 const STATUS_AUTHORIZED: u32 = 0;
@@ -42,12 +49,14 @@ const STATUS_PENDING: u32 = 2;
 const DEVICE_CODE_LEN: usize = 40;
 const USER_CODE_LEN: usize = 8;
 const RANDOM_CODE_LEN: usize = 32;
+const CLIENT_ID_MAX_LEN: usize = 20;
 
 const USER_CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // No 0, O, I, 1
 
 pub struct OAuth {
     pub key: String,
     pub expiry_user_code: u64,
+    pub expiry_auth_code: u64,
     pub expiry_token: u64,
     pub expiry_refresh_token: u64,
     pub expiry_refresh_token_renew: u64,
@@ -55,20 +64,21 @@ pub struct OAuth {
     pub metadata: String,
 }
 
-pub struct OAuthStatus {
+pub struct OAuthCode {
     pub status: AtomicU32,
     pub account_id: AtomicU32,
     pub expiry: Instant,
-    pub client_id: u64,
+    pub client_id: String,
+    pub redirect_uri: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct UserAuthRequest {
+pub struct DeviceAuthGet {
     code: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct UserAuthForm {
+pub struct DeviceAuthPost {
     code: Option<String>,
     email: Option<String>,
     password: Option<String>,
@@ -76,8 +86,7 @@ pub struct UserAuthForm {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceAuthRequest {
-    client_id: u64,
-    //scope: Option<String>,
+    client_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,11 +100,29 @@ pub struct DeviceAuthResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct CodeAuthRequest {
+    response_type: String,
+    client_id: String,
+    redirect_uri: String,
+    scope: Option<String>,
+    state: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CodeAuthForm {
+    code: String,
+    email: Option<String>,
+    password: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TokenRequest {
     pub grant_type: String,
+    pub code: Option<String>,
     pub device_code: Option<String>,
-    pub client_id: Option<u64>,
+    pub client_id: Option<String>,
     pub refresh_token: Option<String>,
+    pub redirect_uri: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -147,9 +174,10 @@ pub struct OAuthMetadata {
     pub device_authorization_endpoint: String,
     pub response_types_supported: Vec<String>,
     pub scopes_supported: Vec<String>,
-    //pub authorization_endpoint: String,
+    pub authorization_endpoint: String,
 }
 
+// Device authorization endpoint
 pub async fn handle_device_auth<T>(
     core: web::Data<JMAPServer<T>>,
     params: web::Form<DeviceAuthRequest>,
@@ -157,6 +185,11 @@ pub async fn handle_device_auth<T>(
 where
     T: for<'x> Store<'x> + 'static,
 {
+    // Validate clientId
+    if params.client_id.len() > CLIENT_ID_MAX_LEN {
+        return HttpResponse::BadRequest().body("Client ID is too long");
+    }
+
     // Generate device code
     let device_code = thread_rng()
         .sample_iter(Alphanumeric)
@@ -179,18 +212,17 @@ where
     }
 
     // Add OAuth status
-    let oauth_status = Arc::new(OAuthStatus {
+    let oauth_code = Arc::new(OAuthCode {
         status: STATUS_PENDING.into(),
         account_id: u32::MAX.into(),
         expiry: Instant::now(),
         client_id: params.into_inner().client_id,
+        redirect_uri: None,
     });
-    core.oauth_status
-        .insert(device_code.clone(), oauth_status.clone())
+    core.oauth_codes
+        .insert(device_code.clone(), oauth_code.clone())
         .await;
-    core.oauth_status
-        .insert(user_code.clone(), oauth_status)
-        .await;
+    core.oauth_codes.insert(user_code.clone(), oauth_code).await;
 
     // Build response
     let response = DeviceAuthResponse {
@@ -211,6 +243,7 @@ where
         .body(serde_json::to_string(&response).unwrap_or_default())
 }
 
+// Token endpoint
 pub async fn handle_token_request<T>(
     core: web::Data<JMAPServer<T>>,
     params: web::Form<TokenRequest>,
@@ -220,7 +253,44 @@ where
 {
     let mut response = TokenResponse::error(ErrorType::InvalidGrant);
 
-    if params
+    if params.grant_type.eq_ignore_ascii_case("authorization_code") {
+        response = if let (Some(code), Some(client_id), Some(redirect_uri)) =
+            (&params.code, &params.client_id, &params.redirect_uri)
+        {
+            if let Some(oauth) = core.oauth_codes.get(code) {
+                if client_id != &oauth.client_id
+                    || redirect_uri != oauth.redirect_uri.as_deref().unwrap_or("")
+                {
+                    TokenResponse::error(ErrorType::InvalidClient)
+                } else if oauth.status.load(atomic::Ordering::Relaxed) == STATUS_AUTHORIZED
+                    && oauth.expiry.elapsed().as_secs() < core.oauth.expiry_auth_code
+                {
+                    // Mark this token as issued
+                    oauth
+                        .status
+                        .store(STATUS_TOKEN_ISSUED, atomic::Ordering::Relaxed);
+
+                    // Issue token
+                    core.issue_token(
+                        oauth.account_id.load(atomic::Ordering::Relaxed),
+                        &oauth.client_id,
+                        true,
+                    )
+                    .await
+                    .unwrap_or_else(|err| {
+                        error!("Failed to generate OAuth token: {}", err);
+                        TokenResponse::error(ErrorType::InvalidRequest)
+                    })
+                } else {
+                    TokenResponse::error(ErrorType::InvalidGrant)
+                }
+            } else {
+                TokenResponse::error(ErrorType::AccessDenied)
+            }
+        } else {
+            TokenResponse::error(ErrorType::InvalidClient)
+        };
+    } else if params
         .grant_type
         .eq_ignore_ascii_case("urn:ietf:params:oauth:grant-type:device_code")
     {
@@ -230,42 +300,40 @@ where
             params
                 .device_code
                 .as_ref()
-                .and_then(|dc| core.oauth_status.get(dc)),
-            params.client_id,
+                .and_then(|dc| core.oauth_codes.get(dc)),
+            &params.client_id,
         ) {
-            if oauth.client_id == client_id {
-                if oauth.expiry.elapsed().as_secs() < core.oauth.expiry_user_code {
-                    response = match oauth.status.load(atomic::Ordering::Relaxed) {
-                        STATUS_AUTHORIZED => {
-                            // Mark this token as issued
-                            oauth
-                                .status
-                                .store(STATUS_TOKEN_ISSUED, atomic::Ordering::Relaxed);
-
-                            // Issue token
-                            core.issue_token(
-                                oauth.account_id.load(atomic::Ordering::Relaxed),
-                                oauth.client_id,
-                                true,
-                            )
-                            .await
-                            .unwrap_or_else(|err| {
-                                error!("Failed to generate OAuth token: {}", err);
-                                TokenResponse::error(ErrorType::InvalidRequest)
-                            })
-                        }
-                        status
-                            if (STATUS_PENDING..STATUS_PENDING + core.oauth.max_auth_attempts)
-                                .contains(&status) =>
-                        {
-                            TokenResponse::error(ErrorType::AuthorizationPending)
-                        }
-                        STATUS_TOKEN_ISSUED => TokenResponse::error(ErrorType::ExpiredToken),
-                        _ => TokenResponse::error(ErrorType::AccessDenied),
-                    };
-                }
-            } else {
+            if &oauth.client_id != client_id {
                 response = TokenResponse::error(ErrorType::InvalidClient);
+            } else if oauth.expiry.elapsed().as_secs() < core.oauth.expiry_user_code {
+                response = match oauth.status.load(atomic::Ordering::Relaxed) {
+                    STATUS_AUTHORIZED => {
+                        // Mark this token as issued
+                        oauth
+                            .status
+                            .store(STATUS_TOKEN_ISSUED, atomic::Ordering::Relaxed);
+
+                        // Issue token
+                        core.issue_token(
+                            oauth.account_id.load(atomic::Ordering::Relaxed),
+                            &oauth.client_id,
+                            true,
+                        )
+                        .await
+                        .unwrap_or_else(|err| {
+                            error!("Failed to generate OAuth token: {}", err);
+                            TokenResponse::error(ErrorType::InvalidRequest)
+                        })
+                    }
+                    status
+                        if (STATUS_PENDING..STATUS_PENDING + core.oauth.max_auth_attempts)
+                            .contains(&status) =>
+                    {
+                        TokenResponse::error(ErrorType::AuthorizationPending)
+                    }
+                    STATUS_TOKEN_ISSUED => TokenResponse::error(ErrorType::ExpiredToken),
+                    _ => TokenResponse::error(ErrorType::AccessDenied),
+                };
             }
         }
     } else if params.grant_type.eq_ignore_ascii_case("refresh_token") {
@@ -279,7 +347,7 @@ where
                     response = core
                         .issue_token(
                             account_id,
-                            client_id,
+                            &client_id,
                             time_left <= core.oauth.expiry_refresh_token_renew,
                         )
                         .await
@@ -306,16 +374,40 @@ where
     .body(serde_json::to_string(&response).unwrap_or_default())
 }
 
-pub async fn handle_client_auth<T>(params: web::Query<UserAuthRequest>) -> HttpResponse
+// Code authorization flow, handles an authorization request
+pub async fn handle_user_code_auth<T>(params: web::Query<CodeAuthRequest>) -> HttpResponse
 where
     T: for<'x> Store<'x> + 'static,
 {
+    // Validate clientId
+    if params.client_id.len() > CLIENT_ID_MAX_LEN {
+        return HttpResponse::BadRequest().body("Client ID is too long");
+    } else if !params.redirect_uri.starts_with("https://") {
+        return HttpResponse::BadRequest().body("Redirect URI must be HTTPS");
+    }
+
+    let params = params.into_inner();
+    let mut cancel_link = format!("{}?error=access_denied", params.redirect_uri);
+    if let Some(state) = &params.state {
+        let _ = write!(cancel_link, "&state={}", state);
+    }
+    let code = base64::encode(&bincode::serialize(&(1u32, params)).unwrap_or_default());
+
     let mut response = String::with_capacity(
-        OAUTH_HTML_HEADER.len() + OAUTH_HTML_FOOTER.len() + OAUTH_HTML_LOGIN.len(),
+        OAUTH_HTML_HEADER.len()
+            + OAUTH_HTML_LOGIN_HEADER_CLIENT.len()
+            + OAUTH_HTML_LOGIN_CODE_HIDDEN.len()
+            + OAUTH_HTML_LOGIN_FORM.len()
+            + OAUTH_HTML_FOOTER.len()
+            + code.len()
+            + cancel_link.len()
+            + 10,
     );
 
-    response.push_str(OAUTH_HTML_HEADER);
-    response.push_str(&OAUTH_HTML_LOGIN.replace("@@@", params.code.as_deref().unwrap_or("")));
+    response.push_str(&OAUTH_HTML_HEADER.replace("@@@", "/auth/code"));
+    response.push_str(OAUTH_HTML_LOGIN_HEADER_CLIENT);
+    response.push_str(&OAUTH_HTML_LOGIN_CODE_HIDDEN.replace("@@@", &code));
+    response.push_str(&OAUTH_HTML_LOGIN_FORM.replace("@@@", &cancel_link));
     response.push_str(OAUTH_HTML_FOOTER);
 
     HttpResponse::build(StatusCode::OK)
@@ -323,9 +415,130 @@ where
         .body(response)
 }
 
-pub async fn handle_client_auth_post<T>(
+// Handles POST request from the code authorization form
+pub async fn handle_user_code_auth_post<T>(
     core: web::Data<JMAPServer<T>>,
-    params: web::Form<UserAuthForm>,
+    params: web::Form<CodeAuthForm>,
+) -> HttpResponse
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let mut auth_code = None;
+    let params = params.into_inner();
+    let (auth_attempts, code_req) = match base64::decode(&params.code)
+        .ok()
+        .and_then(|bytes| bincode::deserialize::<(u32, CodeAuthRequest)>(&bytes).ok())
+    {
+        Some(code) => code,
+        None => {
+            return HttpResponse::BadRequest().body("Failed to deserialize code.");
+        }
+    };
+
+    // Authenticate user
+    if let (Some(email), Some(password)) = (params.email, params.password) {
+        let store = core.store.clone();
+
+        if let Ok(Some(account_id)) = core
+            .spawn_worker(move || store.authenticate(&email, &password))
+            .await
+        {
+            // Generate client code
+            let client_code = thread_rng()
+                .sample_iter(Alphanumeric)
+                .take(DEVICE_CODE_LEN)
+                .map(char::from)
+                .collect::<String>();
+
+            // Add client code
+            core.oauth_codes
+                .insert(
+                    client_code.clone(),
+                    Arc::new(OAuthCode {
+                        status: STATUS_AUTHORIZED.into(),
+                        account_id: account_id.into(),
+                        expiry: Instant::now(),
+                        client_id: code_req.client_id.clone(),
+                        redirect_uri: code_req.redirect_uri.clone().into(),
+                    }),
+                )
+                .await;
+
+            auth_code = client_code.into();
+        }
+    }
+
+    // Build redirect link
+    let mut redirect_link = if let Some(auth_code) = &auth_code {
+        format!("{}?code={}", code_req.redirect_uri, auth_code)
+    } else {
+        format!("{}?error=access_denied", code_req.redirect_uri)
+    };
+    if let Some(state) = &code_req.state {
+        let _ = write!(redirect_link, "&state={}", state);
+    }
+
+    if auth_code.is_none() && (auth_attempts < core.oauth.max_auth_attempts) {
+        let code =
+            base64::encode(&bincode::serialize(&(auth_attempts + 1, code_req)).unwrap_or_default());
+
+        let mut response = String::with_capacity(
+            OAUTH_HTML_HEADER.len()
+                + OAUTH_HTML_LOGIN_HEADER_CLIENT.len()
+                + OAUTH_HTML_LOGIN_CODE_HIDDEN.len()
+                + OAUTH_HTML_LOGIN_FORM.len()
+                + OAUTH_HTML_FOOTER.len()
+                + code.len()
+                + redirect_link.len()
+                + 10,
+        );
+        response.push_str(&OAUTH_HTML_HEADER.replace("@@@", "/auth/code"));
+        response.push_str(OAUTH_HTML_LOGIN_HEADER_FAILED);
+        response.push_str(&OAUTH_HTML_LOGIN_CODE_HIDDEN.replace("@@@", &code));
+        response.push_str(&OAUTH_HTML_LOGIN_FORM.replace("@@@", &redirect_link));
+        response.push_str(OAUTH_HTML_FOOTER);
+
+        HttpResponse::build(StatusCode::OK)
+            .content_type("text/html; charset=utf-8")
+            .body(response)
+    } else {
+        HttpResponse::build(StatusCode::TEMPORARY_REDIRECT)
+            .insert_header((header::LOCATION, redirect_link))
+            .finish()
+    }
+}
+
+// Device authorization flow, renders the authorization page
+pub async fn handle_user_device_auth<T>(params: web::Query<DeviceAuthGet>) -> HttpResponse
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    let code = params.code.as_deref().unwrap_or("");
+    let mut response = String::with_capacity(
+        OAUTH_HTML_HEADER.len()
+            + OAUTH_HTML_LOGIN_HEADER_DEVICE.len()
+            + OAUTH_HTML_LOGIN_CODE.len()
+            + OAUTH_HTML_LOGIN_FORM.len()
+            + OAUTH_HTML_FOOTER.len()
+            + code.len()
+            + 16,
+    );
+
+    response.push_str(&OAUTH_HTML_HEADER.replace("@@@", "/auth"));
+    response.push_str(OAUTH_HTML_LOGIN_HEADER_DEVICE);
+    response.push_str(&OAUTH_HTML_LOGIN_CODE.replace("@@@", code));
+    response.push_str(&OAUTH_HTML_LOGIN_FORM.replace("@@@", "about:blank"));
+    response.push_str(OAUTH_HTML_FOOTER);
+
+    HttpResponse::build(StatusCode::OK)
+        .content_type("text/html; charset=utf-8")
+        .body(response)
+}
+
+// Handles POST request from the device authorization form
+pub async fn handle_user_device_auth_post<T>(
+    core: web::Data<JMAPServer<T>>,
+    params: web::Form<DeviceAuthPost>,
 ) -> HttpResponse
 where
     T: for<'x> Store<'x> + 'static,
@@ -341,7 +554,7 @@ where
     let code = if let Some(oauth) = params
         .code
         .as_ref()
-        .and_then(|code| core.oauth_status.get(code))
+        .and_then(|code| core.oauth_codes.get(code))
     {
         if (STATUS_PENDING..STATUS_PENDING + core.oauth.max_auth_attempts)
             .contains(&oauth.status.load(atomic::Ordering::Relaxed))
@@ -379,18 +592,26 @@ where
     };
 
     let mut response = String::with_capacity(
-        OAUTH_HTML_HEADER.len() + OAUTH_HTML_FOOTER.len() + OAUTH_HTML_LOGIN.len(),
+        OAUTH_HTML_HEADER.len()
+            + OAUTH_HTML_LOGIN_HEADER_DEVICE.len()
+            + OAUTH_HTML_LOGIN_CODE.len()
+            + OAUTH_HTML_LOGIN_FORM.len()
+            + OAUTH_HTML_FOOTER.len()
+            + USER_CODE_LEN
+            + 17,
     );
-    response.push_str(OAUTH_HTML_HEADER);
+    response.push_str(&OAUTH_HTML_HEADER.replace("@@@", "/auth"));
 
     match code {
         Response::Success => {
             response.push_str(OAUTH_HTML_LOGIN_SUCCESS);
         }
         Response::Failed => {
+            response.push_str(OAUTH_HTML_LOGIN_HEADER_FAILED);
             response.push_str(
-                &OAUTH_HTML_LOGIN_FAILED.replace("@@@", params.code.as_deref().unwrap_or("")),
+                &OAUTH_HTML_LOGIN_CODE.replace("@@@", params.code.as_deref().unwrap_or("")),
             );
+            response.push_str(&OAUTH_HTML_LOGIN_FORM.replace("@@@", "about:blank"));
         }
         Response::InvalidCode => {
             response.push_str(
@@ -412,6 +633,7 @@ where
         .body(response)
 }
 
+// /.well-known/oauth-authorization-server endpoint
 pub async fn handle_oauth_metadata<T>(core: web::Data<JMAPServer<T>>) -> HttpResponse
 where
     T: for<'x> Store<'x> + 'static,
@@ -428,7 +650,7 @@ where
     async fn issue_token(
         &self,
         account_id: AccountId,
-        client_id: u64,
+        client_id: &str,
         with_refresh_token: bool,
     ) -> store::Result<TokenResponse>
     where
@@ -449,15 +671,13 @@ where
             .await?;
 
         Ok(TokenResponse::Granted {
-            access_token: self
-                .encode_access_token(
-                    "access_token",
-                    account_id,
-                    &password_hash,
-                    client_id,
-                    self.oauth.expiry_token,
-                )
-                .await?,
+            access_token: self.encode_access_token(
+                "access_token",
+                account_id,
+                &password_hash,
+                client_id,
+                self.oauth.expiry_token,
+            )?,
             token_type: "bearer".to_string(),
             expires_in: self.oauth.expiry_token,
             refresh_token: if with_refresh_token {
@@ -467,8 +687,7 @@ where
                     &password_hash,
                     client_id,
                     self.oauth.expiry_refresh_token,
-                )
-                .await?
+                )?
                 .into()
             } else {
                 None
@@ -477,72 +696,72 @@ where
         })
     }
 
-    async fn encode_access_token(
+    fn encode_access_token(
         &self,
         grant_type: &str,
         account_id: u32,
         password_hash: &str,
-        client_id: u64,
+        client_id: &str,
         expiry_in: u64,
     ) -> store::Result<String> {
+        // Build context
+        if client_id.len() > CLIENT_ID_MAX_LEN {
+            return Err(StoreError::DeserializeError("ClientId is too long".into()));
+        }
         let key = self.oauth.key.clone();
-        let context = format!("{} {} {}", grant_type, client_id, password_hash);
+        let context = format!(
+            "{} {} {} {}",
+            grant_type, client_id, account_id, password_hash
+        );
+        let context_nonce = format!("{} nonce {}", grant_type, password_hash);
 
-        self.spawn_worker(move || {
-            // Set expiration time
-            let expiry = SystemTime::now()
+        // Set expiration time
+        let expiry = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0)
                 .saturating_sub(946684800) // Jan 1, 2000
                 + expiry_in;
 
-            // Create nonce
-            let mut nonce = Vec::with_capacity(SymmetricEncrypt::NONCE_LEN);
-            account_id.to_leb128_writer(&mut nonce).unwrap();
-            expiry.to_leb128_writer(&mut nonce).unwrap();
-            match nonce.len().cmp(&SymmetricEncrypt::NONCE_LEN) {
-                std::cmp::Ordering::Less => nonce.resize(SymmetricEncrypt::NONCE_LEN, 0),
-                std::cmp::Ordering::Greater => {
-                    let mut hasher = AHasher::default();
-                    nonce.hash(&mut hasher);
-                    let hash = hasher.finish();
-                    nonce.clear();
-                    nonce.extend_from_slice(hash.to_be_bytes().as_slice());
-                    nonce.resize(SymmetricEncrypt::NONCE_LEN, 0)
-                }
-                std::cmp::Ordering::Equal => {}
-            }
+        // Calculate nonce
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(context_nonce.as_bytes());
+        hasher.update(expiry.to_be_bytes().as_slice());
+        let nonce = hasher
+            .finalize()
+            .as_bytes()
+            .iter()
+            .take(SymmetricEncrypt::NONCE_LEN)
+            .copied()
+            .collect::<Vec<_>>();
 
-            // Encrypt random bytes with nonce
-            let mut token = SymmetricEncrypt::new(key.as_bytes(), &context)
-                .encrypt(&thread_rng().gen::<[u8; RANDOM_CODE_LEN]>(), &nonce)
-                .map_err(StoreError::DeserializeError)?;
-            account_id.to_leb128_bytes(&mut token);
-            client_id.to_leb128_bytes(&mut token);
-            expiry.to_leb128_bytes(&mut token);
+        // Encrypt random bytes
+        let mut token = SymmetricEncrypt::new(key.as_bytes(), &context)
+            .encrypt(&thread_rng().gen::<[u8; RANDOM_CODE_LEN]>(), &nonce)
+            .map_err(StoreError::DeserializeError)?;
+        account_id.to_leb128_bytes(&mut token);
+        expiry.to_leb128_bytes(&mut token);
+        token.extend_from_slice(client_id.as_bytes());
 
-            Ok(base64::encode(&token))
-        })
-        .await
+        Ok(base64::encode(&token))
     }
 
     pub async fn validate_access_token(
         &self,
         grant_type: &str,
         token: &str,
-    ) -> store::Result<(AccountId, u64, u64)> {
+    ) -> store::Result<(AccountId, String, u64)> {
         // Base64 decode token
         let token = base64::decode(token)
             .map_err(|e| StoreError::DeserializeError(format!("Failed to decode: {}", e)))?;
-        let (account_id, client_id, expiry) = token
+        let (account_id, expiry, client_id) = token
             .get((RANDOM_CODE_LEN + SymmetricEncrypt::ENCRYPT_TAG_LEN)..)
             .and_then(|bytes| {
                 let mut bytes = bytes.iter();
                 (
                     AccountId::from_leb128_it(&mut bytes)?,
                     u64::from_leb128_it(&mut bytes)?,
-                    u64::from_leb128_it(&mut bytes)?,
+                    bytes.copied().map(char::from).collect::<String>(),
                 )
                     .into()
             })
@@ -565,35 +784,33 @@ where
             .await?
             .ok_or_else(|| StoreError::DeserializeError("Account no longer exists".into()))?;
 
-        // Create nonce
-        let mut nonce = Vec::with_capacity(SymmetricEncrypt::NONCE_LEN);
-        account_id.to_leb128_writer(&mut nonce).unwrap();
-        expiry.to_leb128_writer(&mut nonce).unwrap();
-        match nonce.len().cmp(&SymmetricEncrypt::NONCE_LEN) {
-            std::cmp::Ordering::Less => nonce.resize(SymmetricEncrypt::NONCE_LEN, 0),
-            std::cmp::Ordering::Greater => {
-                let mut hasher = AHasher::default();
-                nonce.hash(&mut hasher);
-                let hash = hasher.finish();
-                nonce.clear();
-                nonce.extend_from_slice(hash.to_be_bytes().as_slice());
-                nonce.resize(SymmetricEncrypt::NONCE_LEN, 0)
-            }
-            std::cmp::Ordering::Equal => {}
-        }
+        // Build context
+        let key = self.oauth.key.clone();
+        let context = format!(
+            "{} {} {} {}",
+            grant_type, client_id, account_id, password_hash
+        );
+        let context_nonce = format!("{} nonce {}", grant_type, password_hash);
+
+        // Calculate nonce
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(context_nonce.as_bytes());
+        hasher.update(expiry.to_be_bytes().as_slice());
+        let nonce = hasher
+            .finalize()
+            .as_bytes()
+            .iter()
+            .take(SymmetricEncrypt::NONCE_LEN)
+            .copied()
+            .collect::<Vec<_>>();
 
         // Decrypt
-        let key = self.oauth.key.clone();
-        let context = format!("{} {} {}", grant_type, client_id, password_hash);
-        self.spawn_worker(move || {
-            SymmetricEncrypt::new(key.as_bytes(), &context)
-                .decrypt(
-                    &token[..RANDOM_CODE_LEN + SymmetricEncrypt::ENCRYPT_TAG_LEN],
-                    &nonce,
-                )
-                .map_err(|e| StoreError::DeserializeError(format!("Failed to decrypt: {}", e)))
-        })
-        .await?;
+        SymmetricEncrypt::new(key.as_bytes(), &context)
+            .decrypt(
+                &token[..RANDOM_CODE_LEN + SymmetricEncrypt::ENCRYPT_TAG_LEN],
+                &nonce,
+            )
+            .map_err(|e| StoreError::DeserializeError(format!("Failed to decrypt: {}", e)))?;
 
         // Success
         Ok((account_id, client_id, expiry - now))
@@ -604,11 +821,15 @@ impl OAuthMetadata {
     pub fn new(base_url: &str) -> Self {
         OAuthMetadata {
             issuer: base_url.to_string(),
-            //authorization_endpoint: format!("{}/oauth/code", base_url),
+            authorization_endpoint: format!("{}/auth/code", base_url),
             token_endpoint: format!("{}/auth/token", base_url),
-            grant_types_supported: vec!["urn:ietf:params:oauth:grant-type:device_code".to_string()],
+            grant_types_supported: vec![
+                "authorization_code".to_string(),
+                "implicit".to_string(),
+                "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+            ],
             device_authorization_endpoint: format!("{}/auth/device", base_url),
-            response_types_supported: vec!["token".to_string()],
+            response_types_supported: vec!["code".to_string(), "code token".to_string()],
             scopes_supported: vec!["offline_access".to_string()],
         }
     }

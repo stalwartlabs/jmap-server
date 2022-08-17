@@ -28,8 +28,9 @@ use crate::{
     authorization::{
         auth::SessionFactory,
         oauth::{
-            handle_client_auth, handle_client_auth_post, handle_device_auth, handle_oauth_metadata,
-            handle_token_request, OAuth, OAuthMetadata,
+            handle_device_auth, handle_oauth_metadata, handle_token_request, handle_user_code_auth,
+            handle_user_code_auth_post, handle_user_device_auth, handle_user_device_auth_post,
+            OAuth, OAuthMetadata,
         },
     },
     cluster::{rpc::tls::load_tls_server_config, ClusterIpc},
@@ -141,6 +142,7 @@ where
                         .collect::<String>()
                 }),
             expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
+            expiry_auth_code: settings.parse("oauth-auth-code-expiry").unwrap_or(600),
             expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
             expiry_refresh_token: settings
                 .parse("oauth-refresh-token-expiry")
@@ -160,7 +162,7 @@ where
             .initial_capacity(128)
             .time_to_idle(ONE_HOUR_EXPIRY)
             .build(),
-        oauth_status: Cache::builder().time_to_live(ONE_HOUR_EXPIRY).build(),
+        oauth_codes: Cache::builder().time_to_live(ONE_HOUR_EXPIRY).build(),
         cluster,
         base_session,
         #[cfg(test)]
@@ -246,8 +248,13 @@ where
             )
             .route("/jmap/ws", web::get().to(handle_ws::<T>))
             .route("/ingest", web::post().to(handle_ingest::<T>))
-            .route("/auth", web::get().to(handle_client_auth::<T>))
-            .route("/auth", web::post().to(handle_client_auth_post::<T>))
+            .route("/auth", web::get().to(handle_user_device_auth::<T>))
+            .route("/auth", web::post().to(handle_user_device_auth_post::<T>))
+            .route("/auth/code", web::get().to(handle_user_code_auth::<T>))
+            .route(
+                "/auth/code",
+                web::post().to(handle_user_code_auth_post::<T>),
+            )
             .route("/auth/device", web::post().to(handle_device_auth::<T>))
             .route("/auth/token", web::post().to(handle_token_request::<T>))
             .route(

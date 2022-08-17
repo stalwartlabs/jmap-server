@@ -4,7 +4,6 @@ jmap-server
 - General
   - Fix logging from subcrates.
   - Control the amount of data stored from all set requests (ORM values, headers, etc.)
-  - OAuth authentication with Raft support.
   - Replace expect and panic with print during startup.
 - Testing
   - Cluster read replicas
@@ -91,7 +90,7 @@ Settings
   - rate-limit-anonymous: 100/60
   - use-forwarded-header: false
   - subscription-max-total: 100
-  - oauth-key: <String>
+
 - Websockets
   - ws-client-timeout: 10 seconds
   - ws-heartbeat-interval: 5 seconds
@@ -131,8 +130,9 @@ Settings
   - rpc-cert-key
   - rpc-tls-domain: false
 
-
+  - oauth-key: <String>
             expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
+            expiry_auth_code: settings.parse("oauth-auth-code-expiry").unwrap_or(600),
             expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
             expiry_refresh_token: settings
                 .parse("oauth-refresh-token-expiry")
