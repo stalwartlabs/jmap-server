@@ -1,6 +1,6 @@
 use crate::core::bitmap::Bitmap;
 use crate::core::collection::Collection;
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::Leb128Iterator;
 use crate::serialize::StoreDeserialize;
 use crate::write::batch;
 use crate::AccountId;
@@ -62,16 +62,16 @@ impl StoreDeserialize for Entry {
             },
             batch::Change::SNAPSHOT => {
                 let mut bytes_it = bytes.get(1..)?.iter();
-                let total_collections = usize::from_leb128_it(&mut bytes_it)?;
+                let total_collections = bytes_it.next_leb128()?;
                 let mut changed_accounts = Vec::with_capacity(total_collections);
 
                 for _ in 0..total_collections {
-                    let collections = u64::from_leb128_it(&mut bytes_it)?.into();
-                    let total_accounts = usize::from_leb128_it(&mut bytes_it)?;
+                    let collections = bytes_it.next_leb128::<u64>()?.into();
+                    let total_accounts = bytes_it.next_leb128()?;
                     let mut accounts = Vec::with_capacity(total_accounts);
 
                     for _ in 0..total_accounts {
-                        accounts.push(AccountId::from_leb128_it(&mut bytes_it)?);
+                        accounts.push(bytes_it.next_leb128()?);
                     }
 
                     changed_accounts.push((collections, accounts));

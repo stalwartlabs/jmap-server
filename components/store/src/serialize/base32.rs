@@ -1,5 +1,7 @@
 use std::slice::Iter;
 
+use super::leb128::{Leb128Iterator, Leb128Writer};
+
 pub static BASE32_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz792013";
 pub static BASE32_INVERSE: [u8; 256] = [
     255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
@@ -142,6 +144,9 @@ impl Iterator for Base32Reader<'_> {
         }
     }
 }
+
+impl Leb128Iterator<u8> for Base32Reader<'_> {}
+impl Leb128Writer for Base32Writer {}
 
 #[cfg(test)]
 mod tests {

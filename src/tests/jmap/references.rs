@@ -4,7 +4,6 @@ use store::ahash::AHashMap;
 
 use crate::api::{method, request::Request, response::Response};
 
-// TODO test references pointing to updatedProperties in mailbox
 #[test]
 fn map_sort_created_ids() {
     let request = serde_json::from_slice::<Request>(
@@ -17,7 +16,7 @@ fn map_sort_created_ids() {
                     [
                         "Mailbox/set",
                         {
-                            "accountId": "i01",
+                            "accountId": "b",
                             "create": {
                                 "a": {
                                     "name": "Folder a",
@@ -54,7 +53,7 @@ fn map_sort_created_ids() {
                     [
                         "Mailbox/set",
                         {
-                            "accountId": "i01",
+                            "accountId": "b",
                             "create": {
                                 "a1": {
                                     "name": "Folder a1",
@@ -91,7 +90,7 @@ fn map_sort_created_ids() {
                     [
                         "Mailbox/set",
                         {
-                            "accountId": "i01",
+                            "accountId": "b",
                             "create": {
                                 "z": {
                                     "name": "Folder Z",
@@ -110,7 +109,7 @@ fn map_sort_created_ids() {
                     [
                         "Mailbox/set",
                         {
-                            "accountId": "i01",
+                            "accountId": "b",
                             "create": {
                                 "a": {
                                     "name": "Folder a",
@@ -227,7 +226,7 @@ fn map_sort_created_ids() {
                 [
                     "Mailbox/set",
                     {
-                        "accountId": "i01",
+                        "accountId": "b",
                         "create": {
                             "a": {
                                 "name": "a",
@@ -248,7 +247,7 @@ fn map_sort_created_ids() {
                 [
                     "Mailbox/set",
                     {
-                        "accountId": "i01",
+                        "accountId": "b",
                         "create": {
                             "a1": {
                                 "name": "a1",
@@ -268,9 +267,9 @@ fn map_sort_created_ids() {
                 ]
             ],
             "createdIds": {
-                "x": "i01",
-                "y": "i02",
-                "z": "i03"
+                "x": "b",
+                "y": "c",
+                "z": "d"
             }
         }"##,
     )

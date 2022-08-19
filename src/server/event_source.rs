@@ -94,7 +94,8 @@ where
         .insert_header(("Cache-Control", "no-store"))
         .streaming::<_, std::io::Error>(stream! {
             let mut last_message = Instant::now() - Duration::from_millis(throttle_ms);
-            let mut timeout = Duration::from_millis(LONG_SLUMBER_MS);
+            let mut timeout =
+                Duration::from_millis(ping.as_ref().map(|p| p.interval).unwrap_or(LONG_SLUMBER_MS));
 
             loop {
                 match time::timeout(timeout, change_rx.recv()).await {

@@ -199,7 +199,6 @@ pub async fn start_cluster<T>(
                     ping_interval - time_since_last_ping
                 };
 
-                let time = Instant::now();
                 wait_timeout = Duration::from_millis(
                     if let Some(time_to_next_election) = cluster.time_to_next_election() {
                         if time_to_next_election == 0 {
@@ -217,14 +216,6 @@ pub async fn start_cluster<T>(
                         time_to_next_ping
                     },
                 );
-
-                if time.elapsed().as_millis() > 50 {
-                    panic!(
-                        "{}ms [{}] Request votes took too long!",
-                        time.elapsed().as_millis(),
-                        cluster.addr,
-                    );
-                }
             }
         }
     });

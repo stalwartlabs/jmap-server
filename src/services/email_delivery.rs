@@ -62,8 +62,6 @@ impl Event {
     }
 }
 
-// TODO be notified of shutdowns and lost leaderships (all modules)
-// TODO on startup load all pending deliveries
 pub fn init_email_delivery() -> (mpsc::Sender<Event>, mpsc::Receiver<Event>) {
     mpsc::channel::<Event>(IPC_CHANNEL_BUFFER)
 }

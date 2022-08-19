@@ -10,7 +10,10 @@ use crate::{
     AccountId, DocumentId, FieldId,
 };
 
-use super::{leb128::Leb128, DeserializeBigEndian};
+use super::{
+    leb128::{Leb128Iterator, Leb128Reader, Leb128Vec},
+    DeserializeBigEndian,
+};
 
 pub const COLLECTION_PREFIX_LEN: usize =
     std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>();
@@ -48,7 +51,7 @@ impl ValueKey {
         let mut bytes = Vec::with_capacity(
             std::mem::size_of::<AccountId>() + std::mem::size_of::<Collection>(),
         );
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes.push(collection.into());
         bytes
     }
@@ -60,9 +63,9 @@ impl ValueKey {
         field: FieldId,
     ) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<FieldId>());
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes.push(collection.into());
-        document.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(document);
         bytes.push(field);
         bytes
     }
@@ -77,9 +80,9 @@ impl ValueKey {
                 + std::mem::size_of::<Collection>()
                 + std::mem::size_of::<DocumentId>(),
         );
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes.push(collection.into());
-        document.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(document);
         bytes
     }
 
@@ -90,11 +93,11 @@ impl ValueKey {
         to_document: DocumentId,
     ) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<AccountId>() + 1);
-        grant_account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(grant_account);
         bytes.push(u8::MAX);
-        to_account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(to_account);
         bytes.push(to_collection.into());
-        to_document.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(to_document);
         bytes
     }
 
@@ -104,10 +107,10 @@ impl ValueKey {
         to_collection: Collection,
     ) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(std::mem::size_of::<AccountId>() + 1);
-        grant_account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(grant_account);
         bytes.push(u8::MAX);
         if to_account != AccountId::MAX {
-            to_account.to_leb128_bytes(&mut bytes);
+            bytes.push_leb128(to_account);
         }
         if to_collection != Collection::None {
             bytes.push(to_collection.into());
@@ -118,9 +121,9 @@ impl ValueKey {
     pub fn deserialize_acl_target(bytes: &[u8]) -> Option<(AccountId, Collection, DocumentId)> {
         let mut bytes = bytes.iter();
         Some((
-            AccountId::from_leb128_it(&mut bytes)?,
+            bytes.next_leb128()?,
             (*bytes.next()?).into(),
-            DocumentId::from_leb128_it(&mut bytes)?,
+            bytes.next_leb128()?,
         ))
     }
 }
@@ -139,9 +142,9 @@ impl BlobKey {
             BLOB_EXTERNAL
         });
         key.extend_from_slice(id.hash());
-        account.to_leb128_bytes(&mut key);
+        key.push_leb128(account);
         key.push(collection.into());
-        document.to_leb128_bytes(&mut key);
+        key.push_leb128(document);
         key
     }
 
@@ -154,7 +157,7 @@ impl BlobKey {
         });
         key.extend_from_slice(id.hash());
         if account != AccountId::MAX {
-            account.to_leb128_bytes(&mut key);
+            key.push_leb128(account);
         }
         key
     }
@@ -171,7 +174,7 @@ impl BlobKey {
             BLOB_EXTERNAL
         });
         key.extend_from_slice(id.hash());
-        account.to_leb128_bytes(&mut key);
+        key.push_leb128(account);
         key.push(collection.into());
         key
     }
@@ -201,7 +204,7 @@ impl BitmapKey {
         bytes.push(field);
         bytes.push(collection.into());
         bytes.push(BM_TERM | if is_exact { TERM_EXACT } else { TERM_STEMMED });
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes
     }
 
@@ -224,7 +227,7 @@ impl BitmapKey {
                 let mut bytes =
                     Vec::with_capacity(ACCOUNT_KEY_LEN + std::mem::size_of::<u64>() + 3);
                 bytes.extend_from_slice(&xxhash_rust::xxh3::xxh3_64(term.as_bytes()).to_be_bytes());
-                term.len().to_leb128_bytes(&mut bytes);
+                bytes.push_leb128(term.len());
                 (bytes, TERM_HASH)
             }
             21..=u32::MAX => {
@@ -232,7 +235,7 @@ impl BitmapKey {
                     Vec::with_capacity(ACCOUNT_KEY_LEN + (std::mem::size_of::<u64>() * 2) + 3);
                 bytes.extend_from_slice(&xxhash_rust::xxh3::xxh3_64(term.as_bytes()).to_be_bytes());
                 bytes.extend_from_slice(&naive_cityhash::cityhash64(term.as_bytes()).to_be_bytes());
-                term.len().to_leb128_bytes(&mut bytes);
+                bytes.push_leb128(term.len());
                 (bytes, TERM_HASH)
             }
             0 => {
@@ -243,7 +246,7 @@ impl BitmapKey {
         bytes.push(field);
         bytes.push(collection.into());
         bytes.push(BM_TERM | bm_type | if is_exact { TERM_EXACT } else { TERM_STEMMED });
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes
     }
 
@@ -260,7 +263,7 @@ impl BitmapKey {
                 TAG_STATIC
             }
             Tag::Id(id) => {
-                (*id).to_leb128_bytes(&mut bytes);
+                bytes.push_leb128(*id);
                 TAG_ID
             }
             Tag::Text(text) => {
@@ -275,7 +278,7 @@ impl BitmapKey {
         bytes.push(field);
         bytes.push(collection.into());
         bytes.push(BM_TAG | bm_type);
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes
     }
 
@@ -283,7 +286,7 @@ impl BitmapKey {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + 1);
         bytes.push(collection.into());
         bytes.push(BM_DOCUMENT_IDS);
-        account.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(account);
         bytes
     }
 
@@ -295,7 +298,7 @@ impl BitmapKey {
                 .and_then(|start_pos| {
                     bytes
                         .get(start_pos + 1..)
-                        .and_then(|range| AccountId::from_leb128_bytes(range).map(|r| r.0))
+                        .and_then(|range| range.read_leb128().map(|r| r.0))
                 })
         })
     }
@@ -312,7 +315,7 @@ impl IndexKey {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + key.len());
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.push(collection.into());
-        bytes.extend_from_slice(&field.to_be_bytes());
+        bytes.push(field);
         bytes.extend_from_slice(key);
         bytes.extend_from_slice(&document.to_be_bytes());
         bytes
@@ -331,7 +334,7 @@ impl IndexKey {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN);
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.push(collection);
-        bytes.extend_from_slice(&field.to_be_bytes());
+        bytes.push(field);
         bytes
     }
 
@@ -344,7 +347,7 @@ impl IndexKey {
         let mut bytes = Vec::with_capacity(ACCOUNT_KEY_LEN + key.len());
         bytes.extend_from_slice(&account.to_be_bytes());
         bytes.push(collection.into());
-        bytes.extend_from_slice(&field.to_be_bytes());
+        bytes.push(field);
         bytes.extend_from_slice(key);
         bytes
     }

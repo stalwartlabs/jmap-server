@@ -231,7 +231,7 @@ mod tests {
         for number in [0, 1, 10, 1000, u64::MAX / 2, u64::MAX - 1, u64::MAX] {
             let id = JMAPId::from(number);
             let id_string = id.as_string();
-            println!("'{}'", id_string);
+            //println!("'{}'", id_string);
             assert_eq!(JMAPId::parse(&id_string).unwrap(), id);
         }
     }

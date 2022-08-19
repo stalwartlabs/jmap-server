@@ -25,7 +25,7 @@ where
         println!("Fuzzing cluster...");
     }
 
-    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster_fuzz", 5, true).await;
     let peers = cluster.start_cluster().await;
     let mut actions = Cmds::default();
     let id_map: Arc<Mutex<AHashMap<(AccountId, Collection), AHashMap<JMAPId, String>>>> =

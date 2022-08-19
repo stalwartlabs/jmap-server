@@ -8,7 +8,7 @@ use store_rocksdb::RocksDB;
 use tokio::sync::oneshot;
 
 use crate::{
-    authorization::{auth::RemoteAddress, rate_limit::RateLimiter, Session},
+    authorization::{auth::RemoteAddress, rate_limit::Limiter, Session},
     server::http::{build_jmap_server, init_jmap_server},
     JMAPServer,
 };
@@ -35,10 +35,6 @@ where
 {
     let (settings, temp_dir) = init_settings(test_name, peer_num, total_peers, delete_if_exists);
     let server = init_jmap_server::<T>(&settings, None);
-    let session_url = format!(
-        "http://{}/.well-known/jmap",
-        settings.get("hostname").unwrap()
-    );
 
     // Start web server
     let _server = server.clone();
@@ -59,7 +55,7 @@ where
     // Create client
     let mut client = Client::new()
         .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
-        .connect(&session_url)
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
     client.set_default_account_id(JMAPId::new(1));
@@ -71,7 +67,17 @@ pub async fn init_jmap_tests<T>(test_name: &str) -> (web::Data<JMAPServer<T>>, C
 where
     T: for<'x> Store<'x> + 'static,
 {
-    tracing_subscriber::fmt::init();
+    /*tracing_subscriber::registry()
+    .with(fmt::layer().with_filter(LevelFilter::DEBUG))
+    .with(Targets::new().with_target("hyper", LevelFilter::OFF))
+    .init();*/
+
+    store::tracing::subscriber::set_global_default(
+        tracing_subscriber::FmtSubscriber::builder()
+            .with_max_level(store::tracing::Level::ERROR)
+            .finish(),
+    )
+    .expect("Setting default subscriber failed.");
 
     let (server, client, tmp_dir, _) = init_jmap_tests_opts::<T>(test_name, 1, 1, true).await;
     (server, client, tmp_dir)
@@ -97,22 +103,23 @@ where
         .rate_limiters
         .insert(
             RemoteAddress::AccountId(SUPERUSER_ID),
-            Arc::new(RateLimiter::new(1000, 1000)),
+            Arc::new(Limiter::new_authenticated(1000, 1000)),
         )
         .await;
 }
 
 #[actix_web::test]
+#[ignore]
 async fn jmap_core_tests() {
     let (server, mut client, temp_dir) = init_jmap_tests::<RocksDB>("jmap_tests").await;
 
     // Run tests
     oauth::test(server.clone(), &mut client).await;
-    //acl::test(server.clone(), &mut client).await;
-    //authorization::test(server.clone(), &mut client).await;
-    //event_source::test(server.clone(), &mut client).await;
-    //push_subscription::test(server.clone(), &mut client).await;
-    //websocket::test(server.clone(), &mut client).await;
+    acl::test(server.clone(), &mut client).await;
+    authorization::test(server.clone(), &mut client).await;
+    event_source::test(server.clone(), &mut client).await;
+    push_subscription::test(server.clone(), &mut client).await;
+    websocket::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(&temp_dir);
 }

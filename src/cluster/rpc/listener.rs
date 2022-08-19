@@ -16,6 +16,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::codec::Framed;
 
 use crate::cluster::{Config, Event};
+use crate::server::failed_to;
 
 use super::serialize::RpcEncoder;
 use super::tls::load_tls_server_config;
@@ -34,7 +35,7 @@ pub async fn spawn_rpc(
     {
         (cert_path, key_path)
     } else {
-        panic!("Missing TLS 'rpc-cert-path' and/or 'rpc-key-path' parameters.");
+        failed_to("start TLS, 'rpc-cert-path' and/or 'rpc-key-path' parameters.");
     };
 
     let tls_acceptor = Arc::new(TlsAcceptor::from(Arc::new(load_tls_server_config(
@@ -43,7 +44,7 @@ pub async fn spawn_rpc(
 
     // Start listener for RPC requests
     let listener = TcpListener::bind(bind_addr).await.unwrap_or_else(|e| {
-        panic!("Failed to bind RPC listener to {}: {}", bind_addr, e);
+        failed_to(&format!("bind RPC listener to {}: {}", bind_addr, e));
     });
 
     let key = config.key.to_string();

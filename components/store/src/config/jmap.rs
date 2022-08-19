@@ -16,6 +16,7 @@ pub struct JMAPConfig {
 
     pub rate_limit_authenticated: (u64, u64),
     pub rate_limit_anonymous: (u64, u64),
+    pub rate_limit_auth: (u64, u64),
     pub use_forwarded_header: bool,
 
     pub query_max_results: usize,
@@ -82,6 +83,16 @@ impl From<&EnvSettings> for JMAPConfig {
             rate_limit_anonymous: settings
                 .get("rate-limit-anonymous")
                 .unwrap_or_else(|| "100/60".to_string())
+                .split_once('/')
+                .and_then(|(a, b)| {
+                    a.parse::<u64>()
+                        .ok()
+                        .map(|a| (a, b.parse::<u64>().unwrap_or(60)))
+                })
+                .unwrap_or((100, 60)),
+            rate_limit_auth: settings
+                .get("rate-limit-auth")
+                .unwrap_or_else(|| "10/60".to_string())
                 .split_once('/')
                 .and_then(|(a, b)| {
                     a.parse::<u64>()

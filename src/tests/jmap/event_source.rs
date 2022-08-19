@@ -9,7 +9,9 @@ use store::{ahash::AHashSet, RecipientType, Store};
 use tokio::sync::mpsc;
 
 use crate::{
-    tests::{jmap_mail::ingest_message, store::utils::StoreCompareWith},
+    tests::{
+        jmap::bypass_authentication, jmap_mail::ingest_message, store::utils::StoreCompareWith,
+    },
     JMAPServer,
 };
 
@@ -19,7 +21,8 @@ where
 {
     println!("Running EventSource tests...");
 
-    // Create a domain name and a test account
+    // Bypass authentication
+    bypass_authentication(&server).await;
     server.store.recipients.insert(
         "jdoe@example.com".to_string(),
         Arc::new(RecipientType::Individual(1)),
@@ -40,6 +43,8 @@ where
             }
         }
     });
+
+    assert_ping(&mut event_rx).await;
 
     // Create mailbox and expect state change
     let mailbox_id = client

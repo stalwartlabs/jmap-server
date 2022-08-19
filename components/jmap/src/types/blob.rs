@@ -2,7 +2,7 @@ use std::io::Write;
 
 use store::blob::{BlobId, BLOB_HASH_LEN};
 use store::serialize::base32::{Base32Reader, Base32Writer};
-use store::serialize::leb128::Leb128;
+use store::serialize::leb128::{Leb128Iterator, Leb128Writer};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JMAPBlob {
@@ -63,8 +63,8 @@ impl JMAPBlob {
             },
             section: if let Some(encoding) = encoding {
                 BlobSection {
-                    offset_start: usize::from_leb128_it(&mut it)?,
-                    size: usize::from_leb128_it(&mut it)?,
+                    offset_start: it.next_leb128()?,
+                    size: it.next_leb128()?,
                     encoding,
                 }
                 .into()
@@ -154,8 +154,8 @@ impl std::fmt::Display for JMAPBlob {
                 b'h' + section.encoding
             }));
             writer.write(self.id.hash()).unwrap();
-            section.offset_start.to_leb128_writer(&mut writer).unwrap();
-            section.size.to_leb128_writer(&mut writer).unwrap();
+            writer.write_leb128(section.offset_start).unwrap();
+            writer.write_leb128(section.size).unwrap();
         } else {
             writer = Base32Writer::with_capacity(BLOB_HASH_LEN + 1);
             writer.push_char(if self.id.is_local() { 'a' } else { 'b' });

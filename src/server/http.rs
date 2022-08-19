@@ -43,7 +43,10 @@ use crate::{
     JMAPServer, DEFAULT_HTTP_PORT,
 };
 
+use super::UnwrapFailure;
+
 const ONE_HOUR_EXPIRY: Duration = Duration::from_secs(60 * 60);
+const HALF_HOUR_EXPIRY: Duration = Duration::from_secs(30 * 60);
 
 pub fn init_jmap_server<T>(
     settings: &EnvSettings,
@@ -73,12 +76,12 @@ where
             {
                 let account_id = store
                     .assign_document_id(SUPERUSER_ID, Collection::Principal)
-                    .expect("Failed to generate account id.");
+                    .failed_to("generate account id.");
                 if account_id != pos as u32 {
-                    panic!(
-                        "Failed to generate account id, expected id {} but got {}.",
+                    super::failed_to(&format!(
+                        "generate account id, expected id {} but got {}.",
                         pos, account_id
-                    );
+                    ));
                 }
                 let mut document = Document::new(Collection::Principal, account_id);
                 TinyORM::<Principal>::new_account(
@@ -92,7 +95,7 @@ where
                 .unwrap();
                 batch.insert_document(document);
             }
-            store.write(batch).expect("Failed to write to database.");
+            store.write(batch).failed_to("write to database");
         }
     } else if let Some(secret) = settings.get("set-admin-password") {
         // Reset admin password
@@ -116,6 +119,31 @@ where
     let (change_tx, change_rx) = init_state_manager();
     let is_in_cluster = cluster.is_some();
 
+    let oauth = Box::new(OAuth {
+        key: settings
+            .get("rpc-key")
+            .or_else(|| settings.get("oauth-key"))
+            .unwrap_or_else(|| {
+                thread_rng()
+                    .sample_iter(Alphanumeric)
+                    .take(40)
+                    .map(char::from)
+                    .collect::<String>()
+            }),
+        expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
+        expiry_auth_code: settings.parse("oauth-auth-code-expiry").unwrap_or(600),
+        expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
+        expiry_refresh_token: settings
+            .parse("oauth-refresh-token-expiry")
+            .unwrap_or(30 * 86400),
+        expiry_refresh_token_renew: settings
+            .parse("oauth-refresh-token-renew")
+            .unwrap_or(4 * 86400),
+        max_auth_attempts: settings.parse("oauth-max-attempts").unwrap_or(3),
+        metadata: serde_json::to_string(&OAuthMetadata::new(base_session.base_url()))
+            .failed_to("serialize OAuth metadata"),
+    });
+
     let server = web::Data::new(JMAPServer {
         store,
         worker_pool: rayon::ThreadPoolBuilder::new()
@@ -130,39 +158,16 @@ where
         state_change: change_tx,
         email_delivery: email_tx.clone(),
         housekeeper: housekeeper_tx,
-        oauth: Box::new(OAuth {
-            key: settings
-                .get("rpc-key")
-                .or_else(|| settings.get("oauth-key"))
-                .unwrap_or_else(|| {
-                    thread_rng()
-                        .sample_iter(Alphanumeric)
-                        .take(40)
-                        .map(char::from)
-                        .collect::<String>()
-                }),
-            expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
-            expiry_auth_code: settings.parse("oauth-auth-code-expiry").unwrap_or(600),
-            expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
-            expiry_refresh_token: settings
-                .parse("oauth-refresh-token-expiry")
-                .unwrap_or(30 * 86400),
-            expiry_refresh_token_renew: settings
-                .parse("oauth-refresh-token-renew")
-                .unwrap_or(4 * 86400),
-            max_auth_attempts: settings.parse("oauth-max-attempts").unwrap_or(3),
-            metadata: serde_json::to_string(&OAuthMetadata::new(base_session.base_url()))
-                .expect("Failed to serialize OAuth metadata."),
-        }),
         sessions: Cache::builder()
             .initial_capacity(128)
-            .time_to_live(ONE_HOUR_EXPIRY)
+            .time_to_live(HALF_HOUR_EXPIRY)
             .build(),
         rate_limiters: Cache::builder()
             .initial_capacity(128)
             .time_to_idle(ONE_HOUR_EXPIRY)
             .build(),
         oauth_codes: Cache::builder().time_to_live(ONE_HOUR_EXPIRY).build(),
+        oauth,
         cluster,
         base_session,
         #[cfg(test)]
@@ -200,7 +205,7 @@ where
             &cert_path,
             &settings
                 .get("key-path")
-                .expect("Missing 'key-path' argument."),
+                .failed_to("load TLS config, missing 'key-path' argument."),
         )
         .into()
     } else {

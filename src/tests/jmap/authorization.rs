@@ -10,6 +10,7 @@ use jmap_client::{
     },
     mailbox::{self},
 };
+use jmap_sharing::principal::set::JMAPSetPrincipal;
 use store::Store;
 
 use crate::{tests::store::utils::StoreCompareWith, JMAPServer};
@@ -37,6 +38,9 @@ where
         .await
         .unwrap();
 
+    // Wait for rate limit to be restored after running previous tests
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     // Incorrect passwords should be rejected with a 401 error
     assert!(matches!(
         Client::new()
@@ -55,7 +59,7 @@ where
     for n in 0..110 {
         if let Err(jmap_client::Error::Problem(problem)) = Client::new()
             .credentials(Credentials::basic(
-                "jdoe@example.com",
+                "not_an_account@example.com",
                 &format!("brute_force{}", n),
             ))
             .connect(admin_client.session_url())
@@ -185,6 +189,7 @@ where
         .await
         .unwrap();
     admin_client.principal_destroy(&domain_id).await.unwrap();
+    server.store.principal_purge().unwrap();
     server.store.assert_is_empty();
 }
 

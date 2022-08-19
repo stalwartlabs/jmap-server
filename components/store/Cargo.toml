@@ -5,9 +5,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
-ahash = { version = "0.7.6", features = ["serde"] }
+ahash = { version = "0.8.0", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"]}
-moka = { version = "0.8", features = ["future"] }
+moka = { version = "0.9.3", features = ["future"] }
 chrono = { version = "0.4", features = ["serde"]}
 bitpacking = "0.8.4"
 rand = "0.8.5"

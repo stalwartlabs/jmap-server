@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use crate::nlp::{stemmer::StemmedToken, tokenizers::Token};
 
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::{Leb128Reader, Leb128Vec};
 use crate::{
     serialize::{StoreDeserialize, StoreSerialize},
     FieldId,
@@ -273,7 +273,7 @@ impl StoreSerialize for TermIndexBuilder {
         let mut bytes = Vec::with_capacity(
             terms_len + ((self.items.len() / self.terms.len()) * std::mem::size_of::<u64>() * 2),
         );
-        self.terms.len().to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(self.terms.len());
         for terms in terms {
             bytes.extend_from_slice(terms.as_bytes());
             bytes.push(0);
@@ -291,8 +291,8 @@ impl StoreSerialize for TermIndexBuilder {
             let header_pos = bytes.len();
             bytes.extend_from_slice(&[0u8; LENGTH_SIZE]);
             bytes.push(term_index.field);
-            term_index.part_id.to_leb128_bytes(&mut bytes);
-            term_index.terms.len().to_leb128_bytes(&mut bytes);
+            bytes.push_leb128(term_index.part_id);
+            bytes.push_leb128(term_index.terms.len());
 
             let terms_pos = bytes.len();
 
@@ -341,7 +341,7 @@ impl StoreSerialize for TermIndexBuilder {
                         pos += block_len;
                     } else {
                         for val in &chunk[pos..] {
-                            (*val).to_leb128_bytes(&mut bytes);
+                            bytes.push_leb128(*val);
                         }
                         pos = len;
                     }
@@ -359,7 +359,7 @@ impl StoreSerialize for TermIndexBuilder {
 
 impl StoreDeserialize for TermIndex {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let (num_tokens, mut pos) = u32::from_leb128_bytes(bytes)?;
+        let (num_tokens, mut pos) = bytes.read_leb128()?;
         let mut token_map = AHashMap::with_capacity(num_tokens as usize);
         for term_id in 0..num_tokens {
             let nil_pos = bytes.get(pos..)?.iter().position(|b| b == &0)?;
@@ -383,10 +383,10 @@ impl StoreDeserialize for TermIndex {
             let field = bytes.get(pos)?;
             pos += 1;
 
-            let (part_id, bytes_read) = u32::from_leb128_bytes(bytes.get(pos..)?)?;
+            let (part_id, bytes_read) = bytes.get(pos..)?.read_leb128()?;
             pos += bytes_read;
 
-            let (terms_len, bytes_read) = usize::from_leb128_bytes(bytes.get(pos..)?)?;
+            let (terms_len, bytes_read) = bytes.get(pos..)?.read_leb128()?;
             pos += bytes_read;
 
             term_index.items.push(TermIndexItem {
@@ -430,9 +430,11 @@ impl TermIndex {
                 remaining_items -= block_len;
             } else {
                 while remaining_items > 0 {
-                    let (_, bytes_read) =
-                        u32::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                            .ok_or(Error::Leb128DecodeError)?;
+                    let bytes_read = bytes
+                        .get(pos..)
+                        .ok_or(Error::DataCorruption)?
+                        .skip_leb128()
+                        .ok_or(Error::Leb128DecodeError)?;
 
                     pos += bytes_read;
                     remaining_items -= 1;
@@ -480,9 +482,11 @@ impl TermIndex {
             let mut decompressed = Vec::with_capacity(remaining_items);
             let mut pos = 0;
             while decompressed.len() < remaining_items {
-                let (val, bytes_read) =
-                    u32::from_leb128_bytes(bytes.get(pos..).ok_or(Error::DataCorruption)?)
-                        .ok_or(Error::Leb128DecodeError)?;
+                let (val, bytes_read) = bytes
+                    .get(pos..)
+                    .ok_or(Error::DataCorruption)?
+                    .read_leb128()
+                    .ok_or(Error::Leb128DecodeError)?;
                 decompressed.push(val);
                 pos += bytes_read;
             }
@@ -666,7 +670,7 @@ pub struct TokenIndex {
 
 impl StoreDeserialize for TokenIndex {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let (num_tokens, mut pos) = u32::from_leb128_bytes(bytes)?;
+        let (num_tokens, mut pos) = bytes.read_leb128::<u32>()?;
         let mut tokens = Vec::with_capacity(num_tokens as usize);
         for _ in 0..num_tokens {
             let nil_pos = bytes.get(pos..)?.iter().position(|b| b == &0)?;
@@ -687,10 +691,10 @@ impl StoreDeserialize for TokenIndex {
             };
             pos += 1;
 
-            let (_, bytes_read) = u32::from_leb128_bytes(bytes.get(pos..)?)?;
+            let bytes_read = bytes.get(pos..)?.skip_leb128()?;
             pos += bytes_read;
 
-            let (terms_len, bytes_read) = usize::from_leb128_bytes(bytes.get(pos..)?)?;
+            let (terms_len, bytes_read) = bytes.get(pos..)?.read_leb128::<usize>()?;
             pos += bytes_read;
 
             let mut term_pos = 0;

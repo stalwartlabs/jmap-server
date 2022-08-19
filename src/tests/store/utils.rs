@@ -11,7 +11,8 @@ use jmap_mail::mail::schema::Email;
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::vacation_response::schema::VacationResponse;
 use store::serialize::key::ValueKey;
-use store::{ahash::AHashMap, blob::BLOB_HASH_LEN, serialize::leb128::Leb128};
+use store::serialize::leb128::Leb128Reader;
+use store::{ahash::AHashMap, blob::BLOB_HASH_LEN};
 use store::{
     config::env_settings::EnvSettings,
     core::collection::Collection,
@@ -20,7 +21,7 @@ use store::{
         key::{FOLLOWER_COMMIT_INDEX_KEY, LEADER_COMMIT_INDEX_KEY},
         StoreDeserialize,
     },
-    AccountId, ColumnFamily, DocumentId, JMAPStore, Store,
+    AccountId, ColumnFamily, JMAPStore, Store,
 };
 use store::{
     log,
@@ -156,7 +157,6 @@ pub fn init_settings(
             ("smtp-relay".to_string(), "!127.0.0.1:9999".to_string()),
             ("max-concurrent-uploads".to_string(), "4".to_string()),
             ("max-concurrent-requests".to_string(), "8".to_string()),
-            ("rate-limit-anonymous".to_string(), "100/60".to_string()),
             ("push-attempt-interval".to_string(), "500".to_string()),
             ("push-throttle".to_string(), "500".to_string()),
             ("event-source-throttle".to_string(), "500".to_string()),
@@ -166,6 +166,8 @@ pub fn init_settings(
             ("oauth-refresh-token-expiry".to_string(), "3".to_string()),
             ("oauth-refresh-token-renew".to_string(), "2".to_string()),
             ("oauth-max-attempts".to_string(), "1".to_string()),
+            ("rate-limit-anonymous".to_string(), "100/60".to_string()),
+            ("rate-limit-auth".to_string(), "100/60".to_string()),
             (
                 "rate-limit-authenticated".to_string(),
                 "1000/60".to_string(),
@@ -311,10 +313,9 @@ where
                             && &key[..] != FOLLOWER_COMMIT_INDEX_KEY
                             && &key[..] != LEADER_COMMIT_INDEX_KEY
                         {
-                            let (account_id, pos) = AccountId::from_leb128_bytes(&key).unwrap();
+                            let (account_id, pos) = key.read_leb128().unwrap();
                             let collection = key[pos].into();
-                            let (document_id, _) =
-                                DocumentId::from_leb128_bytes(&key[pos + 1..]).unwrap();
+                            let (document_id, _) = (&key[pos + 1..]).read_leb128().unwrap();
 
                             if account_id != last_account_id || last_collection != collection {
                                 last_account_id = account_id;
@@ -533,7 +534,7 @@ where
                         if key.len() > BLOB_HASH_LEN + 1
                             && key.len()
                                 > BLOB_HASH_LEN
-                                    + u32::from_leb128_bytes(&key[BLOB_HASH_LEN + 1..]).unwrap().1
+                                    + (&key[BLOB_HASH_LEN + 1..]).read_leb128::<u32>().unwrap().1
                                     + 1
                         {
                             *total_keys.get_mut(&cf).unwrap() += 1;
@@ -589,12 +590,18 @@ where
                         panic!("{:?} {:?}={:?}", cf, key, value);
                     }
                     ColumnFamily::Indexes => {
-                        panic!("{:?} {:?}={:?}", cf, key, value);
+                        panic!(
+                            "{:?} {:?}={:?} (key: {:?})",
+                            cf,
+                            key,
+                            value,
+                            String::from_utf8_lossy(&key)
+                        );
                     }
                     ColumnFamily::Blobs => {
                         if key.len()
                             > BLOB_HASH_LEN
-                                + u32::from_leb128_bytes(&key[BLOB_HASH_LEN..]).unwrap().1
+                                + (&key[BLOB_HASH_LEN..]).read_leb128::<u32>().unwrap().1
                         {
                             panic!("{:?} {:?}={:?}", cf, key, value);
                         }

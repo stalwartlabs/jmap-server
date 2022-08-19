@@ -108,13 +108,13 @@ where
                 if let Some(session) = core.sessions.get(&token.to_string()) {
                     authorized = session.into();
                 } else {
-                    // Before authenticating enforce rate limit for anonymous requests
-                    core.is_anonymous_allowed(
-                        req.remote_address(core.store.config.use_forwarded_header),
-                    )
-                    .await?;
-
                     let session = if mechanism.eq_ignore_ascii_case("basic") {
+                        // Enforce rate limit for authentication requests
+                        core.is_auth_allowed(
+                            req.remote_address(core.store.config.use_forwarded_header),
+                        )
+                        .await?;
+
                         // Decode the base64 encoded credentials
                         if let Some((login, secret)) = base64::decode(token)
                             .ok()
@@ -146,6 +146,12 @@ where
                             Ok(None)
                         }
                     } else if mechanism.eq_ignore_ascii_case("bearer") {
+                        // Enforce anonymous rate limit for bearer auth requests
+                        core.is_anonymous_allowed(
+                            req.remote_address(core.store.config.use_forwarded_header),
+                        )
+                        .await?;
+
                         // Validate OAuth bearer token
                         match core.validate_access_token("access_token", token).await {
                             Ok((account_id, _, _)) => {
@@ -166,6 +172,12 @@ where
                             Err(err) => Err(err),
                         }
                     } else {
+                        // Enforce anonymous rate limit
+                        core.is_anonymous_allowed(
+                            req.remote_address(core.store.config.use_forwarded_header),
+                        )
+                        .await?;
+
                         Ok(None)
                     };
 
@@ -195,10 +207,21 @@ where
                 req.extensions_mut()
                     .insert::<(Session, InFlightRequest)>((session, in_flight_request));
             } else {
-                core.is_anonymous_allowed(
-                    req.remote_address(core.store.config.use_forwarded_header),
-                )
-                .await?
+                let request_path = req
+                    .uri()
+                    .path_and_query()
+                    .map(|pq| pq.as_str())
+                    .unwrap_or("");
+                if request_path == "/auth" || request_path == "/auth/code" {
+                    // OAuth authentication endpoints
+                    core.is_auth_allowed(req.remote_address(core.store.config.use_forwarded_header))
+                        .await?
+                } else {
+                    core.is_anonymous_allowed(
+                        req.remote_address(core.store.config.use_forwarded_header),
+                    )
+                    .await?
+                }
             }
 
             service.call(req).await

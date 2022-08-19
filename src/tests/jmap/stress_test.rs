@@ -17,6 +17,7 @@ use crate::tests::store::utils::{destroy_temp_dir, StoreCompareWith};
 use super::init_jmap_tests;
 
 #[actix_web::test]
+#[ignore]
 async fn jmap_stress_tests() {
     let (server, client, temp_dir) = init_jmap_tests::<RocksDB>("jmap_stress_tests").await;
 

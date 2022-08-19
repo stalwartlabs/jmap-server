@@ -61,6 +61,10 @@ impl Object for Email {
         Collection::Mail
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[]
+    }
+
     fn new(id: JMAPId) -> Self {
         let mut email = Email::default();
         email

@@ -155,3 +155,36 @@ where
         self.is_offline.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
+
+pub trait UnwrapFailure<T> {
+    fn failed_to(self, action: &str) -> T;
+}
+
+impl<T> UnwrapFailure<T> for Option<T> {
+    fn failed_to(self, message: &str) -> T {
+        match self {
+            Some(result) => result,
+            None => {
+                println!("Failed to {}", message);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+impl<T, E: std::fmt::Display> UnwrapFailure<T> for Result<T, E> {
+    fn failed_to(self, message: &str) -> T {
+        match self {
+            Ok(result) => result,
+            Err(err) => {
+                println!("Failed to {}: {}", message, err);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+pub fn failed_to(action: &str) -> ! {
+    println!("Failed to {}", action);
+    std::process::exit(1);
+}

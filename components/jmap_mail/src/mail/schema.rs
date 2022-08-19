@@ -86,6 +86,8 @@ pub struct Keyword {
     pub tag: Tag,
 }
 
+const MAX_KEYWORD_LENGTH: usize = 100;
+
 impl Keyword {
     pub const SEEN: u8 = 0;
     pub const DRAFT: u8 = 1;
@@ -105,39 +107,45 @@ impl Keyword {
     }
 
     pub fn parse(value: &str) -> Self {
-        Keyword {
-            tag: if value.starts_with('$') {
-                if value.eq_ignore_ascii_case("$seen") {
-                    Tag::Static(Self::SEEN)
-                } else if value.eq_ignore_ascii_case("$draft") {
-                    Tag::Static(Self::DRAFT)
-                } else if value.eq_ignore_ascii_case("$flagged") {
-                    Tag::Static(Self::FLAGGED)
-                } else if value.eq_ignore_ascii_case("$answered") {
-                    Tag::Static(Self::ANSWERED)
-                } else if value.eq_ignore_ascii_case("$recent") {
-                    Tag::Static(Self::RECENT)
-                } else if value.eq_ignore_ascii_case("$important") {
-                    Tag::Static(Self::IMPORTANT)
-                } else if value.eq_ignore_ascii_case("$phishing") {
-                    Tag::Static(Self::PHISHING)
-                } else if value.eq_ignore_ascii_case("$junk") {
-                    Tag::Static(Self::JUNK)
-                } else if value.eq_ignore_ascii_case("$notjunk") {
-                    Tag::Static(Self::NOTJUNK)
-                } else if value.eq_ignore_ascii_case("$deleted") {
-                    Tag::Static(Self::DELETED)
-                } else if value.eq_ignore_ascii_case("$forwarded") {
-                    Tag::Static(Self::FORWARDED)
-                } else if value.eq_ignore_ascii_case("$mdnsent") {
-                    Tag::Static(Self::MDN_SENT)
-                } else {
-                    Tag::Text(value.to_lowercase())
-                }
-            } else {
-                Tag::Text(value.to_lowercase())
-            },
+        if let Some(k) = value.strip_prefix('$') {
+            if k.eq_ignore_ascii_case("seen") {
+                return Keyword::new(Tag::Static(Self::SEEN));
+            } else if k.eq_ignore_ascii_case("draft") {
+                return Keyword::new(Tag::Static(Self::DRAFT));
+            } else if k.eq_ignore_ascii_case("flagged") {
+                return Keyword::new(Tag::Static(Self::FLAGGED));
+            } else if k.eq_ignore_ascii_case("answered") {
+                return Keyword::new(Tag::Static(Self::ANSWERED));
+            } else if k.eq_ignore_ascii_case("recent") {
+                return Keyword::new(Tag::Static(Self::RECENT));
+            } else if k.eq_ignore_ascii_case("important") {
+                return Keyword::new(Tag::Static(Self::IMPORTANT));
+            } else if k.eq_ignore_ascii_case("phishing") {
+                return Keyword::new(Tag::Static(Self::PHISHING));
+            } else if k.eq_ignore_ascii_case("junk") {
+                return Keyword::new(Tag::Static(Self::JUNK));
+            } else if k.eq_ignore_ascii_case("notjunk") {
+                return Keyword::new(Tag::Static(Self::NOTJUNK));
+            } else if k.eq_ignore_ascii_case("deleted") {
+                return Keyword::new(Tag::Static(Self::DELETED));
+            } else if k.eq_ignore_ascii_case("forwarded") {
+                return Keyword::new(Tag::Static(Self::FORWARDED));
+            } else if k.eq_ignore_ascii_case("mdnsent") {
+                return Keyword::new(Tag::Static(Self::MDN_SENT));
+            }
         }
+
+        Keyword::new(if value.len() < MAX_KEYWORD_LENGTH {
+            Tag::Text(value.to_lowercase())
+        } else {
+            Tag::Text(
+                value
+                    .to_lowercase()
+                    .chars()
+                    .take(MAX_KEYWORD_LENGTH)
+                    .collect(),
+            )
+        })
     }
 }
 

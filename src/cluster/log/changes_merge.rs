@@ -4,7 +4,7 @@ use store::core::JMAPIdPrefix;
 use store::log::changes::ChangeId;
 use store::roaring::{RoaringBitmap, RoaringTreemap};
 use store::serialize::key::LogKey;
-use store::serialize::leb128::{skip_leb128_it, Leb128};
+use store::serialize::leb128::{Leb128Iterator, Leb128Reader, Leb128Vec};
 use store::write::batch::{self};
 use store::{AccountId, ColumnFamily, Direction, JMAPId, JMAPStore, Store};
 
@@ -96,19 +96,19 @@ impl MergedChanges {
         match *bytes.first()? {
             batch::Change::ENTRY => {
                 let mut bytes_it = bytes.get(1..)?.iter();
-                let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
-                let total_updates = usize::from_leb128_it(&mut bytes_it)?;
-                let total_child_updates = usize::from_leb128_it(&mut bytes_it)?;
-                let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
+                let total_inserts: usize = bytes_it.next_leb128()?;
+                let total_updates: usize = bytes_it.next_leb128()?;
+                let total_child_updates: usize = bytes_it.next_leb128()?;
+                let total_deletes: usize = bytes_it.next_leb128()?;
 
                 let mut inserted_ids = Vec::with_capacity(total_inserts);
 
                 for _ in 0..total_inserts {
-                    inserted_ids.push(JMAPId::from_leb128_it(&mut bytes_it)?);
+                    inserted_ids.push(bytes_it.next_leb128::<JMAPId>()?);
                 }
 
                 for _ in 0..total_updates {
-                    let document_id = JMAPId::from_leb128_it(&mut bytes_it)?.get_document_id();
+                    let document_id = bytes_it.next_leb128::<JMAPId>()?.get_document_id();
                     if !self.inserts.contains(document_id) {
                         self.updates.insert(document_id);
                     }
@@ -116,11 +116,11 @@ impl MergedChanges {
 
                 // Skip child updates
                 for _ in 0..total_child_updates {
-                    skip_leb128_it(&mut bytes_it)?;
+                    bytes_it.skip_leb128()?;
                 }
 
                 for _ in 0..total_deletes {
-                    let deleted_id = JMAPId::from_leb128_it(&mut bytes_it)?;
+                    let deleted_id = bytes_it.next_leb128::<JMAPId>()?;
                     let document_id = deleted_id.get_document_id();
                     let prefix_id = deleted_id.get_prefix_id();
                     if let Some(pos) = inserted_ids.iter().position(|&inserted_id| {
@@ -184,9 +184,9 @@ impl MergedChanges {
             insert_size + update_size + delete_size + (3 * std::mem::size_of::<usize>()),
         );
 
-        insert_size.to_leb128_bytes(&mut bytes);
-        update_size.to_leb128_bytes(&mut bytes);
-        delete_size.to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(insert_size);
+        bytes.push_leb128(update_size);
+        bytes.push_leb128(delete_size);
 
         if !self.inserts.is_empty() {
             self.inserts.serialize_into(&mut bytes).ok()?;
@@ -202,10 +202,10 @@ impl MergedChanges {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let (insert_size, mut read_bytes) = usize::from_leb128_bytes(bytes)?;
-        let (update_size, read_bytes_) = usize::from_leb128_bytes(bytes.get(read_bytes..)?)?;
+        let (insert_size, mut read_bytes) = bytes.read_leb128::<usize>()?;
+        let (update_size, read_bytes_) = bytes.get(read_bytes..)?.read_leb128::<usize>()?;
         read_bytes += read_bytes_;
-        let (delete_size, read_bytes_) = usize::from_leb128_bytes(bytes.get(read_bytes..)?)?;
+        let (delete_size, read_bytes_) = bytes.get(read_bytes..)?.read_leb128::<usize>()?;
         read_bytes += read_bytes_;
 
         // This function is also called from the raft module using network data,

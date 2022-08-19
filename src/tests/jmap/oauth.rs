@@ -293,7 +293,7 @@ where
 
 async fn post_bytes(url: &str, params: &AHashMap<String, String>) -> Bytes {
     reqwest::Client::builder()
-        .timeout(Duration::from_millis(200))
+        .timeout(Duration::from_millis(500))
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap_or_default()
@@ -313,7 +313,7 @@ async fn post<T: DeserializeOwned>(url: &str, params: &AHashMap<String, String>)
 
 async fn post_expect_redirect(url: &str, params: &AHashMap<String, String>) -> String {
     let response = reqwest::Client::builder()
-        .timeout(Duration::from_millis(200))
+        .timeout(Duration::from_millis(500))
         .danger_accept_invalid_certs(true)
         .redirect(Policy::none())
         .build()
@@ -334,7 +334,7 @@ async fn post_expect_redirect(url: &str, params: &AHashMap<String, String>) -> S
 
 async fn get_bytes(url: &str) -> Bytes {
     reqwest::Client::builder()
-        .timeout(Duration::from_millis(200))
+        .timeout(Duration::from_millis(500))
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap_or_default()
@@ -389,7 +389,7 @@ async fn assert_unauthorized(client: &Client, token: &str) {
 fn parse_code_input(bytes: Bytes) -> String {
     let html = String::from_utf8_lossy(&bytes).into_owned();
     if let Some((_, code)) = html.split_once("name=\"code\" value=\"") {
-        if let Some((code, _)) = code.split_once("\"") {
+        if let Some((code, _)) = code.split_once('\"') {
             return code.to_string();
         }
     }

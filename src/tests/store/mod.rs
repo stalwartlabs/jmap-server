@@ -39,6 +39,7 @@ where
 }
 
 #[test]
+#[ignore]
 fn store_tests() {
     let (db, temp_dir) = init_db::<RocksDB>("strdb_store", true);
     let db = Arc::new(db);

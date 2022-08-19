@@ -77,7 +77,8 @@ where
                 self.raft_apply_update::<VacationResponse>(write_batch, update)
             }
             Collection::Thread | Collection::None => {
-                panic!("Unsupported update for {:?}", collection)
+                debug_assert!(false, "Unsupported update for {:?}", collection);
+                Ok(())
             }
         }
     }

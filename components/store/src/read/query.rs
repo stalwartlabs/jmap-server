@@ -189,8 +189,15 @@ where
                                     let mut requested_keys = AHashSet::default();
                                     let mut text_bitmap = None;
 
+                                    // Default language for stemming
+                                    let language = if text.language != Language::Unknown {
+                                        text.language
+                                    } else {
+                                        self.config.default_language
+                                    };
+
                                     for token in
-                                        Stemmer::new(&text.text, text.language, MAX_TOKEN_LENGTH)
+                                        Stemmer::new(&text.text, language, MAX_TOKEN_LENGTH)
                                     {
                                         let mut keys = Vec::new();
 

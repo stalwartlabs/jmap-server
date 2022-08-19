@@ -34,6 +34,7 @@ pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
     fn id(&self) -> Option<&JMAPId>;
     fn required() -> &'static [Self::Property];
     fn indexed() -> &'static [(Self::Property, u64)];
+    fn max_len() -> &'static [(Self::Property, usize)];
     fn collection() -> Collection;
 }
 

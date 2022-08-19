@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use actix_web::web;
+use jmap_client::client::{Client, Credentials};
 use store::{ahash::AHashMap, parking_lot::Mutex, Store};
 
 use crate::{
     tests::cluster::utils::{
         activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
-        compact_log, shutdown_all, test_batch, Clients, Cluster,
+        compact_log, find_online_follower, shutdown_all, test_batch, Clients, Cluster,
     },
     JMAPServer,
 };
@@ -16,7 +17,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     println!("Testing distributed CRUD operations...");
-    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster_crud", 5, true).await;
     let peers = cluster.start_cluster().await;
 
     // Wait for leader to be elected
@@ -38,10 +39,32 @@ where
             let client = &clients.clients[0];
             // Create an account
             client.domain_create("example.com").await.unwrap();
-            client
+            let account_id = client
                 .individual_create("jdoe@example.com", "12345", "John Doe")
                 .await
+                .unwrap()
+                .take_id();
+
+            // Connect to one of the followers and test read replicas
+            // Disable redirects to avoid the request from being redirected to the leader
+            let follower_client = Client::new()
+                .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
+                .connect(&format!(
+                    "http://127.0.0.1:{}",
+                    8001 + find_online_follower(&peers)
+                ))
+                .await
                 .unwrap();
+            assert_eq!(
+                follower_client
+                    .principal_get(&account_id, None::<Vec<_>>)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .email()
+                    .unwrap(),
+                "jdoe@example.com"
+            );
         }
 
         let mailbox_map = mailbox_map.clone();
@@ -78,11 +101,14 @@ where
     println!("Compacting log...");
     compact_log(peers.clone()).await;
     println!("Adding peer to cluster...");
-    let peers = cluster.extend_cluster("st_cluster", peers, 1).await;
+    let peers = cluster.extend_cluster("st_cluster_crud", peers, 1).await;
     assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers.clone(), false).await;
 
+    // Stop cluster
+    println!("Stopping cluster...");
+    cluster.stop_cluster().await;
+    println!("Shutting down cluster...");
     shutdown_all(peers).await;
-
     cluster.cleanup();
 }

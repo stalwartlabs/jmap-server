@@ -361,6 +361,7 @@ where
     assert_eq!(inbox.unread_threads(), 0);
 
     // Only email properties must have changed
+    let prev_state = state.clone();
     let state = client.mailbox_changes(state, 0).await.unwrap();
     assert_eq!(state.created().len(), 0);
     assert_eq!(
@@ -384,6 +385,35 @@ where
         )
     );
     let state = state.new_state().to_string();
+
+    // Use updatedProperties in a query
+    let mut request = client.build();
+    let changes_request = request.changes_mailbox(prev_state).max_changes(0);
+    let properties_ref = changes_request.updated_properties_reference();
+    let updated_ref = changes_request.updated_reference();
+    request
+        .get_mailbox()
+        .ids_ref(updated_ref)
+        .properties_ref(properties_ref);
+    let mut changed_mailboxes = request
+        .send()
+        .await
+        .unwrap()
+        .unwrap_method_responses()
+        .pop()
+        .unwrap()
+        .unwrap_get_mailbox()
+        .unwrap()
+        .take_list();
+    assert_eq!(changed_mailboxes.len(), 1);
+    let inbox = changed_mailboxes.pop().unwrap();
+    assert_eq!(inbox.id().unwrap(), &id_map["inbox"]);
+    assert_eq!(inbox.total_emails(), 1);
+    assert_eq!(inbox.unread_emails(), 0);
+    assert_eq!(inbox.total_threads(), 1);
+    assert_eq!(inbox.unread_threads(), 0);
+    assert_eq!(inbox.name(), None);
+    assert_eq!(inbox.my_rights(), None);
 
     // Move email from Inbox to Trash
     client

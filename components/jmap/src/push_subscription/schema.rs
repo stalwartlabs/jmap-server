@@ -5,8 +5,8 @@ use store::{core::vec_map::VecMap, FieldId};
 
 use crate::{
     orm,
-    types::type_state::TypeState,
     types::{date::JMAPDate, jmap::JMAPId},
+    types::{state::JMAPState, type_state::TypeState},
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -63,6 +63,17 @@ impl orm::Value for Value {
             Value::Text { value } => value.is_empty(),
             Value::Null => true,
             _ => false,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Id { .. } => std::mem::size_of::<JMAPId>(),
+            Value::Text { value } => value.len(),
+            Value::DateTime { .. } => std::mem::size_of::<JMAPState>(),
+            Value::Types { value } => value.len() * std::mem::size_of::<TypeState>(),
+            Value::Keys { value } => value.auth.len() + value.p256dh.len(),
+            Value::Null => 0,
         }
     }
 }

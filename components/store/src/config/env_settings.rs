@@ -1,5 +1,6 @@
 use std::{
     env,
+    io::BufRead,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
     str::FromStr,
 };
@@ -27,15 +28,55 @@ impl EnvSettings {
                 if let Some(key) = key.strip_prefix("--") {
                     args.insert(key.to_lowercase(), value.to_string());
                 } else {
-                    panic!("Invalid command line argument: {}", key);
+                    soft_panic(&format!("Invalid command line argument: {}", key));
                 }
             } else if let Some(key) = std::mem::take(&mut current_key) {
                 args.insert(key, arg);
             } else if let Some(key) = arg.strip_prefix("--") {
                 current_key = Some(key.to_lowercase());
             } else {
-                panic!("Invalid command line argument: {}", arg);
+                soft_panic(&format!("Invalid command line argument: {}", arg));
             }
+        }
+
+        // Read config file if it was provided
+        if let Some(config_path) = args.remove("config") {
+            std::fs::read(&config_path)
+                .unwrap_or_else(|err| {
+                    soft_panic(&format!(
+                        "Failed to read config file {}: {}",
+                        config_path, err
+                    ));
+                })
+                .lines()
+                .for_each(|line| {
+                    let line = line.unwrap_or_else(|err| {
+                        soft_panic(&format!(
+                            "Failed to read config file {}: {}",
+                            config_path, err
+                        ));
+                    });
+                    let line = line.trim();
+                    if !line.is_empty() && !line.starts_with('#') {
+                        if let Some((key, value)) = line.split_once(':') {
+                            let key = key.trim();
+                            if !args.contains_key(key) {
+                                let value = value
+                                    .rsplit_once(" #")
+                                    .or_else(|| value.split_once("\t#"))
+                                    .map(|v| v.0)
+                                    .unwrap_or(value)
+                                    .trim();
+
+                                if !value.is_empty() {
+                                    args.insert(key.to_string(), value.to_string());
+                                }
+                            }
+                        } else {
+                            soft_panic(&format!("Invalid config file line: {}", line));
+                        }
+                    }
+                });
         }
 
         EnvSettings { args }
@@ -63,7 +104,7 @@ impl EnvSettings {
             if let Ok(value) = value.parse::<T>() {
                 Some(value)
             } else {
-                panic!("Failed to parse environment variable: {}", name);
+                soft_panic(&format!("Failed to parse argument: {}", name));
             }
         } else {
             None
@@ -87,7 +128,10 @@ impl EnvSettings {
             .unwrap_or_else(|| default.to_string())
             .parse()
             .map_err(|e| {
-                panic!("Failed to parse address in parameter '{}': {}", name, e);
+                soft_panic(&format!(
+                    "Failed to parse address in parameter '{}': {}",
+                    name, e
+                ));
             })
             .unwrap()
     }
@@ -97,12 +141,15 @@ impl EnvSettings {
             value
                 .to_socket_addrs()
                 .map_err(|e| {
-                    panic!("Failed to parse address in parameter '{}': {}", name, e);
+                    soft_panic(&format!(
+                        "Failed to parse address in parameter '{}': {}",
+                        name, e
+                    ));
                 })
                 .unwrap()
                 .next()
                 .unwrap_or_else(|| {
-                    panic!("Failed to parse address in parameter '{}'.", name);
+                    soft_panic(&format!("Failed to parse address in parameter '{}'.", name));
                 })
         } else {
             default.to_socket_addrs().unwrap().next().unwrap()
@@ -112,4 +159,9 @@ impl EnvSettings {
     pub fn set_value(&mut self, name: String, value: String) {
         self.args.insert(name, value);
     }
+}
+
+pub fn soft_panic(message: &str) -> ! {
+    println!("{}", message);
+    std::process::exit(1);
 }

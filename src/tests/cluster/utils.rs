@@ -206,10 +206,7 @@ impl Clients {
                 Client::new()
                     .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
                     .follow_redirects(["127.0.0.1"])
-                    .connect(&format!(
-                        "http://127.0.0.1:{}/.well-known/jmap",
-                        8000 + peer_num
-                    ))
+                    .connect(&format!("http://127.0.0.1:{}", 8000 + peer_num))
                     .await
                     .unwrap(),
             );
@@ -508,6 +505,18 @@ where
         return;
     }
     panic!("Leader still active, expected no quorum.");
+}
+
+pub fn find_online_follower<T>(peers: &[web::Data<JMAPServer<T>>]) -> usize
+where
+    T: for<'x> Store<'x> + 'static,
+{
+    for (peer_num, peer) in peers.iter().enumerate() {
+        if !peer.is_leader() && !peer.is_offline() {
+            return peer_num;
+        }
+    }
+    panic!("Did not find any online followers.");
 }
 
 pub fn num_online_peers<T>(peers: &[web::Data<JMAPServer<T>>]) -> usize

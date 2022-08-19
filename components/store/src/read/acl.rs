@@ -1,6 +1,6 @@
 use roaring::RoaringBitmap;
 
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::Leb128Reader;
 use crate::serialize::StoreDeserialize;
 use crate::DocumentId;
 use crate::{
@@ -82,8 +82,8 @@ where
                     .iterator(ColumnFamily::Values, &prefix, Direction::Forward)?
             {
                 if key.starts_with(&prefix) && key.len() > prefix.len() {
-                    let (document_id, _) = DocumentId::from_leb128_bytes(&key[prefix.len()..])
-                        .ok_or_else(|| {
+                    let (document_id, _) =
+                        (&key[prefix.len()..]).read_leb128().ok_or_else(|| {
                             StoreError::InternalError(format!(
                                 "Corrupted ACL members key for [{:?}]",
                                 key

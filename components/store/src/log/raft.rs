@@ -1,5 +1,5 @@
 use crate::serialize::key::LogKey;
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::{Leb128Iterator, Leb128Vec};
 use crate::serialize::{StoreDeserialize, StoreSerialize};
 use crate::{ColumnFamily, Direction, JMAPStore, Store, StoreError};
 use std::sync::atomic::Ordering;
@@ -32,17 +32,19 @@ impl RaftId {
 impl StoreSerialize for RaftId {
     fn serialize(&self) -> Option<Vec<u8>> {
         let mut bytes = Vec::with_capacity(std::mem::size_of::<RaftId>());
-        self.term.to_leb128_writer(&mut bytes).ok()?;
-        self.index.to_leb128_writer(&mut bytes).ok()?;
+        bytes.push_leb128(self.term);
+        bytes.push_leb128(self.index);
         bytes.into()
     }
 }
 
 impl StoreDeserialize for RaftId {
     fn deserialize(bytes: &[u8]) -> Option<Self> {
-        let (term, bytes_read) = TermId::from_leb128_bytes(bytes)?;
-        let (index, _) = TermId::from_leb128_bytes(bytes.get(bytes_read..)?)?;
-        Some(Self { term, index })
+        let mut bytes = bytes.iter();
+        Some(Self {
+            term: bytes.next_leb128()?,
+            index: bytes.next_leb128()?,
+        })
     }
 }
 

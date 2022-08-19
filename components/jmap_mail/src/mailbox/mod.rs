@@ -43,6 +43,11 @@ impl Object for Mailbox {
         ]
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        // Validated from set.rs
+        &[]
+    }
+
     fn collection() -> Collection {
         Collection::Mailbox
     }

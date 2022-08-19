@@ -19,7 +19,7 @@ pub async fn test<T>(server: web::Data<JMAPServer<T>>, admin_client: &mut Client
 where
     T: for<'x> Store<'x> + 'static,
 {
-    println!("Running Authorization tests...");
+    println!("Running ACL tests...");
 
     // Create a domain name and three test accounts
     let inbox_id = JMAPId::new(INBOX_ID as u64).to_string();

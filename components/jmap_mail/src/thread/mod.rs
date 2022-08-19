@@ -31,6 +31,10 @@ impl Object for Thread {
         &[]
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[]
+    }
+
     fn collection() -> store::core::collection::Collection {
         Collection::Thread
     }

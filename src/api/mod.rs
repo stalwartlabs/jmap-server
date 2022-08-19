@@ -138,6 +138,14 @@ impl RequestError {
         )
     }
 
+    pub fn too_many_auth_attempts() -> Self {
+        RequestError::blank(
+            429,
+            "Too Many Authentication Attempts",
+            "Your request has been rate limited. Please try again in a few minutes.",
+        )
+    }
+
     pub fn limit(limit_type: RequestLimitError) -> Self {
         RequestError {
             p_type: RequestErrorType::Limit,

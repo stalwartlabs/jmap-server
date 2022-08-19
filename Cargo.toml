@@ -10,7 +10,7 @@ store_rocksdb = { path = "components/store_rocksdb" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 jmap_sharing = { path = "components/jmap_sharing" }
-tracing-subscriber = "0.2"
+tracing-subscriber = "0.3.15"
 actix = "0.13"
 actix-web = { version = "4", features = ["rustls"] }
 actix-web-actors = "4"
@@ -43,7 +43,7 @@ csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
-serde_yaml = "0.8"
+serde_yaml = "0.9.9"
 
 [workspace]
 members = [

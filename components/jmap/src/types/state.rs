@@ -2,7 +2,7 @@ use store::{
     log::changes::ChangeId,
     serialize::{
         base32::{Base32Reader, Base32Writer},
-        leb128::Leb128,
+        leb128::{Leb128Iterator, Leb128Writer},
     },
 };
 
@@ -60,16 +60,15 @@ impl JMAPState {
     pub fn parse(id: &str) -> Option<Self> {
         match id.as_bytes().first()? {
             b'n' => JMAPState::Initial.into(),
-            b's' => JMAPState::Exact(ChangeId::from_leb128_it(&mut Base32Reader::new(
-                id.get(1..)?.as_bytes(),
-            ))?)
-            .into(),
+            b's' => {
+                JMAPState::Exact(Base32Reader::new(id.get(1..)?.as_bytes()).next_leb128()?).into()
+            }
             b'r' => {
                 let mut it = Base32Reader::new(id.get(1..)?.as_bytes());
 
-                let from_id = ChangeId::from_leb128_it(&mut it)?;
-                let to_id = from_id.checked_add(ChangeId::from_leb128_it(&mut it)?)?;
-                let items_sent = usize::from_leb128_it(&mut it)?;
+                let from_id = it.next_leb128::<ChangeId>()?;
+                let to_id = from_id.checked_add(it.next_leb128()?)?;
+                let items_sent = it.next_leb128()?;
 
                 if items_sent > 0 {
                     JMAPState::Intermediate(JMAPIntermediateState {
@@ -133,18 +132,15 @@ impl std::fmt::Display for JMAPState {
             }
             JMAPState::Exact(id) => {
                 writer.push_char('s');
-                id.to_leb128_writer(&mut writer).unwrap();
+                writer.write_leb128(*id).unwrap();
             }
             JMAPState::Intermediate(intermediate) => {
                 writer.push_char('r');
-                intermediate.from_id.to_leb128_writer(&mut writer).unwrap();
-                (intermediate.to_id - intermediate.from_id)
-                    .to_leb128_writer(&mut writer)
+                writer.write_leb128(intermediate.from_id).unwrap();
+                writer
+                    .write_leb128(intermediate.to_id - intermediate.from_id)
                     .unwrap();
-                intermediate
-                    .items_sent
-                    .to_leb128_writer(&mut writer)
-                    .unwrap();
+                writer.write_leb128(intermediate.items_sent).unwrap();
             }
         }
 
@@ -176,21 +172,6 @@ mod tests {
             JMAPState::new_intermediate(ChangeId::MAX, ChangeId::MAX, ChangeId::MAX as usize),
         ] {
             assert_eq!(JMAPState::parse(&id.to_string()).unwrap(), id);
-        }
-
-        for invalid_id in [
-            "z",
-            "",
-            "blah",
-            "izzzz",
-            "i00zz",
-            "r00",
-            "r00zz",
-            "r00z",
-            "rffffffffffffffffff01ffffffffffffffffff01ffffffffffffffffff01",
-            "rcec2f105e3bcf42300",
-        ] {
-            assert!(JMAPState::parse(invalid_id).is_none());
         }
     }
 }

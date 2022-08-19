@@ -265,7 +265,7 @@ impl CoreCapabilities {
 impl WebSocketCapabilities {
     pub fn new(base_url: &str) -> Self {
         WebSocketCapabilities {
-            url: format!("{}/jmap/ws", base_url),
+            url: format!("ws{}/jmap/ws", base_url.strip_prefix("http").unwrap()),
             supports_push: true,
         }
     }
@@ -315,7 +315,6 @@ where
             // Obtain member and shared accounts
             let acl = store.get_acl_token(session.account_id())?;
 
-            // TODO set read only for shared accounts
             for (pos, id) in acl
                 .member_of
                 .iter()

@@ -84,6 +84,7 @@ where
 {
     fn index_as(&self) -> Index;
     fn is_empty(&self) -> bool;
+    fn len(&self) -> usize;
 }
 
 impl Value for () {
@@ -93,6 +94,10 @@ impl Value for () {
 
     fn is_empty(&self) -> bool {
         true
+    }
+
+    fn len(&self) -> usize {
+        0
     }
 }
 

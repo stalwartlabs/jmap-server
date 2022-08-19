@@ -72,9 +72,7 @@ where
                     property,
                     match (property, value) {
                         (Property::DeviceClientId, value @ Value::Text { .. }) => value,
-                        (Property::Url, Value::Text { value })
-                            if value.starts_with("https://") && value.len() < 512 =>
-                        {
+                        (Property::Url, Value::Text { value }) if value.starts_with("https://") => {
                             Value::Text { value }
                         }
                         (Property::Keys, value @ Value::Keys { .. }) => value,

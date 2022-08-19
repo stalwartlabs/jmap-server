@@ -16,7 +16,7 @@ pub async fn test<T>()
 where
     T: for<'x> Store<'x> + 'static,
 {
-    let mut cluster = Cluster::<T>::new("st_cluster", 5, true).await;
+    let mut cluster = Cluster::<T>::new("st_cluster_log_merge", 5, true).await;
     let peers = cluster.start_cluster().await;
 
     let mut messages = build_thread_test_messages()
@@ -91,7 +91,8 @@ where
     assert_cluster_updated(&peers).await;
     assert_mirrored_stores(peers.clone(), false).await;
 
+    // Stop cluster
+    cluster.stop_cluster().await;
     shutdown_all(peers).await;
-
     cluster.cleanup();
 }

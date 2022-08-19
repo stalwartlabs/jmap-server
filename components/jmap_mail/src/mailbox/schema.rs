@@ -61,6 +61,24 @@ impl orm::Value for Value {
             _ => false,
         }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Id { .. } => std::mem::size_of::<JMAPId>(),
+            Value::Text { value } => value.len(),
+            Value::Bool { .. } => std::mem::size_of::<bool>(),
+            Value::Number { .. } => std::mem::size_of::<u32>(),
+            Value::Subscriptions { value } => value.len() * std::mem::size_of::<u32>(),
+            Value::MailboxRights { .. } => std::mem::size_of::<MailboxRights>(),
+            Value::ResultReference { .. } => std::mem::size_of::<ResultReference>(),
+            Value::IdReference { value } => value.len(),
+            Value::ACLSet(value) => value.len() * std::mem::size_of::<ACLUpdate>(),
+            Value::ACLGet(value) => value.iter().fold(0, |acc, (k, v)| {
+                acc + k.len() + v.len() * std::mem::size_of::<ACL>()
+            }),
+            Value::Null => 0,
+        }
+    }
 }
 
 impl Value {

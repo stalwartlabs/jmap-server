@@ -18,7 +18,9 @@ where
         let mut indexes = Vec::with_capacity(self.peers.len() + 1);
         for peer in self.peers.iter_mut() {
             if peer.is_in_shard(self.shard_id) {
-                if peer.peer_id == peer_id && commit_index > peer.commit_index {
+                if peer.peer_id == peer_id
+                    && (commit_index > peer.commit_index || peer.commit_index == LogIndex::MAX)
+                {
                     peer.commit_index = commit_index;
                 }
                 indexes.push(peer.commit_index.wrapping_add(1));
@@ -129,13 +131,4 @@ where
         }
         false
     }
-
-    /*#[cfg(test)]
-    pub async fn commit_last_index(&self) -> LogIndex {
-        let uncommitted_index = self.get_last_log().await.unwrap().unwrap().index;
-        if !self.commit_index(uncommitted_index).await {
-            panic!("Failed to commit index {}", uncommitted_index);
-        }
-        uncommitted_index
-    }*/
 }

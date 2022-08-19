@@ -1,13 +1,16 @@
-use store::{core::collection::Collection, write::options::Options};
+use store::{
+    core::{acl::ACL, collection::Collection},
+    write::options::Options,
+};
 
 use crate::{
     jmap_store::{get::GetObject, query::QueryObject, set::SetObject, Object},
     orm,
     request::ResultReference,
-    types::jmap::JMAPId,
+    types::{blob::JMAPBlob, jmap::JMAPId},
 };
 
-use super::schema::{Comparator, Filter, Principal, Property, Type, Value};
+use super::schema::{Comparator, Filter, Patch, Principal, Property, Type, Value};
 
 impl orm::Value for Value {
     fn index_as(&self) -> orm::Index {
@@ -50,6 +53,27 @@ impl orm::Value for Value {
             Value::Text { value } => value.is_empty(),
             Value::Null => true,
             _ => false,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Id { .. } => std::mem::size_of::<JMAPId>(),
+            Value::Blob { .. } => std::mem::size_of::<JMAPBlob>(),
+            Value::Text { value } => value.len(),
+            Value::TextList { value } => value.iter().fold(0, |acc, item| acc + item.len()),
+            Value::Number { .. } => std::mem::size_of::<i64>(),
+            Value::Type { .. } => std::mem::size_of::<Type>(),
+            Value::DKIM { value } => {
+                value.dkim_selector.as_ref().map(|s| s.len()).unwrap_or(0)
+                    + std::mem::size_of::<i64>()
+            }
+            Value::Members { value } => value.len() * std::mem::size_of::<JMAPId>(),
+            Value::ACL(value) => value.iter().fold(0, |acc, (k, v)| {
+                acc + k.len() + v.len() * std::mem::size_of::<ACL>()
+            }),
+            Value::Patch(_) => std::mem::size_of::<Patch>(),
+            Value::Null => 0,
         }
     }
 }
@@ -110,6 +134,19 @@ impl Object for Principal {
 
     fn collection() -> Collection {
         Collection::Principal
+    }
+
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[
+            (Property::Name, 255),
+            (Property::Email, 255),
+            (Property::Aliases, 255 * 1000),
+            (Property::Capabilities, 100 * 10),
+            (Property::Description, 512),
+            (Property::Timezone, 100),
+            (Property::Secret, 2048),
+            (Property::DKIM, 100),
+        ]
     }
 }
 

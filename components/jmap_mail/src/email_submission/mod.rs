@@ -44,6 +44,10 @@ impl Object for EmailSubmission {
         ]
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[(Property::Envelope, 2048)]
+    }
+
     fn collection() -> Collection {
         Collection::EmailSubmission
     }

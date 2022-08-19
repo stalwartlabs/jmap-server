@@ -38,6 +38,18 @@ impl orm::Value for Value {
             _ => false,
         }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Id { .. } => std::mem::size_of::<JMAPId>(),
+            Value::Text { value } => value.len(),
+            Value::Bool { .. } => std::mem::size_of::<bool>(),
+            Value::Addresses { value } => value.iter().fold(0, |acc, x| {
+                acc + x.email.len() + x.name.as_ref().map(|n| n.len()).unwrap_or(0)
+            }),
+            Value::Null => 0,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]

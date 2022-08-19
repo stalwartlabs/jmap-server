@@ -3,7 +3,7 @@ use std::{ops::Range, time::SystemTime};
 use roaring::RoaringBitmap;
 use tracing::error;
 
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::Leb128Reader;
 use crate::write::operation::WriteOperation;
 use crate::{
     core::collection::Collection,
@@ -132,9 +132,7 @@ where
         {
             if key.starts_with(&prefix) {
                 if key.len() > prefix.len() {
-                    if let Some((account_id, _)) =
-                        AccountId::from_leb128_bytes(&key[prefix.len()..])
-                    {
+                    if let Some((account_id, _)) = (&key[prefix.len()..]).read_leb128() {
                         if account_ids.contains(&account_id) {
                             return Ok(true);
                         }
@@ -164,8 +162,7 @@ where
             .iterator(ColumnFamily::Blobs, &prefix, Direction::Forward)?
         {
             if key.starts_with(&prefix) && key.len() > prefix.len() {
-                if let Some((document_id, _)) = DocumentId::from_leb128_bytes(&key[prefix.len()..])
-                {
+                if let Some((document_id, _)) = (&key[prefix.len()..]).read_leb128() {
                     if documents.contains(document_id) {
                         return Ok(true);
                     }
@@ -194,8 +191,7 @@ where
             .next()
         {
             if key.starts_with(&prefix) && key.len() > prefix.len() {
-                if let Some((document_id, _)) = DocumentId::from_leb128_bytes(&key[prefix.len()..])
-                {
+                if let Some((document_id, _)) = (&key[prefix.len()..]).read_leb128() {
                     return Ok(Some(document_id));
                 }
             }

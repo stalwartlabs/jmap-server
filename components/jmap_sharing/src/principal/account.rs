@@ -235,10 +235,6 @@ where
                     .unwrap_or_default(),
             ))
         } else {
-            debug!(
-                "Account details failed: ORM for account {} does not exist.",
-                JMAPId::from(account_id)
-            );
             Ok(None)
         }
     }

@@ -20,27 +20,27 @@ use store::{
         distributions::{Alphanumeric, Standard},
         thread_rng, Rng,
     },
-    serialize::leb128::Leb128,
+    serialize::leb128::{Leb128Iterator, Leb128Vec},
     tracing::{debug, error},
     AccountId, Store,
 };
 
 use super::SymmetricEncrypt;
 
-const OAUTH_HTML_HEADER: &str = include_str!("../../resources/oauth_header.html");
-const OAUTH_HTML_FOOTER: &str = include_str!("../../resources/oauth_footer.html");
+const OAUTH_HTML_HEADER: &str = include_str!("../../resources/oauth_header.htx");
+const OAUTH_HTML_FOOTER: &str = include_str!("../../resources/oauth_footer.htx");
 const OAUTH_HTML_LOGIN_HEADER_CLIENT: &str =
-    include_str!("../../resources/oauth_login_hdr_client.html");
+    include_str!("../../resources/oauth_login_hdr_client.htx");
 const OAUTH_HTML_LOGIN_HEADER_DEVICE: &str =
-    include_str!("../../resources/oauth_login_hdr_device.html");
+    include_str!("../../resources/oauth_login_hdr_device.htx");
 const OAUTH_HTML_LOGIN_HEADER_FAILED: &str =
-    include_str!("../../resources/oauth_login_hdr_failed.html");
-const OAUTH_HTML_LOGIN_FORM: &str = include_str!("../../resources/oauth_login.html");
-const OAUTH_HTML_LOGIN_CODE: &str = include_str!("../../resources/oauth_login_code.html");
+    include_str!("../../resources/oauth_login_hdr_failed.htx");
+const OAUTH_HTML_LOGIN_FORM: &str = include_str!("../../resources/oauth_login.htx");
+const OAUTH_HTML_LOGIN_CODE: &str = include_str!("../../resources/oauth_login_code.htx");
 const OAUTH_HTML_LOGIN_CODE_HIDDEN: &str =
-    include_str!("../../resources/oauth_login_code_hidden.html");
-const OAUTH_HTML_LOGIN_SUCCESS: &str = include_str!("../../resources/oauth_login_success.html");
-const OAUTH_HTML_ERROR: &str = include_str!("../../resources/oauth_error.html");
+    include_str!("../../resources/oauth_login_code_hidden.htx");
+const OAUTH_HTML_LOGIN_SUCCESS: &str = include_str!("../../resources/oauth_login_success.htx");
+const OAUTH_HTML_ERROR: &str = include_str!("../../resources/oauth_error.htx");
 
 const STATUS_AUTHORIZED: u32 = 0;
 const STATUS_TOKEN_ISSUED: u32 = 1;
@@ -739,8 +739,8 @@ where
         let mut token = SymmetricEncrypt::new(key.as_bytes(), &context)
             .encrypt(&thread_rng().gen::<[u8; RANDOM_CODE_LEN]>(), &nonce)
             .map_err(StoreError::DeserializeError)?;
-        account_id.to_leb128_bytes(&mut token);
-        expiry.to_leb128_bytes(&mut token);
+        token.push_leb128(account_id);
+        token.push_leb128(expiry);
         token.extend_from_slice(client_id.as_bytes());
 
         Ok(base64::encode(&token))
@@ -759,8 +759,8 @@ where
             .and_then(|bytes| {
                 let mut bytes = bytes.iter();
                 (
-                    AccountId::from_leb128_it(&mut bytes)?,
-                    u64::from_leb128_it(&mut bytes)?,
+                    bytes.next_leb128()?,
+                    bytes.next_leb128::<u64>()?,
                     bytes.copied().map(char::from).collect::<String>(),
                 )
                     .into()

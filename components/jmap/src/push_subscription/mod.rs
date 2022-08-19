@@ -36,6 +36,14 @@ impl Object for PushSubscription {
         &[]
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[
+            (Property::DeviceClientId, 255),
+            (Property::Url, 512),
+            (Property::Keys, 2045),
+        ]
+    }
+
     fn collection() -> Collection {
         Collection::PushSubscription
     }

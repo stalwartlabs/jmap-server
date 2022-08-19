@@ -4,7 +4,7 @@ use store::{
     ahash::AHashMap,
     blob::{BlobId, BLOB_HASH_LEN},
     core::{collection::Collection, document::Document},
-    serialize::{key::BlobKey, leb128::skip_leb128_value, StoreDeserialize, StoreSerialize},
+    serialize::{key::BlobKey, leb128::Leb128Reader, StoreDeserialize, StoreSerialize},
     write::{
         batch::WriteBatch,
         options::{IndexOptions, Options},
@@ -141,7 +141,7 @@ where
             }
 
             if key.len() > BLOB_HASH_LEN + 1 {
-                if let Some(bytes_read) = skip_leb128_value(&key[BLOB_HASH_LEN + 1..]) {
+                if let Some(bytes_read) = (&key[BLOB_HASH_LEN + 1..]).skip_leb128() {
                     if key.len() == BLOB_HASH_LEN + 1 + bytes_read {
                         blob_ephemeral_count += 1;
                     } else {

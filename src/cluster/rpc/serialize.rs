@@ -1,7 +1,9 @@
 use super::Protocol;
 use actix_web::web::{self, Buf};
-use store::bincode;
-use store::serialize::leb128::Leb128;
+use store::{
+    bincode,
+    serialize::leb128::{Leb128Reader, Leb128Vec},
+};
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Default)]
@@ -19,7 +21,7 @@ impl Decoder for RpcEncoder {
             // Not enough data to read length marker.
             return Ok(None);
         }
-        let (frame_len, bytes_read) = usize::from_leb128_bytes(src).ok_or_else(|| {
+        let (frame_len, bytes_read) = src.as_ref().read_leb128::<usize>().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Failed to decode frame length.",
@@ -60,7 +62,7 @@ impl Encoder<Protocol> for RpcEncoder {
             )
         })?;
         let mut bytes_len = Vec::with_capacity(std::mem::size_of::<u32>() + 1);
-        bytes.len().to_leb128_bytes(&mut bytes_len);
+        bytes_len.push_leb128(bytes.len());
 
         dst.reserve(bytes_len.len() + bytes.len());
         dst.extend_from_slice(&bytes_len);

@@ -2,8 +2,9 @@ use roaring::RoaringBitmap;
 
 use crate::blob::BLOB_HASH_LEN;
 use crate::serialize::key::BitmapKey;
-use crate::serialize::leb128::Leb128;
-use crate::{AccountId, ColumnFamily, Direction, JMAPStore, Store};
+use crate::serialize::leb128::{Leb128Iterator, Leb128Reader};
+use crate::serialize::DeserializeBigEndian;
+use crate::{ColumnFamily, Direction, JMAPStore, Store};
 
 use super::operation::WriteOperation;
 
@@ -22,12 +23,12 @@ where
             .iterator(ColumnFamily::Values, &[], Direction::Forward)?
         {
             let mut bytes = key.iter();
-            if let Some(account_id) = AccountId::from_leb128_it(&mut bytes) {
+            if let Some(account_id) = bytes.next_leb128() {
                 let do_delete = if account_ids.contains(account_id) {
                     true
                 } else if matches!(bytes.next(), Some(collection) if *collection == u8::MAX) {
                     // Shared account
-                    matches!(AccountId::from_leb128_it(&mut bytes), Some(shared_account_id) if account_ids.contains(shared_account_id))
+                    matches!(bytes.next_leb128(), Some(shared_account_id) if account_ids.contains(shared_account_id))
                 } else {
                     false
                 };
@@ -50,7 +51,7 @@ where
             .db
             .iterator(ColumnFamily::Indexes, &[], Direction::Forward)?
         {
-            if let Some((account_id, _)) = AccountId::from_leb128_bytes(&key) {
+            if let Some(account_id) = (&key[..]).deserialize_be_u32(0) {
                 if account_ids.contains(account_id) {
                     batch.push(WriteOperation::Delete {
                         cf: ColumnFamily::Indexes,
@@ -69,9 +70,8 @@ where
             .db
             .iterator(ColumnFamily::Blobs, &[], Direction::Forward)?
         {
-            if let Some((account_id, _)) = key
-                .get(BLOB_HASH_LEN + 1..)
-                .and_then(AccountId::from_leb128_bytes)
+            if let Some((account_id, _)) =
+                key.get(BLOB_HASH_LEN + 1..).and_then(|b| b.read_leb128())
             {
                 if account_ids.contains(account_id) {
                     batch.push(WriteOperation::Delete {

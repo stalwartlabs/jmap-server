@@ -104,6 +104,7 @@ where
         assert_cluster_updated(&peers).await;
         assert_mirrored_stores(peers.clone(), false).await;
 
+        // Stop cluster
         cluster.stop_cluster().await;
         shutdown_all(peers).await;
         cluster.cleanup();

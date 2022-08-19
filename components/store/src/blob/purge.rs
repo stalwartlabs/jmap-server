@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use tracing::error;
 
-use crate::serialize::leb128::skip_leb128_value;
+use crate::serialize::leb128::Leb128Reader;
 use crate::serialize::StoreDeserialize;
 use crate::WriteOperation;
 use crate::{ColumnFamily, Direction, JMAPStore, Store, StoreError};
@@ -41,7 +41,7 @@ where
 
             // Blob link
             if key.len() > BLOB_HASH_LEN + 1 {
-                if let Some(bytes_read) = skip_leb128_value(&key[BLOB_HASH_LEN + 1..]) {
+                if let Some(bytes_read) = (&key[BLOB_HASH_LEN + 1..]).skip_leb128() {
                     if key.len() == BLOB_HASH_LEN + 1 + bytes_read {
                         let timestamp = u64::deserialize(&value).ok_or_else(|| {
                             StoreError::InternalError(format!(

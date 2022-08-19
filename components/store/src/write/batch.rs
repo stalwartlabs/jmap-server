@@ -2,7 +2,7 @@ use ahash::AHashSet;
 
 use crate::core::document::Document;
 use crate::core::vec_map::VecMap;
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::Leb128Vec;
 use crate::{AccountId, Collection, DocumentId, JMAPId};
 
 #[derive(Debug)]
@@ -147,15 +147,15 @@ impl Change {
                 + 4)
                 * std::mem::size_of::<usize>(),
         );
-        buf.push(Change::ENTRY);
 
-        self.inserts.len().to_leb128_bytes(&mut buf);
-        self.updates.len().to_leb128_bytes(&mut buf);
-        self.child_updates.len().to_leb128_bytes(&mut buf);
-        self.deletes.len().to_leb128_bytes(&mut buf);
+        buf.push(Change::ENTRY);
+        buf.push_leb128(self.inserts.len());
+        buf.push_leb128(self.updates.len());
+        buf.push_leb128(self.child_updates.len());
+        buf.push_leb128(self.deletes.len());
         for list in [self.inserts, self.updates, self.child_updates, self.deletes] {
             for id in list {
-                id.to_leb128_bytes(&mut buf);
+                buf.push_leb128(id);
             }
         }
         buf

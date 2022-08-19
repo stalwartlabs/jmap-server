@@ -1,5 +1,5 @@
 use crate::read::filter::{ComparisonOperator, LogicalOperator};
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::Leb128Vec;
 use crate::{
     serialize::{DeserializeBigEndian, StoreDeserialize},
     ColumnFamily, Direction, JMAPStore, Store,
@@ -9,6 +9,7 @@ use roaring::RoaringBitmap;
 use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
 
 use super::key::FIELD_PREFIX_LEN;
+use super::leb128::Leb128Iterator;
 
 pub const BIT_SET: u8 = 0x80;
 pub const BIT_CLEAR: u8 = 0;
@@ -26,7 +27,7 @@ pub fn deserialize_bitlist(bm: &mut RoaringBitmap, bytes: &[u8]) {
         //print!("[{} {}] ", if is_set { "set" } else { "clear" }, items);
 
         while items > 0 {
-            if let Some(doc_id) = DocumentId::from_leb128_it(&mut it) {
+            if let Some(doc_id) = it.next_leb128() {
                 if is_set {
                     bm.insert(doc_id);
                 } else {
@@ -115,7 +116,7 @@ macro_rules! impl_bit {
             let mut buf = Vec::with_capacity(std::mem::size_of::<DocumentId>() + 2);
             buf.push(IS_BITLIST);
             buf.push($flag);
-            document.to_leb128_bytes(&mut buf);
+            buf.push_leb128(document);
             buf
         }
 
@@ -145,7 +146,7 @@ macro_rules! impl_bit {
                     header_pos = buf.len();
                     buf.push($flag | 0x7F);
                 }
-                document.to_leb128_bytes(&mut buf);
+                buf.push_leb128(document);
                 total_docs = pos;
             }
 
@@ -189,14 +190,14 @@ where
                 set_header_pos = set_buf.len();
                 set_buf.push(BIT_SET | 0x7F);
             }
-            document.to_leb128_bytes(&mut set_buf);
+            set_buf.push_leb128(document);
             set_total_docs += 1;
         } else {
             if clear_total_docs & 0x7F == 0 {
                 clear_header_pos = clear_buf.len();
                 clear_buf.push(BIT_CLEAR | 0x7F);
             }
-            document.to_leb128_bytes(&mut clear_buf);
+            clear_buf.push_leb128(document);
             clear_total_docs += 1;
         }
     }

@@ -37,6 +37,17 @@ impl Object for Identity {
         &[]
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[
+            (Property::Name, 255),
+            (Property::Email, 255),
+            (Property::TextSignature, 2048),
+            (Property::HtmlSignature, 2048),
+            (Property::ReplyTo, 1024),
+            (Property::Bcc, 1024),
+        ]
+    }
+
     fn collection() -> Collection {
         Collection::Identity
     }

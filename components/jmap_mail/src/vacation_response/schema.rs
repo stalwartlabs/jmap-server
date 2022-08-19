@@ -40,6 +40,17 @@ impl orm::Value for Value {
             _ => false,
         }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Id { .. } => std::mem::size_of::<JMAPId>(),
+            Value::Text { value } => value.len(),
+            Value::Bool { .. } => std::mem::size_of::<bool>(),
+            Value::DateTime { .. } => std::mem::size_of::<JMAPDate>(),
+            Value::SentResponses { value } => value.iter().fold(0, |acc, x| acc + x.len()),
+            Value::Null => 0,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]

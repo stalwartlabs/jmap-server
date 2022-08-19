@@ -127,7 +127,7 @@ impl Serialize for MethodError {
                 "serverPartialFail",
                 concat!(
                     "Some, but not all, expected changes described by the method ",
-                    "occurred.  Please resynchronise to determine server state."
+                    "occurred.  Please resynchronize to determine server state."
                 ),
             ),
             MethodError::InvalidResultReference(description) => {

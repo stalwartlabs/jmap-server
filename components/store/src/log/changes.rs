@@ -1,7 +1,7 @@
 use roaring::RoaringTreemap;
 
 use crate::serialize::key::LogKey;
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::Leb128Iterator;
 use crate::write::batch;
 use crate::{AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError};
 pub type ChangeId = u64;
@@ -43,21 +43,20 @@ impl Changes {
         match *bytes.first()? {
             batch::Change::ENTRY => {
                 let mut bytes_it = bytes.get(1..)?.iter();
-                let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
-                let total_updates = usize::from_leb128_it(&mut bytes_it)?;
-                let total_child_updates = usize::from_leb128_it(&mut bytes_it)?;
-                let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
+                let total_inserts: usize = bytes_it.next_leb128()?;
+                let total_updates: usize = bytes_it.next_leb128()?;
+                let total_child_updates: usize = bytes_it.next_leb128()?;
+                let total_deletes: usize = bytes_it.next_leb128()?;
 
                 if total_inserts > 0 {
                     for _ in 0..total_inserts {
-                        self.changes
-                            .push(Change::Insert(JMAPId::from_leb128_it(&mut bytes_it)?));
+                        self.changes.push(Change::Insert(bytes_it.next_leb128()?));
                     }
                 }
 
                 if total_updates > 0 || total_child_updates > 0 {
                     'update_outer: for change_pos in 0..(total_updates + total_child_updates) {
-                        let id = JMAPId::from_leb128_it(&mut bytes_it)?;
+                        let id = bytes_it.next_leb128()?;
                         let mut is_child_update = change_pos >= total_updates;
 
                         for (idx, change) in self.changes.iter().enumerate() {
@@ -91,7 +90,7 @@ impl Changes {
 
                 if total_deletes > 0 {
                     'delete_outer: for _ in 0..total_deletes {
-                        let id = JMAPId::from_leb128_it(&mut bytes_it)?;
+                        let id = bytes_it.next_leb128()?;
 
                         'delete_inner: for (idx, change) in self.changes.iter().enumerate() {
                             match change {

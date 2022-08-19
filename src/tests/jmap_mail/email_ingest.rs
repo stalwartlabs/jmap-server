@@ -22,6 +22,7 @@ where
     // Domain names need to exist before creating an account
     assert!(matches!(
         client
+            .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
             .individual_create("jdoe@example.com", "12345", "John Doe")
             .await,
         Err(jmap_client::Error::Set(SetError {
@@ -32,7 +33,7 @@ where
 
     // Create a domain name and a test account
     let domain_id = client
-        .set_default_account_id(JMAPId::new(0))
+        .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
         .domain_create("example.com")
         .await
         .unwrap()

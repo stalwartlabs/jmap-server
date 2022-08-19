@@ -270,10 +270,53 @@ impl orm::Value for Value {
             _ => false,
         }
     }
+
+    fn len(&self) -> usize {
+        match self {
+            Value::Id { .. } => std::mem::size_of::<JMAPId>(),
+            Value::Text { value } => value.len(),
+            Value::DateTime { .. } => std::mem::size_of::<JMAPDate>(),
+            Value::UndoStatus { .. } => std::mem::size_of::<UndoStatus>(),
+            Value::DeliveryStatus { value } => value.keys().fold(0, |acc, x| {
+                acc + x.len() + std::mem::size_of::<DeliveryStatus>()
+            }),
+            Value::Envelope { value } => value.len(),
+            Value::BlobIds { value } => value.len() * std::mem::size_of::<JMAPDate>(),
+            Value::IdReference { value } => value.len(),
+            Value::ResultReference { .. } => std::mem::size_of::<ResultReference>(),
+            Value::Null => 0,
+        }
+    }
 }
 
 impl Default for Value {
     fn default() -> Self {
         Value::Null
+    }
+}
+
+impl Envelope {
+    pub fn len(&self) -> usize {
+        self.mail_from.len() + self.rcpt_to.iter().fold(0, |acc, item| acc + item.len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.mail_from.is_empty() && self.rcpt_to.is_empty()
+    }
+}
+
+impl Address {
+    pub fn len(&self) -> usize {
+        let mut size = self.email.len();
+        if let Some(params) = &self.parameters {
+            for (key, value) in params {
+                size += key.len() + value.as_ref().map(|v| v.len()).unwrap_or(0);
+            }
+        }
+        size
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.email.is_empty() && self.parameters.is_none()
     }
 }

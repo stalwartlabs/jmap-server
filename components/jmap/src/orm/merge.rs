@@ -28,6 +28,22 @@ where
                 ));
             }
         }
+
+        for (property, max_len) in T::max_len() {
+            if changes
+                .properties
+                .get(property)
+                .ok_or(|| self.properties.get(property))
+                .map(|v| v.len() > *max_len)
+                .unwrap_or(false)
+            {
+                return Err(SetError::invalid_property(
+                    property.clone(),
+                    format!("Property cannot be longer than {} bytes.", max_len),
+                ));
+            }
+        }
+
         self.merge(document, changes).map_err(|err| err.into())
     }
 

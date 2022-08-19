@@ -4,13 +4,11 @@ use crate::core::bitmap::Bitmap;
 use crate::log::entry::Entry;
 use crate::log::raft::{RaftId, TermId};
 use crate::serialize::key::LogKey;
-use crate::serialize::leb128::skip_leb128_it;
-use crate::serialize::leb128::Leb128;
+use crate::serialize::leb128::{Leb128Iterator, Leb128Vec};
 use crate::serialize::{DeserializeBigEndian, StoreDeserialize};
 use crate::write::batch;
 use crate::{
-    AccountId, Collection, ColumnFamily, Direction, JMAPId, JMAPStore, Store, StoreError,
-    WriteOperation,
+    AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError, WriteOperation,
 };
 use ahash::AHashMap;
 use roaring::{RoaringBitmap, RoaringTreemap};
@@ -219,12 +217,12 @@ where
                 + std::mem::size_of::<usize>(),
         );
         bytes.push(batch::Change::SNAPSHOT);
-        changed_collections.len().to_leb128_bytes(&mut bytes);
+        bytes.push_leb128(changed_collections.len());
         for (collections, account_ids) in changed_collections {
-            collections.to_leb128_bytes(&mut bytes);
-            account_ids.len().to_leb128_bytes(&mut bytes);
+            bytes.push_leb128(collections.bitmap);
+            bytes.push_leb128(account_ids.len());
             for account_id in account_ids {
-                account_id.to_leb128_bytes(&mut bytes);
+                bytes.push_leb128(account_id);
             }
         }
         write_batch.push(WriteOperation::set(
@@ -266,27 +264,27 @@ fn deserialize_inserts(inserted_ids: &mut RoaringTreemap, bytes: &[u8]) -> Optio
     match *bytes.first()? {
         batch::Change::ENTRY => {
             let mut bytes_it = bytes.get(1..)?.iter();
-            let total_inserts = usize::from_leb128_it(&mut bytes_it)?;
-            let total_updates = usize::from_leb128_it(&mut bytes_it)?;
-            let total_child_updates = usize::from_leb128_it(&mut bytes_it)?;
-            let total_deletes = usize::from_leb128_it(&mut bytes_it)?;
+            let total_inserts: usize = bytes_it.next_leb128()?;
+            let total_updates: usize = bytes_it.next_leb128()?;
+            let total_child_updates: usize = bytes_it.next_leb128()?;
+            let total_deletes: usize = bytes_it.next_leb128()?;
 
             for _ in 0..total_inserts {
-                inserted_ids.insert(JMAPId::from_leb128_it(&mut bytes_it)?);
+                inserted_ids.insert(bytes_it.next_leb128()?);
             }
 
             // Skip updates
             for _ in 0..total_updates {
-                skip_leb128_it(&mut bytes_it)?;
+                bytes_it.skip_leb128()?;
             }
 
             // Skip child updates
             for _ in 0..total_child_updates {
-                skip_leb128_it(&mut bytes_it)?;
+                bytes_it.skip_leb128()?;
             }
 
             for _ in 0..total_deletes {
-                inserted_ids.remove(JMAPId::from_leb128_it(&mut bytes_it)?);
+                inserted_ids.remove(bytes_it.next_leb128()?);
             }
         }
         batch::Change::SNAPSHOT => {

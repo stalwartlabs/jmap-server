@@ -1,18 +1,9 @@
 
 jmap-server
 ===
-- General
-  - Fix logging from subcrates.
-  - Control the amount of data stored from all set requests (ORM values, headers, etc.)
-  - Replace expect and panic with print during startup.
 - Testing
-  - Cluster read replicas
   - Webmail client using Enron db.
-  - References pointing to updatedProperties in mailbox.
-  - upToId in queryChanges.
-  - IdAssigner.
-  - Fuzz testing.
-  - Enron database.
+  - JMAPTest
 - Review all dependencies what kind of code they have.
 - Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).
 - Remove print!() and println!() from everywhere.
@@ -20,9 +11,16 @@ jmap-server
 imap-server
 ===
 - Retest, make sure parsing is OK.
+- Fuzz testing.
 - Check TODOs
+
+jmap + imap + cli
+===
 - Compile for multiple targets.
 - Docker image.
+- Cargo.toml authors, etc.
+- Licenses
+
 
 jmap-client
 ===
@@ -47,8 +45,13 @@ Medium term
 - Use unique nonce for each packet.
 
 
+Testing
+cargo test --all
+cargo test jmap_stress_tests -- --ignored
+
 Settings
 ----
+- config: <Path>
 - Store
   - db-path: <String>
   - id-cache-size: <Bytes> (32 * 1024 * 1024)
@@ -88,6 +91,7 @@ Settings
   - default-language: en
   - rate-limit-authenticated: 1000/60
   - rate-limit-anonymous: 100/60
+  - rate-limit-auth: 10/60
   - use-forwarded-header: false
   - subscription-max-total: 100
 
@@ -130,14 +134,11 @@ Settings
   - rpc-cert-key
   - rpc-tls-domain: false
 
+- OAuth
   - oauth-key: <String>
-            expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
-            expiry_auth_code: settings.parse("oauth-auth-code-expiry").unwrap_or(600),
-            expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
-            expiry_refresh_token: settings
-                .parse("oauth-refresh-token-expiry")
-                .unwrap_or(30 * 86400),
-            expiry_refresh_token_renew: settings
-                .parse("oauth-refresh-token-renew")
-                .unwrap_or(4 * 86400),
-            max_auth_attempts: settings.parse("oauth-max-attempts").unwrap_or(3),
+  - oauth-user-code-expiry: 1800
+  - oauth-auth-code-expiry: 600
+  - oauth-token-expiry: 3600
+  - oauth-refresh-token-expiry: 30 * 86400
+  - oauth-refresh-token-renew: 4 * 86400
+  - oauth-max-attempts: 3

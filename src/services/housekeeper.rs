@@ -10,7 +10,11 @@ use store::{
 };
 use tokio::sync::mpsc;
 
-use crate::{cluster::IPC_CHANNEL_BUFFER, JMAPServer};
+use crate::{
+    cluster::IPC_CHANNEL_BUFFER,
+    server::{failed_to, UnwrapFailure},
+    JMAPServer,
+};
 
 pub enum Event {
     PurgeAccounts,
@@ -155,22 +159,25 @@ impl SimpleCron {
 
         for (pos, value) in value.split(' ').enumerate() {
             if pos == 0 {
-                minute = value.parse::<u32>().expect("Failed to parse minute.");
+                minute = value.parse::<u32>().failed_to("parse minute.");
                 if !(0..=59).contains(&minute) {
-                    panic!("Invalid minute: {}", minute);
+                    failed_to(&format!("parse minute, invalid value: {}", minute));
                 }
             } else if pos == 1 {
-                hour = value.parse::<u32>().expect("Failed to parse hour.");
+                hour = value.parse::<u32>().failed_to("parse hour.");
                 if !(0..=23).contains(&hour) {
-                    panic!("Invalid hour: {}", hour);
+                    failed_to(&format!("parse hour, invalid value: {}", hour));
                 }
             } else if pos == 2 {
-                if value.as_bytes().first().expect("Failed to parse weekday") == &b'*' {
+                if value.as_bytes().first().failed_to("parse weekday") == &b'*' {
                     return SimpleCron::EveryDay { hour, minute };
                 } else {
-                    let day = value.parse::<u32>().expect("Failed to parse weekday.");
+                    let day = value.parse::<u32>().failed_to("parse weekday.");
                     if !(1..=7).contains(&hour) {
-                        panic!("Invalid day: {}, range is 1 (Monday) to 7 (Sunday).", hour);
+                        failed_to(&format!(
+                            "parse weekday, invalid value: {}, range is 1 (Monday) to 7 (Sunday).",
+                            hour,
+                        ));
                     }
 
                     return SimpleCron::EveryWeek { day, hour, minute };
@@ -178,7 +185,7 @@ impl SimpleCron {
             }
         }
 
-        panic!("Failed to parse cron expression.");
+        failed_to("parse cron expression.");
     }
 
     pub fn time_to_next(&self) -> Duration {

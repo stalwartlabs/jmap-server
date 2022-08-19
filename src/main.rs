@@ -16,17 +16,22 @@ use cluster::{
     ClusterIpc,
 };
 
-use authorization::{auth::RemoteAddress, oauth, rate_limit::RateLimiter};
+use authorization::{auth::RemoteAddress, oauth, rate_limit::Limiter};
 use futures::StreamExt;
 use server::http::{build_jmap_server, init_jmap_server};
 use services::{email_delivery, housekeeper, state_change};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use store::{
-    config::env_settings::EnvSettings, moka::future::Cache, tracing::info, JMAPStore, Store,
+    config::env_settings::EnvSettings,
+    moka::future::Cache,
+    tracing::{self, info, Level},
+    JMAPStore, Store,
 };
 use store_rocksdb::RocksDB;
 use tokio::sync::mpsc;
+
+use crate::server::UnwrapFailure;
 
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
 pub const DEFAULT_RPC_PORT: u16 = 7911;
@@ -44,7 +49,7 @@ pub struct JMAPServer<T> {
     pub oauth_codes: Cache<String, Arc<oauth::OAuthCode>>,
 
     pub sessions: Cache<String, authorization::Session>,
-    pub rate_limiters: Cache<RemoteAddress, Arc<RateLimiter>>,
+    pub rate_limiters: Cache<RemoteAddress, Arc<Limiter>>,
 
     #[cfg(test)]
     pub is_offline: std::sync::atomic::AtomicBool,
@@ -52,13 +57,18 @@ pub struct JMAPServer<T> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    //TODO logging
-    tracing_subscriber::fmt::init();
-    //tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new())
-    //    .expect("Failed to set global default subscriber");
-
     // Read configuration parameters
     let mut settings = EnvSettings::new();
+
+    // Enable logging
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::FmtSubscriber::builder()
+            .with_max_level(settings.parse("log-level").unwrap_or(Level::ERROR))
+            .finish(),
+    )
+    .failed_to("setdefault subscriber failed.");
+
+    // Set hostname if missing
     if !settings.contains_key("hostname") {
         let default_hostname = format!(
             "{}:{}",
@@ -82,7 +92,7 @@ async fn main() -> std::io::Result<()> {
     };
     let server = build_jmap_server(core.clone(), settings)
         .await
-        .expect("Failed to start JMAP server");
+        .failed_to("start JMAP server");
     let server_handle = server.handle();
 
     // Start web server
@@ -113,7 +123,7 @@ async fn main() -> std::io::Result<()> {
                 tokio::time::sleep(Duration::from_secs(1)).await;
 
                 // Flush DB
-                core.store.db.close().expect("Failed to close database");
+                core.store.db.close().failed_to("close database");
 
                 break;
             }

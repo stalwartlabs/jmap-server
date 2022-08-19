@@ -36,6 +36,14 @@ impl Object for VacationResponse {
         &[]
     }
 
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[
+            (Property::Subject, 512),
+            (Property::HtmlBody, 4096),
+            (Property::TextBody, 4096),
+        ]
+    }
+
     fn collection() -> store::core::collection::Collection {
         Collection::VacationResponse
     }
