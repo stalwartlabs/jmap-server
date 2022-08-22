@@ -72,7 +72,6 @@ where
                     || request_path.starts_with("/jmap/upload")
                     || request_path.starts_with("/jmap/ws")
                     || request_path.starts_with("/jmap/eventsource")
-                    || request_path.starts_with("/ingest")
                     || request_path.starts_with("/auth")
                     || request_path.starts_with("/.well-known/oauth-authorization-server");
 

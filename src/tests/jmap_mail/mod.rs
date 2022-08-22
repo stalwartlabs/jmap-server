@@ -1,8 +1,6 @@
 use reqwest::header;
 use store_rocksdb::RocksDB;
 
-use crate::api::ingest::Dsn;
-
 use super::{jmap::init_jmap_tests, store::utils::destroy_temp_dir};
 
 pub mod email_changes;

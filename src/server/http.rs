@@ -21,7 +21,6 @@ use store::{
 use crate::{
     api::{
         blob::{handle_jmap_download, handle_jmap_upload},
-        ingest::handle_ingest,
         request::handle_jmap_request,
         session::{handle_jmap_session, Session},
     },
@@ -34,6 +33,7 @@ use crate::{
         },
     },
     cluster::{rpc::tls::load_tls_server_config, ClusterIpc},
+    lmtp::listener::{init_lmtp, spawn_lmtp},
     server::{event_source::handle_jmap_event_source, websocket::handle_ws},
     services::{
         email_delivery::{init_email_delivery, spawn_email_delivery},
@@ -70,31 +70,27 @@ where
         #[cfg(not(test))]
         {
             let mut batch = WriteBatch::new(SUPERUSER_ID);
-            for (pos, (id, name)) in [("admin", "Administrator"), ("ingest", "Ingest account")]
-                .into_iter()
-                .enumerate()
-            {
-                let account_id = store
-                    .assign_document_id(SUPERUSER_ID, Collection::Principal)
-                    .failed_to("generate account id.");
-                if account_id != pos as u32 {
-                    super::failed_to(&format!(
-                        "generate account id, expected id {} but got {}.",
-                        pos, account_id
-                    ));
-                }
-                let mut document = Document::new(Collection::Principal, account_id);
-                TinyORM::<Principal>::new_account(
-                    id,
-                    &settings
-                        .get(&format!("set-{}-password", id))
-                        .unwrap_or_else(|| "changeme".to_string()),
-                    name,
-                )
-                .insert(&mut document)
-                .unwrap();
-                batch.insert_document(document);
+
+            let account_id = store
+                .assign_document_id(SUPERUSER_ID, Collection::Principal)
+                .failed_to("generate account id.");
+            if account_id != SUPERUSER_ID as u32 {
+                super::failed_to(&format!(
+                    "generate account id, expected id {} but got {}.",
+                    SUPERUSER_ID, account_id
+                ));
             }
+            let mut document = Document::new(Collection::Principal, account_id);
+            TinyORM::<Principal>::new_account(
+                "admin",
+                &settings
+                    .get("set-admin-password")
+                    .unwrap_or_else(|| "changeme".to_string()),
+                "Administrator",
+            )
+            .insert(&mut document)
+            .unwrap();
+            batch.insert_document(document);
             store.write(batch).failed_to("write to database");
         }
     } else if let Some(secret) = settings.get("set-admin-password") {
@@ -117,6 +113,7 @@ where
     let (email_tx, email_rx) = init_email_delivery();
     let (housekeeper_tx, housekeeper_rx) = init_housekeeper();
     let (change_tx, change_rx) = init_state_manager();
+    let (lmtp_tx, lmtp_rx) = init_lmtp();
     let is_in_cluster = cluster.is_some();
 
     let oauth = Box::new(OAuth {
@@ -158,6 +155,7 @@ where
         state_change: change_tx,
         email_delivery: email_tx.clone(),
         housekeeper: housekeeper_tx,
+        lmtp: lmtp_tx,
         sessions: Cache::builder()
             .initial_capacity(128)
             .time_to_live(HALF_HOUR_EXPIRY)
@@ -173,6 +171,9 @@ where
         #[cfg(test)]
         is_offline: false.into(),
     });
+
+    // Spawn LMTP service
+    spawn_lmtp(server.clone(), settings, lmtp_rx);
 
     // Spawn TypeState manager
     spawn_state_manager(server.clone(), settings, !is_in_cluster, change_rx);
@@ -195,17 +196,17 @@ where
 {
     // Start JMAP server
     let http_addr = SocketAddr::from((
-        settings.parse_ipaddr("bind-addr", "127.0.0.1"),
-        settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT),
+        settings.parse_ipaddr("jmap-bind-addr", "127.0.0.1"),
+        settings.parse("jmap-port").unwrap_or(DEFAULT_HTTP_PORT),
     ));
 
     // Obtain TLS path
-    let tls_config = if let Some(cert_path) = settings.get("cert-path") {
+    let tls_config = if let Some(cert_path) = settings.get("jmap-cert-path") {
         load_tls_server_config(
             &cert_path,
             &settings
-                .get("key-path")
-                .failed_to("load TLS config, missing 'key-path' argument."),
+                .get("jmap-key-path")
+                .failed_to("load TLS config, missing 'jmap-key-path' argument."),
         )
         .into()
     } else {
@@ -252,7 +253,6 @@ where
                 web::get().to(handle_jmap_event_source::<T>),
             )
             .route("/jmap/ws", web::get().to(handle_ws::<T>))
-            .route("/ingest", web::post().to(handle_ingest::<T>))
             .route("/auth", web::get().to(handle_user_device_auth::<T>))
             .route("/auth", web::post().to(handle_user_device_auth_post::<T>))
             .route("/auth/code", web::get().to(handle_user_code_auth::<T>))

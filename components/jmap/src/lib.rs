@@ -32,7 +32,6 @@ pub enum URI {
 pub type Result<T> = std::result::Result<T, MethodError>;
 
 pub const SUPERUSER_ID: AccountId = 0;
-pub const INGEST_ID: AccountId = 1;
 
 // Basic email sanitizer
 pub fn sanitize_email(email: &str) -> Option<String> {

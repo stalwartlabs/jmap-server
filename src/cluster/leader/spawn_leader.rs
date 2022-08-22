@@ -8,10 +8,10 @@ use store::log::raft::{LogIndex, RaftId};
 use store::roaring::{RoaringBitmap, RoaringTreemap};
 use store::tracing::{debug, error};
 use store::Store;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::watch;
 
 use super::{
-    rpc::{self, Request, Response, RpcEvent},
+    rpc::{Request, Response},
     Cluster,
 };
 use super::{Event, Peer};
@@ -242,7 +242,7 @@ where
                     }
                 };
 
-                let response = if let Some(response) = send_request(&peer_tx, request).await {
+                let response = if let Some(response) = request.send(&peer_tx).await {
                     match response {
                         Response::StepDown { term: peer_term } => {
                             if let Err(err) = main_tx
@@ -327,6 +327,7 @@ where
                         response @ (Response::UpdatePeers { .. }
                         | Response::Vote { .. }
                         | Response::Pong
+                        | Response::Command { .. }
                         | Response::Auth { .. }) => {
                             error!(
                                 "Unexpected response from peer {}: {:?}",
@@ -571,16 +572,4 @@ where
             }
         });
     }
-}
-
-async fn send_request(peer_tx: &mpsc::Sender<rpc::RpcEvent>, request: Request) -> Option<Response> {
-    let (response_tx, rx) = oneshot::channel();
-    peer_tx
-        .send(RpcEvent::NeedResponse {
-            request,
-            response_tx,
-        })
-        .await
-        .ok()?;
-    rx.await.unwrap_or(Response::None).into()
 }

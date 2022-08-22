@@ -1,8 +1,11 @@
+pub mod command;
 pub mod listener;
 pub mod peer;
 pub mod request;
 pub mod serialize;
 pub mod tls;
+
+use self::command::{Command, CommandResponse};
 
 use super::log::{AppendEntriesRequest, AppendEntriesResponse};
 use super::{gossip::PeerInfo, PeerId};
@@ -32,6 +35,9 @@ pub enum Request {
         term: TermId,
         request: AppendEntriesRequest,
     },
+    Command {
+        command: Command,
+    },
     Ping,
     None,
 }
@@ -43,6 +49,7 @@ pub enum Response {
     Vote { term: TermId, vote_granted: bool },
     StepDown { term: TermId },
     AppendEntries(AppendEntriesResponse),
+    Command { response: CommandResponse },
     Pong,
     UnregisteredPeer,
     None,

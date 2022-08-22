@@ -7,7 +7,6 @@ use std::fmt::Display;
 use store::core::vec_map::VecMap;
 
 pub mod blob;
-pub mod ingest;
 pub mod invocation;
 pub mod method;
 pub mod request;

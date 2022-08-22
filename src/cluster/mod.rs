@@ -1,4 +1,5 @@
 use self::gossip::PeerInfo;
+use self::rpc::command::{Command, CommandResponse};
 use crate::JMAPServer;
 use actix_web::web;
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,10 @@ pub enum Event {
     RpcResponse {
         peer_id: PeerId,
         response: rpc::Response,
+    },
+    RpcCommand {
+        command: Command,
+        response_tx: oneshot::Sender<CommandResponse>,
     },
     StepDown {
         term: TermId,

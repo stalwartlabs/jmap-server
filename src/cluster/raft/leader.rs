@@ -1,5 +1,6 @@
 use super::{Cluster, PeerId};
 use super::{State, RAFT_LOG_LEADER};
+use crate::cluster::Peer;
 use crate::services::{email_delivery, state_change};
 use crate::JMAPServer;
 use std::sync::atomic::Ordering;
@@ -16,6 +17,13 @@ where
         match self.state {
             State::Leader { .. } => Some(self.peer_id),
             State::Follower { peer_id, .. } => Some(peer_id),
+            _ => None,
+        }
+    }
+
+    pub fn leader_peer(&self) -> Option<&Peer> {
+        match self.state {
+            State::Follower { peer_id, .. } => self.get_peer(peer_id),
             _ => None,
         }
     }

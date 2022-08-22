@@ -24,6 +24,7 @@ pub struct JMAPConfig {
     pub mailbox_name_max_len: usize,
     pub mailbox_max_total: usize,
     pub mailbox_max_depth: usize,
+    pub mail_max_size: usize,
     pub mail_attachments_max_size: usize,
     pub mail_import_max_items: usize,
     pub mail_parse_max_items: usize,
@@ -56,6 +57,7 @@ impl From<&EnvSettings> for JMAPConfig {
             mail_attachments_max_size: settings
                 .parse("mail-attachments-max-size")
                 .unwrap_or(50000000),
+            mail_max_size: settings.parse("mail-max-size").unwrap_or(104857600),
             mail_import_max_items: settings.parse("mail-import-max-items").unwrap_or(5),
             mail_parse_max_items: settings.parse("mail-parse-max-items").unwrap_or(5),
             subscription_max_total: settings.parse("subscription-max-total").unwrap_or(100),

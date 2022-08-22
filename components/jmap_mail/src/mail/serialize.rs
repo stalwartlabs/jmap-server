@@ -230,6 +230,8 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                 value: map.next_value()?,
                             },
                         );
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
                     }
                 }
                 _ if key.starts_with("header:") => {
@@ -292,6 +294,8 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                             }
                         };
                         properties.append(Property::Header(header), header_value);
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
                     }
                 }
                 _ => {
@@ -342,6 +346,8 @@ impl<'de> serde::de::Visitor<'de> for EmailVisitor {
                                 map.next_value::<IgnoredAny>()?;
                             }
                         }
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
                     }
                 }
             }

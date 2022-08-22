@@ -8,7 +8,6 @@ use jmap_sharing::principal::set::JMAPSetPrincipal;
 use store::{core::collection::Collection, Store};
 
 use crate::{
-    api::ingest::{DeliveryStatus, Dsn},
     tests::{jmap_mail::ingest_message, store::utils::StoreCompareWith},
     JMAPServer,
 };

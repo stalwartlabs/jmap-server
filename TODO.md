@@ -3,7 +3,6 @@ jmap-server
 ===
 - Testing
   - Webmail client using Enron db.
-  - JMAPTest
 - Review all dependencies what kind of code they have.
 - Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).
 - Remove print!() and println!() from everywhere.
@@ -26,6 +25,19 @@ jmap-client
 ===
 - Use `Cow<str>`.
 - Write documentation and samples.
+
+Distro
+====
+- https://rust-cli.github.io/book/tutorial/packaging.html
+- https://skerritt.blog/packaging-your-rust-package/
+- https://www.infinyon.com/blog/2021/04/github-actions-best-practices/
+- https://github.com/japaric/trust
+- https://github.com/cross-rs/cross
+- https://github.com/jordansissel/fpm
+- https://gist.github.com/FedericoPonzi/873aea22b652572f5995f23b86543fdb
+- https://github.com/ClementTsang/bottom/blob/master/.github/workflows/ci.yml
+- https://github.com/nicolas-van/rust-cross-compile-example/blob/main/.github/workflows/rust.yml
+- https://github.com/Coding-Badly/rusty-tools/blob/main/.github/workflows/build.yml
 
 Final:
 ===
@@ -61,12 +73,11 @@ Settings
   - blob-min-size: 16384
   - blob-temp-ttl: 3600
 - Server
-  - hostname: 127.0.0.1:8080
-  - bind-addr: 127.0.0.1
-  - advertise-addr: 127.0.0.1
-  - cert-path: /etc/ssl/certs/jmap.pem
-  - key-path: /etc/ssl/private/jmap.key
-  - http-port: 8080
+  - jmap-hostname: localhost
+  - jmap-bind-addr: 127.0.0.1
+  - jmap-port: 8080
+  - jmap-cert-path: /etc/ssl/certs/jmap.pem
+  - jmap-key-path: /etc/ssl/private/jmap.key
   - worker-pool-size: Number of CPUs
   - strict-cors: false
 - E-mail Submissions
@@ -94,6 +105,7 @@ Settings
   - rate-limit-auth: 10/60
   - use-forwarded-header: false
   - subscription-max-total: 100
+  - mail-max-size: 104857600
 
 - Websockets
   - ws-client-timeout: 10 seconds
@@ -118,8 +130,17 @@ Settings
   - push-attempt-interval: 60 * 1000
   - push-throttle: 1000
 
+- LMTP
+  - lmtp-bind-addr: 127.0.0.1
+  - lmtp-port: 11200
+  - lmtp-cert-path
+  - lmtp-key-path
+  - lmtp-tls-only: false
+
 - Cluster
   - seed-nodes: 127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914
+  - rpc-bind-addr: 127.0.0.1 (or bind-addr)
+  - rpc-advertise-addr: 127.0.0.1
   - rpc-port: 7911
   - rpc-key: <String>
   - peer-ping-interval: 500

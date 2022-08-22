@@ -3,6 +3,7 @@
 pub mod api;
 pub mod authorization;
 pub mod cluster;
+pub mod lmtp;
 pub mod server;
 pub mod services;
 
@@ -29,7 +30,7 @@ use store::{
     JMAPStore, Store,
 };
 use store_rocksdb::RocksDB;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::server::UnwrapFailure;
 
@@ -41,9 +42,11 @@ pub struct JMAPServer<T> {
     pub worker_pool: rayon::ThreadPool,
     pub base_session: api::session::Session,
     pub cluster: Option<ClusterIpc>,
+
     pub state_change: mpsc::Sender<state_change::Event>,
     pub email_delivery: mpsc::Sender<email_delivery::Event>,
     pub housekeeper: mpsc::Sender<housekeeper::Event>,
+    pub lmtp: watch::Sender<bool>,
 
     pub oauth: Box<oauth::OAuth>,
     pub oauth_codes: Cache<String, Arc<oauth::OAuthCode>>,
@@ -69,17 +72,9 @@ async fn main() -> std::io::Result<()> {
     .failed_to("setdefault subscriber failed.");
 
     // Set hostname if missing
-    if !settings.contains_key("hostname") {
-        let default_hostname = format!(
-            "{}:{}",
-            settings.parse_ipaddr("advertise-addr", "127.0.0.1"),
-            settings.parse("http-port").unwrap_or(DEFAULT_HTTP_PORT)
-        );
-        info!(
-            "Warning: Hostname parameter 'hostname' was not specified, using default '{}'.",
-            default_hostname
-        );
-        settings.set_value("hostname".to_string(), default_hostname);
+    if !settings.contains_key("jmap-hostname") {
+        info!("Warning: Hostname parameter 'jmap-hostname' was not specified, using 'localhost'.",);
+        settings.set_value("jmap-hostname".to_string(), "localhost".to_string());
     }
 
     // Init JMAP server

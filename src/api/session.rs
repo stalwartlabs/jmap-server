@@ -123,10 +123,10 @@ struct VacationResponseCapabilities {}
 
 impl Session {
     pub fn new(settings: &EnvSettings, config: &JMAPConfig) -> Session {
-        let hostname = settings.get("hostname").unwrap();
+        let hostname = settings.get("jmap-hostname").unwrap();
         let base_url = format!(
             "{}://{}",
-            if settings.contains_key("cert-path") {
+            if settings.contains_key("jmap-cert-path") {
                 "https"
             } else {
                 "http"

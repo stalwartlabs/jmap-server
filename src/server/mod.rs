@@ -5,7 +5,7 @@ pub mod websocket;
 use crate::services::{email_delivery, housekeeper, state_change};
 use crate::{cluster, JMAPServer};
 use store::core::error::StoreError;
-use store::tracing::error;
+use store::tracing::{debug, error};
 use store::ColumnFamily;
 use store::{
     serialize::{StoreDeserialize, StoreSerialize},
@@ -101,6 +101,10 @@ where
             }
         }
 
+        if self.lmtp.send(false).is_err() {
+            error!("Failed to send shutdown event to LMTP service.");
+        }
+
         if self
             .state_change
             .send(state_change::Event::Stop)
@@ -125,7 +129,7 @@ where
             .await
             .is_err()
         {
-            error!("Failed to send shutdown event to e-mail delivery task.");
+            debug!("Failed to send shutdown event to e-mail delivery task.");
         }
     }
 

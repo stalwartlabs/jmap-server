@@ -63,6 +63,9 @@ where
                 rpc::Request::Ping => response_tx
                     .send(rpc::Response::Pong)
                     .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
+                rpc::Request::Command { command } => {
+                    self.handle_command(command, response_tx).await;
+                }
                 _ => response_tx
                     .send(rpc::Response::None)
                     .unwrap_or_else(|_| error!("Oneshot response channel closed.")),
@@ -117,6 +120,12 @@ where
                 commit_index,
             } => {
                 self.advance_commit_index(peer_id, commit_index).await?;
+            }
+            Event::RpcCommand {
+                command,
+                response_tx,
+            } => {
+                self.send_command(command, response_tx).await;
             }
             Event::Shutdown => return Ok(false),
 

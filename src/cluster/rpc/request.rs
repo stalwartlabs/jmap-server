@@ -1,7 +1,7 @@
 use super::{Protocol, Request, Response, RpcEvent};
 use crate::cluster::Peer;
 use store::tracing::error;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 impl Peer {
     // Sends a request and "waits" asynchronically until the response is available.
@@ -43,5 +43,19 @@ impl Protocol {
             Protocol::Response(res) => res,
             _ => Response::None,
         }
+    }
+}
+
+impl Request {
+    pub async fn send(self, peer_tx: &mpsc::Sender<RpcEvent>) -> Option<Response> {
+        let (response_tx, rx) = oneshot::channel();
+        peer_tx
+            .send(RpcEvent::NeedResponse {
+                request: self,
+                response_tx,
+            })
+            .await
+            .ok()?;
+        rx.await.unwrap_or(Response::None).into()
     }
 }

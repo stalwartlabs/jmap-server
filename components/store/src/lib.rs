@@ -17,6 +17,7 @@ use log::raft::{LogIndex, RaftId};
 use moka::sync::Cache;
 use parking_lot::{Mutex, MutexGuard};
 use roaring::RoaringBitmap;
+use serde::{Deserialize, Serialize};
 use serialize::StoreDeserialize;
 use std::sync::atomic::AtomicBool;
 use std::{
@@ -109,7 +110,7 @@ pub struct SharedResource {
     pub acl: ACL,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecipientType {
     Individual(AccountId),
     List(Vec<(AccountId, String)>),

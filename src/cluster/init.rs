@@ -79,7 +79,11 @@ pub async fn start_cluster<T>(
     .await;
 
     let bind_addr = SocketAddr::from((
-        settings.parse_ipaddr("bind-addr", "127.0.0.1"),
+        if settings.contains_key("rpc-bind-addr") {
+            settings.parse_ipaddr("rpc-bind-addr", "127.0.0.1")
+        } else {
+            settings.parse_ipaddr("jmap-bind-addr", "127.0.0.1")
+        },
         settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT),
     ));
     info!("Starting RPC server at {} (UDP/TCP)...", bind_addr);
@@ -235,7 +239,7 @@ where
         let config = Config::new(settings);
 
         // Obtain public addresses to advertise
-        let advertise_addr = settings.parse_ipaddr("advertise-addr", "127.0.0.1");
+        let advertise_addr = settings.parse_ipaddr("rpc-advertise-addr", "127.0.0.1");
         let rpc_port = settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT);
 
         // Obtain peer id from disk or generate a new one.
@@ -276,12 +280,12 @@ where
         // Calculate generationId
         let hostname = format!(
             "{}://{}",
-            if settings.contains_key("cert-path") {
+            if settings.contains_key("jmap-cert-path") {
                 "https"
             } else {
                 "http"
             },
-            settings.get("hostname").unwrap()
+            settings.get("jmap-hostname").unwrap()
         );
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
