@@ -1,11 +1,10 @@
-use std::sync::Arc;
-
 use actix_web::web;
-use jmap::types::jmap::JMAPId;
-use jmap_client::{client::Client, mailbox::Role};
+use jmap::{types::jmap::JMAPId, SUPERUSER_ID};
+use jmap_client::client::Client;
+use jmap_sharing::principal::set::JMAPSetPrincipal;
 use store::{
     chrono::{Duration, Utc},
-    RecipientType, Store,
+    Store,
 };
 
 use crate::{
@@ -14,7 +13,7 @@ use crate::{
             email_submission::{
                 assert_message_delivery, expect_nothing, spawn_mock_smtp_server, MockMessage,
             },
-            ingest_message,
+            lmtp::SmtpConnection,
         },
         store::utils::StoreCompareWith,
     },
@@ -28,22 +27,24 @@ where
     println!("Running Vacation Response tests...");
 
     // Create INBOX
-    let mailbox_id = client
-        .set_default_account_id(JMAPId::new(1).to_string())
-        .mailbox_create("Inbox", None::<String>, Role::Inbox)
+    let domain_id = client
+        .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
+        .domain_create("example.com")
         .await
         .unwrap()
         .take_id();
-    server.store.recipients.insert(
-        "jdoe@example.com".to_string(),
-        Arc::new(RecipientType::Individual(1)),
-    );
+    let account_id = client
+        .individual_create("jdoe@example.com", "12345", "John Doe")
+        .await
+        .unwrap()
+        .take_id();
 
     // Start mock SMTP server
     let (mut smtp_rx, smtp_settings) = spawn_mock_smtp_server();
 
     // Let people know that we'll be down in Kokomo
     client
+        .set_default_account_id(&account_id)
         .vacation_response_create(
             "Off the Florida Keys there's a place called Kokomo",
             "That's where you wanna go to get away from it all".into(),
@@ -52,8 +53,13 @@ where
         .await
         .unwrap();
 
+    // Connect to LMTP service
+    let mut lmtp = SmtpConnection::connect().await;
+
     // Send a message
-    ingest_message(
+    lmtp.ingest(
+        "bill@example.com",
+        &["jdoe@example.com"],
         concat!(
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
@@ -61,10 +67,7 @@ where
             "\r\n",
             "I'm going to need those TPS reports ASAP. ",
             "So, if you could do that, that'd be great."
-        )
-        .as_bytes()
-        .to_vec(),
-        &["jdoe@example.com"],
+        ),
     )
     .await;
 
@@ -78,19 +81,36 @@ where
 
     // Further messages from the same recipient should not
     // trigger a vacation response
-    ingest_message(
+    lmtp.ingest(
+        "bill@example.com",
+        &["jdoe@example.com"],
         concat!(
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
             "Subject: TPS Report -- friendly reminder\r\n",
             "\r\n",
             "Listen, are you gonna have those TPS reports for us this afternoon?",
-        )
-        .as_bytes()
-        .to_vec(),
-        &["jdoe@example.com"],
+        ),
     )
     .await;
+
+    expect_nothing(&mut smtp_rx).await;
+
+    // Messages from MAILER-DAEMON should not
+    // trigger a vacation response
+    lmtp.ingest(
+        "MAILER-DAEMON@example.com",
+        &["jdoe@example.com"],
+        concat!(
+            "From: MAILER-DAEMON@example.com\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: Delivery Failure\r\n",
+            "\r\n",
+            "I tried so hard and got so far but in the end it wasn't delivered.",
+        ),
+    )
+    .await;
+
     expect_nothing(&mut smtp_rx).await;
 
     // Vacation responses should honor the configured date ranges
@@ -98,19 +118,19 @@ where
         .vacation_response_set_dates((Utc::now() + Duration::days(1)).timestamp().into(), None)
         .await
         .unwrap();
-    ingest_message(
+    lmtp.ingest(
+        "jane_smith@example.com",
+        &["jdoe@example.com"],
         concat!(
             "From: jane_smith@example.com\r\n",
             "To: jdoe@example.com\r\n",
             "Subject: When were you going on holidays?\r\n",
             "\r\n",
             "I'm asking because Bill really wants those TPS reports.",
-        )
-        .as_bytes()
-        .to_vec(),
-        &["jdoe@example.com"],
+        ),
     )
     .await;
+
     expect_nothing(&mut smtp_rx).await;
 
     client
@@ -118,19 +138,20 @@ where
         .await
         .unwrap();
     smtp_settings.lock().do_stop = true;
-    ingest_message(
+    lmtp.ingest(
+        "jane_smith@example.com",
+        &["jdoe@example.com"],
         concat!(
             "From: jane_smith@example.com\r\n",
             "To: jdoe@example.com\r\n",
             "Subject: When were you going on holidays?\r\n",
             "\r\n",
             "I'm asking because Bill really wants those TPS reports.",
-        )
-        .as_bytes()
-        .to_vec(),
-        &["jdoe@example.com"],
+        ),
     )
     .await;
+    lmtp.quit().await;
+
     assert_message_delivery(
         &mut smtp_rx,
         MockMessage::new(
@@ -142,8 +163,14 @@ where
     )
     .await;
 
-    // Delete vacation response
-    client.mailbox_destroy(&mailbox_id, true).await.unwrap();
-    client.vacation_response_destroy().await.unwrap();
+    // Remove test data
+    for account_id in [&account_id, &domain_id] {
+        client
+            .set_default_account_id(JMAPId::new(SUPERUSER_ID as u64))
+            .principal_destroy(account_id)
+            .await
+            .unwrap();
+    }
+    server.store.principal_purge().unwrap();
     server.store.assert_is_empty();
 }

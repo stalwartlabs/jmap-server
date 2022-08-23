@@ -208,7 +208,6 @@ where
                             commit_index,
                             changed_accounts.len()
                         );
-                        println!("Normal updates: {:#?}", updates);
                         indexes.leader_commit_index = commit_index;
 
                         if let Some((next_state, response)) = core

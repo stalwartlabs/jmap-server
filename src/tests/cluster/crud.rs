@@ -1,13 +1,20 @@
 use std::sync::Arc;
 
 use actix_web::web;
-use jmap_client::client::{Client, Credentials};
+use jmap_client::{
+    client::{Client, Credentials},
+    email::{query::Filter, Property},
+};
 use store::{ahash::AHashMap, parking_lot::Mutex, Store};
 
 use crate::{
-    tests::cluster::utils::{
-        activate_all_peers, assert_cluster_updated, assert_leader_elected, assert_mirrored_stores,
-        compact_log, find_online_follower, shutdown_all, test_batch, Clients, Cluster,
+    tests::{
+        cluster::utils::{
+            activate_all_peers, assert_cluster_updated, assert_leader_elected,
+            assert_mirrored_stores, compact_log, find_online_follower, shutdown_all, test_batch,
+            Clients, Cluster,
+        },
+        jmap_mail::lmtp::{AssertResult, SmtpConnection},
     },
     JMAPServer,
 };
@@ -29,44 +36,101 @@ where
     // Keep one leader offline
     leader.set_offline(true, true).await;
 
+    // Create test principals
+    assert_leader_elected(&peers).await;
+    let client = &clients.clients[0];
+    client.domain_create("example.com").await.unwrap();
+    let account_id_1 = client
+        .individual_create("jdoe@example.com", "12345", "John Doe")
+        .await
+        .unwrap()
+        .take_id();
+    let account_id_2 = client
+        .individual_create("jane@example.com", "abcde", "Jane Doe")
+        .await
+        .unwrap()
+        .take_id();
+    client
+        .list_create(
+            "members@example.com",
+            "Mailing List",
+            [&account_id_1, &account_id_2],
+        )
+        .await
+        .unwrap()
+        .take_id();
+
+    // Connect to one of the followers and test read replicas
+    // Disable redirects to avoid the request from being redirected to the leader
+    let follower_id = find_online_follower(&peers) + 1;
+    let mut follower_client = Client::new()
+        .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
+        .connect(&format!("http://127.0.0.1:{}", 8000 + follower_id))
+        .await
+        .unwrap();
+    assert_eq!(
+        follower_client
+            .principal_get(&account_id_1, None::<Vec<_>>)
+            .await
+            .unwrap()
+            .unwrap()
+            .email()
+            .unwrap(),
+        "jdoe@example.com"
+    );
+
+    // LMTP requests should be forwarded to the leader over RPC
+    let mut lmtp = SmtpConnection::connect_peer(follower_id).await;
+    lmtp.expn("members@example.com", 2)
+        .await
+        .assert_contains("jdoe@example.com")
+        .assert_contains("jane@example.com");
+    lmtp.vrfy("jdoe@example.com", 2).await;
+    lmtp.ingest(
+        "bill@otherdomain.com",
+        &["jdoe@example.com"],
+        concat!(
+            "From: bill@otherdomain.com\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: TPS Report\r\n",
+            "\r\n",
+            "I'm going to need those TPS reports ASAP. ",
+            "So, if you could do that, that'd be great."
+        ),
+    )
+    .await;
+    lmtp.quit().await;
+    assert_cluster_updated(&peers).await;
+
+    // Make sure the message was delivered
+    let mut ids = follower_client
+        .set_default_account_id(&account_id_1)
+        .email_query(None::<Filter>, None::<Vec<_>>)
+        .await
+        .unwrap()
+        .take_ids();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(
+        follower_client
+            .email_get(&ids.pop().unwrap(), [Property::Subject].into())
+            .await
+            .unwrap()
+            .unwrap()
+            .subject()
+            .unwrap(),
+        "TPS Report"
+    );
+
+    assert_cluster_updated(&peers).await;
+    assert_mirrored_stores(peers.clone(), true).await;
+
+    // Test create, update, delete operations
     let mut prev_offline_leader: Option<&web::Data<JMAPServer<T>>> = None;
     let mailbox_map = Arc::new(Mutex::new(AHashMap::new()));
     let email_map = Arc::new(Mutex::new(AHashMap::new()));
 
     for (batch_num, batch) in test_batch().into_iter().enumerate() {
         let leader = assert_leader_elected(&peers).await;
-        if batch_num == 0 {
-            let client = &clients.clients[0];
-            // Create an account
-            client.domain_create("example.com").await.unwrap();
-            let account_id = client
-                .individual_create("jdoe@example.com", "12345", "John Doe")
-                .await
-                .unwrap()
-                .take_id();
-
-            // Connect to one of the followers and test read replicas
-            // Disable redirects to avoid the request from being redirected to the leader
-            let follower_client = Client::new()
-                .credentials(Credentials::bearer("DO_NOT_ATTEMPT_THIS_AT_HOME"))
-                .connect(&format!(
-                    "http://127.0.0.1:{}",
-                    8001 + find_online_follower(&peers)
-                ))
-                .await
-                .unwrap();
-            assert_eq!(
-                follower_client
-                    .principal_get(&account_id, None::<Vec<_>>)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .email()
-                    .unwrap(),
-                "jdoe@example.com"
-            );
-        }
-
         let mailbox_map = mailbox_map.clone();
         let email_map = email_map.clone();
         let clients = clients.clone();

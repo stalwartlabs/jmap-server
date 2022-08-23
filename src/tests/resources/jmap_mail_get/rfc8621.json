@@ -196,7 +196,7 @@
           {
             "partId": "13",
             "blobId": "blob_8",
-            "size": 14,
+            "size": 13,
             "headers": [
               {
                 "name": "Content-Type",
@@ -463,7 +463,7 @@
     {
       "partId": "13",
       "blobId": "blob_8",
-      "size": 14,
+      "size": 13,
       "headers": [
         {
           "name": "Content-Type",

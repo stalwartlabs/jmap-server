@@ -278,15 +278,7 @@ where
         let addr = SocketAddr::from((advertise_addr, rpc_port));
 
         // Calculate generationId
-        let hostname = format!(
-            "{}://{}",
-            if settings.contains_key("jmap-cert-path") {
-                "https"
-            } else {
-                "http"
-            },
-            settings.get("jmap-hostname").unwrap()
-        );
+        let hostname = settings.get("jmap-url").unwrap();
         let mut generation = DefaultHasher::new();
         peer_id.hash(&mut generation);
         shard_id.hash(&mut generation);

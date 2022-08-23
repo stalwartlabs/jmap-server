@@ -71,10 +71,18 @@ async fn main() -> std::io::Result<()> {
     )
     .failed_to("setdefault subscriber failed.");
 
-    // Set hostname if missing
-    if !settings.contains_key("jmap-hostname") {
-        info!("Warning: Hostname parameter 'jmap-hostname' was not specified, using 'localhost'.",);
-        settings.set_value("jmap-hostname".to_string(), "localhost".to_string());
+    // Set base URL if missing
+    if !settings.contains_key("jmap-url") {
+        info!("Warning: Hostname parameter 'jmap-url' was not specified, using 'localhost'.",);
+        settings.set_value(
+            "jmap-url".to_string(),
+            if settings.contains_key("jmap-cert-path") {
+                "https://localhost"
+            } else {
+                "http://localhost"
+            }
+            .to_string(),
+        );
     }
 
     // Init JMAP server

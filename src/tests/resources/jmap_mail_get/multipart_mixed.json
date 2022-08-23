@@ -133,7 +133,7 @@
       {
         "partId": "7",
         "blobId": "blob_5",
-        "size": 224,
+        "size": 223,
         "headers": [
           {
             "name": "Content-Type",
@@ -251,7 +251,7 @@
     {
       "partId": "7",
       "blobId": "blob_5",
-      "size": 224,
+      "size": 223,
       "headers": [
         {
           "name": "Content-Type",

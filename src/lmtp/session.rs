@@ -75,11 +75,7 @@ where
     pub async fn ingest(&mut self, bytes: &[u8]) -> Result<(), ()> {
         /*let tmp = "dd";
         for line in String::from_utf8_lossy(bytes).split("\r\n") {
-            if let Some((tag, _)) = line.split_once(' ') {
-                if tag.len() < 10 && tag.contains('.') {
-                    println!("<- {:?}", &line[..std::cmp::min(line.len(), 100)]);
-                }
-            }
+            println!("<- {:?}", &line[..std::cmp::min(line.len(), 100)]);
         }*/
 
         let mut bytes = bytes.iter();
@@ -313,6 +309,9 @@ where
     }
 
     pub async fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), ()> {
+        /*let aa = "fdf";
+        println!("-> {}", String::from_utf8_lossy(bytes));*/
+
         match &mut self.stream {
             Stream::Clear(stream) => stream.write_all(bytes).await.map_err(|err| {
                 debug!("Failed to write to stream: {}", err);

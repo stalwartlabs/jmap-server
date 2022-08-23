@@ -116,7 +116,7 @@ where
 
         helper.destroy(|id, helper, document| {
             #[cfg(not(feature = "debug"))]
-            if [SUPERUSER_ID, jmap::INGEST_ID].contains(&document.document_id) {
+            if [SUPERUSER_ID].contains(&document.document_id) {
                 return Err(SetError::forbidden("Cannot delete system accounts."));
             }
 

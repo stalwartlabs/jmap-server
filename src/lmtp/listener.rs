@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use actix_web::web;
 use store::{
@@ -9,7 +13,10 @@ use store::{
 use tokio::{io::AsyncWriteExt, net::TcpListener, sync::watch};
 use tokio_rustls::TlsAcceptor;
 
-use crate::{cluster::rpc::tls::load_tls_server_config, lmtp::session::Session, JMAPServer};
+use crate::{
+    cluster::rpc::tls::load_tls_server_config, lmtp::session::Session, server::failed_to,
+    JMAPServer,
+};
 
 const TIMEOUT: Duration = Duration::from_secs(5 * 60); // 5 minutes
 const DEFAULT_LMTP_PORT: u16 = 11200;
@@ -31,6 +38,23 @@ pub fn spawn_lmtp<T>(
         settings.parse("lmtp-port").unwrap_or(DEFAULT_LMTP_PORT),
     ));
     info!("Starting LMTP service at {}...", bind_addr);
+
+    // Parse allowed IPs
+    let allowed_ips = if let Some(allowed_ips_) = settings.get("lmtp-allowed-ips") {
+        let mut allowed_ips = Vec::new();
+        for ip in allowed_ips_.split(';') {
+            allowed_ips.push(ip.parse::<IpAddr>().unwrap_or_else(|_| {
+                failed_to(&format!("parse 'lmtp-allowed-ips', invalid ip {}.", ip));
+            }));
+        }
+        if !allowed_ips.is_empty() {
+            allowed_ips.into()
+        } else {
+            failed_to("parse 'lmtp-allowed-ips', no entries found.");
+        }
+    } else {
+        None
+    };
 
     // Build TLS acceptor
     let tls_acceptor = if let (Some(cert_path), Some(key_path)) = (
@@ -82,7 +106,14 @@ pub fn spawn_lmtp<T>(
             tokio::select! {
                 stream = listener.accept() => {
                     match stream {
-                        Ok((mut stream, _)) => {
+                        Ok((mut stream, peer_addr)) => {
+                            if let Some(allowed_ips) = &allowed_ips {
+                                if !allowed_ips.contains(&peer_addr.ip()) {
+                                    debug!("Dropping LMTP connection from unknow address {}.", peer_addr.ip());
+                                    continue;
+                                }
+                            }
+
                             let shutdown_rx = shutdown_rx.clone();
                             let core = core.clone();
                             let greeting = greeting.clone();
@@ -90,8 +121,6 @@ pub fn spawn_lmtp<T>(
                             let hostname = hostname.clone();
 
                             tokio::spawn(async move {
-                                let peer_addr = stream.peer_addr().unwrap();
-
                                 if tls_only {
                                     let mut stream = match tls_acceptor.as_ref().unwrap().accept(stream).await {
                                         Ok(stream) => stream,

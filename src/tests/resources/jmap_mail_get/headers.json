@@ -84,7 +84,7 @@
       },
       {
         "partId": "2",
-        "size": 724,
+        "size": 723,
         "type": "message/rfc822"
       }
     ]
@@ -115,7 +115,7 @@
   "attachments": [
     {
       "partId": "2",
-      "size": 724,
+      "size": 723,
       "type": "message/rfc822"
     }
   ],

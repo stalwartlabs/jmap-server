@@ -10,7 +10,8 @@ use tokio::sync::mpsc;
 
 use crate::{
     tests::{
-        jmap::bypass_authentication, jmap_mail::ingest_message, store::utils::StoreCompareWith,
+        jmap::bypass_authentication, jmap_mail::lmtp::SmtpConnection,
+        store::utils::StoreCompareWith,
     },
     JMAPServer,
 };
@@ -66,7 +67,10 @@ where
     assert_ping(&mut event_rx).await; // Pings are only received in cfg(test)
 
     // Ingest email and expect state change
-    ingest_message(
+    let mut lmtp = SmtpConnection::connect().await;
+    lmtp.ingest(
+        "bill@example.com",
+        &["jdoe@example.com"],
         concat!(
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
@@ -74,12 +78,10 @@ where
             "\r\n",
             "I'm going to need those TPS reports ASAP. ",
             "So, if you could do that, that'd be great."
-        )
-        .as_bytes()
-        .to_vec(),
-        &["jdoe@example.com"],
+        ),
     )
     .await;
+    lmtp.quit().await;
 
     assert_state(
         &mut event_rx,

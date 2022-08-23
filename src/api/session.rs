@@ -123,16 +123,7 @@ struct VacationResponseCapabilities {}
 
 impl Session {
     pub fn new(settings: &EnvSettings, config: &JMAPConfig) -> Session {
-        let hostname = settings.get("jmap-hostname").unwrap();
-        let base_url = format!(
-            "{}://{}",
-            if settings.contains_key("jmap-cert-path") {
-                "https"
-            } else {
-                "http"
-            },
-            hostname
-        );
+        let base_url = settings.get("jmap-url").unwrap();
 
         Session {
             capabilities: VecMap::from_iter([

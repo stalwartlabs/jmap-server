@@ -41,6 +41,7 @@ impl GetObject for VacationResponse {
     }
 }
 
+#[derive(Debug)]
 pub struct VacationMessage {
     pub from: String,
     pub to: String,

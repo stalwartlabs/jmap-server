@@ -45,7 +45,7 @@ where
     assert!(matches!(
         Client::new()
             .credentials(Credentials::basic("jdoe@example.com", "abcde"))
-            .connect(admin_client.session_url())
+            .connect(server.base_session.base_url())
             .await,
         Err(jmap_client::Error::Problem(ProblemDetails {
             status: Some(401),
@@ -62,7 +62,7 @@ where
                 "not_an_account@example.com",
                 &format!("brute_force{}", n),
             ))
-            .connect(admin_client.session_url())
+            .connect(server.base_session.base_url())
             .await
         {
             if problem.status().unwrap() == 401 {
@@ -89,7 +89,7 @@ where
     // Login with the correct credentials
     let client = Client::new()
         .credentials(Credentials::basic("jdoe@example.com", "12345"))
-        .connect(admin_client.session_url())
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
     assert_eq!(client.session().username(), "jdoe@example.com");

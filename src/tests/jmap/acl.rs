@@ -54,19 +54,19 @@ where
     // Authenticate all accounts
     let mut john_client = Client::new()
         .credentials(Credentials::basic("jdoe@example.com", "12345"))
-        .connect(admin_client.session_url())
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
 
     let mut jane_client = Client::new()
         .credentials(Credentials::basic("jane.smith@example.com", "abcde"))
-        .connect(admin_client.session_url())
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
 
     let mut bill_client = Client::new()
         .credentials(Credentials::basic("bill@example.com", "098765"))
-        .connect(admin_client.session_url())
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
 

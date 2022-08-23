@@ -111,7 +111,7 @@ where
     // Connect to account using token and attempt to search
     let john_client = Client::new()
         .credentials(Credentials::bearer(&token))
-        .connect(admin_client.session_url())
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
     assert_eq!(john_client.default_account_id(), john_id);
@@ -222,7 +222,7 @@ where
     // Connect to account using token and attempt to search
     let john_client = Client::new()
         .credentials(Credentials::bearer(&token))
-        .connect(admin_client.session_url())
+        .connect(server.base_session.base_url())
         .await
         .unwrap();
     assert_eq!(john_client.default_account_id(), john_id);
@@ -234,7 +234,7 @@ where
         .is_empty());
 
     // Connecting using the refresh token should not work
-    assert_unauthorized(admin_client, &refresh_token).await;
+    assert_unauthorized(server.base_session.base_url(), &refresh_token).await;
 
     // Refreshing a token using the access token should not work
     assert_eq!(
@@ -264,7 +264,7 @@ where
 
     // Wait 1 second and make sure the access token expired
     tokio::time::sleep(Duration::from_secs(1)).await;
-    assert_unauthorized(admin_client, &token).await;
+    assert_unauthorized(server.base_session.base_url(), &token).await;
 
     // Wait another second for the refresh token to be about to expire
     // and expect a new refresh token
@@ -372,10 +372,10 @@ async fn assert_client_auth(
     assert!(html_response.contains(expect), "{:#?}", html_response);
 }
 
-async fn assert_unauthorized(client: &Client, token: &str) {
+async fn assert_unauthorized(base_url: &str, token: &str) {
     match Client::new()
         .credentials(Credentials::bearer(token))
-        .connect(client.session_url())
+        .connect(base_url)
         .await
     {
         Ok(_) => panic!("Expected unauthorized access."),

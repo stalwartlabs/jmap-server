@@ -6,11 +6,16 @@ jmap-server
 - Review all dependencies what kind of code they have.
 - Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).
 - Remove print!() and println!() from everywhere.
+- Refresh addresses when created
+- <- "Received: from localhost (localhost [127.0.0.1])"
+<- "\tby localhost.fritz.box (Postfix) with ESMTP id 47A64C2911;"
+<- "\tTue, 23 Aug 2022 13:57:54 +0000 (UTC)"
 
 imap-server
 ===
-- Retest, make sure parsing is OK.
 - Fuzz testing.
+- Trusted IPs Redirects
+- Set forwarded IPs header
 - Check TODOs
 
 jmap + imap + cli
@@ -73,7 +78,7 @@ Settings
   - blob-min-size: 16384
   - blob-temp-ttl: 3600
 - Server
-  - jmap-hostname: localhost
+  - jmap-url: http://localhost
   - jmap-bind-addr: 127.0.0.1
   - jmap-port: 8080
   - jmap-cert-path: /etc/ssl/certs/jmap.pem
@@ -136,6 +141,7 @@ Settings
   - lmtp-cert-path
   - lmtp-key-path
   - lmtp-tls-only: false
+  - lmtp-allowed-ips: ip1;ip2
 
 - Cluster
   - seed-nodes: 127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914
@@ -163,3 +169,14 @@ Settings
   - oauth-refresh-token-expiry: 30 * 86400
   - oauth-refresh-token-renew: 4 * 86400
   - oauth-max-attempts: 3
+
+
+address_verify_negative_expire_time = 30s
+address_verify_negative_refresh_time = 30s
+address_verify_positive_expire_time = 12h
+address_verify_positive_refresh_time = 6h
+
+virtual_mailbox_domains = example.com
+virtual_transport=lmtp:[127.0.0.1]:11200
+smtpd_recipient_restrictions = reject_unverified_recipient
+

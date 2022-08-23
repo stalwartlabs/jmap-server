@@ -10,6 +10,7 @@ use jmap_mail::identity::schema::Identity;
 use jmap_mail::mail::schema::Email;
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::vacation_response::schema::VacationResponse;
+use store::ahash::AHashSet;
 use store::serialize::key::ValueKey;
 use store::serialize::leb128::Leb128Reader;
 use store::{ahash::AHashMap, blob::BLOB_HASH_LEN};
@@ -148,9 +149,10 @@ pub fn init_settings(
                 temp_dir.to_str().unwrap().to_string(),
             ),
             (
-                "jmap-hostname".to_string(),
-                format!("127.0.0.1:{}", 8000 + peer_num),
+                "jmap-url".to_string(),
+                format!("http://127.0.0.1:{}", 8000 + peer_num),
             ),
+            ("lmtp-port".to_string(), (11200 + peer_num).to_string()),
             ("max-objects-in-set".to_string(), "100000".to_string()),
             ("query-max-results".to_string(), "100000".to_string()),
             ("jmap-port".to_string(), (8000 + peer_num).to_string()),
@@ -480,14 +482,32 @@ where
                                             changed_accounts: other_changed_accounts,
                                         },
                                     ) => {
-                                        for changed_account in changed_accounts {
+                                        let changed_accounts = changed_accounts
+                                            .iter()
+                                            .map(|(k, v)| {
+                                                (
+                                                    k.clone(),
+                                                    v.iter().copied().collect::<AHashSet<_>>(),
+                                                )
+                                            })
+                                            .collect::<Vec<_>>();
+                                        let other_changed_accounts = other_changed_accounts
+                                            .iter()
+                                            .map(|(k, v)| {
+                                                (
+                                                    k.clone(),
+                                                    v.iter().copied().collect::<AHashSet<_>>(),
+                                                )
+                                            })
+                                            .collect::<Vec<_>>();
+                                        for changed_account in &changed_accounts {
                                             if !other_changed_accounts.contains(changed_account) {
                                                 do_panic = true;
                                                 break;
                                             }
                                         }
                                         if !do_panic {
-                                            for other_changed_account in other_changed_accounts {
+                                            for other_changed_account in &other_changed_accounts {
                                                 if !changed_accounts.contains(other_changed_account)
                                                 {
                                                     do_panic = true;

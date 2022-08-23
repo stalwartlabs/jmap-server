@@ -91,17 +91,15 @@ where
 
         // Build response
         let mut buf = Vec::with_capacity(128);
-        for (pos, rcpt) in rcpt_to.iter().enumerate() {
-            let (code, esn, mailbox, message) = match rcpt {
+        for rcpt in &rcpt_to {
+            let (code, mailbox, message) = match rcpt {
                 RcptType::Mailbox { id, name } => match delivery_status.get(id).unwrap() {
-                    DeliveryStatus::Success => {
-                        (b"250", b"2.1.5", name.as_bytes(), &b"Delivered"[..])
-                    }
+                    DeliveryStatus::Success => (b"250 2.1.5", name.as_bytes(), &b"delivered."[..]),
                     DeliveryStatus::TemporaryFailure { reason } => {
-                        (b"451", b"4.3.0", name.as_bytes(), reason.as_bytes())
+                        (b"451 4.3.0", name.as_bytes(), reason.as_bytes())
                     }
                     DeliveryStatus::PermanentFailure { reason } => {
-                        (b"550", b"5.5.0", name.as_bytes(), reason.as_bytes())
+                        (b"550 5.5.0", name.as_bytes(), reason.as_bytes())
                     }
                 },
                 RcptType::List { ids, name } => {
@@ -122,32 +120,16 @@ where
                     }
 
                     if success > 0 {
-                        (b"250", b"2.1.5", name.as_bytes(), &b"Delivered."[..])
+                        (b"250 2.1.5", name.as_bytes(), &b"delivered."[..])
                     } else if temp_failures > 0 {
-                        (
-                            b"451",
-                            b"4.3.0",
-                            name.as_bytes(),
-                            &b"Temporary failure."[..],
-                        )
+                        (b"451 4.3.0", name.as_bytes(), &b"temporary failure."[..])
                     } else {
-                        (
-                            b"550",
-                            b"5.5.0",
-                            name.as_bytes(),
-                            &b"Permanent failure."[..],
-                        )
+                        (b"550 5.5.0", name.as_bytes(), &b"permanent failure."[..])
                     }
                 }
             };
 
             buf.extend_from_slice(code);
-            if pos == rcpt_to.len() - 1 {
-                buf.push(b' ');
-            } else {
-                buf.push(b'-');
-            }
-            buf.extend_from_slice(esn);
             buf.extend_from_slice(b" <");
             buf.extend_from_slice(mailbox);
             buf.extend_from_slice(b"> ");
@@ -160,7 +142,12 @@ where
 
     pub async fn expand_rcpt(&self, email: &str) -> Option<Arc<RecipientType>> {
         if let Some(email) = sanitize_email(email) {
-            if self.core.is_leader() || self.core.is_up_to_date() {
+            #[cfg(not(test))]
+            let is_local = self.core.is_leader() || self.core.is_up_to_date();
+            #[cfg(test)]
+            let is_local = self.core.is_leader();
+
+            if is_local {
                 let store = self.core.store.clone();
                 match self
                     .core
@@ -336,7 +323,9 @@ where
         )
         .and_then(|r| {
             // As per RFC3834
-            if !r.starts_with("owner-") && !r.ends_with("-request") && !r.contains("MAILER-DAEMON")
+            if !r.starts_with("owner-")
+                && !r.contains("-request@")
+                && !r.starts_with("mailer-daemon")
             {
                 Some(r)
             } else {

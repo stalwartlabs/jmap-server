@@ -1,4 +1,4 @@
-use std::{borrow::Cow, vec::IntoIter};
+use std::{borrow::Cow, iter::Peekable, vec::IntoIter};
 
 use super::response::Response;
 
@@ -161,7 +161,7 @@ impl RequestParser {
                     b'\n' => {
                         self.push_buf()?;
                         self.command_size = 0;
-                        let mut tokens = std::mem::take(&mut self.tokens).into_iter();
+                        let mut tokens = std::mem::take(&mut self.tokens).into_iter().peekable();
                         self.tokens = Vec::with_capacity(5);
                         self.state = State::Start;
 
@@ -185,15 +185,24 @@ impl RequestParser {
                                     && matches!(tokens.next(), Some(Token::Colon))
                                     && matches!(tokens.next(), Some(Token::Lt))
                                 {
+                                    let sender = match tokens.peek() {
+                                        Some(Token::Text(_)) => {
+                                            if let Some(Token::Text(sender)) = tokens.next() {
+                                                sender
+                                            } else {
+                                                unreachable!()
+                                            }
+                                        }
+                                        Some(Token::Gt) => "".to_string(),
+                                        _ => {
+                                            return Err(Event::parse_error(
+                                                "MAIL FROM requires a mailbox as an argument.",
+                                            ));
+                                        }
+                                    };
+
                                     Ok(Request::Mail {
-                                        sender: tokens
-                                            .next()
-                                            .and_then(|t| t.unwrap_text())
-                                            .ok_or_else(|| {
-                                                Event::parse_error(
-                                                    "MAIL requires a mailbox as an argument.",
-                                                )
-                                            })?,
+                                        sender,
                                         params: self.parse_params(&mut tokens)?,
                                     })
                                 } else {
@@ -410,7 +419,7 @@ impl RequestParser {
         Err(Event::NeedsMoreBytes)
     }
 
-    fn parse_params(&self, tokens: &mut IntoIter<Token>) -> Result<Vec<Param>, Event> {
+    fn parse_params(&self, tokens: &mut Peekable<IntoIter<Token>>) -> Result<Vec<Param>, Event> {
         if !matches!(tokens.next(), Some(Token::Gt)) {
             return Err(Event::parse_error("Missing > after mailbox."));
         }
@@ -539,6 +548,7 @@ mod tests {
             (
                 vec![
                     "MAIL FROM:<chris@bar.com>\r\n",
+                    "MAIL FROM:<> SIZE=1024 BODY=8BITMIME\r\n",
                     "RCPT TO:<jones@foo.edu>\r\n",
                     "VRFY address\r\n",
                     "EXPN mailing-list \r\n",
@@ -547,6 +557,10 @@ mod tests {
                     Request::Mail {
                         sender: "chris@bar.com".to_string(),
                         params: Vec::new(),
+                    },
+                    Request::Mail {
+                        sender: "".to_string(),
+                        params: vec![Param::Size(1024), Param::Body8BitMime],
                     },
                     Request::Rcpt {
                         recipient: "jones@foo.edu".to_string(),
