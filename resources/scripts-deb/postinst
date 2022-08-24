@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Generate encryption key
+sed -i "s/REPLACE_WITH_ENCRYPTION_KEY/`tr -dc '[:alpha:]' < /dev/urandom | head -c 64`/g" /etc/stalwart-jmap/config.yml
+chown -R stalwart-jmap:stalwart-jmap /etc/stalwart-jmap
+
+# Generate self-signed certificates
+if [ ! -f /etc/stalwart-jmap/certs/jmap.crt ]; then
+    openssl req -x509 -nodes -days 1825 -newkey rsa:4096 -subj '/CN=localhost' -keyout /etc/stalwart-jmap/private/jmap.key -out /etc/stalwart-jmap/certs/jmap.crt
+fi
+if [ ! -f /etc/stalwart-jmap/certs/lmtp.crt ]; then
+    openssl req -x509 -nodes -days 1825 -newkey rsa:4096 -subj '/CN=localhost' -keyout /etc/stalwart-jmap/private/lmtp.key -out /etc/stalwart-jmap/certs/lmtp.crt
+fi
+if [ ! -f /etc/stalwart-jmap/certs/rpc.crt ]; then
+    openssl req -x509 -nodes -days 1825 -newkey rsa:4096 -subj '/CN=localhost' -keyout /etc/stalwart-jmap/private/jmap.key -out /etc/stalwart-jmap/certs/rpc.crt
+fi
+
+# Install service
+/bin/systemctl enable stalwart-jmap
+/bin/systemctl restart stalwart-jmap
+
+echo
+echo "************************************************************"
+echo "***                                                      ***"
+echo "***       Stalwart JMAP successfully installed           ***"
+echo "***                                                      ***"
+echo "***              Please configure                        ***"
+echo "***         '/etc/stalwart-jmap/config.yml'              ***"
+echo "***                                                      ***"
+echo "************************************************************"
+echo

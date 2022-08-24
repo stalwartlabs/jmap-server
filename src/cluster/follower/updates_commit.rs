@@ -15,8 +15,6 @@ where
         if indexes.leader_commit_index != LogIndex::MAX
             && indexes.uncommitted_index <= indexes.leader_commit_index
         {
-            println!("Follower committing updates with {:?}", indexes);
-
             let last_log = match self.commit_follower(indexes.uncommitted_index, false).await {
                 Ok(Some(last_log)) => last_log,
                 Ok(None) => {

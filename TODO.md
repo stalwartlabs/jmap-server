@@ -3,13 +3,6 @@ jmap-server
 ===
 - Testing
   - Webmail client using Enron db.
-- Review all dependencies what kind of code they have.
-- Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).
-- Remove print!() and println!() from everywhere.
-- Refresh addresses when created
-- <- "Received: from localhost (localhost [127.0.0.1])"
-<- "\tby localhost.fritz.box (Postfix) with ESMTP id 47A64C2911;"
-<- "\tTue, 23 Aug 2022 13:57:54 +0000 (UTC)"
 
 imap-server
 ===
@@ -20,6 +13,7 @@ imap-server
 
 jmap + imap + cli
 ===
+- Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).
 - Compile for multiple targets.
 - Docker image.
 - Cargo.toml authors, etc.
@@ -145,7 +139,7 @@ Settings
 
 - Cluster
   - seed-nodes: 127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914
-  - rpc-bind-addr: 127.0.0.1 (or bind-addr)
+  - rpc-bind-addr: 127.0.0.1 (or jmap-bind-addr)
   - rpc-advertise-addr: 127.0.0.1
   - rpc-port: 7911
   - rpc-key: <String>
@@ -170,6 +164,10 @@ Settings
   - oauth-refresh-token-renew: 4 * 86400
   - oauth-max-attempts: 3
 
+-set-admin-password!
+
+Postfix
+--------
 
 address_verify_negative_expire_time = 30s
 address_verify_negative_refresh_time = 30s
@@ -180,3 +178,18 @@ virtual_mailbox_domains = example.com
 virtual_transport=lmtp:[127.0.0.1]:11200
 smtpd_recipient_restrictions = reject_unverified_recipient
 
+Install Deb
+------
+
+sudo apt install /home/vagrant/empty-project/bin/target/debian/stalwart-jmap_0.1.0_amd64.deb 
+sudo apt-get remove stalwart-jmap
+
+        /*println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::from_slice::<serde_json::Value>(&request).unwrap()
+            )
+            .unwrap()
+        );*/
+
+                    //println!("{}", serde_json::to_string_pretty(&result).unwrap());

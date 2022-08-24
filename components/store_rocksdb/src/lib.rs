@@ -208,7 +208,7 @@ impl<'x> Store<'x> for RocksDB {
         let path = PathBuf::from(
             &settings
                 .get("db-path")
-                .unwrap_or_else(|| "stalwart-jmap".to_string()),
+                .unwrap_or_else(|| "/var/lib/stalwart-jmap".to_string()),
         );
         let mut idx_path = path;
         idx_path.push("idx");
@@ -309,10 +309,11 @@ pub fn numeric_value_merge(
     } else {
         0
     };
+
     for op in operands.iter() {
         value += i64::from_le_bytes(op.try_into().ok()?);
     }
-    //println!("Merging key {:?}: {}", key, value);
+
     let mut bytes = Vec::with_capacity(std::mem::size_of::<i64>());
     bytes.extend_from_slice(&value.to_le_bytes());
     Some(bytes)
@@ -323,16 +324,9 @@ pub fn bitmap_merge(
     existing_val: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    /*println!(
-        "Merge operands {:?}, has val {} -> ",
-        operands.len(),
-        existing_val.is_some(),
-    );*/
-
     let mut bm = match existing_val {
         Some(existing_val) => RoaringBitmap::deserialize(existing_val)?,
         None if operands.len() == 1 => {
-            //println!("return unserialized");
             return Some(Vec::from(operands.into_iter().next().unwrap()));
         }
         _ => RoaringBitmap::new(),
@@ -342,7 +336,6 @@ pub fn bitmap_merge(
         match *op.first()? {
             IS_BITMAP => {
                 if let Some(union_bm) = deserialize_bitmap(op) {
-                    //print!("Bitmap union");
                     if !bm.is_empty() {
                         bm |= union_bm;
                     } else {
@@ -361,8 +354,6 @@ pub fn bitmap_merge(
         }
     }
 
-    //println!(" -> {}", bm.len());
-
     let mut bytes = Vec::with_capacity(bm.serialized_size() + 1);
     bytes.push(IS_BITMAP);
     bm.serialize_into(&mut bytes).ok()?;
@@ -374,68 +365,8 @@ pub fn bitmap_compact(
     _key: &[u8],
     value: &[u8],
 ) -> rocksdb::compaction_filter::Decision {
-    //println!("Compact entry with {:?} bytes.", value.len());
     match RoaringBitmap::deserialize(value) {
         Some(bm) if bm.is_empty() => rocksdb::compaction_filter::Decision::Remove,
         _ => rocksdb::compaction_filter::Decision::Keep,
     }
 }
-
-/*
-#[cfg(test)]
-mod tests {
-    use std::{fs::remove_dir_all, path::Path};
-
-    use store::{
-        ahash::AHashMap,
-        config::env_settings::EnvSettings,
-        serialize::bitmap::{clear_bits, set_bits},
-        ColumnFamily, Store,
-    };
-
-    use crate::RocksDB;
-
-    #[test]
-    fn bitmap_remove() {
-        let path = Path::new("/tmp/rocksdb_test");
-        if path.exists() {
-            remove_dir_all(path).unwrap();
-        }
-        let mut settings = EnvSettings {
-            args: AHashMap::new(),
-        };
-        settings.set_value("db-path".to_string(), "/tmp/rocksdb_test".to_string());
-        let store = RocksDB::open(&settings).unwrap();
-
-        store
-            .merge(ColumnFamily::Bitmaps, b"abc", &set_bits([0].into_iter()))
-            .unwrap();
-
-        store
-            .merge(
-                ColumnFamily::Bitmaps,
-                b"abc",
-                &set_bits([1, 2, 3].into_iter()),
-            )
-            .unwrap();
-
-        assert!(store
-            .get::<Vec<u8>>(ColumnFamily::Bitmaps, b"abc")
-            .unwrap()
-            .is_some());
-
-        store
-            .merge(
-                ColumnFamily::Bitmaps,
-                b"abc",
-                &clear_bits([0, 1, 2, 3].into_iter()),
-            )
-            .unwrap();
-        store.compact(ColumnFamily::Bitmaps).unwrap();
-        assert!(store
-            .get::<Vec<u8>>(ColumnFamily::Bitmaps, b"abc")
-            .unwrap()
-            .is_none());
-    }
-}
-*/

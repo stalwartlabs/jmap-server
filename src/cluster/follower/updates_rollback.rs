@@ -25,18 +25,12 @@ where
             // Thread collection does not contain any actual records,
             // it exists solely for change tracking.
             if let Collection::Thread = collection {
-                //println!("Skipping thread changes...");
                 changes.inserts.clear();
                 changes.updates.clear();
                 changes.deletes.clear();
             }
 
             if !changes.inserts.is_empty() {
-                /*println!(
-                    "Deleting from collection {:?} items {:?}",
-                    collection, changes.inserts
-                );*/
-
                 let inserts = std::mem::take(&mut changes.inserts);
                 let store = self.store.clone();
                 if let Err(err) = self

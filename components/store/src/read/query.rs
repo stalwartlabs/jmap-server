@@ -81,7 +81,6 @@ where
 
         'outer: loop {
             while let Some(cond) = state.it.next() {
-                //println!("---> cond: {:?} {:?}", cond, state.bm);
                 match cond {
                     Filter::Condition(filter_cond) => {
                         match filter_cond.value {
@@ -343,10 +342,6 @@ where
                 }
             }
             if let Some(mut prev_state) = stack.pop() {
-                /*println!(
-                    "--> merge {:?} {:?} {:?}",
-                    prev_state.op, prev_state.bm, state.bm
-                );*/
                 bitmap_op(prev_state.op, &mut prev_state.bm, state.bm, &document_ids);
                 state = prev_state;
             } else {

@@ -66,23 +66,24 @@ async fn main() -> std::io::Result<()> {
     // Enable logging
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(settings.parse("log-level").unwrap_or(Level::ERROR))
+            .with_max_level(settings.parse("log-level").unwrap_or(Level::INFO))
             .finish(),
     )
-    .failed_to("setdefault subscriber failed.");
+    .failed_to("set default subscriber");
 
     // Set base URL if missing
     if !settings.contains_key("jmap-url") {
-        info!("Warning: Hostname parameter 'jmap-url' was not specified, using 'localhost'.",);
-        settings.set_value(
-            "jmap-url".to_string(),
-            if settings.contains_key("jmap-cert-path") {
-                "https://localhost"
-            } else {
-                "http://localhost"
-            }
-            .to_string(),
+        let jmap_url = if settings.contains_key("jmap-cert-path") {
+            "https://localhost"
+        } else {
+            "http://localhost"
+        }
+        .to_string();
+        info!(
+            "Warning: Hostname parameter 'jmap-url' was not specified, using '{}'.",
+            jmap_url
         );
+        settings.set_value("jmap-url".to_string(), jmap_url);
     }
 
     // Init JMAP server

@@ -198,10 +198,6 @@ where
     type Result = ();
 
     fn handle(&mut self, msg: WebSocketResponse, ctx: &mut Self::Context) -> Self::Result {
-        /*println!(
-            "Send response: {}",
-            serde_json::to_string_pretty(&msg).unwrap_or_default()
-        );*/
         ctx.text(serde_json::to_string(&msg).unwrap_or_default());
     }
 }
@@ -213,10 +209,6 @@ where
     type Result = ();
 
     fn handle(&mut self, error: WebSocketRequestError, ctx: &mut Self::Context) -> Self::Result {
-        /*println!(
-            "Send response: {}",
-            serde_json::to_string_pretty(&msg).unwrap_or_default()
-        );*/
         ctx.text(serde_json::to_string(&error).unwrap_or_default());
     }
 }
@@ -226,10 +218,6 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn handle(&mut self, item: WebSocketStateChange, ctx: &mut Self::Context) {
-        /*println!(
-            "Send state: {}",
-            serde_json::to_string_pretty(&item).unwrap_or_default()
-        );*/
         ctx.text(serde_json::to_string(&item).unwrap_or_default());
     }
 }
@@ -239,7 +227,6 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
-        //println!("WS: {:?}", msg);
         match msg {
             Ok(ws::Message::Ping(msg)) => {
                 self.hb = Instant::now();

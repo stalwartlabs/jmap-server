@@ -32,20 +32,6 @@ where
             }
         }
 
-        /*if self.is_leading() {
-            print!(
-                "Leader [{} = {}/{}]",
-                self.addr, self.last_log.index, self.last_log.term
-            );
-            for peer in &self.peers {
-                print!(
-                    " [{} = {:?}, {}/{}]",
-                    peer.addr, peer.state, peer.last_log_index, peer.last_log_term
-                );
-            }
-            println!();
-        }*/
-
         // Start a new election
         if leader_is_offline {
             debug!(

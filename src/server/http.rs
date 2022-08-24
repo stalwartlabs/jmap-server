@@ -43,7 +43,7 @@ use crate::{
     JMAPServer, DEFAULT_HTTP_PORT,
 };
 
-use super::UnwrapFailure;
+use super::{failed_to, UnwrapFailure};
 
 const ONE_HOUR_EXPIRY: Duration = Duration::from_secs(60 * 60);
 const HALF_HOUR_EXPIRY: Duration = Duration::from_secs(30 * 60);
@@ -116,17 +116,15 @@ where
     let (lmtp_tx, lmtp_rx) = init_lmtp();
     let is_in_cluster = cluster.is_some();
 
+    // Load OAuth settings
     let oauth = Box::new(OAuth {
-        key: settings
-            .get("rpc-key")
-            .or_else(|| settings.get("oauth-key"))
-            .unwrap_or_else(|| {
-                thread_rng()
-                    .sample_iter(Alphanumeric)
-                    .take(40)
-                    .map(char::from)
-                    .collect::<String>()
-            }),
+        key: settings.get("encryption-key").unwrap_or_else(|| {
+            thread_rng()
+                .sample_iter(Alphanumeric)
+                .take(64)
+                .map(char::from)
+                .collect::<String>()
+        }),
         expiry_user_code: settings.parse("oauth-user-code-expiry").unwrap_or(1800),
         expiry_auth_code: settings.parse("oauth-auth-code-expiry").unwrap_or(600),
         expiry_token: settings.parse("oauth-token-expiry").unwrap_or(3600),
@@ -140,6 +138,15 @@ where
         metadata: serde_json::to_string(&OAuthMetadata::new(base_session.base_url()))
             .failed_to("serialize OAuth metadata"),
     });
+
+    // Refuse to start with the default key
+    if oauth.key == "REPLACE_WITH_ENCRYPTION_KEY" {
+        failed_to(concat!(
+            "start server without a valid encryption key.\n",
+            "Please update the 'encryption-key' parameter with a valid key.\n",
+            "Note: In distributed environments, this key has to be the same on all servers."
+        ));
+    }
 
     let server = web::Data::new(JMAPServer {
         store,

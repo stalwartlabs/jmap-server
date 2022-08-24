@@ -76,8 +76,6 @@ where
                     Poll::Pending => (),
                 }
 
-                //println!("Leader: {:?}", state);
-
                 let request = match state {
                     State::BecomeLeader => {
                         state = State::BecomeLeader;
@@ -344,8 +342,6 @@ where
                     break;
                 };
 
-                //println!("[{}] {:#?}", peer_name, response);
-
                 match response {
                     AppendEntriesResponse::Match { match_log } => {
                         if let Some(mut init_rx) = Option::take(&mut init_rx) {
@@ -433,8 +429,6 @@ where
                                 break;
                             }
 
-                            //print!("Received match indexes: {:?}", matched_indexes);
-
                             match core
                                 .get_raft_match_indexes(matched_indexes.min().unwrap())
                                 .await
@@ -447,11 +441,8 @@ where
                                         state = State::BecomeLeader;
                                         continue;
                                     }
-                                    //print!(" & Local {:?}", local_match_indexes);
 
                                     local_match_indexes &= matched_indexes;
-
-                                    //println!(" = {:?}", local_match_indexes);
 
                                     if local_match_indexes.is_empty() {
                                         error!("Log sync failed: Invalid intersection result.");

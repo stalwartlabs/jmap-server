@@ -34,7 +34,10 @@ pub struct ClusterInit {
 }
 
 pub fn init_cluster(settings: &EnvSettings) -> Option<(ClusterIpc, ClusterInit)> {
-    if settings.get("rpc-key").is_some() {
+    if settings.get("seed-nodes").is_some()
+        || settings.get("rpc-advertise-addr").is_some()
+        || settings.get("rpc-bind-addr").is_some()
+    {
         let (main_tx, main_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
         let (commit_index_tx, commit_index_rx) = watch::channel(LogIndex::MAX);
         (
@@ -365,7 +368,7 @@ impl Config {
     pub fn new(settings: &EnvSettings) -> Self {
         let tls_domain = settings.get("rpc-tls-domain");
         Config {
-            key: settings.get("rpc-key").unwrap(),
+            key: settings.get("encryption-key").unwrap(),
             raft_batch_max: settings.parse("raft-batch-max").unwrap_or(10 * 1024 * 1024),
             raft_election_timeout: settings.parse("raft-election-timeout").unwrap_or(1000),
             rpc_inactivity_timeout: settings

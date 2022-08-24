@@ -208,11 +208,6 @@ where
                         break 'inner;
                     }
                 }
-                /*println!(
-                    "first {:?} {:?}",
-                    it_opts.remaining,
-                    next_it_opts.as_ref().map(|x| &x.remaining)
-                );*/
 
                 match &mut it_opts.index {
                     IndexType::DB(index) => {
@@ -298,11 +293,6 @@ where
                         }
 
                         if is_eof {
-                            /*println!(
-                                "eof reached with {:?} {:?}",
-                                it_opts.remaining,
-                                next_it_opts.as_ref().map(|x| &x.remaining)
-                            );*/
                             if let Some(next_it_opts) = &mut next_it_opts {
                                 if !it_opts.remaining.is_empty() {
                                     next_it_opts.remaining |= &it_opts.remaining;
@@ -311,11 +301,6 @@ where
                                 index.prev_key = None;
                                 it_opts.eof = true;
                             }
-                            /*println!(
-                                "eof then with {:?} {:?}",
-                                it_opts.remaining,
-                                next_it_opts.as_ref().map(|x| &x.remaining)
-                            );*/
                         }
                     }
                     IndexType::DocumentSet(index) => {
@@ -362,7 +347,6 @@ where
                 };
 
                 if let Some(next_it_opts) = next_it_opts {
-                    //println!("{:?} {:?}", it_opts.remaining, next_it_opts.remaining);
                     if !next_it_opts.remaining.is_empty() {
                         if next_it_opts.remaining.len() == 1 {
                             doc_id = next_it_opts.remaining.min().unwrap();

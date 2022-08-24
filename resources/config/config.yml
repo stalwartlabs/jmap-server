@@ -1,0 +1,146 @@
+######################################################
+#                                                    #
+#               Stalwart JMAP config                 #
+#                                                    #
+######################################################
+
+db-path: /var/lib/stalwart-jmap
+log-level: info
+
+# ----------------------------------------
+#  JMAP Server settings
+# ----------------------------------------
+jmap-url: http://localhost
+jmap-bind-addr: 0.0.0.0
+jmap-port: 8080
+jmap-cert-path: /etc/stalwart-jmap/certs/jmap.crt
+jmap-key-path: /etc/stalwart-jmap/private/jmap.key
+encryption-key: REPLACE_WITH_ENCRYPTION_KEY
+worker-pool-size: 8
+strict-cors: false
+use-forwarded-header: false
+cache-size-ids: 33554432
+cache-tti-ids: 3600
+cache-tti-sharings: 300
+cache-tti-acl: 3600
+cache-tti-recipients: 86400
+
+# ----------------------------------------
+#  Rate and size limits
+# ----------------------------------------
+rate-limit-auth: 10/60 # num. requests / time
+rate-limit-anonymous: 100/60 # num. requests / time
+rate-limit-authenticated: 1000/60 # num. requests / time
+max-concurrent-requests: 4
+max-concurrent-uploads: 4
+max-size-upload: 50000000 # bytes
+max-size-request: 10000000 # bytes
+
+# ----------------------------------------
+#  Blob storage
+# ----------------------------------------
+blob-nested-levels: 2
+blob-min-size: 16384 # bytes
+blob-temp-ttl: 3600 # seconds
+
+# ----------------------------------------
+#  JMAP Protocol
+# ----------------------------------------
+max-calls-in-request: 16
+max-objects-in-get: 500
+max-objects-in-set: 500
+changes-max-results: 5000
+query-max-results: 5000
+
+# ----------------------------------------
+#  E-mail settings
+# ----------------------------------------
+mail-max-size: 104857600 # bytes
+mail-attachments-max-size: 50000000 # bytes
+mail-import-max-items: 5
+mail-parse-max-items: 5
+default-language: en
+
+# ----------------------------------------
+#  Mailbox settings
+# ----------------------------------------
+mailbox-name-max-len: 255
+mailbox-max-total: 1000
+mailbox-max-depth: 10
+
+# ----------------------------------------
+#  JMAP WebSockets
+# ----------------------------------------
+ws-client-timeout: 10 # seconds
+ws-heartbeat-interval: 5 # seconds
+ws-throttle: 1000 # ms
+
+# ----------------------------------------
+#  JMAP EmailSubmission
+# ----------------------------------------
+#smtp-relay: user:pass@hostname:port
+smtp-relay-timeout: 60000 # ms
+
+# ----------------------------------------
+#  Event Source
+# ----------------------------------------
+event-source-throttle: 1000 # ms
+
+# ----------------------------------------
+#  Push subscriptions
+# ----------------------------------------
+push-max-total: 100
+push-attempt-interval: 60000 # ms
+push-attempts-max: 3
+push-retry-interval: 1000 # ms
+push-timeout: 10000 # ms
+push-attempt-interval: 60000 # ms
+push-throttle: 1000 # ms
+
+# ----------------------------------------
+#  LMTP service
+# ----------------------------------------
+lmtp-bind-addr: 127.0.0.1
+lmtp-port: 11200
+lmtp-cert-path: /etc/stalwart-jmap/certs/lmtp.crt
+lmtp-key-path: /etc/stalwart-jmap/private/lmtp.key
+#lmtp-tls-only: false
+#lmtp-allowed-ips: 192.168.0.1;192.168.0.2
+
+# ----------------------------------------
+#  OAuth settings
+# ----------------------------------------
+oauth-user-code-expiry: 1800 # ms
+oauth-auth-code-expiry: 600 # ms
+oauth-token-expiry: 3600 # ms
+oauth-refresh-token-expiry: 2592000  # ms
+oauth-refresh-token-renew: 345600  # ms
+oauth-max-attempts: 3
+
+# ----------------------------------------
+#  Cluster settings
+# ----------------------------------------
+#seed-nodes: 192.168.0.100:7911;192.168.0.101:7911;192.168.0.102:7911
+#rpc-bind-addr: 0.0.0.0 # Defaults to jmap-bind-addr
+rpc-advertise-addr: 127.0.0.1
+rpc-port: 7911
+rpc-inactivity-timeout: 300000 # ms
+rpc-timeout: 1000 # ms
+rpc-retries-max: 5
+rpc-backoff-max: 180000 # ms
+rpc-cert-path: /etc/stalwart-jmap/certs/rpc.crt
+rpc-key-path: /etc/stalwart-jmap/private/rpc.key
+#rpc-tls-domain: example.com
+peer-ping-interval: 500 # ms
+raft-batch-max: 10485760 # bytes
+raft-commit-timeout: 1000 # ms
+raft-election-timeout: 1000 # ms
+
+# ----------------------------------------
+#  Housekeeper settings
+# ----------------------------------------
+schedule-purge-accounts: 0 3 * # min hour week-day
+schedule-purge-blobs: 30 3 * # min hour week-day
+schedule-compact-log: 45 3 * # min hour week-day
+schedule-compact-db: 0 4 * # min hour week-day
+max-changelog-entries: 10000

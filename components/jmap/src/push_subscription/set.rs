@@ -56,7 +56,7 @@ where
 
         helper.create(|_create_id, item, helper, document| {
             // Limit the number of subscriptions
-            if helper.document_ids.len() as usize >= helper.store.config.subscription_max_total {
+            if helper.document_ids.len() as usize >= helper.store.config.push_max_total {
                 return Err(SetError::new(
                     SetErrorType::Forbidden,
                     "There are too many subscriptions, please delete some before adding a new one."

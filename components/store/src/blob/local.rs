@@ -20,7 +20,7 @@ impl BlobStore for LocalBlobStore {
         let mut base_path = PathBuf::from(
             settings
                 .get("db-path")
-                .unwrap_or_else(|| "stalwart-jmap".to_string()),
+                .unwrap_or_else(|| "/var/lib/stalwart-jmap".to_string()),
         );
         base_path.push("blobs");
         Ok(LocalBlobStore {

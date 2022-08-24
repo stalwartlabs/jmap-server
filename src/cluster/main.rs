@@ -96,18 +96,10 @@ where
                 }
             }
             Event::UpdateLastLog { last_log } => {
-                /*println!(
-                    "[{}] Follower updated store to id {}, term {}.",
-                    self.addr, last_log.index, last_log.term
-                );*/
                 self.last_log = last_log;
                 self.core.update_raft_index(last_log.index);
             }
             Event::AdvanceUncommittedIndex { uncommitted_index } => {
-                /*println!(
-                    "[{}] Sending appendEntries request for id {}, term {}.",
-                    self.addr, uncommitted_index, self.term
-                );*/
                 if uncommitted_index > self.uncommitted_index
                     || self.uncommitted_index == LogIndex::MAX
                 {

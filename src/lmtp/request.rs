@@ -77,7 +77,7 @@ enum Token {
 }
 
 pub struct RequestParser {
-    buf: Vec<u8>,
+    pub buf: Vec<u8>,
     tokens: Vec<Token>,
     pub state: State,
     pub command_size: usize,

@@ -79,8 +79,6 @@ where
                         Update::Log { raft_id, log } => {
                             #[cfg(test)]
                             {
-                                //println!("Adding raft id {:?}", raft_id,);
-
                                 use store::log::{self};
                                 use store::serialize::StoreDeserialize;
                                 let existing_log = store
@@ -132,7 +130,6 @@ where
                 indexes.merge_index = merge_index;
 
                 if is_done {
-                    //println!("Changed accounts: {:?}", changed_accounts);
                     self.request_updates(indexes, changed_accounts.into_iter().collect::<Vec<_>>())
                         .await
                 } else {

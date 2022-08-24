@@ -24,7 +24,6 @@ where
     let mut expected_inserted_ids: Vec<Vec<JMAPId>> = vec![Vec::new(); NUM_ACCOUNTS];
 
     for run in 0u64..10u64 {
-        //println!("Run {}", run);
         for (num, expected_inserted_id) in expected_inserted_ids.iter_mut().enumerate() {
             let account_id = (num * 3) as AccountId;
             let mut batch = WriteBatch::new(account_id);

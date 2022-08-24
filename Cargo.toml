@@ -1,5 +1,12 @@
 [package]
 name = "jmap-server"
+description = "Stalwart JMAP Server"
+authors = [ "Stalwart Labs Ltd. <hello@stalw.art>"]
+repository = "https://github.com/stalwartlabs/jmap-server"
+homepage = "https://stalw.art/jmap"
+keywords = ["jmap", "email", "mail", "server"]
+categories = ["email"]
+license = "AGPL-3.0-only"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
@@ -38,12 +45,13 @@ signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
 [dev-dependencies]
 jmap_mail = { path = "components/jmap_mail", features = ["debug"] }
 jmap_sharing = { path = "components/jmap_sharing", features = ["debug"] }
-jmap-client = { path = "/home/vagrant/code/jmap-client", features = ["websockets", "debug"] } 
+jmap-client = { git = "https://github.com/stalwartlabs/jmap-client", features = ["websockets", "debug"] } 
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 serde_yaml = "0.9.9"
+cargo-deb = "1.28.2"
 
 [workspace]
 members = [
@@ -95,3 +103,20 @@ incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
+
+[package.metadata.deb]
+name = "stalwart-jmap"
+maintainer = "Stalwart Labs Ltd. <hello@stalw.art>"
+copyright = "2022, Stalwart Labs Ltd. <hello@stalw.art>"
+depends = "$auto"
+section = "mail"
+license-file = ["LICENSE"]
+maintainer-scripts = "resources/scripts-deb"
+assets = [
+    ["target/release/jmap-server", "usr/bin", "755"],
+    ["resources/config/config.yml", "etc/stalwart-jmap/", "600"],
+    ["resources/systemd/stalwart-jmap.service", "lib/systemd/system/", "644"],
+]
+conf-files = [
+    "/etc/stalwart-jmap/config.yml"
+]

@@ -147,7 +147,6 @@ where
 
                     store.db.delete(ColumnFamily::Logs, &key)?;
                 } else if do_reset {
-                    println!("Deleting uncommitted update: {}", index);
                     log_batch.push(WriteOperation::Delete {
                         cf: ColumnFamily::Logs,
                         key: key.to_vec(),
@@ -242,7 +241,6 @@ where
                                 }
                             }
                         };
-                        println!("Deleting raft entry: {}", raft_id.index);
 
                         log_batch.push(WriteOperation::Delete {
                             cf: ColumnFamily::Logs,

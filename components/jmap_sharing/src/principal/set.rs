@@ -69,9 +69,24 @@ where
             }
 
             // Set values
-            TinyORM::<Principal>::new()
-                .principal_set(helper, item, None, document.document_id)?
-                .insert_validate(document)?;
+            let fields = TinyORM::<Principal>::new().principal_set(
+                helper,
+                item,
+                None,
+                document.document_id,
+            )?;
+
+            // Invalidate cache
+            if let Some(Value::Text { value: email }) = fields.get(&Property::Email) {
+                helper.store.recipients.invalidate(email);
+            }
+            if let Some(Value::TextList { value: emails }) = fields.get(&Property::Aliases) {
+                for email in emails {
+                    helper.store.recipients.invalidate(email);
+                }
+            }
+
+            fields.insert_validate(document)?;
 
             Ok(Principal::new(document.document_id.into()))
         })?;
@@ -97,12 +112,27 @@ where
                     Some(Value::Text { value: new_email }),
                     Some(Value::Text { value: old_email }),
                 ) if new_email != old_email => {
+                    helper.store.recipients.invalidate(new_email);
                     helper.store.recipients.invalidate(old_email);
                 }
                 _ => (),
             }
-            if let (Some(Value::Members { .. }), Some(Value::Text { value: email })) = (
-                fields.get(&Property::Members),
+            if fields.get(&Property::Aliases) != current_fields.get(&Property::Aliases) {
+                if let Some(Value::TextList { value: emails }) =
+                    current_fields.get(&Property::Aliases)
+                {
+                    for email in emails {
+                        helper.store.recipients.invalidate(email);
+                    }
+                }
+                if let Some(Value::TextList { value: emails }) = fields.get(&Property::Aliases) {
+                    for email in emails {
+                        helper.store.recipients.invalidate(email);
+                    }
+                }
+            }
+            if let (Some(Value::Type { value: Type::List }), Some(Value::Text { value: email })) = (
+                current_fields.get(&Property::Type),
                 current_fields.get(&Property::Email),
             ) {
                 helper.store.recipients.invalidate(email);

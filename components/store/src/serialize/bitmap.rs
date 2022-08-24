@@ -24,7 +24,6 @@ pub fn deserialize_bitlist(bm: &mut RoaringBitmap, bytes: &[u8]) {
     'inner: while let Some(header) = it.next() {
         let mut items = (header & 0x7F) + 1;
         let is_set = (header & BIT_SET) != 0;
-        //print!("[{} {}] ", if is_set { "set" } else { "clear" }, items);
 
         while items > 0 {
             if let Some(doc_id) = it.next_leb128() {
@@ -68,11 +67,6 @@ pub fn bitmap_op<'x>(
     mut src: Option<RoaringBitmap>,
     not_mask: &'x RoaringBitmap,
 ) {
-    /*print!(
-        "op: {:?}, dest: {:?}, src: {:?}, not_mask: {:?}",
-        op, dest, src, not_mask
-    );*/
-
     if let Some(dest) = dest {
         match op {
             LogicalOperator::And => {
@@ -90,7 +84,6 @@ pub fn bitmap_op<'x>(
             LogicalOperator::Not => {
                 if let Some(mut src) = src {
                     src.bitxor_assign(not_mask);
-                    //print!(", xor: {:?}", src);
                     dest.bitand_assign(src);
                 }
             }
@@ -105,8 +98,6 @@ pub fn bitmap_op<'x>(
     } else {
         *dest = Some(RoaringBitmap::new());
     }
-
-    //println!(", result: {:?}", dest);
 }
 
 macro_rules! impl_bit {

@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use actix_web::web;
-use store::{ahash::AHashSet, tracing::debug, AccountId, RecipientType, Store};
+use store::{ahash::AHashSet, chrono::Local, tracing::debug, AccountId, RecipientType, Store};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -11,7 +11,7 @@ use tokio_rustls::{server::TlsStream, TlsAcceptor};
 use crate::JMAPServer;
 
 use super::{
-    request::{Event, Request, RequestParser},
+    request::{Event, Param, Request, RequestParser},
     response::{Extension, Response},
 };
 
@@ -29,7 +29,9 @@ where
     pub stream: Stream,
 
     // State
+    pub remote_hostname: Option<String>,
     pub mail_from: Option<String>,
+    pub mail_size: Option<usize>,
     pub rcpt_to: Vec<RcptType>,
     pub rcpt_to_ids: AHashSet<AccountId>,
     pub message: Vec<u8>,
@@ -64,7 +66,9 @@ where
             peer_addr,
             stream,
             core,
+            remote_hostname: None,
             mail_from: None,
+            mail_size: None,
             rcpt_to: Vec::new(),
             rcpt_to_ids: AHashSet::new(),
             message: Vec::new(),
@@ -73,11 +77,6 @@ where
     }
 
     pub async fn ingest(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        /*let tmp = "dd";
-        for line in String::from_utf8_lossy(bytes).split("\r\n") {
-            println!("<- {:?}", &line[..std::cmp::min(line.len(), 100)]);
-        }*/
-
         let mut bytes = bytes.iter();
 
         loop {
@@ -101,19 +100,27 @@ where
                         self.write_bytes(
                             &Response::Lhlo {
                                 local_host: self.hostname.as_ref().into(),
-                                remote_host: domain.into(),
+                                remote_host: domain.as_str().into(),
                                 extensions,
                             }
                             .into_bytes(),
                         )
                         .await?;
+                        self.remote_hostname = domain.into();
                     }
-                    Request::Mail { sender, .. } => {
+                    Request::Mail { sender, params } => {
                         self.write_bytes(
                             format!("250 2.1.0 Sender <{}> accepted.\r\n", sender).as_bytes(),
                         )
                         .await?;
                         self.mail_from = sender.into();
+                        self.mail_size = params.iter().find_map(|p| {
+                            if let Param::Size(size) = p {
+                                Some(*size as usize)
+                            } else {
+                                None
+                            }
+                        });
                     }
                     Request::Rcpt { recipient, .. } => match self.expand_rcpt(&recipient).await {
                         Some(recipient_) => match recipient_.as_ref() {
@@ -164,10 +171,15 @@ where
                     Request::Bdat { data, is_last } => {
                         if self.message.len() + data.len() < self.core.store.config.mail_max_size {
                             if self.message.is_empty() {
-                                self.message = data;
-                            } else {
-                                self.message.extend_from_slice(&data);
+                                let rp = self.build_return_path();
+                                self.message = Vec::with_capacity(
+                                    self.mail_size
+                                        .unwrap_or_else(|| std::cmp::max(1024, data.len()))
+                                        + rp.len(),
+                                );
+                                self.message.extend_from_slice(rp.as_bytes());
                             }
+                            self.message.extend_from_slice(&data);
                             if is_last {
                                 self.ingest_message().await?;
                             } else {
@@ -273,6 +285,7 @@ where
                     },
                     Request::Rset => {
                         self.mail_from = None;
+                        self.mail_size = None;
                         self.rcpt_to.clear();
                         self.rcpt_to_ids.clear();
                         self.message = Vec::new();
@@ -291,6 +304,10 @@ where
                 }
                 Err(Event::Data) => {
                     if !self.rcpt_to_ids.is_empty() {
+                        let rp = self.build_return_path();
+                        self.parser.buf =
+                            Vec::with_capacity(self.mail_size.unwrap_or(1024) + rp.len());
+                        self.parser.buf.extend_from_slice(rp.as_bytes());
                         self.write_bytes(
                             b"354 3.0.0 Start mail input; end with <CRLF>.<CRLF>.\r\n",
                         )
@@ -309,9 +326,6 @@ where
     }
 
     pub async fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        /*let aa = "fdf";
-        println!("-> {}", String::from_utf8_lossy(bytes));*/
-
         match &mut self.stream {
             Stream::Clear(stream) => stream.write_all(bytes).await.map_err(|err| {
                 debug!("Failed to write to stream: {}", err);
@@ -333,6 +347,20 @@ where
             }),
             _ => unreachable!(),
         }
+    }
+
+    fn build_return_path(&self) -> String {
+        format!(
+            concat!(
+                "Received: from {} ([{}])",
+                "\tby {} (Stalwart JMAP) with LMTP;",
+                "\t{}\r\n"
+            ),
+            self.remote_hostname.as_deref().unwrap_or("unknown"),
+            self.hostname.as_ref(),
+            self.peer_addr.ip(),
+            Local::now().to_rfc2822()
+        )
     }
 }
 

@@ -101,8 +101,6 @@ pub fn spawn_state_manager<T>(
         while let Some(event) = change_rx.recv().await {
             let mut purge_needed = last_purge.elapsed() >= Duration::from_secs(PURGE_EVERY_SECS);
 
-            //println!("Manager: {:?}", event);
-
             match event {
                 Event::Start => {
                     started = true;
@@ -207,8 +205,6 @@ pub fn spawn_state_manager<T>(
                         );
                 }
                 Event::Publish { state_change } if started => {
-                    //println!("{:?}\n{:?}", shared_accounts_map, subscribers);
-
                     if let Some(shared_accounts) = shared_accounts_map.get(&state_change.account_id)
                     {
                         let current_time = SystemTime::now()

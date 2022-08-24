@@ -64,18 +64,6 @@ where
     pub async fn request_votes(&mut self, now: bool) -> store::Result<()> {
         // Check if there is enough quorum for an election.
         if self.has_election_quorum() {
-            /*print!(
-                "[{} = {}/{}]",
-                self.addr, self.last_log.index, self.last_log.term
-            );
-            for peer in &self.peers {
-                print!(
-                    " [{} = {}/{}]",
-                    peer.addr, peer.last_log_index, peer.last_log_term
-                );
-            }
-            println!();*/
-
             // Assess whether this node could become the leader for the next term.
             if !self.peers.iter().any(|peer| {
                 peer.is_in_shard(self.shard_id)

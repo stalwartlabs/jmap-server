@@ -27,20 +27,20 @@ use store::{
 
 use super::SymmetricEncrypt;
 
-const OAUTH_HTML_HEADER: &str = include_str!("../../resources/oauth_header.htx");
-const OAUTH_HTML_FOOTER: &str = include_str!("../../resources/oauth_footer.htx");
+const OAUTH_HTML_HEADER: &str = include_str!("../../resources/oauth/header.htx");
+const OAUTH_HTML_FOOTER: &str = include_str!("../../resources/oauth/footer.htx");
 const OAUTH_HTML_LOGIN_HEADER_CLIENT: &str =
-    include_str!("../../resources/oauth_login_hdr_client.htx");
+    include_str!("../../resources/oauth/login_hdr_client.htx");
 const OAUTH_HTML_LOGIN_HEADER_DEVICE: &str =
-    include_str!("../../resources/oauth_login_hdr_device.htx");
+    include_str!("../../resources/oauth/login_hdr_device.htx");
 const OAUTH_HTML_LOGIN_HEADER_FAILED: &str =
-    include_str!("../../resources/oauth_login_hdr_failed.htx");
-const OAUTH_HTML_LOGIN_FORM: &str = include_str!("../../resources/oauth_login.htx");
-const OAUTH_HTML_LOGIN_CODE: &str = include_str!("../../resources/oauth_login_code.htx");
+    include_str!("../../resources/oauth/login_hdr_failed.htx");
+const OAUTH_HTML_LOGIN_FORM: &str = include_str!("../../resources/oauth/login.htx");
+const OAUTH_HTML_LOGIN_CODE: &str = include_str!("../../resources/oauth/login_code.htx");
 const OAUTH_HTML_LOGIN_CODE_HIDDEN: &str =
-    include_str!("../../resources/oauth_login_code_hidden.htx");
-const OAUTH_HTML_LOGIN_SUCCESS: &str = include_str!("../../resources/oauth_login_success.htx");
-const OAUTH_HTML_ERROR: &str = include_str!("../../resources/oauth_error.htx");
+    include_str!("../../resources/oauth/login_code_hidden.htx");
+const OAUTH_HTML_LOGIN_SUCCESS: &str = include_str!("../../resources/oauth/login_success.htx");
+const OAUTH_HTML_ERROR: &str = include_str!("../../resources/oauth/error.htx");
 
 const STATUS_AUTHORIZED: u32 = 0;
 const STATUS_TOKEN_ISSUED: u32 = 1;
@@ -343,7 +343,7 @@ where
                 .await
             {
                 Ok((account_id, client_id, time_left)) => {
-                    // TODO implement revoking client ids
+                    // TODO: implement revoking client ids
                     response = core
                         .issue_token(
                             account_id,

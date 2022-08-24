@@ -60,11 +60,7 @@ where
                 }
             };
 
-            //println!("Starting follower with {:?} and {:?}", state, indexes);
-
             while let Some(event) = rx.recv().await {
-                //println!("Follower: {:?}", event.request);
-
                 let response = match (event.request, state) {
                     (AppendEntriesRequest::Match { last_log }, State::Synchronize) => {
                         if let Some(response) = core.handle_match_log(last_log).await {
@@ -88,7 +84,6 @@ where
                         if let Some((next_state, response)) =
                             core.handle_merge_log(matched_log).await
                         {
-                            //println!("Merge results {:?} {:?}", next_state, response);
                             state = next_state;
                             response
                         } else {
@@ -108,8 +103,6 @@ where
                             updates.len(),
                             commit_index,
                         );
-                        //println!("Updates {:?}", updates);
-
                         indexes.leader_commit_index = commit_index;
                         indexes.merge_index = LogIndex::MAX;
                         core.set_up_to_date(false);
@@ -248,7 +241,6 @@ where
                             account_id,
                             collection
                         );
-                        println!("Rollback updates: {:#?}", updates);
                         indexes.leader_commit_index = commit_index;
 
                         if let Some((next_state, response)) = core

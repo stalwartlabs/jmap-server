@@ -53,10 +53,6 @@ pub type LongInteger = u64;
 pub type Float = f64;
 pub type JMAPId = u64;
 
-const FIVE_MINUTES_EXPIRY: Duration = Duration::from_secs(5 * 60);
-const ONE_HOUR_EXPIRY: Duration = Duration::from_secs(60 * 60);
-const ONE_DAY_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ColumnFamily {
     Bitmaps,
@@ -143,20 +139,28 @@ where
             blob_store: LocalBlobStore::new(settings).unwrap(),
             id_assigner: Cache::builder()
                 .initial_capacity(128)
-                .max_capacity(settings.parse("id-cache-size").unwrap_or(32 * 1024 * 1024))
-                .time_to_idle(Duration::from_secs(60 * 60))
+                .max_capacity(settings.parse("cache-size-ids").unwrap_or(32 * 1024 * 1024))
+                .time_to_idle(Duration::from_secs(
+                    settings.parse("cache-tti-ids").unwrap_or(3600),
+                ))
                 .build(),
             shared_documents: Cache::builder()
                 .initial_capacity(128)
-                .time_to_idle(FIVE_MINUTES_EXPIRY)
+                .time_to_idle(Duration::from_secs(
+                    settings.parse("cache-tti-sharings").unwrap_or(300),
+                ))
                 .build(),
             acl_tokens: Cache::builder()
                 .initial_capacity(128)
-                .time_to_idle(ONE_HOUR_EXPIRY)
+                .time_to_idle(Duration::from_secs(
+                    settings.parse("cache-tti-acl").unwrap_or(3600),
+                ))
                 .build(),
             recipients: Cache::builder()
                 .initial_capacity(128)
-                .time_to_idle(ONE_DAY_EXPIRY)
+                .time_to_idle(Duration::from_secs(
+                    settings.parse("cache-tti-recipients").unwrap_or(86400),
+                ))
                 .build(),
             account_lock: MutexMap::with_capacity(1024),
             raft_index: 0.into(),

@@ -307,11 +307,6 @@ where
                         [(term.exact_terms, true), (term.stemmed_terms, false)]
                     {
                         for term_id in term_ids {
-                            /*println!(
-                                "Delete '{}' ({})",
-                                token_index.tokens.get(term_id as usize).unwrap(),
-                                is_exact
-                            );*/
                             bitmap_list
                                 .entry(BitmapKey::serialize_term(
                                     batch.account_id,

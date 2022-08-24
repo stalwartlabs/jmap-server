@@ -20,7 +20,6 @@ where
         changed_accounts: Vec<(AccountId, Bitmap<Collection>)>,
         updates: Vec<Update>,
     ) -> Option<(State, Response)> {
-        //println!("{:#?}", updates);
         let mut pending_updates = Vec::with_capacity(updates.len());
         let mut is_done = updates.is_empty();
 
@@ -48,7 +47,6 @@ where
         }
 
         if !pending_updates.is_empty() {
-            //println!("Storing update: {:?}", pending_updates);
             let pending_updates_key =
                 LogKey::serialize_pending_update(indexes.uncommitted_index, indexes.sequence_id);
             let pending_updates = match PendingUpdates::new(pending_updates).serialize() {

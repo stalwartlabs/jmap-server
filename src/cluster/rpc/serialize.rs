@@ -9,7 +9,7 @@ use tokio_util::codec::{Decoder, Encoder};
 #[derive(Default)]
 pub struct RpcEncoder {}
 
-const MAX_FRAME_LENGTH: usize = 50 * 1024 * 1024;
+const MAX_FRAME_LENGTH: usize = 150 * 1024 * 1024;
 
 impl Decoder for RpcEncoder {
     type Item = Protocol;

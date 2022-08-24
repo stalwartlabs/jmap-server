@@ -83,10 +83,6 @@ where
                     for document in bincode::deserialize::<Vec<Document>>(&value).map_err(|_| {
                         StoreError::SerializeError("Failed to deserialize tombstones".to_string())
                     })? {
-                        /*println!(
-                            "Committing delete document {} from account {}, {:?}",
-                            document.document_id, write_batch.account_id, document.collection
-                        );*/
                         write_batch.delete_document(document);
                     }
 
@@ -99,7 +95,6 @@ where
                         key: key.to_vec(),
                     });
                 } else if do_reset {
-                    //println!("Deleting uncommitted leader update: {}", index);
                     log_batch.push(WriteOperation::Delete {
                         cf: ColumnFamily::Logs,
                         key: key.to_vec(),

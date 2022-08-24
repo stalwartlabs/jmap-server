@@ -47,7 +47,7 @@ where
                 .unwrap_or_else(store::log::raft::RaftId::none)
                 .index;
             if db_index != self.last_log.index {
-                println!(
+                debug!(
                     "Raft index mismatch!!! {} != {}\n",
                     db_index, self.last_log.index
                 );

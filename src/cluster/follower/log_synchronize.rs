@@ -27,7 +27,6 @@ where
                 return None;
             }
         };
-        //println!("Match terms: {:?}\n{:?}", match_terms, local_match_terms);
 
         let mut matched_id = RaftId::none();
         for (local_id, remote_id) in local_match_terms.into_iter().zip(match_terms) {
@@ -37,8 +36,6 @@ where
                 break;
             }
         }
-
-        //debug!("[{}] Found matching terms at {:?}.", local_name, matched_id,);
 
         Response::AppendEntries(AppendEntriesResponse::Synchronize {
             match_indexes: if !matched_id.is_none() {
