@@ -31,16 +31,21 @@ tokio = { version = "1.16.1", features = ["full"] }
 tokio-rustls = { version = "0.23.4"}
 tokio-util = "0.7.0"
 webpki-roots = { version = "0.22.3"}
-aes-gcm-siv = "0.11.1"
 futures-util = "0.3.21"
 async-stream = "0.3.3"
 num_cpus = "1.13.1"
 futures = "0.3"
 rayon = "1.5.1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"]}
-ece = "2.2"
 signal-hook = "0.3.14"
 signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
+p256 = { version = "0.11.1", features = ["ecdh"] }
+hkdf = "0.12.3"
+aes-gcm-siv = "0.11.1"
+aes-gcm = "0.10.1"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
 
 [dev-dependencies]
 jmap_mail = { path = "components/jmap_mail", features = ["debug"] }
@@ -51,6 +56,7 @@ flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 serde_yaml = "0.9.9"
+ece = "2.2"
 cargo-deb = "1.28.2"
 
 [workspace]
@@ -113,7 +119,7 @@ section = "mail"
 license-file = ["LICENSE"]
 maintainer-scripts = "resources/scripts-deb"
 assets = [
-    ["target/release/jmap-server", "usr/bin", "755"],
+    ["target/release/jmap-server", "usr/bin/stalwart-jmap", "755"],
     ["resources/config/config.yml", "etc/stalwart-jmap/", "600"],
     ["resources/systemd/stalwart-jmap.service", "lib/systemd/system/", "644"],
 ]

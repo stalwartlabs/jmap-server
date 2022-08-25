@@ -1,6 +1,7 @@
 
 jmap-server
 ===
+- Set upload limit Actix
 - Testing
   - Webmail client using Enron db.
 
@@ -193,3 +194,12 @@ sudo apt-get remove stalwart-jmap
         );*/
 
                     //println!("{}", serde_json::to_string_pretty(&result).unwrap());
+
+
+
+Troubleshooting Import
+-----
+[1/4] Parsing mailbox...
+Failed to read Maildir folder: Too many open files (os error 24)
+
+ulimit -n 65535

@@ -7,12 +7,12 @@ After=network-online.target
 Type=simple
 User=stalwart-jmap
 Group=stalwart-jmap
-LimitNOFILE=1024
+LimitNOFILE=65536
 KillMode=process
 KillSignal=SIGINT
 Restart=on-failure
 RestartSec=5
-ExecStart=/usr/bin/stalwart-jmap --config=/etc/stalwart-jmap.yml
+ExecStart=/usr/bin/stalwart-jmap --config=/etc/stalwart-jmap/config.yml
 PermissionsStartOnly=true
 ExecStartPre=/bin/mkdir -p /var/log/stalwart-jmap
 ExecStartPre=/bin/chown syslog:adm /var/log/stalwart-jmap

@@ -7,6 +7,8 @@ use rustls::{
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use store::tracing::error;
 
+use crate::server::UnwrapFailure;
+
 pub fn load_tls_client_config(allow_invalid_certs: bool) -> ClientConfig {
     let config = ClientConfig::builder().with_safe_defaults();
 
@@ -38,17 +40,17 @@ pub fn load_tls_server_config(cert_path: &str, key_path: &str) -> ServerConfig {
         .with_no_client_auth();
 
     // load TLS key/cert files
-    let cert_file = &mut BufReader::new(File::open(cert_path).unwrap());
-    let key_file = &mut BufReader::new(File::open(key_path).unwrap());
+    let cert_file = &mut BufReader::new(File::open(cert_path).failed_to("open certificate file"));
+    let key_file = &mut BufReader::new(File::open(key_path).failed_to("open key file"));
 
     // convert files to key/cert objects
     let cert_chain = certs(cert_file)
-        .unwrap()
+        .failed_to("parse certificate file")
         .into_iter()
         .map(Certificate)
         .collect();
     let mut keys: Vec<PrivateKey> = pkcs8_private_keys(key_file)
-        .unwrap()
+        .failed_to("parse jey file")
         .into_iter()
         .map(PrivateKey)
         .collect();

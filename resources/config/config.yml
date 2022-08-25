@@ -122,7 +122,7 @@ oauth-max-attempts: 3
 # ----------------------------------------
 #seed-nodes: 192.168.0.100:7911;192.168.0.101:7911;192.168.0.102:7911
 #rpc-bind-addr: 0.0.0.0 # Defaults to jmap-bind-addr
-rpc-advertise-addr: 127.0.0.1
+#rpc-advertise-addr: 127.0.0.1
 rpc-port: 7911
 rpc-inactivity-timeout: 300000 # ms
 rpc-timeout: 1000 # ms

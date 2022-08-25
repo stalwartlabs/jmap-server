@@ -1,6 +1,13 @@
 #!/bin/bash
+
+# Add user
 useradd stalwart-jmap -s /sbin/nologin -M
+
+# Create default data and config directories
 mkdir -p /var/lib/stalwart-jmap
 mkdir -p /etc/stalwart-jmap/certs
 mkdir -p /etc/stalwart-jmap/private
-chown stalwart-jmap:stalwart-jmap /var/lib/stalwart-jmap
+
+# Set permissions
+chown -R stalwart-jmap:stalwart-jmap /var/lib/stalwart-jmap
+chmod -R 770 /var/lib/stalwart-jmap

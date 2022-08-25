@@ -1,4 +1,4 @@
-use super::{state_change::StateChange, LONG_SLUMBER_MS};
+use super::{push_subscription_ece::ece_encrypt, state_change::StateChange, LONG_SLUMBER_MS};
 use crate::{api::StateChangeResponse, cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 use jmap::{
     base64,
@@ -363,7 +363,7 @@ async fn http_request(
         .header("TTL", "86400");
 
     if let Some(keys) = keys {
-        match ece::encrypt(&keys.p256dh, &keys.auth, body.as_bytes())
+        match ece_encrypt(&keys.p256dh, &keys.auth, body.as_bytes())
             .map(|b| base64::encode_config(b, base64::URL_SAFE))
         {
             Ok(body_) => {
