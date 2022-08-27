@@ -10,13 +10,13 @@ log-level: info
 # ----------------------------------------
 #  JMAP Server settings
 # ----------------------------------------
-jmap-url: http://localhost
+jmap-url: http://localhost:8080
 jmap-bind-addr: 0.0.0.0
 jmap-port: 8080
 jmap-cert-path: /etc/stalwart-jmap/certs/jmap.crt
 jmap-key-path: /etc/stalwart-jmap/private/jmap.key
 encryption-key: REPLACE_WITH_ENCRYPTION_KEY
-worker-pool-size: 8
+#worker-pool-size: 8
 strict-cors: false
 use-forwarded-header: false
 cache-size-ids: 33554432
@@ -78,7 +78,11 @@ ws-throttle: 1000 # ms
 # ----------------------------------------
 #  JMAP EmailSubmission
 # ----------------------------------------
-#smtp-relay: user:pass@hostname:port
+smtp-relay-host: 127.0.0.1
+smtp-relay-port: 25
+#smtp-relay-auth: foo
+#smtp-relay-secret: bar
+smtp-relay-tls: false
 smtp-relay-timeout: 60000 # ms
 
 # ----------------------------------------
@@ -122,7 +126,7 @@ oauth-max-attempts: 3
 # ----------------------------------------
 #seed-nodes: 192.168.0.100:7911;192.168.0.101:7911;192.168.0.102:7911
 #rpc-bind-addr: 0.0.0.0 # Defaults to jmap-bind-addr
-#rpc-advertise-addr: 127.0.0.1
+#rpc-advertise-addr: 192.168.0.99
 rpc-port: 7911
 rpc-inactivity-timeout: 300000 # ms
 rpc-timeout: 1000 # ms

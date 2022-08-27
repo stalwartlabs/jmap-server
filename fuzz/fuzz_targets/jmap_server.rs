@@ -4,6 +4,7 @@ use jmap::types::date::JMAPDate;
 use jmap::types::jmap::JMAPId;
 use jmap::types::json_pointer::JSONPointer;
 use jmap::types::state::JMAPState;
+use jmap_server::lmtp::request::RequestParser;
 use libfuzzer_sys::fuzz_target;
 use store::serialize::{
     base32::{Base32Reader, BASE32_ALPHABET},
@@ -12,6 +13,7 @@ use store::serialize::{
 
 static DATE_ALPHABET: &[u8] = b"0123456789TZ+-:.";
 static POINTER_ALPHABET: &[u8] = b"0123456789abcdefghijklm~*/";
+static LMTP_ALPHABET: &[u8] = b" MAIL FROM :<>=";
 
 fuzz_target!(|data: &[u8]| {
     // Leb128 decoding
@@ -46,6 +48,12 @@ fuzz_target!(|data: &[u8]| {
     // JSON Pointer
     JSONPointer::parse(&str_data);
     JSONPointer::parse(&String::from_utf8(into_alphabet(data, POINTER_ALPHABET)).unwrap());
+
+    // LMTP Parser
+    RequestParser::new(1024, 1024).parse(&mut data.iter()).ok();
+    RequestParser::new(1024, 1024)
+        .parse(&mut into_alphabet(data, LMTP_ALPHABET).iter())
+        .ok();
 });
 
 fn into_alphabet(data: &[u8], alphabet: &[u8]) -> Vec<u8> {

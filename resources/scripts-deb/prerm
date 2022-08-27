@@ -1,5 +1,4 @@
 #!/bin/bash
 /bin/systemctl stop stalwart-jmap
 /bin/systemctl disable stalwart-jmap
-rm -f /etc/stalwart.yml
 deluser stalwart-jmap

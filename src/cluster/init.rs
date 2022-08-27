@@ -83,9 +83,9 @@ pub async fn start_cluster<T>(
 
     let bind_addr = SocketAddr::from((
         if settings.contains_key("rpc-bind-addr") {
-            settings.parse_ipaddr("rpc-bind-addr", "127.0.0.1")
+            settings.parse_ipaddr("rpc-bind-addr", "0.0.0.0")
         } else {
-            settings.parse_ipaddr("jmap-bind-addr", "127.0.0.1")
+            settings.parse_ipaddr("jmap-bind-addr", "0.0.0.0")
         },
         settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT),
     ));

@@ -544,36 +544,18 @@ struct SMTPRelay {
 }
 
 fn parse_smtp_settings(settings: &EnvSettings) -> Option<SMTPRelay> {
-    let smtp_relay = settings.get("smtp-relay")?;
-    let mut parts = smtp_relay.split('@');
-    let part_1 = parts.next()?;
-    let (hostname, credentials) = if let Some(part_2) = parts.next() {
-        let mut parts = part_1.split(':');
-        (
-            part_2,
-            Some((parts.next()?.to_string(), parts.next()?.to_string())),
-        )
-    } else {
-        (part_1, None)
-    };
-
-    let mut parts = hostname.split(':');
-    let mut tls = true;
     Some(SMTPRelay {
-        hostname: parts
-            .next()
-            .map(|h| {
-                if let Some(h) = h.strip_prefix('!') {
-                    tls = false;
-                    h
-                } else {
-                    h
-                }
-            })?
-            .to_string(),
-        port: parts.next().and_then(|p| p.parse().ok()).unwrap_or(0),
-        credentials,
-        tls,
+        hostname: settings.get("smtp-relay-host")?,
+        port: settings.parse("smtp-relay-port").unwrap_or(0),
+        credentials: if let (Some(auth), Some(pass)) = (
+            settings.get("smtp-relay-auth"),
+            settings.get("smtp-relay-secret"),
+        ) {
+            (auth, pass).into()
+        } else {
+            None
+        },
+        tls: settings.parse("smtp-relay-tls").unwrap_or(false),
         timeout: Duration::from_millis(
             settings
                 .parse("smtp-relay-timeout")

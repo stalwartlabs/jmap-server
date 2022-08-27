@@ -17,6 +17,9 @@ path = "../components/jmap"
 [dependencies.store]
 path = "../components/store"
 
+[dependencies.jmap-server]
+path = ".."
+
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]

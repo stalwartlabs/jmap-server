@@ -1,5 +1,4 @@
 #![warn(clippy::disallowed_types)]
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -7,63 +6,25 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-pub mod api;
-pub mod authorization;
-pub mod cluster;
-pub mod lmtp;
-pub mod server;
-pub mod services;
-
-#[cfg(test)]
-pub mod tests;
-
-use std::{sync::Arc, time::Duration};
-
-use cluster::{
-    init::{init_cluster, start_cluster},
-    ClusterIpc,
+use jmap_server::{
+    cluster::init::{init_cluster, start_cluster},
+    server::{
+        http::{build_jmap_server, init_jmap_server},
+        UnwrapFailure,
+    },
 };
 
-use authorization::{auth::RemoteAddress, oauth, rate_limit::Limiter};
+use std::time::Duration;
+
 use futures::StreamExt;
-use server::http::{build_jmap_server, init_jmap_server};
-use services::{email_delivery, housekeeper, state_change};
 use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use store::{
     config::env_settings::EnvSettings,
-    moka::future::Cache,
     tracing::{self, info, Level},
-    JMAPStore, Store,
+    Store,
 };
 use store_rocksdb::RocksDB;
-use tokio::sync::{mpsc, watch};
-
-use crate::server::UnwrapFailure;
-
-pub const DEFAULT_HTTP_PORT: u16 = 8080;
-pub const DEFAULT_RPC_PORT: u16 = 7911;
-
-pub struct JMAPServer<T> {
-    pub store: Arc<JMAPStore<T>>,
-    pub worker_pool: rayon::ThreadPool,
-    pub base_session: api::session::Session,
-    pub cluster: Option<ClusterIpc>,
-
-    pub state_change: mpsc::Sender<state_change::Event>,
-    pub email_delivery: mpsc::Sender<email_delivery::Event>,
-    pub housekeeper: mpsc::Sender<housekeeper::Event>,
-    pub lmtp: watch::Sender<bool>,
-
-    pub oauth: Box<oauth::OAuth>,
-    pub oauth_codes: Cache<String, Arc<oauth::OAuthCode>>,
-
-    pub sessions: Cache<String, authorization::Session>,
-    pub rate_limiters: Cache<RemoteAddress, Arc<Limiter>>,
-
-    #[cfg(test)]
-    pub is_offline: std::sync::atomic::AtomicBool,
-}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
