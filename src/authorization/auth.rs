@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     future::{ready, Ready},
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr},
     sync::Arc,
 };
 
@@ -16,7 +16,7 @@ use jmap::{base64, types::jmap::JMAPId};
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     core::error::StoreError,
-    tracing::{debug, error},
+    tracing::{debug, error, warn},
     AccountId, Store,
 };
 
@@ -37,7 +37,7 @@ where
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum RemoteAddress {
-    IpAddress(SocketAddr),
+    IpAddress(IpAddr),
     IpAddressFwd(String),
     AccountId(AccountId),
 }
@@ -235,20 +235,22 @@ trait ServiceRequestAddr {
 
 impl ServiceRequestAddr for ServiceRequest {
     fn remote_address(&self, use_forwarded: bool) -> RemoteAddress {
-        if use_forwarded {
+        let peer_addr = self
+            .peer_addr()
+            .map(|addr| addr.ip())
+            .unwrap_or_else(|| Ipv4Addr::new(127, 0, 0, 1).into());
+
+        if use_forwarded || peer_addr.is_loopback() {
             self.connection_info()
                 .realip_remote_addr()
                 .map(|ip| RemoteAddress::IpAddressFwd(ip.to_string()))
+                .unwrap_or_else(|| {
+                    warn!("Warning: No remote address found in request, using loopback.");
+                    RemoteAddress::IpAddress(peer_addr)
+                })
         } else {
-            self.peer_addr().map(|mut addr| {
-                addr.set_port(0);
-                RemoteAddress::IpAddress(addr)
-            })
+            RemoteAddress::IpAddress(peer_addr)
         }
-        .unwrap_or_else(|| {
-            debug!("Warning: No remote address found in request, using localhost.");
-            RemoteAddress::IpAddressFwd("127.0.0.1".to_string())
-        })
     }
 }
 

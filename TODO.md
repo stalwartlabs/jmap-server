@@ -1,17 +1,3 @@
-
-jmap-server
-===
-- Set upload limit Actix
-- Testing
-  - Webmail client using Enron db.
-
-imap-server
-===
-- Fuzz testing.
-- Trusted IPs Redirects
-- Set forwarded IPs header
-- Check TODOs
-
 jmap + imap + cli
 ===
 - Remove /home/vagrant/code/ references from Cargo.toml (from all projects!).

@@ -21,7 +21,7 @@ use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 use signal_hook_tokio::Signals;
 use store::{
     config::env_settings::EnvSettings,
-    tracing::{self, info, Level},
+    tracing::{self, info, warn, Level},
     Store,
 };
 use store_rocksdb::RocksDB;
@@ -47,7 +47,7 @@ async fn main() -> std::io::Result<()> {
             "http://localhost"
         }
         .to_string();
-        info!(
+        warn!(
             "Warning: Hostname parameter 'jmap-url' was not specified, using '{}'.",
             jmap_url
         );

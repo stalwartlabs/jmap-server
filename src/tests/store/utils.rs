@@ -174,6 +174,7 @@ pub fn init_settings(
                 "rate-limit-authenticated".to_string(),
                 "1000/60".to_string(),
             ),
+            ("max-size-upload".to_string(), "50000000".to_string()),
         ]
         .into_iter(),
     );

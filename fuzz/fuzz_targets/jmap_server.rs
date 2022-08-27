@@ -13,7 +13,7 @@ use store::serialize::{
 
 static DATE_ALPHABET: &[u8] = b"0123456789TZ+-:.";
 static POINTER_ALPHABET: &[u8] = b"0123456789abcdefghijklm~*/";
-static LMTP_ALPHABET: &[u8] = b" MAIL FROM :<>=";
+static LMTP_ALPHABET: &[u8] = b" MAILFROM:<>=";
 
 fuzz_target!(|data: &[u8]| {
     // Leb128 decoding

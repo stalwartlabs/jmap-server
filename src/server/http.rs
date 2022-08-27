@@ -1,7 +1,12 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use actix_cors::Cors;
-use actix_web::{dev::Server, middleware, web, App, HttpServer};
+use actix_web::{
+    dev::Server,
+    middleware,
+    web::{self, PayloadConfig},
+    App, HttpServer,
+};
 use jmap::{
     orm::{serialize::JMAPOrm, TinyORM},
     principal::schema::Principal,
@@ -244,6 +249,10 @@ where
             })
             .wrap(middleware::Logger::default())
             .wrap(middleware::NormalizePath::trim())
+            .app_data(PayloadConfig::new(std::cmp::max(
+                jmap_server.store.config.max_size_upload,
+                jmap_server.store.config.max_size_request,
+            )))
             .app_data(jmap_server.clone())
             .route("/.well-known/jmap", web::get().to(handle_jmap_session::<T>))
             .route("/jmap", web::post().to(handle_jmap_request::<T>))

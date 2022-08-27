@@ -99,6 +99,20 @@ where
     );
     assert!(client.session().account(&account_id).unwrap().is_personal());
 
+    // Uploads up to 50000000 bytes should be allowed
+    assert_eq!(
+        client
+            .upload(None, vec![b'A'; 50000000], None)
+            .await
+            .unwrap()
+            .size(),
+        50000000
+    );
+    assert!(client
+        .upload(None, vec![b'A'; 50000001], None)
+        .await
+        .is_err());
+
     // Users should not be allowed to create, read, modify or delete principals
     assert_forbidden(
         client
