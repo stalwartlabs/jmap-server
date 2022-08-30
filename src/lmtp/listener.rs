@@ -40,17 +40,17 @@ pub fn spawn_lmtp<T>(
     info!("Starting LMTP service at {}...", bind_addr);
 
     // Parse allowed IPs
-    let allowed_ips = if let Some(allowed_ips_) = settings.get("lmtp-allowed-ips") {
-        let mut allowed_ips = Vec::new();
-        for ip in allowed_ips_.split(';') {
-            allowed_ips.push(ip.parse::<IpAddr>().unwrap_or_else(|_| {
-                failed_to(&format!("parse 'lmtp-allowed-ips', invalid ip {}.", ip));
+    let trusted_ips = if let Some(trusted_ips_) = settings.get("lmtp-trusted-ips") {
+        let mut trusted_ips = Vec::new();
+        for ip in trusted_ips_.split(';') {
+            trusted_ips.push(ip.parse::<IpAddr>().unwrap_or_else(|_| {
+                failed_to(&format!("parse 'lmtp-trusted-ips', invalid ip {}.", ip));
             }));
         }
-        if !allowed_ips.is_empty() {
-            allowed_ips.into()
+        if !trusted_ips.is_empty() {
+            trusted_ips.into()
         } else {
-            failed_to("parse 'lmtp-allowed-ips', no entries found.");
+            failed_to("parse 'lmtp-trusted-ips', no entries found.");
         }
     } else {
         None
@@ -107,8 +107,8 @@ pub fn spawn_lmtp<T>(
                 stream = listener.accept() => {
                     match stream {
                         Ok((mut stream, peer_addr)) => {
-                            if let Some(allowed_ips) = &allowed_ips {
-                                if !allowed_ips.contains(&peer_addr.ip()) {
+                            if let Some(trusted_ips) = &trusted_ips {
+                                if !trusted_ips.contains(&peer_addr.ip()) {
                                     debug!("Dropping LMTP connection from unknow address {}.", peer_addr.ip());
                                     continue;
                                 }

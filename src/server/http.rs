@@ -63,8 +63,12 @@ where
     // Build the JMAP server.
     let config = JMAPConfig::from(settings);
     let base_session = Session::new(settings, &config);
-    let store: Arc<JMAPStore<T>> =
-        JMAPStore::new(T::open(settings).unwrap(), config, settings).into();
+    let store: Arc<JMAPStore<T>> = JMAPStore::new(
+        T::open(settings).failed_to("open database"),
+        config,
+        settings,
+    )
+    .into();
 
     // Create admin user on first run.
     if store

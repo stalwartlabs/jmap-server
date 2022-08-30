@@ -603,8 +603,9 @@ where
                         assert_eq!(
                             RoaringBitmap::deserialize(&value).unwrap(),
                             RoaringBitmap::new(),
-                            "{:?}",
-                            key
+                            "{:?}: {:?}",
+                            key,
+                            value
                         );
                     }
                     ColumnFamily::Values if (0..=9).contains(&key[0]) => {

@@ -97,15 +97,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     pub async fn set_leader(&self, term: TermId) {
-        self.cluster
-            .as_ref()
-            .unwrap()
-            .state
-            .store(RAFT_LOG_LEADER, Ordering::Relaxed);
-        self.store.raft_term.store(term, Ordering::Relaxed);
-        self.store
-            .tombstone_deletions
-            .store(true, Ordering::Relaxed);
+        // Invalidate caches
         self.store.id_assigner.invalidate_all();
         #[cfg(not(test))]
         {
@@ -113,6 +105,19 @@ where
         }
         self.store.recipients.invalidate_all();
         self.store.shared_documents.invalidate_all();
+
+        // Set leader status
+        self.store
+            .tombstone_deletions
+            .store(true, Ordering::Relaxed);
+        self.cluster
+            .as_ref()
+            .unwrap()
+            .state
+            .store(RAFT_LOG_LEADER, Ordering::Relaxed);
+        self.store.raft_term.store(term, Ordering::Relaxed);
+
+        // Start services
         self.state_change
             .clone()
             .send(state_change::Event::Start)

@@ -42,9 +42,9 @@ async fn main() -> std::io::Result<()> {
     // Set base URL if missing
     if !settings.contains_key("jmap-url") {
         let jmap_url = if settings.contains_key("jmap-cert-path") {
-            "https://localhost"
+            "https://localhost:8080"
         } else {
-            "http://localhost"
+            "http://localhost:8080"
         }
         .to_string();
         warn!(

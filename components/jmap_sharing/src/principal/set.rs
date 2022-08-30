@@ -793,7 +793,13 @@ where
         // Create default mailboxes in new accounts
         if current_fields.is_none() && [Type::Individual, Type::Group].contains(&ptype) {
             let mut batch = WriteBatch::new(document_id);
-            for (name, role) in [("Inbox", "inbox"), ("Deleted Items", "trash")] {
+            for (name, role) in [
+                ("Inbox", "inbox"),
+                ("Deleted Items", "trash"),
+                ("Drafts", "drafts"),
+                ("Sent Items", "sent"),
+                ("Junk Mail", "junk"),
+            ] {
                 let mut document = Document::new(
                     Collection::Mailbox,
                     helper

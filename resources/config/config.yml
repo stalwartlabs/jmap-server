@@ -69,7 +69,7 @@ mailbox-max-total: 1000
 mailbox-max-depth: 10
 
 # ----------------------------------------
-#  JMAP WebSockets
+#  JMAP over WebSocket (RFC 8887)
 # ----------------------------------------
 ws-client-timeout: 10 # seconds
 ws-heartbeat-interval: 5 # seconds
@@ -109,16 +109,16 @@ lmtp-port: 11200
 lmtp-cert-path: /etc/stalwart-jmap/certs/lmtp.crt
 lmtp-key-path: /etc/stalwart-jmap/private/lmtp.key
 #lmtp-tls-only: false
-#lmtp-allowed-ips: 192.168.0.1;192.168.0.2
+#lmtp-trusted-ips: 192.168.0.1;192.168.0.2
 
 # ----------------------------------------
 #  OAuth settings
 # ----------------------------------------
-oauth-user-code-expiry: 1800 # ms
-oauth-auth-code-expiry: 600 # ms
-oauth-token-expiry: 3600 # ms
-oauth-refresh-token-expiry: 2592000  # ms
-oauth-refresh-token-renew: 345600  # ms
+oauth-user-code-expiry: 1800 # secs
+oauth-auth-code-expiry: 600 # secs
+oauth-token-expiry: 3600 # secs
+oauth-refresh-token-expiry: 2592000  # secs
+oauth-refresh-token-renew: 345600  # secs
 oauth-max-attempts: 3
 
 # ----------------------------------------

@@ -129,7 +129,7 @@ Settings
   - lmtp-cert-path
   - lmtp-key-path
   - lmtp-tls-only: false
-  - lmtp-allowed-ips: ip1;ip2
+  - lmtp-trusted-ips: ip1;ip2
 
 - Cluster
   - seed-nodes: 127.0.0.1:7912;127.0.0.1:7913;127.0.0.1:7914
@@ -206,3 +206,12 @@ Troubleshooting Import
 Failed to read Maildir folder: Too many open files (os error 24)
 
 ulimit -n 65535
+
+
+Debugging
+-----
+thread apply all bt
+
+
+
+

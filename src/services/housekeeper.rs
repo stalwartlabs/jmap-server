@@ -20,7 +20,7 @@ pub enum Event {
     PurgeAccounts,
     PurgeBlobs,
     CompactLog,
-    CompactDb,
+    //CompactDb,
     Exit,
 }
 
@@ -32,7 +32,7 @@ enum SimpleCron {
 const TASK_PURGE_ACCOUNTS: usize = 0;
 const TASK_PURGE_BLOBS: usize = 1;
 const TASK_COMPACT_LOG: usize = 2;
-const TASK_COMPACT_DB: usize = 3;
+//const TASK_COMPACT_DB: usize = 3;
 
 pub fn spawn_housekeeper<T>(
     core: web::Data<JMAPServer<T>>,
@@ -56,11 +56,11 @@ pub fn spawn_housekeeper<T>(
             .get("schedule-compact-log")
             .unwrap_or_else(|| "45 3 *".to_string()),
     );
-    let compact_db_at = SimpleCron::parse(
+    /*let compact_db_at = SimpleCron::parse(
         &settings
             .get("schedule-compact-db")
             .unwrap_or_else(|| "0 4 *".to_string()),
-    );
+    );*/
     let max_log_entries: u64 = settings.parse("max-changelog-entries").unwrap_or(10000);
 
     tokio::spawn(async move {
@@ -70,9 +70,9 @@ pub fn spawn_housekeeper<T>(
                 purge_accounts_at.time_to_next(),
                 purge_blobs_at.time_to_next(),
                 compact_log_at.time_to_next(),
-                compact_db_at.time_to_next(),
+                //compact_db_at.time_to_next(),
             ];
-            let mut tasks_to_run = [false, false, false, false];
+            let mut tasks_to_run = [false, false, false /* , false*/];
             let start_time = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -84,7 +84,7 @@ pub fn spawn_housekeeper<T>(
                     Event::PurgeAccounts => tasks_to_run[TASK_PURGE_ACCOUNTS] = true,
                     Event::PurgeBlobs => tasks_to_run[TASK_PURGE_BLOBS] = true,
                     Event::CompactLog => tasks_to_run[TASK_COMPACT_LOG] = true,
-                    Event::CompactDb => tasks_to_run[TASK_COMPACT_DB] = true,
+                    //Event::CompactDb => tasks_to_run[TASK_COMPACT_DB] = true,
                     Event::Exit => {
                         debug!("Housekeeper task exiting.");
                         return;
@@ -103,7 +103,7 @@ pub fn spawn_housekeeper<T>(
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             for (pos, time_to_next) in time_to_next.into_iter().enumerate() {
-                if start_time + time_to_next.as_secs() >= now {
+                if start_time + time_to_next.as_secs() <= now {
                     tasks_to_run[pos] = true;
                 }
             }
@@ -132,10 +132,10 @@ pub fn spawn_housekeeper<T>(
                             core.spawn_worker(move || store.compact_log(max_log_entries))
                                 .await
                         }
-                        TASK_COMPACT_DB => {
+                        /*TASK_COMPACT_DB => {
                             info!("Compacting db.");
                             core.spawn_worker(move || store.compact_bitmaps()).await
-                        }
+                        }*/
                         _ => unreachable!(),
                     };
 

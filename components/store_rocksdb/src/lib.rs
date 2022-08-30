@@ -5,15 +5,8 @@ use rocksdb::{
     MergeOperands, MultiThreaded, Options,
 };
 use store::{
-    config::env_settings::EnvSettings,
-    core::error::StoreError,
-    roaring::RoaringBitmap,
-    serialize::{
-        bitmap::{deserialize_bitlist, deserialize_bitmap, IS_BITLIST, IS_BITMAP},
-        StoreDeserialize,
-    },
-    write::operation::WriteOperation,
-    Result, Store,
+    config::env_settings::EnvSettings, core::error::StoreError, roaring::RoaringBitmap,
+    serialize::StoreDeserialize, write::operation::WriteOperation, Result, Store,
 };
 
 pub struct RocksDB {
@@ -224,7 +217,7 @@ impl<'x> Store<'x> for RocksDB {
         let cf_bitmaps = {
             let mut cf_opts = Options::default();
             //cf_opts.set_max_write_buffer_number(16);
-            cf_opts.set_merge_operator_associative("merge", bitmap_merge);
+            cf_opts.set_merge_operator("merge", bitmap_merge, bitmap_partial_merge);
             cf_opts.set_compaction_filter("compact", bitmap_compact);
             ColumnFamilyDescriptor::new("bitmaps", cf_opts)
         };
@@ -324,40 +317,16 @@ pub fn bitmap_merge(
     existing_val: Option<&[u8]>,
     operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
-    let mut bm = match existing_val {
-        Some(existing_val) => RoaringBitmap::deserialize(existing_val)?,
-        None if operands.len() == 1 => {
-            return Some(Vec::from(operands.into_iter().next().unwrap()));
-        }
-        _ => RoaringBitmap::new(),
-    };
+    store::serialize::bitmap::bitmap_merge(existing_val, operands.len(), operands.into_iter())
+}
 
-    for op in operands.iter() {
-        match *op.first()? {
-            IS_BITMAP => {
-                if let Some(union_bm) = deserialize_bitmap(op) {
-                    if !bm.is_empty() {
-                        bm |= union_bm;
-                    } else {
-                        bm = union_bm;
-                    }
-                } else {
-                    return None;
-                }
-            }
-            IS_BITLIST => {
-                deserialize_bitlist(&mut bm, op);
-            }
-            _ => {
-                return None;
-            }
-        }
-    }
-
-    let mut bytes = Vec::with_capacity(bm.serialized_size() + 1);
-    bytes.push(IS_BITMAP);
-    bm.serialize_into(&mut bytes).ok()?;
-    Some(bytes)
+pub fn bitmap_partial_merge(
+    _new_key: &[u8],
+    _existing_val: Option<&[u8]>,
+    _operands: &MergeOperands,
+) -> Option<Vec<u8>> {
+    // Force a full merge
+    None
 }
 
 pub fn bitmap_compact(

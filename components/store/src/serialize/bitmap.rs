@@ -1,15 +1,11 @@
-use crate::read::filter::{ComparisonOperator, LogicalOperator};
+use crate::read::filter::LogicalOperator;
 use crate::serialize::leb128::Leb128Vec;
-use crate::{
-    serialize::{DeserializeBigEndian, StoreDeserialize},
-    ColumnFamily, Direction, JMAPStore, Store,
-};
-use crate::{DocumentId, StoreError};
+use crate::serialize::StoreDeserialize;
+use crate::DocumentId;
 use roaring::RoaringBitmap;
 use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign};
 
-use super::key::FIELD_PREFIX_LEN;
-use super::leb128::Leb128Iterator;
+use super::{leb128::Leb128Iterator, StoreSerialize};
 
 pub const BIT_SET: u8 = 0x80;
 pub const BIT_CLEAR: u8 = 0;
@@ -60,43 +56,54 @@ impl StoreDeserialize for RoaringBitmap {
     }
 }
 
-#[inline(always)]
-pub fn bitmap_op<'x>(
-    op: LogicalOperator,
-    dest: &'x mut Option<RoaringBitmap>,
-    mut src: Option<RoaringBitmap>,
-    not_mask: &'x RoaringBitmap,
-) {
-    if let Some(dest) = dest {
-        match op {
-            LogicalOperator::And => {
-                if let Some(src) = src {
-                    dest.bitand_assign(src);
-                } else {
-                    dest.clear();
+impl StoreSerialize for RoaringBitmap {
+    fn serialize(&self) -> Option<Vec<u8>> {
+        let mut bytes = Vec::with_capacity(self.serialized_size() + 1);
+        bytes.push(IS_BITMAP);
+        self.serialize_into(&mut bytes).ok()?;
+        bytes.into()
+    }
+}
+
+impl LogicalOperator {
+    #[inline(always)]
+    pub fn apply(
+        &self,
+        dest: &mut Option<RoaringBitmap>,
+        mut src: Option<RoaringBitmap>,
+        not_mask: &RoaringBitmap,
+    ) {
+        if let Some(dest) = dest {
+            match self {
+                LogicalOperator::And => {
+                    if let Some(src) = src {
+                        dest.bitand_assign(src);
+                    } else {
+                        dest.clear();
+                    }
+                }
+                LogicalOperator::Or => {
+                    if let Some(src) = src {
+                        dest.bitor_assign(src);
+                    }
+                }
+                LogicalOperator::Not => {
+                    if let Some(mut src) = src {
+                        src.bitxor_assign(not_mask);
+                        dest.bitand_assign(src);
+                    }
                 }
             }
-            LogicalOperator::Or => {
-                if let Some(src) = src {
-                    dest.bitor_assign(src);
-                }
+        } else if let Some(ref mut src_) = src {
+            if let LogicalOperator::Not = self {
+                src_.bitxor_assign(not_mask);
             }
-            LogicalOperator::Not => {
-                if let Some(mut src) = src {
-                    src.bitxor_assign(not_mask);
-                    dest.bitand_assign(src);
-                }
-            }
+            *dest = src;
+        } else if let LogicalOperator::Not = self {
+            *dest = Some(not_mask.clone());
+        } else {
+            *dest = Some(RoaringBitmap::new());
         }
-    } else if let Some(ref mut src_) = src {
-        if let LogicalOperator::Not = op {
-            src_.bitxor_assign(not_mask);
-        }
-        *dest = src;
-    } else if let LogicalOperator::Not = op {
-        *dest = Some(not_mask.clone());
-    } else {
-        *dest = Some(RoaringBitmap::new());
     }
 }
 
@@ -211,113 +218,154 @@ where
     }
 }
 
-impl<T> JMAPStore<T>
-where
-    T: for<'x> Store<'x> + 'static,
-{
-    pub fn get_bitmap(&self, key: &[u8]) -> crate::Result<Option<RoaringBitmap>> {
-        Ok(self
-            .db
-            .get::<RoaringBitmap>(ColumnFamily::Bitmaps, key)?
-            .and_then(|bm| if !bm.is_empty() { Some(bm) } else { None }))
-    }
-    pub fn get_bitmaps_intersection(
-        &self,
-        keys: Vec<Vec<u8>>,
-    ) -> crate::Result<Option<RoaringBitmap>> {
-        let mut result: Option<RoaringBitmap> = None;
-        for bitmap in self
-            .db
-            .multi_get::<RoaringBitmap, _>(ColumnFamily::Bitmaps, keys)?
-        {
-            if let Some(bitmap) = bitmap {
-                if let Some(result) = &mut result {
-                    result.bitand_assign(&bitmap);
-                    if result.is_empty() {
-                        break;
+#[inline(always)]
+pub fn bitmap_merge<'x>(
+    existing_val: Option<&[u8]>,
+    operands_len: usize,
+    operands: impl IntoIterator<Item = &'x [u8]>,
+) -> Option<Vec<u8>> {
+    let mut bm = match existing_val {
+        Some(existing_val) => RoaringBitmap::deserialize(existing_val)?,
+        None if operands_len == 1 => {
+            return Some(Vec::from(operands.into_iter().next().unwrap()));
+        }
+        _ => RoaringBitmap::new(),
+    };
+
+    for op in operands.into_iter() {
+        match *op.first()? {
+            IS_BITMAP => {
+                if let Some(union_bm) = deserialize_bitmap(op) {
+                    if !bm.is_empty() {
+                        bm |= union_bm;
+                    } else {
+                        bm = union_bm;
                     }
                 } else {
-                    result = Some(bitmap);
+                    debug_assert!(false, "Failed to deserialize bitmap.");
+                    return None;
                 }
-            } else {
-                return Ok(None);
+            }
+            IS_BITLIST => {
+                deserialize_bitlist(&mut bm, op);
+            }
+            _ => {
+                debug_assert!(false, "This should not have happend");
+                return None;
             }
         }
-        Ok(result)
-    }
-    pub fn get_bitmaps_union(&self, keys: Vec<Vec<u8>>) -> crate::Result<Option<RoaringBitmap>> {
-        let mut result: Option<RoaringBitmap> = None;
-        for bitmap in (self
-            .db
-            .multi_get::<RoaringBitmap, _>(ColumnFamily::Bitmaps, keys)?)
-        .into_iter()
-        .flatten()
-        {
-            if let Some(result) = &mut result {
-                result.bitor_assign(&bitmap);
-            } else {
-                result = Some(bitmap);
-            }
-        }
-        Ok(result)
     }
 
-    pub fn range_to_bitmap(
-        &self,
-        match_key: &[u8],
-        op: ComparisonOperator,
-    ) -> crate::Result<Option<RoaringBitmap>> {
-        let mut bm = RoaringBitmap::new();
-        let match_prefix = &match_key[0..FIELD_PREFIX_LEN];
-        let match_value = &match_key[FIELD_PREFIX_LEN..];
-        for (key, _) in self.db.iterator(
-            ColumnFamily::Indexes,
-            match_key,
-            match op {
-                ComparisonOperator::GreaterThan => Direction::Forward,
-                ComparisonOperator::GreaterEqualThan => Direction::Forward,
-                ComparisonOperator::Equal => Direction::Forward,
-                _ => Direction::Backward,
-            },
-        )? {
-            if !key.starts_with(match_prefix) {
-                break;
-            }
-            let doc_id_pos = key.len() - std::mem::size_of::<DocumentId>();
-            let value = key.get(FIELD_PREFIX_LEN..doc_id_pos).ok_or_else(|| {
-                StoreError::InternalError(
-                    "Invalid key found in 'indexes' column family.".to_string(),
+    let mut bytes = Vec::with_capacity(bm.serialized_size() + 1);
+    bytes.push(IS_BITMAP);
+    bm.serialize_into(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn merge_bitmaps() {
+        let v1 = set_clear_bits([(1, true), (2, true), (3, false), (4, true)].into_iter());
+        let v2 = set_clear_bits([(1, false), (4, false)].into_iter());
+        let v3 = set_clear_bits([(5, true)].into_iter());
+        assert_eq!(
+            RoaringBitmap::from_iter([1, 2, 4]),
+            RoaringBitmap::deserialize(&v1).unwrap()
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([1, 2, 4]),
+            RoaringBitmap::deserialize(&bitmap_merge(None, 1, [v1.as_ref()]).unwrap()).unwrap()
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([2]),
+            RoaringBitmap::deserialize(&bitmap_merge(None, 2, [v1.as_ref(), v2.as_ref()]).unwrap())
+                .unwrap()
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([2, 5]),
+            RoaringBitmap::deserialize(
+                &bitmap_merge(None, 3, [v1.as_ref(), v2.as_ref(), v3.as_ref()]).unwrap()
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([2, 5]),
+            RoaringBitmap::deserialize(
+                &bitmap_merge(Some(v1.as_ref()), 2, [v2.as_ref(), v3.as_ref()]).unwrap()
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            RoaringBitmap::from_iter([5]),
+            RoaringBitmap::deserialize(&bitmap_merge(Some(v2.as_ref()), 1, [v3.as_ref()]).unwrap())
+                .unwrap()
+        );
+
+        assert_eq!(
+            RoaringBitmap::from_iter([1, 2, 4]),
+            RoaringBitmap::deserialize(
+                &bitmap_merge(
+                    Some(
+                        RoaringBitmap::from_iter([1, 2, 3, 4])
+                            .serialize()
+                            .unwrap()
+                            .as_ref()
+                    ),
+                    1,
+                    [v1.as_ref()]
                 )
-            })?;
+                .unwrap()
+            )
+            .unwrap()
+        );
 
-            match op {
-                ComparisonOperator::LowerThan if value >= match_value => {
-                    if value == match_value {
-                        continue;
-                    } else {
-                        break;
-                    }
-                }
-                ComparisonOperator::LowerEqualThan if value > match_value => break,
-                ComparisonOperator::GreaterThan if value <= match_value => {
-                    if value == match_value {
-                        continue;
-                    } else {
-                        break;
-                    }
-                }
-                ComparisonOperator::GreaterEqualThan if value < match_value => break,
-                ComparisonOperator::Equal if value != match_value => break,
-                _ => {
-                    bm.insert(key.as_ref().deserialize_be_u32(doc_id_pos).ok_or_else(|| {
-                        StoreError::InternalError(
-                            "Invalid key found in 'indexes' column family.".to_string(),
-                        )
-                    })?);
-                }
-            }
-        }
+        assert_eq!(
+            RoaringBitmap::from_iter([1, 2, 3, 4, 5, 6]),
+            RoaringBitmap::deserialize(
+                &bitmap_merge(
+                    Some(
+                        RoaringBitmap::from_iter([1, 2, 3, 4])
+                            .serialize()
+                            .unwrap()
+                            .as_ref()
+                    ),
+                    1,
+                    [RoaringBitmap::from_iter([5, 6])
+                        .serialize()
+                        .unwrap()
+                        .as_ref()]
+                )
+                .unwrap()
+            )
+            .unwrap()
+        );
 
-        Ok(Some(bm))
+        assert_eq!(
+            RoaringBitmap::from_iter([1, 2, 4, 5, 6]),
+            RoaringBitmap::deserialize(
+                &bitmap_merge(
+                    Some(
+                        RoaringBitmap::from_iter([1, 2, 3, 4])
+                            .serialize()
+                            .unwrap()
+                            .as_ref()
+                    ),
+                    2,
+                    [
+                        RoaringBitmap::from_iter([5, 6])
+                            .serialize()
+                            .unwrap()
+                            .as_ref(),
+                        v1.as_ref()
+                    ]
+                )
+                .unwrap()
+            )
+            .unwrap()
+        );
     }
 }

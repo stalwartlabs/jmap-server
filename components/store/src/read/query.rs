@@ -1,10 +1,7 @@
 use crate::{
     core::{collection::Collection, document::MAX_TOKEN_LENGTH, error::StoreError},
     nlp::{stemmer::Stemmer, tokenizers::Tokenizer, Language},
-    serialize::{
-        bitmap::bitmap_op,
-        key::{BitmapKey, IndexKey},
-    },
+    serialize::key::{BitmapKey, IndexKey},
     AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };
 
@@ -85,8 +82,7 @@ where
                     Filter::Condition(filter_cond) => {
                         match filter_cond.value {
                             Query::Keyword(keyword) => {
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.get_bitmap(&BitmapKey::serialize_term(
                                         account_id,
@@ -100,8 +96,7 @@ where
                             }
                             Query::Tokenize(text) => {
                                 let field_cond_field = filter_cond.field;
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.get_bitmaps_intersection(
                                         Tokenizer::new(&text, Language::English, MAX_TOKEN_LENGTH)
@@ -175,14 +170,13 @@ where
                                                 }
                                             }
                                         }
-                                        bitmap_op(
-                                            state.op,
+                                        state.op.apply(
                                             &mut state.bm,
                                             results.into(),
                                             &document_ids,
                                         );
                                     } else {
-                                        bitmap_op(state.op, &mut state.bm, None, &document_ids);
+                                        state.op.apply(&mut state.bm, None, &document_ids);
                                     }
                                 } else {
                                     let mut requested_keys = AHashSet::default();
@@ -229,8 +223,7 @@ where
                                             continue;
                                         }
 
-                                        bitmap_op(
-                                            LogicalOperator::And,
+                                        LogicalOperator::And.apply(
                                             &mut text_bitmap,
                                             self.get_bitmaps_union(keys)?,
                                             &document_ids,
@@ -240,12 +233,11 @@ where
                                             break;
                                         }
                                     }
-                                    bitmap_op(state.op, &mut state.bm, text_bitmap, &document_ids);
+                                    state.op.apply(&mut state.bm, text_bitmap, &document_ids);
                                 }
                             }
                             Query::Integer(i) => {
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
@@ -260,8 +252,7 @@ where
                                 );
                             }
                             Query::LongInteger(i) => {
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
@@ -276,8 +267,7 @@ where
                                 );
                             }
                             Query::Float(f) => {
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
@@ -292,8 +282,7 @@ where
                                 );
                             }
                             Query::Index(text) => {
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.range_to_bitmap(
                                         &IndexKey::serialize_key(
@@ -308,8 +297,7 @@ where
                                 );
                             }
                             Query::Tag(tag) => {
-                                bitmap_op(
-                                    state.op,
+                                state.op.apply(
                                     &mut state.bm,
                                     self.get_bitmap(&BitmapKey::serialize_tag(
                                         account_id,
@@ -323,7 +311,7 @@ where
                         }
                     }
                     Filter::DocumentSet(set) => {
-                        bitmap_op(state.op, &mut state.bm, Some(set), &document_ids);
+                        state.op.apply(&mut state.bm, Some(set), &document_ids);
                     }
                     Filter::Operator(filter_op) => {
                         stack.push(state);
@@ -342,7 +330,9 @@ where
                 }
             }
             if let Some(mut prev_state) = stack.pop() {
-                bitmap_op(prev_state.op, &mut prev_state.bm, state.bm, &document_ids);
+                prev_state
+                    .op
+                    .apply(&mut prev_state.bm, state.bm, &document_ids);
                 state = prev_state;
             } else {
                 break;

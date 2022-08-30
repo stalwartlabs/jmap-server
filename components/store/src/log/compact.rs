@@ -19,8 +19,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     pub fn compact_bitmaps(&self) -> crate::Result<()> {
-        // This function is necessary as RocksDB does not call compaction filter on
-        // values that inserted using a merge.
+        // Not currently used.
         for (key, value) in self
             .db
             .iterator(ColumnFamily::Bitmaps, &[], Direction::Forward)?
