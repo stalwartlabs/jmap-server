@@ -18,12 +18,11 @@ jmap-key-path: /etc/stalwart-jmap/private/jmap.key
 encryption-key: REPLACE_WITH_ENCRYPTION_KEY
 #worker-pool-size: 8
 strict-cors: false
-use-forwarded-header: false
 cache-size-ids: 33554432
-cache-tti-ids: 3600
-cache-tti-sharings: 300
-cache-tti-acl: 3600
-cache-tti-recipients: 86400
+cache-tti-ids: 3600 # seconds
+cache-tti-sharings: 300 # seconds
+cache-tti-acl: 3600 # seconds
+cache-tti-recipients: 86400 # seconds
 
 # ----------------------------------------
 #  Rate and size limits
@@ -33,8 +32,7 @@ rate-limit-anonymous: 100/60 # num. requests / time
 rate-limit-authenticated: 1000/60 # num. requests / time
 max-concurrent-requests: 4
 max-concurrent-uploads: 4
-max-size-upload: 50000000 # bytes
-max-size-request: 10000000 # bytes
+use-forwarded-header: false
 
 # ----------------------------------------
 #  Blob storage
@@ -46,6 +44,8 @@ blob-temp-ttl: 3600 # seconds
 # ----------------------------------------
 #  JMAP Protocol
 # ----------------------------------------
+max-size-upload: 50000000 # bytes
+max-size-request: 10000000 # bytes
 max-calls-in-request: 16
 max-objects-in-get: 500
 max-objects-in-set: 500
@@ -98,7 +98,7 @@ push-attempt-interval: 60000 # ms
 push-attempts-max: 3
 push-retry-interval: 1000 # ms
 push-timeout: 10000 # ms
-push-attempt-interval: 60000 # ms
+push-verify-timeoutl: 60000 # ms
 push-throttle: 1000 # ms
 
 # ----------------------------------------
@@ -145,6 +145,6 @@ raft-election-timeout: 1000 # ms
 # ----------------------------------------
 schedule-purge-accounts: 0 3 * # min hour week-day
 schedule-purge-blobs: 30 3 * # min hour week-day
-schedule-compact-log: 45 3 * # min hour week-day
+schedule-snapshot-log: 45 3 * # min hour week-day
 schedule-compact-db: 0 4 * # min hour week-day
 max-changelog-entries: 10000

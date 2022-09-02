@@ -102,7 +102,7 @@ pub fn spawn_push_manager(settings: &EnvSettings) -> mpsc::Sender<Event> {
     let push_attempts_max: u32 = settings.parse("push-attempts-max").unwrap_or(3);
     let push_retry_interval: u64 = settings.parse("push-retry-interval").unwrap_or(1000);
     let push_timeout: u64 = settings.parse("push-timeout").unwrap_or(10 * 1000);
-    let push_verify_timeout: u64 = settings.parse("push-attempt-interval").unwrap_or(60 * 1000);
+    let push_verify_timeout: u64 = settings.parse("push-verify-timeout").unwrap_or(60 * 1000);
     let push_throttle: u64 = settings.parse("push-throttle").unwrap_or(1000);
 
     tokio::spawn(async move {

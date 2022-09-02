@@ -11,29 +11,13 @@ use crate::{
     AccountId, Collection, ColumnFamily, Direction, JMAPStore, Store, StoreError, WriteOperation,
 };
 use ahash::AHashMap;
-use roaring::{RoaringBitmap, RoaringTreemap};
+use roaring::RoaringTreemap;
 use tracing::debug;
 
 impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn compact_bitmaps(&self) -> crate::Result<()> {
-        // Not currently used.
-        for (key, value) in self
-            .db
-            .iterator(ColumnFamily::Bitmaps, &[], Direction::Forward)?
-        {
-            match RoaringBitmap::deserialize(&value) {
-                Some(bm) if bm.is_empty() => {
-                    self.db.delete(ColumnFamily::Bitmaps, &key)?;
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
     pub fn compact_log(&self, max_changes: u64) -> crate::Result<()> {
         if let (Some(first_index), Some(last_index)) = (
             self.get_next_raft_id(RaftId::new(0, 0))?.map(|v| v.index),
@@ -233,6 +217,22 @@ where
 
         Ok(())
     }
+
+    /*pub fn compact_bitmaps(&self) -> crate::Result<()> {
+        // Not currently used.
+        for (key, value) in self
+            .db
+            .iterator(ColumnFamily::Bitmaps, &[], Direction::Forward)?
+        {
+            match RoaringBitmap::deserialize(&value) {
+                Some(bm) if bm.is_empty() => {
+                    self.db.delete(ColumnFamily::Bitmaps, &key)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }*/
 }
 
 fn serialize_snapshot(

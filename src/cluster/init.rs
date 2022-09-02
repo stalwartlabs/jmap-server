@@ -34,10 +34,7 @@ pub struct ClusterInit {
 }
 
 pub fn init_cluster(settings: &EnvSettings) -> Option<(ClusterIpc, ClusterInit)> {
-    if settings.get("seed-nodes").is_some()
-        || settings.get("rpc-advertise-addr").is_some()
-        || settings.get("rpc-bind-addr").is_some()
-    {
+    if settings.get("seed-nodes").is_some() || settings.get("rpc-advertise-addr").is_some() {
         let (main_tx, main_rx) = mpsc::channel::<Event>(IPC_CHANNEL_BUFFER);
         let (commit_index_tx, commit_index_rx) = watch::channel(LogIndex::MAX);
         (

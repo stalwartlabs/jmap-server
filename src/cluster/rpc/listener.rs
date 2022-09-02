@@ -30,9 +30,14 @@ pub async fn spawn_rpc(
     config: &Config,
 ) {
     // Build TLS acceptor
-    let (cert_path, key_path) = if let (Some(cert_path), Some(key_path)) =
-        (settings.get("rpc-cert-path"), settings.get("rpc-key-path"))
-    {
+    let (cert_path, key_path) = if let (Some(cert_path), Some(key_path)) = (
+        settings
+            .get("rpc-cert-path")
+            .or_else(|| settings.get("jmap-cert-path")),
+        settings
+            .get("rpc-key-path")
+            .or_else(|| settings.get("jmap-key-path")),
+    ) {
         (cert_path, key_path)
     } else {
         failed_to("start TLS, 'rpc-cert-path' and/or 'rpc-key-path' parameters.");
