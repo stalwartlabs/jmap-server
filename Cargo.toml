@@ -50,7 +50,7 @@ tikv-jemallocator = "0.5"
 [dev-dependencies]
 jmap_mail = { path = "components/jmap_mail", features = ["debug"] }
 jmap_sharing = { path = "components/jmap_sharing", features = ["debug"] }
-jmap-client = { git = "https://github.com/stalwartlabs/jmap-client", features = ["websockets", "debug"] } 
+jmap-client = { git = "https://github.com/stalwartlabs/jmap-client", features = ["websockets", "debug", "follow-trusted"] } 
 csv = "1.1"
 flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
 serde = { version = "1.0", features = ["derive"]}

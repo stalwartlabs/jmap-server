@@ -36,6 +36,7 @@ where
                 batch = self.delete_blobs(batch, &blob_id, blob_link_count)?;
                 blob_link_count = 0;
                 blob_id.copy_from_slice(&key[..BLOB_HASH_LEN + 1]);
+                drop(_blob_lock);
                 _blob_lock = self.blob_store.lock.lock_hash(&blob_id).into();
             }
 
