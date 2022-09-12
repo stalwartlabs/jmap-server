@@ -4,17 +4,17 @@
 #                                                    #
 ######################################################
 
-db-path: /var/lib/stalwart-jmap
+db-path: /usr/local/stalwart-jmap/data
 log-level: info
 
 # ----------------------------------------
 #  JMAP Server settings
 # ----------------------------------------
-jmap-url: http://localhost:8080
+jmap-url: https://localhost:8080
 jmap-bind-addr: 0.0.0.0
 jmap-port: 8080
-jmap-cert-path: /etc/stalwart-jmap/certs/jmap.crt
-jmap-key-path: /etc/stalwart-jmap/private/jmap.key
+jmap-cert-path: /usr/local/stalwart-jmap/etc/certs/jmap.crt
+jmap-key-path: /usr/local/stalwart-jmap/etc/private/jmap.key
 encryption-key: REPLACE_WITH_ENCRYPTION_KEY
 #worker-pool-size: 8
 strict-cors: false
@@ -106,8 +106,8 @@ push-throttle: 1000 # ms
 # ----------------------------------------
 lmtp-bind-addr: 127.0.0.1
 lmtp-port: 11200
-lmtp-cert-path: /etc/stalwart-jmap/certs/lmtp.crt
-lmtp-key-path: /etc/stalwart-jmap/private/lmtp.key
+lmtp-cert-path: /usr/local/stalwart-jmap/etc/certs/lmtp.crt
+lmtp-key-path: /usr/local/stalwart-jmap/etc/private/lmtp.key
 #lmtp-tls-only: false
 #lmtp-trusted-ips: 192.168.0.1;192.168.0.2
 
@@ -132,8 +132,8 @@ rpc-inactivity-timeout: 300000 # ms
 rpc-timeout: 1000 # ms
 rpc-retries-max: 5
 rpc-backoff-max: 180000 # ms
-rpc-cert-path: /etc/stalwart-jmap/certs/rpc.crt
-rpc-key-path: /etc/stalwart-jmap/private/rpc.key
+rpc-cert-path: /usr/local/stalwart-jmap/etc/certs/rpc.crt
+rpc-key-path: /usr/local/stalwart-jmap/etc/private/rpc.key
 #rpc-tls-domain: example.com
 peer-ping-interval: 500 # ms
 raft-batch-max: 10485760 # bytes

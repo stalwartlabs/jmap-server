@@ -1768,7 +1768,7 @@ dependencies = [
 [[package]]
 name = "jmap-client"
 version = "0.1.0"
-source = "git+https://github.com/stalwartlabs/jmap-client#24c5e61cf3a4b9ec0d3e706dd84c66c77902f3a0"
+source = "git+https://github.com/stalwartlabs/jmap-client#7a6c3076f5b49208ff6b2b52c79db26bb6dd71e5"
 dependencies = [
  "ahash 0.8.0",
  "async-stream",
@@ -1776,7 +1776,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "parking_lot",
- "reqwest 0.11.11 (git+https://github.com/stalwartlabs/reqwest.git?rev=e0f7787)",
+ "reqwest 0.11.11 (git+https://github.com/stalwartlabs/reqwest.git)",
  "serde",
  "serde_json",
  "tokio",
@@ -2723,7 +2723,7 @@ dependencies = [
 [[package]]
 name = "reqwest"
 version = "0.11.11"
-source = "git+https://github.com/stalwartlabs/reqwest.git?rev=e0f7787#e0f7787a2eb0cdf40a7d437021461397bcce0e73"
+source = "git+https://github.com/stalwartlabs/reqwest.git#e0f7787a2eb0cdf40a7d437021461397bcce0e73"
 dependencies = [
  "base64",
  "bytes",

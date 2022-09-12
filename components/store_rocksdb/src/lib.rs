@@ -201,7 +201,7 @@ impl<'x> Store<'x> for RocksDB {
         let path = PathBuf::from(
             &settings
                 .get("db-path")
-                .unwrap_or_else(|| "/var/lib/stalwart-jmap".to_string()),
+                .unwrap_or_else(|| "/usr/local/stalwart-jmap/data".to_string()),
         );
         let mut idx_path = path;
         idx_path.push("idx");

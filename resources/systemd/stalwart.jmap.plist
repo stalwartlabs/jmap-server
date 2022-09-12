@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>Label</key>
+        <string>stalwart.jmap</string>
+        <key>ServiceDescription</key>
+        <string>Stalwart JMAP Server</string>
+        <key>ProgramArguments</key>
+        <array>             
+            <string>/usr/local/stalwart-jmap/bin/stalwart-jmap --config=/usr/local/stalwart-jmap/etc/config.yml</string>
+        </array>
+        <key>UserName</key>
+        <string>_stalwart-jmap</string>
+        <key>RunAtLoad</key>
+        <true/>
+        <key>KeepAlive</key>
+        <true/>
+    </dict>
+</plist>

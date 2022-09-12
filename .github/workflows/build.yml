@@ -1,0 +1,186 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*' 
+
+jobs:
+  build:
+    name: Building for ${{ matrix.target }} on ${{ matrix.host_os }}
+    runs-on: ${{ matrix.host_os }}
+    strategy: 
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            host_os: ubuntu-20.04
+          - target: aarch64-apple-darwin
+            host_os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            host_os: windows-2022
+          - target: x86_64-apple-darwin
+            host_os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            host_os: ubuntu-20.04
+
+          #- target: aarch64-pc-windows-msvc
+          #  host_os: windows-2022
+          #- target: aarch64-unknown-linux-musl
+          #  host_os: ubuntu-20.04
+          #- target: arm-unknown-linux-musleabihf
+          #  host_os: ubuntu-20.04
+          #- target: arm-unknown-linux-gnueabihf
+          #  host_os: ubuntu-20.04
+          #- target: armv7-unknown-linux-musleabihf
+          #  host_os: ubuntu-20.04
+          #- target: armv7-unknown-linux-gnueabihf
+          #  host_os: ubuntu-20.04
+          #- target: x86_64-unknown-linux-musl
+          #  host_os: ubuntu-20.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+
+      - name: Install LLVM and Clang (Windows)
+        uses: KyleMayes/install-llvm-action@32c4866ebb71e0949e8833eb49beeebed48532bd
+        if: ${{ contains(matrix.host_os, 'windows') }}
+        with:
+          version: "14.0"
+          directory: ${{ runner.temp }}/llvm
+          
+      - name: Set LIBCLANG_PATH
+        run: echo "LIBCLANG_PATH=$((gcm clang).source -replace "clang.exe")" >> $env:GITHUB_ENV
+        if: ${{ contains(matrix.host_os, 'windows') }}
+
+      - name: Install LLVM and Clang (Linux)
+        if: ${{ contains(matrix.host_os, 'ubuntu') }}
+        run: |
+          sudo apt-get update -y
+          sudo wget https://apt.llvm.org/llvm.sh
+          sudo chmod +x llvm.sh
+          sudo ./llvm.sh 14 all 
+
+      - name: Install ARM64 Linux build tools
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: |
+          sudo apt-get -yq --no-install-suggests --no-install-recommends install \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+
+      - name: Install ARM7 Linux build tools
+        if: ${{ matrix.target == 'armv7-unknown-linux-gnueabihf' ||
+                matrix.target == 'arm-unknown-linux-gnueabihf' }}
+        run: |
+          sudo apt-get -yq --no-install-suggests --no-install-recommends install \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf \
+            libc6-dev-armhf-cross
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          override: true
+          target: ${{ matrix.target }}
+          toolchain: stable
+          
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.host_os }}-${{ matrix.target }}-jmap          
+
+      - name: XCode Version
+        if: ${{ matrix.target == 'aarch64-apple-darwin' }}
+        run: |
+          sudo xcode-select -s /Applications/Xcode_12.4.app &&
+          sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*
+          
+      - name: ARM64 Windows setup
+        if: ${{ matrix.target == 'aarch64-pc-windows-msvc' }}
+        shell: bash
+        run: |
+          echo "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin" >> $GITHUB_PATH
+          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $GITHUB_ENV
+
+      - name: Building binary (Linux/MacOS)
+        if: ${{ !contains(matrix.host_os, 'windows') }}
+        run: |
+          case "${{ matrix.target }}" in
+            aarch64-unknown-linux-gnu)
+              export CC_aarch64_unknown_linux_gnu=clang-14
+              export AR_aarch64_unknown_linux_gnu=llvm-ar-14
+              export CFLAGS_aarch64_unknown_linux_gnu="--sysroot=/usr/aarch64-linux-gnu"
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+              ;;
+            aarch64-unknown-linux-musl)
+              export CC_aarch64_unknown_linux_musl=clang-14
+              export AR_aarch64_unknown_linux_musl=llvm-ar-14
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld"
+              ;;
+            arm-unknown-linux-gnueabihf)
+              export CC_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+              export AR_arm_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc-ar
+              export CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+              ;;
+            arm-unknown-linux-musleabihf)
+              export CC_arm_unknown_linux_musleabihf=clang-14
+              export AR_arm_unknown_linux_musleabihf=llvm-ar-14
+              export CARGO_TARGET_ARM_UNKNOWN_LINUX_MUSLEABIHF_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld"
+              ;;
+            armv7-unknown-linux-gnueabihf)
+              export CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc
+              export AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc-ar
+              export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+              ;;    
+            armv7-unknown-linux-musleabihf)
+              export CC_armv7_unknown_linux_musleabihf=clang-14
+              export AR_armv7_unknown_linux_musleabihf=llvm-ar-14
+              export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld"
+              ;;
+            x86_64-unknown-linux-musl)
+              export CC_x86_64_unknown_linux_musl=clang-14
+              export AR_x86_64_unknown_linux_musl=llvm-ar-14
+              export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld"
+              ;;
+            *)
+              ;;
+          esac
+          cargo build --target=${{ matrix.target }} --release
+          
+      - name: Building binary (Windows)
+        if: ${{ contains(matrix.host_os, 'windows') }}
+        shell: bash
+        run: |
+          cargo build --target=${{ matrix.target }} --release
+
+      - name: Package (tar.gz)
+        if: ${{ !contains(matrix.host_os, 'windows') }}
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release          
+          tar czvf ../../../stalwart-jmap-${{ matrix.target }}.tar.gz stalwart-jmap
+          cd -
+          
+      - name: Package (7z)
+        if: ${{ contains(matrix.host_os, 'windows') }}
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release          
+          7z a ../../../stalwart-jmap-${{ matrix.target }}.zip stalwart-jmap.exe
+          cd -
+          
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+            files: 'stalwart-jmap*'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        

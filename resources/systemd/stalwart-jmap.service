@@ -1,6 +1,6 @@
 [Unit]
 Description=Stalwart JMAP
-ConditionPathExists=/usr/bin/stalwart-jmap
+ConditionPathExists=/usr/local/stalwart-jmap/bin/stalwart-jmap
 After=network-online.target
  
 [Service]
@@ -12,11 +12,8 @@ KillMode=process
 KillSignal=SIGINT
 Restart=on-failure
 RestartSec=5
-ExecStart=/usr/bin/stalwart-jmap --config=/etc/stalwart-jmap/config.yml
+ExecStart=/usr/local/stalwart-jmap/bin/stalwart-jmap --config=/usr/local/stalwart-jmap/etc/config.yml
 PermissionsStartOnly=true
-ExecStartPre=/bin/mkdir -p /var/log/stalwart-jmap
-ExecStartPre=/bin/chown syslog:adm /var/log/stalwart-jmap
-ExecStartPre=/bin/chmod 755 /var/log/stalwart-jmap
 StandardOutput=syslog
 StandardError=syslog
 SyslogIdentifier=stalwart-jmap
