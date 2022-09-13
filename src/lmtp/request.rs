@@ -1,5 +1,7 @@
 use std::{borrow::Cow, iter::Peekable, vec::IntoIter};
 
+use store::tracing::debug;
+
 use super::response::Response;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -430,7 +432,11 @@ impl RequestParser {
                 .unwrap_text()
                 .ok_or_else(|| Event::parse_error("Parameter name must be a text value."))?;
             if !matches!(tokens.next(), Some(Token::Eq)) {
-                return Err(Event::parse_error("Missing '=' after parameter name."));
+                debug!(
+                    "Unsupported LMTP parameter '{}'.",
+                    param_name.to_ascii_uppercase()
+                );
+                continue;
             }
             let param_value = match tokens.next() {
                 Some(Token::Text(text)) => text,
@@ -471,18 +477,24 @@ impl RequestParser {
                     continue;
                 }
                 _ => {
-                    return Err(Event::esn(
+                    /*return Err(Event::esn(
                         500,
                         551,
                         format!(
                             "Unsupported parameter '{}'.",
                             param_name.to_ascii_uppercase()
                         ),
-                    ));
+                    ));*/
                 }
             }
 
-            return Err(Event::esn(
+            debug!(
+                "Unsupported LMTP parameter {}={}.",
+                param_name.to_ascii_uppercase(),
+                param_value.to_ascii_uppercase()
+            );
+
+            /*return Err(Event::esn(
                 500,
                 551,
                 format!(
@@ -490,7 +502,7 @@ impl RequestParser {
                     param_name.to_ascii_uppercase(),
                     param_value.to_ascii_uppercase()
                 ),
-            ));
+            ));*/
         }
 
         Ok(params)

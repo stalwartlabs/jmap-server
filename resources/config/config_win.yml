@@ -1,0 +1,150 @@
+######################################################
+#                                                    #
+#               Stalwart JMAP config                 #
+#                                                    #
+######################################################
+
+db-path: C:\Program Files\Stalwart JMAP\data
+log-level: info
+
+# ----------------------------------------
+#  JMAP Server settings
+# ----------------------------------------
+jmap-url: https://localhost:8080
+jmap-bind-addr: 0.0.0.0
+jmap-port: 8080
+jmap-cert-path: C:\Program Files\Stalwart JMAP\etc\certs\jmap.crt
+jmap-key-path: C:\Program Files\Stalwart JMAP\etc\private\jmap.key
+encryption-key: REPLACE_WITH_ENCRYPTION_KEY
+#worker-pool-size: 8
+strict-cors: false
+cache-size-ids: 33554432
+cache-tti-ids: 3600 # seconds
+cache-tti-sharings: 300 # seconds
+cache-tti-acl: 3600 # seconds
+cache-tti-recipients: 86400 # seconds
+
+# ----------------------------------------
+#  Rate and size limits
+# ----------------------------------------
+rate-limit-auth: 10/60 # num. requests / time
+rate-limit-anonymous: 100/60 # num. requests / time
+rate-limit-authenticated: 1000/60 # num. requests / time
+max-concurrent-requests: 4
+max-concurrent-uploads: 4
+use-forwarded-header: false
+
+# ----------------------------------------
+#  Blob storage
+# ----------------------------------------
+blob-nested-levels: 2
+blob-min-size: 16384 # bytes
+blob-temp-ttl: 3600 # seconds
+
+# ----------------------------------------
+#  JMAP Protocol
+# ----------------------------------------
+max-size-upload: 50000000 # bytes
+max-size-request: 10000000 # bytes
+max-calls-in-request: 16
+max-objects-in-get: 500
+max-objects-in-set: 500
+changes-max-results: 5000
+query-max-results: 5000
+
+# ----------------------------------------
+#  E-mail settings
+# ----------------------------------------
+mail-max-size: 104857600 # bytes
+mail-attachments-max-size: 50000000 # bytes
+mail-import-max-items: 5
+mail-parse-max-items: 5
+default-language: en
+
+# ----------------------------------------
+#  Mailbox settings
+# ----------------------------------------
+mailbox-name-max-len: 255
+mailbox-max-total: 1000
+mailbox-max-depth: 10
+
+# ----------------------------------------
+#  JMAP over WebSocket (RFC 8887)
+# ----------------------------------------
+ws-client-timeout: 10 # seconds
+ws-heartbeat-interval: 5 # seconds
+ws-throttle: 1000 # ms
+
+# ----------------------------------------
+#  JMAP EmailSubmission
+# ----------------------------------------
+smtp-relay-host: 127.0.0.1
+smtp-relay-port: 25
+#smtp-relay-auth: foo
+#smtp-relay-secret: bar
+smtp-relay-tls: false
+smtp-relay-timeout: 60000 # ms
+
+# ----------------------------------------
+#  Event Source
+# ----------------------------------------
+event-source-throttle: 1000 # ms
+
+# ----------------------------------------
+#  Push subscriptions
+# ----------------------------------------
+push-max-total: 100
+push-attempt-interval: 60000 # ms
+push-attempts-max: 3
+push-retry-interval: 1000 # ms
+push-timeout: 10000 # ms
+push-verify-timeoutl: 60000 # ms
+push-throttle: 1000 # ms
+
+# ----------------------------------------
+#  LMTP service
+# ----------------------------------------
+lmtp-bind-addr: 127.0.0.1
+lmtp-port: 11200
+lmtp-cert-path: C:\Program Files\Stalwart JMAP\etc\certs\lmtp.crt
+lmtp-key-path: C:\Program Files\Stalwart JMAP\etc\private\lmtp.key
+#lmtp-tls-only: false
+#lmtp-trusted-ips: 192.168.0.1;192.168.0.2
+
+# ----------------------------------------
+#  OAuth settings
+# ----------------------------------------
+oauth-user-code-expiry: 1800 # secs
+oauth-auth-code-expiry: 600 # secs
+oauth-token-expiry: 3600 # secs
+oauth-refresh-token-expiry: 2592000  # secs
+oauth-refresh-token-renew: 345600  # secs
+oauth-max-attempts: 3
+
+# ----------------------------------------
+#  Cluster settings
+# ----------------------------------------
+#seed-nodes: 192.168.0.100:7911;192.168.0.101:7911;192.168.0.102:7911
+#rpc-bind-addr: 0.0.0.0 # Defaults to jmap-bind-addr
+#rpc-advertise-addr: 192.168.0.99
+rpc-port: 7911
+rpc-inactivity-timeout: 300000 # ms
+rpc-timeout: 1000 # ms
+rpc-retries-max: 5
+rpc-backoff-max: 180000 # ms
+rpc-cert-path: C:\Program Files\Stalwart JMAP\etc\certs\rpc.crt
+rpc-key-path: C:\Program Files\Stalwart JMAP\etc\private\rpc.key
+#rpc-tls-domain: example.com
+peer-ping-interval: 500 # ms
+raft-batch-max: 10485760 # bytes
+raft-commit-timeout: 1000 # ms
+raft-election-timeout: 1000 # ms
+
+# ----------------------------------------
+#  Housekeeper settings
+# ----------------------------------------
+schedule-purge-accounts: 0 3 * # min hour week-day
+schedule-purge-blobs: 30 3 * # min hour week-day
+schedule-snapshot-log: 45 3 * # min hour week-day
+schedule-compact-db: 0 4 * # min hour week-day
+max-changelog-entries: 10000

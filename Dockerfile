@@ -37,7 +37,7 @@ RUN cargo build --release
 
 FROM debian:buster-slim AS runtime
 
-COPY --from=builder /app/target/release/jmap-server /usr/local/bin/stalwart-jmap
+COPY --from=builder /app/target/release/stalwart-jmap /usr/local/bin/stalwart-jmap
 RUN useradd stalwart-jmap -s /sbin/nologin -M
 RUN mkdir -p /usr/local/stalwart-jmap
 RUN chown stalwart-jmap:stalwart-jmap /usr/local/stalwart-jmap
