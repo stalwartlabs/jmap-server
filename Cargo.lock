@@ -1779,47 +1779,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jmap-server"
-version = "0.1.0"
-dependencies = [
- "actix",
- "actix-cors",
- "actix-web",
- "actix-web-actors",
- "aes-gcm",
- "aes-gcm-siv",
- "async-stream",
- "cargo-deb",
- "csv",
- "ece",
- "flate2",
- "futures",
- "futures-util",
- "gethostname",
- "hkdf",
- "jmap",
- "jmap-client",
- "jmap_mail",
- "jmap_sharing",
- "num_cpus",
- "p256",
- "rayon",
- "reqwest 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustls",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "serde_yaml",
- "store",
- "store_rocksdb",
- "tokio",
- "tokio-rustls",
- "tokio-util",
- "tracing-subscriber",
- "webpki-roots",
-]
-
-[[package]]
 name = "jmap_mail"
 version = "0.1.0"
 dependencies = [
@@ -3177,6 +3136,47 @@ checksum = "67cf02bbac7a337dc36e4f5a693db6c21e7863f45070f7064577eb4367a3212b"
 dependencies = [
  "base64ct",
  "der 0.6.0",
+]
+
+[[package]]
+name = "stalwart-jmap"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "actix-cors",
+ "actix-web",
+ "actix-web-actors",
+ "aes-gcm",
+ "aes-gcm-siv",
+ "async-stream",
+ "cargo-deb",
+ "csv",
+ "ece",
+ "flate2",
+ "futures",
+ "futures-util",
+ "gethostname",
+ "hkdf",
+ "jmap",
+ "jmap-client",
+ "jmap_mail",
+ "jmap_sharing",
+ "num_cpus",
+ "p256",
+ "rayon",
+ "reqwest 0.11.11 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "store",
+ "store_rocksdb",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing-subscriber",
+ "webpki-roots",
 ]
 
 [[package]]

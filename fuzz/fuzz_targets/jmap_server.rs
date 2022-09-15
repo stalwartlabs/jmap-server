@@ -27,7 +27,7 @@ use jmap::types::date::JMAPDate;
 use jmap::types::jmap::JMAPId;
 use jmap::types::json_pointer::JSONPointer;
 use jmap::types::state::JMAPState;
-use jmap_server::lmtp::request::RequestParser;
+use stalwart_jmap::lmtp::request::RequestParser;
 use libfuzzer_sys::fuzz_target;
 use store::serialize::{
     base32::{Base32Reader, BASE32_ALPHABET},

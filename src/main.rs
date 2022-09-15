@@ -33,7 +33,7 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;*/
 
-use jmap_server::{
+use stalwart_jmap::{
     cluster::init::{init_cluster, start_cluster},
     server::{
         http::{build_jmap_server, init_jmap_server},

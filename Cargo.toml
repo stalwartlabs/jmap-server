@@ -1,5 +1,5 @@
 [package]
-name = "jmap-server"
+name = "stalwart-jmap"
 description = "Stalwart JMAP Server"
 authors = [ "Stalwart Labs Ltd. <hello@stalw.art>"]
 repository = "https://github.com/stalwartlabs/jmap-server"
