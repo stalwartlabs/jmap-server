@@ -33,7 +33,7 @@ where
     T: for<'x> Store<'x> + 'static,
 {
     // Test election.
-    println!("Testing raft elections on a 5 nodes cluster...");
+    println!("Testing Raft elections on a 5 nodes cluster...");
     let mut cluster = Cluster::<T>::new("st_cluster_election", 5, true).await;
     let peers = cluster.start_cluster().await;
 

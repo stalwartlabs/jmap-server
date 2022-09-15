@@ -35,7 +35,7 @@ pub mod utils;
 async fn cluster_tests() {
     store::tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(store::tracing::Level::DEBUG)
+            .with_max_level(store::tracing::Level::ERROR)
             .finish(),
     )
     .expect("Setting default subscriber failed.");

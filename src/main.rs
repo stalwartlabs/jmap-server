@@ -43,12 +43,9 @@ use jmap_server::{
 
 use std::time::Duration;
 
-use futures::StreamExt;
-use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
-use signal_hook_tokio::Signals;
 use store::{
     config::env_settings::EnvSettings,
-    tracing::{self, info, warn, Level},
+    tracing::{self, debug, info, warn, Level},
     Store,
 };
 use store_rocksdb::RocksDB;
@@ -98,37 +95,46 @@ async fn main() -> std::io::Result<()> {
     actix_web::rt::spawn(async move { server.await });
 
     // Wait for shutdown signal
-    let mut signals = Signals::new(&[SIGHUP, SIGTERM, SIGINT, SIGQUIT])?;
+    #[cfg(not(target_env = "msvc"))]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
 
-    while let Some(signal) = signals.next().await {
-        match signal {
-            SIGHUP => {
-                // Reload configuration
+        let mut h_term = signal(SignalKind::terminate()).failed_to("start signal handler");
+        let mut h_int = signal(SignalKind::interrupt()).failed_to("start signal handler");
+
+        tokio::select! {
+            _ = h_term.recv() => debug!("Received SIGTERM."),
+            _ = h_int.recv() => debug!("Received SIGINT."),
+        };
+    }
+
+    #[cfg(target_env = "msvc")]
+    {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {}
+            Err(err) => {
+                eprintln!("Unable to listen for shutdown signal: {}", err);
             }
-            SIGTERM | SIGINT | SIGQUIT => {
-                // Shutdown the system
-                info!(
-                    "Shutting down Stalwart JMAP server v{}...",
-                    env!("CARGO_PKG_VERSION")
-                );
-
-                // Stop web server
-                server_handle.stop(true).await;
-
-                // Stop services
-                core.shutdown().await;
-
-                // Wait for services to finish
-                tokio::time::sleep(Duration::from_secs(1)).await;
-
-                // Flush DB
-                core.store.db.close().failed_to("close database");
-
-                break;
-            }
-            _ => unreachable!(),
         }
     }
+
+    // Shutdown the system
+    info!(
+        "Shutting down Stalwart JMAP server v{}...",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    // Stop web server
+    server_handle.stop(true).await;
+
+    // Stop services
+    core.shutdown().await;
+
+    // Wait for services to finish
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Flush DB
+    core.store.db.close().failed_to("close database");
 
     Ok(())
 }

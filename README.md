@@ -53,16 +53,6 @@ If you are having problems running Stalwart JMAP, you found a bug or just have a
 do not hesitate to reach us on [Github Discussions](https://github.com/stalwartlabs/jmap-server/discussions) or [Discord](https://discord.gg/jtgtCNj66U).
 Additionally you may become a sponsor to obtain priority support from Stalwart Labs Ltd.
 
-## Roadmap
-
-The following major features and enhancements are planned for Stalwart JMAP:
-
-- Quota support
-- Filtering support (Sieve filters as well as other mechanisms)
-- JMAP Contacts, Calendars and Tasks support (currently IETF drafts)
-- Performance enhancements
-- Jepsen testing
-
 ## Documentation
 
 Table of Contents
@@ -103,6 +93,15 @@ Table of Contents
   - [Tests](https://stalw.art/jmap/development/test/)
   - [RFCs conformed](https://stalw.art/jmap/development/rfc/)
 
+## Roadmap
+
+The following major features and enhancements are planned for Stalwart JMAP:
+
+- Quota support
+- Filtering support (Sieve filters as well as other mechanisms)
+- JMAP Contacts, Calendars and Tasks support (currently IETF drafts)
+- Performance enhancements
+- Jepsen testing
 
 ## Testing
 

@@ -218,7 +218,7 @@ async fn handle_conn(
                         return;
                     }
                     Some(Err(err)) => {
-                        error!("Failed to read RPC request from {}: {}", peer_addr, err);
+                        debug!("Failed to read RPC request from {}: {}", peer_addr, err);
                         return;
                     }
                     None => {

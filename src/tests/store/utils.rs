@@ -200,6 +200,10 @@ pub fn init_settings(
                 "1000/60".to_string(),
             ),
             ("max-size-upload".to_string(), "50000000".to_string()),
+            (
+                "encryption-key".to_string(),
+                "parerga_und_paralipomena".to_string(),
+            ),
         ]
         .into_iter(),
     );
@@ -213,11 +217,9 @@ pub fn init_settings(
         pem_dir.set_file_name("key.pem");
         let key = pem_dir.to_str().unwrap().to_string();
 
-        args.insert("rpc-key".to_string(), "secret_key".to_string());
         args.insert("rpc-cert-path".to_string(), cert);
         args.insert("rpc-key-path".to_string(), key);
         args.insert("rpc-port".to_string(), (9000 + peer_num).to_string());
-        args.insert("rpc-allow-invalid-certs".to_string(), "true".to_string());
         args.insert(
             "seed-nodes".to_string(),
             (1..=total_peers)

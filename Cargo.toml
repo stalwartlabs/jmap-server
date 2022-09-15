@@ -37,8 +37,6 @@ num_cpus = "1.13.1"
 futures = "0.3"
 rayon = "1.5.1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"]}
-signal-hook = "0.3.14"
-signal-hook-tokio = { version = "0.3.1", features = ["futures-v0_3"] }
 p256 = { version = "0.11.1", features = ["ecdh"] }
 hkdf = "0.12.3"
 aes-gcm-siv = "0.11.1"
