@@ -7,7 +7,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*.*.*' 
+      - v*.*.*
 
 jobs:
   build:
@@ -183,4 +183,3 @@ jobs:
             files: 'stalwart-jmap*'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        

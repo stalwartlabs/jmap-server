@@ -1,3 +1,26 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * This file is part of the Stalwart JMAP Server.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of
+ * the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ * in the LICENSE file at the top-level directory of this distribution.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * You can be released from the requirements of the AGPLv3 license by
+ * purchasing a commercial license. Please contact licensing@stalw.art
+ * for more details.
+*/
+
 use std::{io::Read, iter::FromIterator, path::PathBuf};
 
 use flate2::bufread::GzDecoder;
@@ -156,7 +179,9 @@ pub fn init_settings(
             ("max-objects-in-set".to_string(), "100000".to_string()),
             ("query-max-results".to_string(), "100000".to_string()),
             ("jmap-port".to_string(), (8000 + peer_num).to_string()),
-            ("smtp-relay".to_string(), "!127.0.0.1:9999".to_string()),
+            ("smtp-relay-host".to_string(), "127.0.0.1".to_string()),
+            ("smtp-relay-port".to_string(), "9999".to_string()),
+            ("smtp-relay-tls".to_string(), "false".to_string()),
             ("max-concurrent-uploads".to_string(), "4".to_string()),
             ("max-concurrent-requests".to_string(), "8".to_string()),
             ("push-attempt-interval".to_string(), "500".to_string()),
