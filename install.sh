@@ -11,12 +11,10 @@ readonly BIN_PATH="${BASE_PATH}/bin"
 readonly DB_PATH="${BASE_PATH}/data"
 readonly CFG_PATH="${BASE_PATH}/etc"
 
-#readonly BASE_URL="https://github.com/stalwartlabs/jmap-server/releases/latest/download"
-readonly BASE_URL="https://github.com/mdecimus/ci-test/releases/latest/download"
-
-readonly CONFIG_URL="https://raw.githubusercontent.com/mdecimus/ci-test/main/config.yml"
-readonly SYSTEMD_SVC_URL="https://raw.githubusercontent.com/mdecimus/ci-test/main/stalwart-jmap.service"
-readonly LAUNCHCTL_SVC_URL="https://raw.githubusercontent.com/mdecimus/ci-test/main/stalwart.jmap.plist"
+readonly BASE_URL="https://github.com/stalwartlabs/jmap-server/releases/latest/download"
+readonly CONFIG_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/config/config.yml"
+readonly SYSTEMD_SVC_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/systemd/stalwart-jmap.service"
+readonly LAUNCHCTL_SVC_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/systemd/stalwart.jmap.plist"
 
 main() {
     downloader --check
@@ -138,11 +136,11 @@ main() {
     if [ -d /etc/systemd/system ]; then
         say "💡  Starting Stalwart JMAP systemd service..."
         ignore /bin/systemctl enable stalwart-jmap
-        #ignore /bin/systemctl restart stalwart-jmap
+        ignore /bin/systemctl restart stalwart-jmap
     elif [ -d /Library/LaunchDaemons ]; then
         say "💡  Starting Stalwart JMAP launchctl service..."
         ignore launchctl load /Library/LaunchDaemons/stalwart.jmap.plist
-        #ignore launchctl start stalwart.jmap
+        ignore launchctl start stalwart.jmap
     fi
 
     say "🎉 Installed Stalwart JMAP! To complete the installation edit"
