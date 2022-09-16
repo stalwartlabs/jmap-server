@@ -8,8 +8,9 @@
         <key>ServiceDescription</key>
         <string>Stalwart JMAP Server</string>
         <key>ProgramArguments</key>
-        <array>             
-            <string>/usr/local/stalwart-jmap/bin/stalwart-jmap --config=/usr/local/stalwart-jmap/etc/config.yml</string>
+        <array>
+            <string>/usr/local/stalwart-jmap/bin/stalwart-jmap</string>
+            <string>--config=/usr/local/stalwart-jmap/etc/config.yml</string>
         </array>
         <key>UserName</key>
         <string>_stalwart-jmap</string>

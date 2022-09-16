@@ -140,7 +140,8 @@ main() {
     elif [ -d /Library/LaunchDaemons ]; then
         say "💡  Starting Stalwart JMAP launchctl service..."
         ignore launchctl load /Library/LaunchDaemons/stalwart.jmap.plist
-        ignore launchctl start stalwart.jmap
+        ignore launchctl enable system/stalwart.jmap
+        ignore launchctl start system/stalwart.jmap
     fi
 
     say "🎉 Installed Stalwart JMAP! To complete the installation edit"
