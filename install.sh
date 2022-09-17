@@ -16,6 +16,8 @@ readonly CONFIG_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/
 readonly SYSTEMD_SVC_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/systemd/stalwart-jmap.service"
 readonly LAUNCHCTL_SVC_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/systemd/stalwart.jmap.plist"
 
+readonly CLI_URL="https://github.com/stalwartlabs/jmap-server-cli/releases/latest/download"
+
 main() {
     downloader --check
     need_cmd uname
@@ -129,8 +131,7 @@ main() {
     say "⬇️  Installing Stalwart JMAP at ${BASE_PATH}..."
     ensure tar zxvf "$_file" -C "$_dir"
     ensure mv "$_dir/stalwart-jmap" "${BIN_PATH}/stalwart-jmap"
-    ensure chown -R ${_account}:${_account} ${BASE_PATH}
-    ensure chmod -R 770 ${BASE_PATH}   
+    ignore rm "$_file"
 
     # Install systemd service
     if [ -d /etc/systemd/system ]; then
@@ -144,11 +145,28 @@ main() {
         ignore launchctl start system/stalwart.jmap
     fi
 
-    say "🎉 Installed Stalwart JMAP! To complete the installation edit"
-    say "   ${CFG_PATH}/config.yml and restart the Stalwart JMAP service."
+    # Download CLI
+    local _file="${_dir}/stalwart-cli.tar.gz"
+    local _url="${CLI_URL}/stalwart-cli-${_arch}.tar.gz"
+    say "⏳ Downloading Stalwart JMAP CLI for ${_arch}..."
+    ensure mkdir -p "$_dir"
+    ensure downloader "$_url" "$_file" "$_arch"
 
+    # Install CLI
+    say "⬇️  Installing Stalwart JMAP CLI at ${BIN_PATH}/stalwart-cli..."
+    ensure tar zxvf "$_file" -C "$_dir"
+    ensure mv "$_dir/stalwart-cli" "${BIN_PATH}/stalwart-cli"
     ignore rm "$_file"
     ignore rmdir "$_dir"
+    
+    # Set permissions
+    ensure chown -R ${_account}:${_account} ${BASE_PATH}
+    ensure chmod a+rx ${BASE_PATH}
+    ensure chmod -R a+rx ${BIN_PATH}
+    ensure chmod -R 770 ${CFG_PATH} ${DB_PATH}
+
+    say "🎉 Installed Stalwart JMAP! To complete the installation edit"
+    say "   ${CFG_PATH}/config.yml and restart the Stalwart JMAP service."
 
     return 0
 }

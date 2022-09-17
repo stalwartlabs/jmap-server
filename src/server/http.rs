@@ -235,7 +235,7 @@ where
 {
     // Start JMAP server
     let http_addr = SocketAddr::from((
-        settings.parse_ipaddr("jmap-bind-addr", "127.0.0.1"),
+        settings.parse_ipaddr("jmap-bind-addr", "0.0.0.0"),
         settings.parse("jmap-port").unwrap_or(DEFAULT_HTTP_PORT),
     ));
 

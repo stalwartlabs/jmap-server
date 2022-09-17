@@ -262,7 +262,7 @@ where
         let config = Config::new(settings);
 
         // Obtain public addresses to advertise
-        let advertise_addr = settings.parse_ipaddr("rpc-advertise-addr", "127.0.0.1");
+        let advertise_addr = settings.parse_ipaddr("rpc-advertise-addr", "0.0.0.0");
         let rpc_port = settings.parse("rpc-port").unwrap_or(DEFAULT_RPC_PORT);
 
         // Obtain peer id from disk or generate a new one.
