@@ -375,8 +375,8 @@ where
     fn build_return_path(&self) -> String {
         format!(
             concat!(
-                "Received: from {} ([{}])",
-                "\tby {} (Stalwart JMAP) with LMTP;",
+                "Received: from {} ([{}])\r\n",
+                "\tby {} (Stalwart JMAP) with LMTP;\r\n",
                 "\t{}\r\n"
             ),
             self.remote_hostname.as_deref().unwrap_or("unknown"),

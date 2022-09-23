@@ -44,7 +44,6 @@ use mail_parser::{
         base64::decode_base64, charsets::map::get_charset_decoder,
         quoted_printable::decode_quoted_printable,
     },
-    parsers::message::MessageStream,
     Encoding, Header, MessagePartId, RfcHeader,
 };
 
@@ -236,20 +235,10 @@ pub struct MessagePart {
 impl MessagePart {
     pub fn decode(&self, raw_message: &[u8]) -> Option<Vec<u8>> {
         let data = raw_message.get(self.offset_start..self.offset_end)?;
-        let decode_fnc = match self.encoding {
-            Encoding::Base64 => decode_base64,
-            Encoding::QuotedPrintable => decode_quoted_printable,
-            Encoding::None => {
-                return Some(data.to_vec());
-            }
-        };
-
-        match decode_fnc(&MessageStream { data, pos: 0 }, 0, &[][..], false).1 {
-            mail_parser::decoders::DecodeResult::Owned(bytes) => Some(bytes),
-            mail_parser::decoders::DecodeResult::Borrowed((start, end)) => {
-                data.get(start..end).map(|b| b.to_vec())
-            }
-            mail_parser::decoders::DecodeResult::Empty => None,
+        match self.encoding {
+            Encoding::Base64 => decode_base64(data),
+            Encoding::QuotedPrintable => decode_quoted_printable(data),
+            Encoding::None => Some(data.to_vec()),
         }
     }
 

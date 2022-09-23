@@ -50,7 +50,8 @@ You may also [compile Stalwart JMAP from the source](https://stalw.art/jmap/deve
 ## Support
 
 If you are having problems running Stalwart JMAP, you found a bug or just have a question,
-do not hesitate to reach us on [Github Discussions](https://github.com/stalwartlabs/jmap-server/discussions) or [Discord](https://discord.gg/jtgtCNj66U).
+do not hesitate to reach us on [Github Discussions](https://github.com/stalwartlabs/jmap-server/discussions),
+[Reddit](https://www.reddit.com/r/stalwartlabs) or [Discord](https://discord.gg/jtgtCNj66U).
 Additionally you may become a sponsor to obtain priority support from Stalwart Labs Ltd.
 
 ## Documentation
