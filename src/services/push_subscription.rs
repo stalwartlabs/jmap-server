@@ -49,7 +49,7 @@ pub enum UpdateSubscription {
         id: DocumentId,
         url: String,
         code: String,
-        keys: Option<EncriptionKeys>,
+        keys: Option<EncryptionKeys>,
     },
     Verified(PushSubscription),
 }
@@ -60,11 +60,11 @@ pub struct PushSubscription {
     pub url: String,
     pub expires: u64,
     pub types: Bitmap<TypeState>,
-    pub keys: Option<EncriptionKeys>,
+    pub keys: Option<EncryptionKeys>,
 }
 
 #[derive(Debug, Clone)]
-pub struct EncriptionKeys {
+pub struct EncryptionKeys {
     pub p256dh: Vec<u8>,
     pub auth: Vec<u8>,
 }
@@ -95,12 +95,12 @@ pub enum PushUpdate {
         account_id: AccountId,
         url: String,
         code: String,
-        keys: Option<EncriptionKeys>,
+        keys: Option<EncryptionKeys>,
     },
     Register {
         id: store::JMAPId,
         url: String,
-        keys: Option<EncriptionKeys>,
+        keys: Option<EncryptionKeys>,
     },
     Unregister {
         id: store::JMAPId,
@@ -110,7 +110,7 @@ pub enum PushUpdate {
 #[derive(Debug)]
 pub struct PushServer {
     url: String,
-    keys: Option<EncriptionKeys>,
+    keys: Option<EncryptionKeys>,
     num_attempts: u32,
     last_request: Instant,
     state_changes: Vec<StateChange>,
@@ -370,7 +370,7 @@ impl PushServer {
 async fn http_request(
     url: String,
     mut body: String,
-    keys: Option<EncriptionKeys>,
+    keys: Option<EncryptionKeys>,
     push_timeout: u64,
 ) -> bool {
     let client_builder = reqwest::Client::builder().timeout(Duration::from_millis(push_timeout));
@@ -451,7 +451,7 @@ where
                 if expires > current_time {
                     let keys =
                         if let Some(Value::Keys { value }) = subscription.remove(&Property::Keys) {
-                            EncriptionKeys {
+                            EncryptionKeys {
                                 p256dh: base64::decode_config(&value.p256dh, base64::URL_SAFE)
                                     .unwrap_or_default(),
                                 auth: base64::decode_config(&value.auth, base64::URL_SAFE)
