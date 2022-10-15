@@ -199,7 +199,7 @@ cargo test cluster_tests -- --ignored
 ### Cluster fuzz
 
 The cluster fuzz test suite starts a Stalwart JMAP cluster consisting of five nodes and attempts
-to corrupt the cluster state and/or its data by randomly performimg the following operations:
+to corrupt the cluster state and/or its data by randomly performing the following operations:
 
 - Crash current leader.
 - Crash follower.
