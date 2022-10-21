@@ -211,7 +211,7 @@ fn map_sort_created_ids() {
                 if !pending_ids.is_empty() {
                     panic!(
                         "Unexpected order: {:?}",
-                        all_ids = request
+                        request
                             .create
                             .as_ref()
                             .unwrap()

@@ -37,9 +37,7 @@ use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use mail_parser::decoders::html::html_to_text;
 use mail_parser::parsers::fields::thread::thread_name;
-use mail_parser::{
-    GetHeader, HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader,
-};
+use mail_parser::{GetHeader, HeaderName, HeaderValue, Message, PartType, RfcHeader};
 use store::ahash::AHashMap;
 use store::ahash::AHashSet;
 use store::blob::BlobId;
@@ -572,25 +570,14 @@ where
                     (MimePartType::Other { part }, binary.len())
                 }
                 PartType::InlineBinary(binary) => (MimePartType::Other { part }, binary.len()),
-                PartType::Message(nested_message) => {
+                PartType::Message(mut nested_message) => {
                     if !has_attachments {
                         has_attachments = true;
                     }
+                    let size = nested_message.parts[0].raw_len();
+                    document.add_message(&mut nested_message, (part_id) as u32);
 
-                    let part_len = match nested_message {
-                        MessageAttachment::Parsed(mut message) => {
-                            document.add_message(&mut message, (part_id) as u32);
-                            message.raw_message.len()
-                        }
-                        MessageAttachment::Raw(raw_message) => {
-                            if let Some(message) = &mut Message::parse(raw_message.as_ref()) {
-                                document.add_message(message, (part_id) as u32);
-                            }
-                            raw_message.len()
-                        }
-                    };
-
-                    (MimePartType::Other { part }, part_len)
+                    (MimePartType::Other { part }, size)
                 }
                 PartType::Multipart(subparts) => (MimePartType::MultiPart { subparts }, 0),
             };

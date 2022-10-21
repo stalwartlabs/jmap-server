@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 jmap = { path = "../jmap" }
 store = { path = "../store" }
-mail-parser = { git = "https://github.com/stalwartlabs/mail-parser" } 
+mail-parser = { git = "https://github.com/stalwartlabs/mail-parser", features = ["full_encoding", "serde_support", "ludicrous_mode"] } 
 mail-builder = { git = "https://github.com/stalwartlabs/mail-builder" }
 mail-send = { git = "https://github.com/stalwartlabs/mail-send" } 
 serde = { version = "1.0", features = ["derive"]}

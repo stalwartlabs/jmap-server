@@ -42,16 +42,9 @@ where
     }
 
     pub fn is_election_due(&self) -> bool {
-        match self.state {
-            State::Candidate { election_due }
+        !matches!(self.state, State::Candidate { election_due }
             | State::Wait { election_due }
-            | State::VotedFor { election_due, .. }
-                if election_due >= Instant::now() =>
-            {
-                false
-            }
-            _ => true,
-        }
+            | State::VotedFor { election_due, .. } if election_due >= Instant::now())
     }
 
     pub fn time_to_next_election(&self) -> Option<u64> {

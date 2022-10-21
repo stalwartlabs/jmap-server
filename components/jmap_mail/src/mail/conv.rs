@@ -24,16 +24,7 @@
 use std::borrow::Cow;
 
 use jmap::types::date::JMAPDate;
-use mail_parser::{
-    parsers::{
-        fields::{
-            address::parse_address, date::parse_date, id::parse_id,
-            unstructured::parse_unstructured,
-        },
-        message::MessageStream,
-    },
-    Addr, Header, HeaderValue, RfcHeader,
-};
+use mail_parser::{parsers::MessageStream, Addr, Header, HeaderValue, RfcHeader};
 
 use super::{
     schema::{HeaderForm, Value},
@@ -537,14 +528,12 @@ impl HeaderForm {
                                 |str| str.trim_end().to_string().into(),
                             ))
                         }
-                        HeaderForm::Text => parse_unstructured(&mut MessageStream::new(bytes)),
-                        HeaderForm::Addresses => parse_address(&mut MessageStream::new(bytes)),
-                        HeaderForm::GroupedAddresses => {
-                            parse_address(&mut MessageStream::new(bytes))
-                        }
-                        HeaderForm::MessageIds => parse_id(&mut MessageStream::new(bytes)),
-                        HeaderForm::Date => parse_date(&mut MessageStream::new(bytes)),
-                        HeaderForm::URLs => parse_address(&mut MessageStream::new(bytes)),
+                        HeaderForm::Text => MessageStream::new(bytes).parse_unstructured(),
+                        HeaderForm::Addresses => MessageStream::new(bytes).parse_address(),
+                        HeaderForm::GroupedAddresses => MessageStream::new(bytes).parse_address(),
+                        HeaderForm::MessageIds => MessageStream::new(bytes).parse_id(),
+                        HeaderForm::Date => MessageStream::new(bytes).parse_date(),
+                        HeaderForm::URLs => MessageStream::new(bytes).parse_address(),
                     }))
                 .into_owned()
             })

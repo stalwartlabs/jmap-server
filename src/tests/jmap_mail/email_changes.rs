@@ -170,7 +170,7 @@ where
         server.store.write(documents).unwrap();
 
         let mut new_state = JMAPState::Initial;
-        for (test_num, state) in (&states).iter().enumerate() {
+        for (test_num, state) in (states).iter().enumerate() {
             let changes = client.email_changes(state.to_string(), None).await.unwrap();
 
             assert_eq!(

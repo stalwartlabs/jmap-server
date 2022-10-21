@@ -35,7 +35,7 @@ use jmap::{
 };
 use mail_parser::{
     parsers::preview::{preview_html, preview_text},
-    Header, HeaderName, HeaderValue, Message, MessageAttachment, PartType, RfcHeader,
+    Header, HeaderName, HeaderValue, Message, PartType, RfcHeader,
 };
 use std::sync::Arc;
 use store::{
@@ -202,6 +202,7 @@ impl IntoParsedEmail for Message<'_> {
                     headers.push(Header {
                         name: header.name.clone(),
                         value: HeaderValue::Empty,
+                        offset_field: header.offset_field,
                         offset_start: header.offset_start,
                         offset_end: header.offset_end,
                     });
@@ -249,10 +250,7 @@ impl IntoParsedEmail for Message<'_> {
 
                     (
                         MimePartType::Other { part },
-                        match nested_message {
-                            MessageAttachment::Parsed(message) => message.raw_message.len(),
-                            MessageAttachment::Raw(raw_message) => raw_message.len(),
-                        },
+                        nested_message.parts[0].raw_len(),
                     )
                 }
                 PartType::Multipart(subparts) => (

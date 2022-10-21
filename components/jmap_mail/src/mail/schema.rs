@@ -27,10 +27,7 @@ use jmap::{
     request::{MaybeIdReference, ResultReference},
     types::{blob::JMAPBlob, date::JMAPDate, jmap::JMAPId},
 };
-use mail_parser::{
-    parsers::header::{parse_header_name, HeaderParserResult},
-    RfcHeader,
-};
+use mail_parser::RfcHeader;
 
 use store::{
     blob::BlobId,
@@ -433,15 +430,14 @@ impl HeaderProperty {
         for (pos, part) in value.split(':').enumerate() {
             match pos {
                 0 if part == "header" => (),
-                1 => match parse_header_name(part.as_bytes()) {
-                    (_, HeaderParserResult::Rfc(rfc_header)) => {
-                        header = Some(HeaderName::Rfc(rfc_header));
-                    }
-                    (_, HeaderParserResult::Other(other_header)) => {
-                        header = Some(HeaderName::Other(other_header.as_ref().to_owned()));
-                    }
-                    _ => return None,
-                },
+                1 => {
+                    header = mail_parser::HeaderName::parse(part).map(|h| match h {
+                        mail_parser::HeaderName::Rfc(header_name) => HeaderName::Rfc(header_name),
+                        mail_parser::HeaderName::Other(header_name) => {
+                            HeaderName::Other(header_name.into_owned())
+                        }
+                    });
+                }
                 2 | 3 if part == "all" => all = true,
                 2 => {
                     form = HeaderForm::parse(part)?;

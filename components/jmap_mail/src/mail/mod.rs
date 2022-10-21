@@ -251,7 +251,7 @@ impl MessagePart {
         let mut bytes = self.decode(raw_message)?;
 
         if remove_cr {
-            bytes = bytes.into_iter().filter(|&b| b != b'\r').collect();
+            bytes.retain(|&b| b != b'\r');
         }
 
         if let Some(charset) = charset {

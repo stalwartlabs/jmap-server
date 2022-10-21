@@ -28,8 +28,7 @@ use jmap::error::method::MethodError;
 use jmap::jmap_store::query::{ExtraFilterFnc, QueryHelper, QueryObject};
 use jmap::request::query::{QueryRequest, QueryResponse};
 use jmap::types::jmap::JMAPId;
-use mail_parser::parsers::header::{parse_header_name, HeaderParserResult};
-use mail_parser::RfcHeader;
+use mail_parser::{HeaderName, RfcHeader};
 use store::ahash::AHashSet;
 use store::core::acl::ACL;
 use store::core::collection::Collection;
@@ -226,15 +225,15 @@ where
                             ));
                         }
                     };
-                    let header = match parse_header_name(header.as_bytes()) {
-                        (_, HeaderParserResult::Rfc(rfc_header)) => rfc_header,
-                        _ => {
+                    let header =
+                        if let Some(HeaderName::Rfc(rfc_header)) = HeaderName::parse(&header) {
+                            rfc_header
+                        } else {
                             return Err(MethodError::InvalidArguments(format!(
                                 "Querying non-RFC header '{}' is not allowed.",
                                 header
-                            )))
-                        }
-                    };
+                            )));
+                        };
 
                     if let Some(value) = value {
                         filter::Filter::eq(
