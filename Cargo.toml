@@ -17,6 +17,7 @@ store_rocksdb = { path = "components/store_rocksdb" }
 jmap = { path = "components/jmap" }
 jmap_mail = { path = "components/jmap_mail" }
 jmap_sharing = { path = "components/jmap_sharing" }
+jmap_sieve = { path = "components/jmap_sieve" }
 tracing-subscriber = "0.3.15"
 actix = "0.13"
 actix-web = { version = "4", features = ["rustls"] }
@@ -41,6 +42,7 @@ p256 = { version = "0.11.1", features = ["ecdh"] }
 hkdf = "0.12.3"
 aes-gcm-siv = "0.11.1"
 aes-gcm = "0.10.1"
+base64 = "0.13"
 
 #[target.'cfg(not(target_env = "msvc"))'.dependencies]
 #tikv-jemallocator = "0.5"
@@ -64,6 +66,7 @@ members = [
     "components/jmap",
     "components/jmap_mail",
     "components/jmap_sharing",
+    "components/jmap_sieve",
 ]
 
 [profile.dev]

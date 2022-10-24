@@ -24,7 +24,6 @@
 use super::{push_subscription_ece::ece_encrypt, state_change::StateChange, LONG_SLUMBER_MS};
 use crate::{api::StateChangeResponse, cluster::IPC_CHANNEL_BUFFER, JMAPServer};
 use jmap::{
-    base64,
     orm::serialize::JMAPOrm,
     push_subscription::schema::{self, Property, Value},
     types::{jmap::JMAPId, type_state::TypeState},

@@ -32,7 +32,7 @@ use jmap_mail::email_submission::schema::EmailSubmission;
 use jmap_mail::identity::schema::Identity;
 use jmap_mail::mail::schema::Email;
 use jmap_mail::mailbox::schema::Mailbox;
-use jmap_mail::vacation_response::schema::VacationResponse;
+use jmap_sieve::sieve_script::schema::SieveScript;
 use store::ahash::AHashSet;
 use store::serialize::key::ValueKey;
 use store::serialize::leb128::Leb128Reader;
@@ -423,13 +423,11 @@ where
                                                 )
                                                 .unwrap()
                                             ),
-                                            Collection::VacationResponse => assert_eq!(
-                                                TinyORM::<VacationResponse>::deserialize(&value)
+                                            Collection::SieveScript => assert_eq!(
+                                                TinyORM::<SieveScript>::deserialize(&value)
                                                     .unwrap(),
-                                                TinyORM::<VacationResponse>::deserialize(
-                                                    &other_value
-                                                )
-                                                .unwrap()
+                                                TinyORM::<SieveScript>::deserialize(&other_value)
+                                                    .unwrap()
                                             ),
                                             Collection::Thread | Collection::None => unreachable!(),
                                         }

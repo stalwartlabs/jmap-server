@@ -54,6 +54,10 @@ use jmap_mail::{
     thread::schema::Thread,
     vacation_response::schema::VacationResponse,
 };
+use jmap_sieve::sieve_script::{
+    schema::SieveScript,
+    validate::{SieveScriptValidateRequest, SieveScriptValidateResponse},
+};
 use serde::{de::Visitor, ser::SerializeSeq, Deserialize, Serialize};
 use store::{ahash::AHashMap, log::changes::ChangeId, AccountId};
 
@@ -124,9 +128,15 @@ pub enum Request {
     QueryChangesEmailSubmission(QueryChangesRequest<EmailSubmission>),
     SetEmailSubmission(SetRequest<EmailSubmission>),
 
-    // Vacation Respone
+    // Vacation Response
     GetVacationResponse(GetRequest<VacationResponse>),
     SetVacationResponse(SetRequest<VacationResponse>),
+
+    // Sieve Script
+    GetSieveScript(GetRequest<SieveScript>),
+    QuerySieveScript(QueryRequest<SieveScript>),
+    SetSieveScript(SetRequest<SieveScript>),
+    ValidateSieveScript(SieveScriptValidateRequest),
 
     // Principal
     GetPrincipal(GetRequest<Principal>),
@@ -183,6 +193,12 @@ pub enum Response {
     GetVacationResponse(GetResponse<VacationResponse>),
     SetVacationResponse(SetResponse<VacationResponse>),
 
+    // Sieve Script
+    GetSieveScript(GetResponse<SieveScript>),
+    QuerySieveScript(QueryResponse),
+    SetSieveScript(SetResponse<SieveScript>),
+    ValidateSieveScript(SieveScriptValidateResponse),
+
     // Principal
     GetPrincipal(GetResponse<Principal>),
     QueryPrincipal(QueryResponse),
@@ -219,6 +235,9 @@ impl Request {
             | Request::GetVacationResponse(_)
             | Request::GetPrincipal(_)
             | Request::QueryPrincipal(_)
+            | Request::GetSieveScript(_)
+            | Request::QuerySieveScript(_)
+            | Request::ValidateSieveScript(_)
             | Request::Echo(_)
             | Request::Error(_) => true,
 
@@ -231,6 +250,7 @@ impl Request {
             | Request::SetEmailSubmission(_)
             | Request::SetVacationResponse(_)
             | Request::SetPrincipal(_)
+            | Request::SetSieveScript(_)
             | Request::CopyBlob(_) => false,
         }
     }
@@ -486,6 +506,18 @@ impl Response {
                 response.account_id = None;
                 Changes::None
             }
+            Response::SetSieveScript(response) => {
+                if let Some(change_id) = response.has_changes() {
+                    Changes::Item {
+                        created_ids: response.created_ids(),
+                        change_id,
+                        state_change: None,
+                        next_call: None,
+                    }
+                } else {
+                    Changes::None
+                }
+            }
             Response::SetPrincipal(response) => {
                 if let Some(change_id) = response.has_changes() {
                     Changes::Item {
@@ -520,6 +552,9 @@ impl Response {
             | Response::GetPrincipal(_)
             | Response::QueryPrincipal(_)
             | Response::CopyBlob(_)
+            | Response::GetSieveScript(_)
+            | Response::ValidateSieveScript(_)
+            | Response::QuerySieveScript(_)
             | Response::Echo(_)
             | Response::Error(_) => Changes::None,
         }
@@ -713,6 +748,26 @@ where
                 .map_err(|err| MatchError::Parse(err.to_string()))?
                 .ok_or(MatchError::Eof)?,
         ),
+        "SieveScript/get" => Request::GetSieveScript(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
+        "SieveScript/query" => Request::QuerySieveScript(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
+        "SieveScript/set" => Request::SetSieveScript(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
+        "SieveScript/validate" => Request::ValidateSieveScript(
+            seq.next_element()
+                .map_err(|err| MatchError::Parse(err.to_string()))?
+                .ok_or(MatchError::Eof)?,
+        ),
         "PushSubscription/get" => Request::GetPushSubscription(
             seq.next_element()
                 .map_err(|err| MatchError::Parse(err.to_string()))?
@@ -875,6 +930,22 @@ impl Serialize for Call<Response> {
             }
             Response::SetVacationResponse(response) => {
                 seq.serialize_element("VacationResponse/set")?;
+                seq.serialize_element(response)?;
+            }
+            Response::GetSieveScript(response) => {
+                seq.serialize_element("SieveScript/get")?;
+                seq.serialize_element(response)?;
+            }
+            Response::QuerySieveScript(response) => {
+                seq.serialize_element("SieveScript/query")?;
+                seq.serialize_element(response)?;
+            }
+            Response::SetSieveScript(response) => {
+                seq.serialize_element("SieveScript/set")?;
+                seq.serialize_element(response)?;
+            }
+            Response::ValidateSieveScript(response) => {
+                seq.serialize_element("SieveScript/validate")?;
                 seq.serialize_element(response)?;
             }
             Response::GetPrincipal(response) => {

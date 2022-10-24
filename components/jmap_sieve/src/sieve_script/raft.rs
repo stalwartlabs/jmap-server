@@ -21,18 +21,17 @@
  * for more details.
 */
 
-use jmap::jmap_store::RaftObject;
+use jmap::{jmap_store::RaftObject, orm::serialize::JMAPOrm};
 use store::{
     blob::BlobId,
-    core::{collection::Collection, error::StoreError},
-    serialize::StoreSerialize,
+    core::error::StoreError,
     write::{batch::WriteBatch, options::IndexOptions},
     AccountId, DocumentId, JMAPId, JMAPStore, Store,
 };
 
-use super::schema::{EmailSubmission, Property};
+use super::schema::{Property, SieveScript, Value};
 
-impl<T> RaftObject<T> for EmailSubmission
+impl<T> RaftObject<T> for SieveScript
 where
     T: for<'x> Store<'x> + 'static,
 {
@@ -45,20 +44,15 @@ where
     ) -> store::Result<()> {
         if let Some(blobs) = as_insert {
             // First blobId contains the email
-            let email_blob_id = blobs.into_iter().next().ok_or_else(|| {
+            let sieve_blob_id = blobs.into_iter().next().ok_or_else(|| {
                 StoreError::InternalError(format!(
-                    "Failed to get message email blob for {}.",
+                    "Failed to get sieve blob for {}.",
                     document.document_id
                 ))
             })?;
 
             // Link metadata blob
-            document.binary(
-                Property::EmailId,
-                email_blob_id.serialize().unwrap(),
-                IndexOptions::new(),
-            );
-            document.blob(email_blob_id, IndexOptions::new());
+            document.blob(sieve_blob_id, IndexOptions::new());
         }
         Ok(())
     }
@@ -76,18 +70,16 @@ where
         account_id: AccountId,
         document_id: DocumentId,
     ) -> store::Result<Vec<store::blob::BlobId>> {
-        Ok(vec![store
-            .get_document_value(
-                account_id,
-                Collection::EmailSubmission,
-                document_id,
-                Property::EmailId.into(),
-            )?
-            .ok_or_else(|| {
-                StoreError::NotFound(format!(
-                    "Failed to get message email blobId for {}.",
-                    document_id
-                ))
-            })?])
+        Ok(
+            if let Some(Value::BlobId { value }) = store
+                .get_orm::<SieveScript>(account_id, document_id)?
+                .ok_or_else(|| StoreError::NotFound("SieveScript data not found".to_string()))?
+                .remove(&Property::BlobId)
+            {
+                vec![value.id]
+            } else {
+                vec![]
+            },
+        )
     }
 }

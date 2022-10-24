@@ -49,6 +49,9 @@ impl SetObject for PushSubscription {
 
     fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
     fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
+    fn set_property(&mut self, property: Self::Property, value: Self::Value) {
+        self.properties.set(property, value);
+    }
 }
 
 pub trait JMAPSetPushSubscription<T>
@@ -80,10 +83,8 @@ where
         helper.create(|_create_id, item, helper, document| {
             // Limit the number of subscriptions
             if helper.document_ids.len() as usize >= helper.store.config.push_max_total {
-                return Err(SetError::new(
-                    SetErrorType::Forbidden,
-                    "There are too many subscriptions, please delete some before adding a new one."
-                        .to_string(),
+                return Err(SetError::forbidden().with_description(
+                    "There are too many subscriptions, please delete some before adding a new one.",
                 ));
             }
 
@@ -112,10 +113,9 @@ where
                             Value::Null,
                         ) => Value::Null,
                         (property, _) => {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Field could not be set.",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("Field could not be set."));
                         }
                     },
                 );
@@ -160,7 +160,7 @@ where
         helper.update(|id, item, helper, document| {
             let current_fields = self
                 .get_orm::<PushSubscription>(helper.account_id, id.get_document_id())?
-                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+                .ok_or_else(|| SetError::new(SetErrorType::NotFound))?;
             let mut fields = TinyORM::track_changes(&current_fields);
             let mut expires = None;
 
@@ -180,10 +180,11 @@ where
                             ) {
                                 Value::Text { value }
                             } else {
-                                return Err(SetError::invalid_property(
-                                    property,
-                                    "Verification code does not match.".to_string(),
-                                ));
+                                return Err(SetError::invalid_properties()
+                                    .with_property(property)
+                                    .with_description(
+                                        "Verification code does not match.".to_string(),
+                                    ));
                             }
                         }
                         (Property::Expires, Value::Null) => {
@@ -192,10 +193,11 @@ where
                         }
                         (Property::Types, Value::Null) => Value::Null,
                         (property, _) => {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Property cannot be set or an invalid value was provided.",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description(
+                                    "Property cannot be set or an invalid value was provided.",
+                                ));
                         }
                     },
                 );

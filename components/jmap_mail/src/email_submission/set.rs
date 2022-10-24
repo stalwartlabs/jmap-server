@@ -82,6 +82,10 @@ impl SetObject for EmailSubmission {
             }
         }
     }
+
+    fn set_property(&mut self, property: Self::Property, value: Self::Value) {
+        self.properties.set(property, value);
+    }
 }
 
 pub trait JMAPSetEmailSubmission<T>
@@ -161,10 +165,9 @@ where
                     }
                     (Property::UndoStatus, value @ Value::UndoStatus { .. }) => value,
                     (property, _) => {
-                        return Err(SetError::invalid_property(
-                            property,
-                            "Field could not be set.",
-                        ));
+                        return Err(SetError::invalid_properties()
+                            .with_property(property)
+                            .with_description("Field could not be set."));
                     }
                 };
                 fields.set(property, value);
@@ -175,7 +178,9 @@ where
                 .store
                 .get_orm::<Identity>(helper.account_id, identity_id)?
                 .ok_or_else(|| {
-                    SetError::invalid_property(Property::IdentityId, "Identity not found.")
+                    SetError::invalid_properties()
+                        .with_property(Property::IdentityId)
+                        .with_description("Identity not found.")
                 })?
                 .remove(&identity::schema::Property::Email)
                 .and_then(|v| {
@@ -186,10 +191,11 @@ where
                     }
                 })
                 .ok_or_else(|| {
-                    SetError::invalid_property(
-                        Property::IdentityId,
-                        "The speficied identity does not have a valid e-mail address.",
-                    )
+                    SetError::invalid_properties()
+                        .with_property(Property::IdentityId)
+                        .with_description(
+                            "The speficied identity does not have a valid e-mail address.",
+                        )
                 })?;
 
             // Make sure the envelope address matches the identity email address
@@ -199,13 +205,12 @@ where
                 .unwrap_or(0) as i64;
             let mut envelope = if let Some(envelope) = envelope {
                 if !envelope.mail_from.email.eq_ignore_ascii_case(&mail_from) {
-                    return Err(SetError::invalid_property(
-                        Property::IdentityId,
-                        format!(
+                    return Err(SetError::invalid_properties()
+                        .with_property(Property::IdentityId)
+                        .with_description(format!(
                             "The envelope mailFrom ({}) does not match the identity email ({})",
                             envelope.mail_from.email, mail_from
-                        ),
-                    ));
+                        )));
                 }
 
                 // Parse future release
@@ -229,10 +234,9 @@ where
 
             // Make sure we have all required fields.
             if email_id.get_document_id() == u32::MAX || identity_id == u32::MAX {
-                return Err(SetError::invalid_property(
-                    Property::EmailId,
-                    "emailId and identityId properties are required.",
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::EmailId)
+                    .with_description("emailId and identityId properties are required."));
             }
 
             // Set the sentAt property
@@ -257,7 +261,9 @@ where
                                 MessageField::Metadata.into(),
                             )?
                             .ok_or_else(|| {
-                                SetError::invalid_property(Property::EmailId, "Email not found.")
+                                SetError::invalid_properties()
+                                    .with_property(Property::EmailId)
+                                    .with_description("Email not found.")
                             })?,
                     )?
                     .ok_or_else(|| {
@@ -299,10 +305,9 @@ where
                         });
                     }
                 } else {
-                    return Err(SetError::invalid_property(
-                        Property::Envelope,
-                        "No recipients found in the e-mail.",
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_property(Property::Envelope)
+                        .with_description("No recipients found in the e-mail."));
                 }
             } else {
                 // De-duplicate and sanitize recipients
@@ -363,7 +368,7 @@ where
             {
                 let current_fields = self
                     .get_orm::<EmailSubmission>(helper.account_id, id.get_document_id())?
-                    .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+                    .ok_or_else(|| SetError::new(SetErrorType::NotFound))?;
                 let mut fields = TinyORM::track_changes(&current_fields);
 
                 fields.set(Property::UndoStatus, Value::UndoStatus { value });
@@ -371,7 +376,6 @@ where
                 // Merge changes
                 current_fields.merge_validate(document, fields)?;
             }
-
             Ok(None)
         })?;
 

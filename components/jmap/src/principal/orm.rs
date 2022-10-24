@@ -198,6 +198,10 @@ impl SetObject for Principal {
 
     fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
     fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
+
+    fn set_property(&mut self, property: Self::Property, value: Self::Value) {
+        self.properties.set(property, value);
+    }
 }
 
 impl QueryObject for Principal {

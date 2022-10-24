@@ -31,7 +31,7 @@ use jmap_mail::email_submission::schema::EmailSubmission;
 use jmap_mail::identity::schema::Identity;
 use jmap_mail::mail::schema::Email;
 use jmap_mail::mailbox::schema::Mailbox;
-use jmap_mail::vacation_response::schema::VacationResponse;
+use jmap_sieve::sieve_script::schema::SieveScript;
 use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::tracing::debug;
@@ -88,11 +88,9 @@ where
                         document_id,
                         is_insert,
                     ),
-                    Collection::VacationResponse => store.raft_prepare_update::<VacationResponse>(
-                        account_id,
-                        document_id,
-                        is_insert,
-                    ),
+                    Collection::SieveScript => {
+                        store.raft_prepare_update::<SieveScript>(account_id, document_id, is_insert)
+                    }
                     Collection::Thread | Collection::None => Err(StoreError::InternalError(
                         "Unsupported collection for changes".into(),
                     )),

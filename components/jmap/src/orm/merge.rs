@@ -45,10 +45,9 @@ where
                 .map(|v| v.is_empty())
                 .unwrap_or_else(|| self.properties.get(property).is_none())
             {
-                return Err(SetError::invalid_property(
-                    property.clone(),
-                    "Property cannot be empty.".to_string(),
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(property.clone())
+                    .with_description("Property cannot be empty."));
             }
         }
 
@@ -60,10 +59,12 @@ where
                 .map(|v| v.len() > *max_len)
                 .unwrap_or(false)
             {
-                return Err(SetError::invalid_property(
-                    property.clone(),
-                    format!("Property cannot be longer than {} bytes.", max_len),
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(property.clone())
+                    .with_description(format!(
+                        "Property cannot be longer than {} bytes.",
+                        max_len
+                    )));
             }
         }
 

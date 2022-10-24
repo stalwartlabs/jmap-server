@@ -36,9 +36,9 @@ use jmap_mail::mail::schema::Email;
 use jmap_mail::mail::set::JMAPSetMail;
 use jmap_mail::mailbox::schema::Mailbox;
 use jmap_mail::mailbox::set::JMAPSetMailbox;
-use jmap_mail::vacation_response::schema::VacationResponse;
-use jmap_mail::vacation_response::set::JMAPSetVacationResponse;
 use jmap_sharing::principal::set::JMAPSetPrincipal;
+use jmap_sieve::sieve_script::schema::SieveScript;
+use jmap_sieve::sieve_script::set::JMAPSetSieveScript;
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
@@ -96,9 +96,7 @@ where
             Collection::EmailSubmission => {
                 self.raft_apply_update::<EmailSubmission>(write_batch, update)
             }
-            Collection::VacationResponse => {
-                self.raft_apply_update::<VacationResponse>(write_batch, update)
-            }
+            Collection::SieveScript => self.raft_apply_update::<SieveScript>(write_batch, update),
             Collection::Thread | Collection::None => {
                 debug_assert!(false, "Unsupported update for {:?}", collection);
                 Ok(())
@@ -197,8 +195,8 @@ where
             Collection::EmailSubmission => {
                 self.email_submission_delete(write_batch.account_id, &mut document)?
             }
-            Collection::VacationResponse => {
-                self.vacation_response_delete(write_batch.account_id, &mut document)?
+            Collection::SieveScript => {
+                self.sieve_script_delete(write_batch.account_id, &mut document)?
             }
             Collection::Thread | Collection::None => unreachable!(),
         }

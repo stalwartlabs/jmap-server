@@ -26,12 +26,22 @@ use std::borrow::Cow;
 use store::core::error::StoreError;
 use store::tracing::error;
 
+use crate::types::jmap::JMAPId;
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SetError<U> {
     #[serde(rename = "type")]
     pub type_: SetErrorType,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<Cow<'static, str>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     properties: Option<Vec<U>>,
+
+    #[serde(rename = "existingId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    existing_id: Option<JMAPId>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -80,6 +90,12 @@ pub enum SetErrorType {
     ForbiddenToSend,
     #[serde(rename = "cannotUnsend")]
     CannotUnsend,
+    #[serde(rename = "alreadyExists")]
+    AlreadyExists,
+    #[serde(rename = "invalidScript")]
+    InvalidScript,
+    #[serde(rename = "scriptIsActive")]
+    ScriptIsActive,
 }
 
 impl SetErrorType {
@@ -107,52 +123,53 @@ impl SetErrorType {
             SetErrorType::ForbiddenMailFrom => "forbiddenMailFrom",
             SetErrorType::ForbiddenToSend => "forbiddenToSend",
             SetErrorType::CannotUnsend => "cannotUnsend",
+            SetErrorType::AlreadyExists => "alreadyExists",
+            SetErrorType::InvalidScript => "invalidScript",
+            SetErrorType::ScriptIsActive => "scriptIsActive",
         }
     }
 }
 
 impl<U> SetError<U> {
-    pub fn new_err(type_: SetErrorType) -> Self {
+    pub fn new(type_: SetErrorType) -> Self {
         SetError {
             type_,
             description: None,
             properties: None,
+            existing_id: None,
         }
     }
 
-    pub fn new(type_: SetErrorType, description: impl Into<Cow<'static, str>>) -> Self {
-        SetError {
-            type_,
-            description: description.into().into(),
-            properties: None,
-        }
+    pub fn with_description(mut self, description: impl Into<Cow<'static, str>>) -> Self {
+        self.description = description.into().into();
+        self
     }
 
-    pub fn invalid_property(property: U, description: impl Into<Cow<'static, str>>) -> Self {
-        SetError {
-            type_: SetErrorType::InvalidProperties,
-            description: description.into().into(),
-            properties: vec![property].into(),
-        }
+    pub fn with_property(mut self, property: U) -> Self {
+        self.properties = vec![property].into();
+        self
     }
 
-    pub fn invalid_properties(
-        properties: impl IntoIterator<Item = U>,
-        description: impl Into<Cow<'static, str>>,
-    ) -> Self {
-        SetError {
-            type_: SetErrorType::InvalidProperties,
-            description: description.into().into(),
-            properties: properties.into_iter().collect::<Vec<_>>().into(),
-        }
+    pub fn with_properties(mut self, properties: impl IntoIterator<Item = U>) -> Self {
+        self.properties = properties.into_iter().collect::<Vec<_>>().into();
+        self
     }
 
-    pub fn forbidden(description: impl Into<Cow<'static, str>>) -> Self {
-        SetError {
-            type_: SetErrorType::Forbidden,
-            description: description.into().into(),
-            properties: None,
-        }
+    pub fn with_existing_id(mut self, id: JMAPId) -> Self {
+        self.existing_id = id.into();
+        self
+    }
+
+    pub fn invalid_properties() -> Self {
+        Self::new(SetErrorType::InvalidProperties)
+    }
+
+    pub fn forbidden() -> Self {
+        Self::new(SetErrorType::Forbidden)
+    }
+
+    pub fn already_exists() -> Self {
+        Self::new(SetErrorType::Forbidden)
     }
 }
 
@@ -160,12 +177,10 @@ impl<U> From<StoreError> for SetError<U> {
     fn from(error: StoreError) -> Self {
         error!("Failed store operation: {:?}", error);
         if let StoreError::NotFound(_) = error {
-            SetError::new(SetErrorType::NotFound, "Not found.")
+            SetError::new(SetErrorType::NotFound).with_description("Not found.")
         } else {
-            SetError::new(
-                SetErrorType::Forbidden,
-                "There was a problem while processing your request.".to_string(),
-            )
+            SetError::new(SetErrorType::Forbidden)
+                .with_description("There was a problem while processing your request.".to_string())
         }
     }
 }

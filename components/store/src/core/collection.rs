@@ -33,7 +33,7 @@ pub enum Collection {
     Thread = 4,
     Identity = 5,
     EmailSubmission = 6,
-    VacationResponse = 7,
+    SieveScript = 7,
     None = 8,
 }
 
@@ -53,7 +53,7 @@ impl From<u8> for Collection {
             4 => Collection::Thread,
             5 => Collection::Identity,
             6 => Collection::EmailSubmission,
-            7 => Collection::VacationResponse,
+            7 => Collection::SieveScript,
             _ => {
                 debug_assert!(false, "Invalid collection value: {}", value);
                 Collection::None
@@ -84,7 +84,7 @@ impl From<u64> for Collection {
             4 => Collection::Thread,
             5 => Collection::Identity,
             6 => Collection::EmailSubmission,
-            7 => Collection::VacationResponse,
+            7 => Collection::SieveScript,
             _ => {
                 debug_assert!(false, "Invalid collection value: {}", value);
                 Collection::None

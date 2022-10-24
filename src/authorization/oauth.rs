@@ -31,7 +31,9 @@ use std::{
 
 use crate::JMAPServer;
 use actix_web::{http::header, web, HttpResponse};
-use jmap::base64;
+use jmap_mail::{
+    mail_builder::encoders::base64::base64_encode, mail_parser::decoders::base64::decode_base64,
+};
 use jmap_sharing::principal::account::JMAPAccountStore;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -414,7 +416,10 @@ where
     if let Some(state) = &params.state {
         let _ = write!(cancel_link, "&state={}", state);
     }
-    let code = base64::encode(&bincode::serialize(&(1u32, params)).unwrap_or_default());
+    let code = String::from_utf8(
+        base64_encode(&bincode::serialize(&(1u32, params)).unwrap_or_default()).unwrap_or_default(),
+    )
+    .unwrap();
 
     let mut response = String::with_capacity(
         OAUTH_HTML_HEADER.len()
@@ -448,8 +453,7 @@ where
 {
     let mut auth_code = None;
     let params = params.into_inner();
-    let (auth_attempts, code_req) = match base64::decode(&params.code)
-        .ok()
+    let (auth_attempts, code_req) = match decode_base64(params.code.as_bytes())
         .and_then(|bytes| bincode::deserialize::<(u32, CodeAuthRequest)>(&bytes).ok())
     {
         Some(code) => code,
@@ -502,8 +506,11 @@ where
     }
 
     if auth_code.is_none() && (auth_attempts < core.oauth.max_auth_attempts) {
-        let code =
-            base64::encode(&bincode::serialize(&(auth_attempts + 1, code_req)).unwrap_or_default());
+        let code = String::from_utf8(
+            base64_encode(&bincode::serialize(&(auth_attempts + 1, code_req)).unwrap_or_default())
+                .unwrap_or_default(),
+        )
+        .unwrap();
 
         let mut response = String::with_capacity(
             OAUTH_HTML_HEADER.len()
@@ -766,7 +773,7 @@ where
         token.push_leb128(expiry);
         token.extend_from_slice(client_id.as_bytes());
 
-        Ok(base64::encode(&token))
+        Ok(String::from_utf8(base64_encode(&token).unwrap_or_default()).unwrap())
     }
 
     pub async fn validate_access_token(
@@ -775,8 +782,8 @@ where
         token: &str,
     ) -> store::Result<(AccountId, String, u64)> {
         // Base64 decode token
-        let token = base64::decode(token)
-            .map_err(|e| StoreError::DeserializeError(format!("Failed to decode: {}", e)))?;
+        let token = decode_base64(token.as_bytes())
+            .ok_or_else(|| StoreError::DeserializeError("Failed to decode.".to_string()))?;
         let (account_id, expiry, client_id) = token
             .get((RANDOM_CODE_LEN + SymmetricEncrypt::ENCRYPT_TAG_LEN)..)
             .and_then(|bytes| {

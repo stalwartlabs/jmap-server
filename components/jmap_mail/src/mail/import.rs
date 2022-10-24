@@ -187,10 +187,12 @@ where
                     if !mailbox_document_ids.contains(document_id) {
                         not_created.append(
                             id,
-                            SetError::invalid_property(
-                                Property::MailboxIds,
-                                format!("Mailbox {} does not exist.", mailbox_id),
-                            ),
+                            SetError::invalid_properties()
+                                .with_property(Property::MailboxIds)
+                                .with_description(format!(
+                                    "Mailbox {} does not exist.",
+                                    mailbox_id
+                                )),
                         );
                         continue 'outer;
                     } else if is_shared_account
@@ -200,7 +202,7 @@ where
                     {
                         not_created.append(
                             id,
-                            SetError::forbidden(format!(
+                            SetError::forbidden().with_description(format!(
                                 "You are not allowed to import messages into mailbox {}.",
                                 mailbox_id
                             )),
@@ -299,29 +301,26 @@ where
                     BlobResult::Unauthorized => {
                         not_created.append(
                             id,
-                            SetError::new(
-                                SetErrorType::Forbidden,
-                                format!("You do not have access to blobId {}.", item.blob_id),
-                            ),
+                            SetError::new(SetErrorType::Forbidden).with_description(format!(
+                                "You do not have access to blobId {}.",
+                                item.blob_id
+                            )),
                         );
                     }
                     BlobResult::NotFound => {
                         not_created.append(
                             id,
-                            SetError::new(
-                                SetErrorType::BlobNotFound,
-                                format!("BlobId {} not found.", item.blob_id),
-                            ),
+                            SetError::new(SetErrorType::BlobNotFound)
+                                .with_description(format!("BlobId {} not found.", item.blob_id)),
                         );
                     }
                 }
             } else {
                 not_created.append(
                     id,
-                    SetError::invalid_property(
-                        Property::MailboxIds,
-                        "Message must belong to at least one mailbox.",
-                    ),
+                    SetError::invalid_properties()
+                        .with_property(Property::MailboxIds)
+                        .with_description("Message must belong to at least one mailbox."),
                 );
             }
         }

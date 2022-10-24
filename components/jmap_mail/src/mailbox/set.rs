@@ -86,6 +86,10 @@ impl SetObject for Mailbox {
             }
         }
     }
+
+    fn set_property(&mut self, property: Self::Property, value: Self::Value) {
+        self.properties.set(property, value);
+    }
 }
 
 pub trait JMAPSetMailbox<T>
@@ -125,15 +129,14 @@ where
                             )?
                             .has_access(value.get_document_id())
                         {
-                            return Err(SetError::forbidden(
+                            return Err(SetError::forbidden().with_description(
                                 "You are not allowed to create sub folders under this folder.",
                             ));
                         }
                     }
                     _ => {
-                        return Err(SetError::forbidden(
-                            "You are not allowed to create root folders.",
-                        ));
+                        return Err(SetError::forbidden()
+                            .with_description("You are not allowed to create root folders."));
                     }
                 }
             }
@@ -151,7 +154,7 @@ where
             let document_id = id.get_document_id();
             let current_fields = self
                 .get_orm::<Mailbox>(helper.account_id, document_id)?
-                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+                .ok_or_else(|| SetError::new(SetErrorType::NotFound))?;
 
             let fields = TinyORM::track_changes(&current_fields).mailbox_set(
                 helper,
@@ -165,7 +168,7 @@ where
                 && fields.has_property(&Property::Role)
                 && !helper.acl.is_member(SUPERUSER_ID)
             {
-                return Err(SetError::forbidden(
+                return Err(SetError::forbidden().with_description(
                     "You are not allowed to change the role of Inbox or Trash folders.",
                 ));
             }
@@ -177,9 +180,8 @@ where
                     .mail_shared_folders(helper.account_id, &helper.acl.member_of, ACL::Modify)?
                     .has_access(document_id)
                 {
-                    return Err(SetError::forbidden(
-                        "You are not allowed to modify this folder.",
-                    ));
+                    return Err(SetError::forbidden()
+                        .with_description("You are not allowed to modify this folder."));
                 }
 
                 if fields.has_property(&Property::ACL)
@@ -192,7 +194,7 @@ where
                         )?
                         .has_access(document_id)
                 {
-                    return Err(SetError::forbidden(
+                    return Err(SetError::forbidden().with_description(
                         "You are not allowed to change the permissions of this folder.",
                     ));
                 }
@@ -211,9 +213,8 @@ where
             if (document_id == INBOX_ID || document_id == TRASH_ID)
                 && !helper.acl.is_member(SUPERUSER_ID)
             {
-                return Err(SetError::forbidden(
-                    "You are not allowed to delete Inbox or Trash folders.",
-                ));
+                return Err(SetError::forbidden()
+                    .with_description("You are not allowed to delete Inbox or Trash folders."));
             }
 
             // Check ACLs
@@ -223,9 +224,8 @@ where
                     .mail_shared_folders(helper.account_id, &helper.acl.member_of, ACL::Delete)?
                     .has_access(document_id)
                 {
-                    return Err(SetError::forbidden(
-                        "You are not allowed to delete this folder.",
-                    ));
+                    return Err(SetError::forbidden()
+                        .with_description("You are not allowed to delete this folder."));
                 }
                 if on_destroy_remove_emails
                     && !helper
@@ -237,7 +237,7 @@ where
                         )?
                         .has_access(document_id)
                 {
-                    return Err(SetError::forbidden(
+                    return Err(SetError::forbidden().with_description(
                         "You are not allowed to delete emails from this folder.",
                     ));
                 }
@@ -257,10 +257,8 @@ where
                 )?
                 .is_empty()
             {
-                return Err(SetError::new(
-                    SetErrorType::MailboxHasChild,
-                    "Mailbox has at least one children.",
-                ));
+                return Err(SetError::new(SetErrorType::MailboxHasChild)
+                    .with_description("Mailbox has at least one children."));
             }
 
             // Verify that the mailbox is empty
@@ -279,8 +277,7 @@ where
                     ) {
                         Some(lock) => lock,
                         None => {
-                            return Err(SetError::new(
-                                SetErrorType::RateLimit,
+                            return Err(SetError::new(SetErrorType::RateLimit).with_description(
                                 "Resource busy, please try again in a few momentss.",
                             ));
                         }
@@ -343,10 +340,8 @@ where
                         }
                     }
                 } else {
-                    return Err(SetError::new(
-                        SetErrorType::MailboxHasEmail,
-                        "Mailbox is not empty.",
-                    ));
+                    return Err(SetError::new(SetErrorType::MailboxHasEmail)
+                        .with_description("Mailbox is not empty."));
                 }
             }
 
@@ -410,24 +405,19 @@ where
                     if value.len() < helper.store.config.mailbox_name_max_len {
                         Value::Text { value }
                     } else {
-                        return Err(SetError::invalid_property(
-                            property,
-                            "Mailbox name is too long.".to_string(),
-                        ));
+                        return Err(SetError::invalid_properties()
+                            .with_property(property)
+                            .with_description("Mailbox name is too long.".to_string()));
                     }
                 }
                 (Property::ParentId, Value::Id { value }) => {
                     let parent_id = value.get_document_id();
                     if helper.will_destroy.contains(&value) {
-                        return Err(SetError::new(
-                            SetErrorType::WillDestroy,
-                            "Parent ID will be destroyed.",
-                        ));
+                        return Err(SetError::new(SetErrorType::WillDestroy)
+                            .with_description("Parent ID will be destroyed."));
                     } else if !helper.document_ids.contains(parent_id) {
-                        return Err(SetError::new(
-                            SetErrorType::InvalidProperties,
-                            "Parent ID does not exist.",
-                        ));
+                        return Err(SetError::invalid_properties()
+                            .with_description("Parent ID does not exist."));
                     }
 
                     Value::Id {
@@ -495,10 +485,9 @@ where
                         self.tag(property, Tag::Default);
                         Value::Text { value: role }
                     } else {
-                        return Err(SetError::invalid_property(
-                            property,
-                            "Invalid role.".to_string(),
-                        ));
+                        return Err(SetError::invalid_properties()
+                            .with_property(property)
+                            .with_description("Invalid role."));
                     }
                 }
                 (Property::Role, Value::Null) => {
@@ -538,10 +527,9 @@ where
                     continue;
                 }
                 (_, _) => {
-                    return Err(SetError::invalid_property(
-                        property,
-                        "Unexpected value.".to_string(),
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_property(property)
+                        .with_description("Unexpected value."));
                 }
             };
 
@@ -556,10 +544,8 @@ where
             let mut success = false;
             for _ in 0..helper.store.config.mailbox_max_depth {
                 if mailbox_parent_id == (mailbox_id as store::JMAPId) + 1 {
-                    return Err(SetError::new(
-                        SetErrorType::InvalidProperties,
-                        "Mailbox cannot be a parent of itself.",
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_description("Mailbox cannot be a parent of itself."));
                 } else if mailbox_parent_id == 0 {
                     success = true;
                     break;
@@ -579,18 +565,14 @@ where
                     success = true;
                     break;
                 } else {
-                    return Err(SetError::new(
-                        SetErrorType::InvalidProperties,
-                        "Mailbox parent does not exist.",
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_description("Mailbox parent does not exist."));
                 }
             }
 
             if !success {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
-                    "Mailbox parent-child relationship is too deep.",
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_description("Mailbox parent-child relationship is too deep."));
             }
         }
 
@@ -613,10 +595,10 @@ where
                 )?
                 .is_empty()
             {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
-                    format!("A mailbox with role '{}' already exists.", mailbox_role),
-                ));
+                return Err(SetError::invalid_properties().with_description(format!(
+                    "A mailbox with role '{}' already exists.",
+                    mailbox_role
+                )));
             }
         }
 
@@ -665,10 +647,10 @@ where
                         .and_then(|n| n.as_text())
                         == Some(mailbox_name)
                     {
-                        return Err(SetError::new(
-                            SetErrorType::InvalidProperties,
-                            format!("A mailbox with name '{}' already exists.", mailbox_name),
-                        ));
+                        return Err(SetError::invalid_properties().with_description(format!(
+                            "A mailbox with name '{}' already exists.",
+                            mailbox_name
+                        )));
                     }
                 }
             }

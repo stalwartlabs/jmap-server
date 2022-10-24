@@ -35,7 +35,8 @@ use actix_web::{
 };
 use futures::FutureExt;
 use futures_util::future::LocalBoxFuture;
-use jmap::{base64, types::jmap::JMAPId};
+use jmap::types::jmap::JMAPId;
+use jmap_mail::mail_parser::decoders::base64::decode_base64;
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
     core::error::StoreError,
@@ -138,8 +139,7 @@ where
                         .await?;
 
                         // Decode the base64 encoded credentials
-                        if let Some((login, secret)) = base64::decode(token)
-                            .ok()
+                        if let Some((login, secret)) = decode_base64(token.as_bytes())
                             .and_then(|token| String::from_utf8(token).ok())
                             .and_then(|token| {
                                 token.split_once(':').map(|(login, secret)| {

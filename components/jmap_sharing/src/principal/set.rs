@@ -118,7 +118,7 @@ where
             let document_id = id.get_document_id();
             let current_fields = self
                 .get_orm::<Principal>(SUPERUSER_ID, document_id)?
-                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+                .ok_or_else(|| SetError::new(SetErrorType::NotFound))?;
             let fields = TinyORM::track_changes(&current_fields).principal_set(
                 helper,
                 item,
@@ -323,10 +323,9 @@ where
         } {
             Some(Value::Type { value }) => value,
             _ => {
-                return Err(SetError::invalid_property(
-                    Property::Type,
-                    "Missing property.".to_string(),
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::Type)
+                    .with_description("Missing property."));
             }
         };
         let mut validate_emails = Vec::new();
@@ -360,18 +359,19 @@ where
                                 )?
                                 .is_empty()
                             {
-                                return Err(SetError::invalid_property(
-                                    property,
-                                    format!("A domain with name '{}' already exists.", domain),
-                                ));
+                                return Err(SetError::invalid_properties()
+                                    .with_property(property)
+                                    .with_description(format!(
+                                        "A domain with name '{}' already exists.",
+                                        domain
+                                    )));
                             }
 
                             value = domain;
                         } else {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Invalid domain name.".to_string(),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("Invalid domain name."));
                         }
                     }
                     Value::Text { value }
@@ -389,10 +389,9 @@ where
                         }
                         Value::Text { value: email }
                     } else {
-                        return Err(SetError::invalid_property(
-                            property,
-                            "Invalid e-mail address.".to_string(),
-                        ));
+                        return Err(SetError::invalid_properties()
+                            .with_property(property)
+                            .with_description("Invalid e-mail address."));
                     }
                 }
 
@@ -420,10 +419,9 @@ where
                             }
                             aliases.push(email);
                         } else {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "One or more invalid e-mail addresses.".to_string(),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("One or more invalid e-mail addresses."));
                         }
                     }
                     Value::TextList { value: aliases }
@@ -448,10 +446,9 @@ where
                                     aliases.push(email);
                                 }
                             } else {
-                                return Err(SetError::invalid_property(
-                                    property,
-                                    "One or more invalid e-mail addresses.".to_string(),
-                                ));
+                                return Err(SetError::invalid_properties()
+                                    .with_property(property)
+                                    .with_description("One or more invalid e-mail addresses."));
                             }
                         } else {
                             aliases.retain(|v| v != &email);
@@ -475,10 +472,9 @@ where
                             &argon2::Config::default(),
                         )
                         .map_err(|_| {
-                            SetError::invalid_property(
-                                property,
-                                "Failed to generate password hash.".to_string(),
-                            )
+                            SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("Failed to generate password hash.")
                         })?,
                     }
                 }
@@ -493,10 +489,9 @@ where
                             Value::Text { value }
                         }
                         Err(err) => {
-                            return Err(SetError::invalid_property(
-                                property,
-                                format!("Invalid DKIM key: {}", err),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description(format!("Invalid DKIM key: {}", err)));
                         }
                     }
                 }
@@ -566,19 +561,17 @@ where
                         let account_id = id.get_document_id();
 
                         if account_id == document_id {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Cannot add a principal as its member.".to_string(),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("Cannot add a principal as its member."));
                         } else if helper.document_ids.contains(account_id) {
                             if current_members.as_ref().map_or(true, |l| !l.contains(id)) {
                                 helper.store.acl_tokens.invalidate(&account_id);
                             }
                         } else {
-                            return Err(SetError::invalid_property(
-                                property,
-                                format!("Principal '{}' does not exist.", id),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description(format!("Principal '{}' does not exist.", id)));
                         }
                     }
 
@@ -602,18 +595,21 @@ where
                         if do_set {
                             if !members.contains(&id) {
                                 if account_id == document_id {
-                                    return Err(SetError::invalid_property(
-                                        property,
-                                        "Cannot add a principal as its member.".to_string(),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(property)
+                                        .with_description(
+                                            "Cannot add a principal as its member.",
+                                        ));
                                 } else if helper.document_ids.contains(account_id) {
                                     members.push(id);
                                     helper.store.acl_tokens.invalidate(&account_id);
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        property,
-                                        format!("Principal '{}' does not exist.", id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(property)
+                                        .with_description(format!(
+                                            "Principal '{}' does not exist.",
+                                            id
+                                        )));
                                 }
                             }
                         } else if let Some(pos) = members.iter().position(|id_| id_ == &id) {
@@ -638,15 +634,18 @@ where
 
                     for id in &value {
                         if !individuals.contains(id.get_document_id()) {
-                            return Err(SetError::invalid_property(
-                                property,
-                                format!("Principal '{}' is not an individual.", id),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description(format!(
+                                    "Principal '{}' is not an individual.",
+                                    id
+                                )));
                         } else if id.get_document_id() == document_id {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Cannot add a principal as its member.".to_string(),
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description(
+                                    "Cannot add a principal as its member.".to_string(),
+                                ));
                         }
                     }
 
@@ -676,15 +675,18 @@ where
                         if do_set {
                             if !members.contains(&id) {
                                 if !individuals.contains(id.get_document_id()) {
-                                    return Err(SetError::invalid_property(
-                                        property,
-                                        format!("Principal '{}' is not an individual.", id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(property)
+                                        .with_description(format!(
+                                            "Principal '{}' is not an individual.",
+                                            id
+                                        )));
                                 } else if id.get_document_id() == document_id {
-                                    return Err(SetError::invalid_property(
-                                        property,
-                                        "Cannot add a principal as its member.".to_string(),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(property)
+                                        .with_description(
+                                            "Cannot add a principal as its member.",
+                                        ));
                                 }
                                 members.push(id);
                             }
@@ -708,10 +710,9 @@ where
                     continue;
                 }
                 (_, _) => {
-                    return Err(SetError::invalid_property(
-                        property,
-                        "Unexpected value.".to_string(),
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_property(property)
+                        .with_description("Unexpected value."));
                 }
             };
 
@@ -739,10 +740,12 @@ where
                     )?
                     .is_empty()
                 {
-                    return Err(SetError::invalid_property(
-                        Property::Email,
-                        format!("Domain '{}' does not exist on this server.", domain),
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_property(Property::Email)
+                        .with_description(format!(
+                            "Domain '{}' does not exist on this server.",
+                            domain
+                        )));
                 }
             }
 
@@ -767,11 +770,11 @@ where
                 )?
                 .is_empty()
             {
-                return Err(SetError::invalid_property(
-                    Property::Email,
-                    "One of the entered email addresses is linked to another principal."
-                        .to_string(),
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::Email)
+                    .with_description(
+                        "One of the entered email addresses is linked to another principal.",
+                    ));
             }
         }
 
@@ -782,10 +785,9 @@ where
                 .or_else(|| current_fields.and_then(|f| f.get(&Property::Email)))
                 .map_or(true, |v| !matches!(v, Value::Text { .. }))
         {
-            return Err(SetError::invalid_property(
-                Property::Email,
-                "Missing 'email' property.".to_string(),
-            ));
+            return Err(SetError::invalid_properties()
+                .with_property(Property::Email)
+                .with_description("Missing 'email' property."));
         }
 
         if self
@@ -793,10 +795,9 @@ where
             .or_else(|| current_fields.and_then(|f| f.get(&Property::Name)))
             .map_or(true, |v| !matches!(v, Value::Text { .. }))
         {
-            return Err(SetError::invalid_property(
-                Property::Email,
-                "Missing 'name' property.".to_string(),
-            ));
+            return Err(SetError::invalid_properties()
+                .with_property(Property::Email)
+                .with_description("Missing 'name' property."));
         }
 
         if ptype == Type::Individual {
@@ -806,10 +807,9 @@ where
                 .or_else(|| current_fields.and_then(|f| f.get(&Property::Secret)))
                 .map_or(true, |v| !matches!(v, Value::Text { .. }))
             {
-                return Err(SetError::invalid_property(
-                    Property::Email,
-                    "Missing 'secret' property.".to_string(),
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::Email)
+                    .with_description("Missing 'secret' property."));
             }
         }
 

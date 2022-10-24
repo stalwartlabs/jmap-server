@@ -28,7 +28,7 @@ use super::{
     MessageData, MessageField,
 };
 use jmap::{
-    error::set::{SetError, SetErrorType},
+    error::set::SetError,
     jmap_store::copy::CopyHelper,
     orm::TinyORM,
     request::{
@@ -88,9 +88,8 @@ where
                     )?
                     .has_access(document_id)
             {
-                return Err(SetError::forbidden(
-                    "You do not have access to this message.",
-                ));
+                return Err(SetError::forbidden()
+                    .with_description("You do not have access to this message."));
             }
 
             // Update properties
@@ -102,10 +101,9 @@ where
                         if set {
                             for (mailbox_id, set) in value {
                                 let mailbox_id = mailbox_id.unwrap_value().ok_or_else(|| {
-                                    SetError::new(
-                                        SetErrorType::InvalidProperties,
-                                        "Invalid reference used on mailboxIds.",
-                                    )
+                                    SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description("Invalid reference used on mailboxIds.")
                                 })?;
 
                                 if mailbox_ids.contains(mailbox_id.into()) {
@@ -114,19 +112,20 @@ where
                                             .tag(Property::MailboxIds, Tag::Id(mailbox_id.into()));
                                     }
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        Property::MailboxIds,
-                                        format!("mailboxId {} does not exist.", mailbox_id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description(format!(
+                                            "mailboxId {} does not exist.",
+                                            mailbox_id
+                                        )));
                                 }
                             }
                         } else {
                             for (mailbox_id, set) in value {
                                 let mailbox_id = mailbox_id.unwrap_value().ok_or_else(|| {
-                                    SetError::new(
-                                        SetErrorType::InvalidProperties,
-                                        "Invalid reference used on mailboxIds.",
-                                    )
+                                    SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description("Invalid reference used on mailboxIds.")
                                 })?;
 
                                 if mailbox_ids.contains(mailbox_id.into()) {
@@ -135,10 +134,12 @@ where
                                             .tag(Property::MailboxIds, Tag::Id(mailbox_id.into()));
                                     }
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        Property::MailboxIds,
-                                        format!("mailboxId {} does not exist.", mailbox_id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description(format!(
+                                            "mailboxId {} does not exist.",
+                                            mailbox_id
+                                        )));
                                 }
                             }
                         }
@@ -169,10 +170,9 @@ where
 
             // Make sure the message is at least in one mailbox
             if !fields.has_tags(&Property::MailboxIds) {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
-                    "Message has to belong to at least one mailbox.",
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::MailboxIds)
+                    .with_description("Message has to belong to at least one mailbox."));
             }
 
             // Check ACL on target account
@@ -186,7 +186,7 @@ where
                 for mailbox in fields.get_tags(&Property::MailboxIds).unwrap() {
                     let mailbox_id = mailbox.as_id();
                     if !allowed_folders.has_access(mailbox_id) {
-                        return Err(SetError::forbidden(format!(
+                        return Err(SetError::forbidden().with_description(format!(
                             "You are not allowed to add messages to folder {}.",
                             JMAPId::from(mailbox_id)
                         )));

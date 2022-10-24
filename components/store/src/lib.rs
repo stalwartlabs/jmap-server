@@ -41,6 +41,7 @@ use moka::sync::Cache;
 use parking_lot::{Mutex, MutexGuard};
 use roaring::RoaringBitmap;
 use serialize::StoreDeserialize;
+use sieve::{Compiler, Runtime};
 use std::sync::atomic::AtomicBool;
 use std::{
     sync::{atomic::AtomicU64, Arc},
@@ -62,6 +63,7 @@ pub use parking_lot;
 pub use rand;
 pub use roaring;
 pub use sha2;
+pub use sieve;
 pub use tracing;
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -142,6 +144,9 @@ pub struct JMAPStore<T> {
 
     pub account_lock: MutexMap<()>,
 
+    pub sieve_compiler: Compiler,
+    pub sieve_runtime: Runtime,
+
     pub id_assigner: Cache<IdCacheKey, Arc<Mutex<IdAssigner>>>,
     pub shared_documents: Cache<SharedResource, Arc<Option<RoaringBitmap>>>,
     pub acl_tokens: Cache<AccountId, Arc<ACLToken>>,
@@ -189,6 +194,8 @@ where
             raft_index: 0.into(),
             raft_term: 0.into(),
             tombstone_deletions: false.into(),
+            sieve_compiler: Compiler::new(),
+            sieve_runtime: Runtime::new(),
             db,
         };
 

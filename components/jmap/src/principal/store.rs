@@ -30,11 +30,7 @@ use store::{
     AccountId, JMAPStore, Store,
 };
 
-use crate::{
-    error::set::{SetError, SetErrorType},
-    orm::serialize::JMAPOrm,
-    sanitize_email, SUPERUSER_ID,
-};
+use crate::{error::set::SetError, orm::serialize::JMAPOrm, sanitize_email, SUPERUSER_ID};
 
 use super::schema::{Principal, Property, Value};
 
@@ -65,10 +61,8 @@ where
 
     fn principal_to_id<U>(&self, email: &str) -> crate::error::set::Result<AccountId, U> {
         let email_clean = sanitize_email(email).ok_or_else(|| {
-            SetError::new(
-                SetErrorType::InvalidProperties,
-                format!("E-mail {:?} is invalid.", email),
-            )
+            SetError::invalid_properties()
+                .with_description(format!("E-mail {:?} is invalid.", email))
         })?;
         self.query_store::<FilterMapper>(
             SUPERUSER_ID,
@@ -85,10 +79,8 @@ where
         .map_err(SetError::from)?
         .get_min()
         .ok_or_else(|| {
-            SetError::new(
-                SetErrorType::InvalidProperties,
-                format!("E-mail {:?} does not exist.", email),
-            )
+            SetError::invalid_properties()
+                .with_description(format!("E-mail {:?} does not exist.", email))
         })
     }
 }

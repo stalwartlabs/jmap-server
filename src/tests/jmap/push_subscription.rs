@@ -29,10 +29,7 @@ use std::{
 
 use actix_web::{middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use ece::EcKeyComponents;
-use jmap::{
-    base64,
-    types::{jmap::JMAPId, type_state::TypeState},
-};
+use jmap::types::{jmap::JMAPId, type_state::TypeState};
 use jmap_client::{client::Client, mailbox::Role, push_subscription::Keys};
 use reqwest::header::CONTENT_ENCODING;
 use store::{ahash::AHashSet, Store};

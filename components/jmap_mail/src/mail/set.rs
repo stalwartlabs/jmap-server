@@ -108,6 +108,8 @@ impl SetObject for Email {
             }
         }
     }
+
+    fn set_property(&mut self, _property: Self::Property, _value: Self::Value) {}
 }
 
 pub trait JMAPSetMail<T>
@@ -167,10 +169,12 @@ where
                                             .tag(Property::MailboxIds, Tag::Id(mailbox_id.into()));
                                     }
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        Property::MailboxIds,
-                                        format!("mailboxId {} does not exist.", mailbox_id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description(format!(
+                                            "mailboxId {} does not exist.",
+                                            mailbox_id
+                                        )));
                                 }
                             }
                         } else {
@@ -184,10 +188,12 @@ where
                                             .tag(Property::MailboxIds, Tag::Id(mailbox_id.into()));
                                     }
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        Property::MailboxIds,
-                                        format!("mailboxId {} does not exist.", mailbox_id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description(format!(
+                                            "mailboxId {} does not exist.",
+                                            mailbox_id
+                                        )));
                                 }
                             }
                         }
@@ -241,15 +247,15 @@ where
                     }
                     (Property::TextBody, Value::BodyPartList { value }) => {
                         if item.properties.contains_key(&Property::BodyStructure) {
-                            return Err(SetError::invalid_properties(
-                                [Property::TextBody, Property::BodyStructure],
-                                "Cannot set both \"textBody\" and \"bodyStructure\".",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_properties([Property::TextBody, Property::BodyStructure])
+                                .with_description(
+                                    "Cannot set both \"textBody\" and \"bodyStructure\".",
+                                ));
                         } else if value.len() > 1 {
-                            return Err(SetError::invalid_property(
-                                Property::TextBody,
-                                "Only one \"textBody\" part is allowed.",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(Property::TextBody)
+                                .with_description("Only one \"textBody\" part is allowed."));
                         }
 
                         if let Some(body_part) = value.first() {
@@ -265,13 +271,12 @@ where
                             if max_size_attachments > 0 {
                                 size_attachments += text_body.size();
                                 if size_attachments > max_size_attachments {
-                                    return Err(SetError::invalid_property(
-                                        Property::TextBody,
-                                        format!(
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::TextBody)
+                                        .with_description(format!(
                                             "Message exceeds maximum size of {} bytes.",
                                             max_size_attachments
-                                        ),
-                                    ));
+                                        )));
                                 }
                             }
                             builder.text_body = text_body.into();
@@ -279,15 +284,15 @@ where
                     }
                     (Property::HtmlBody, Value::BodyPartList { value }) => {
                         if item.properties.contains_key(&Property::BodyStructure) {
-                            return Err(SetError::invalid_properties(
-                                [Property::HtmlBody, Property::BodyStructure],
-                                "Cannot set both \"htmlBody\" and \"bodyStructure\".",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_properties([Property::HtmlBody, Property::BodyStructure])
+                                .with_description(
+                                    "Cannot set both \"htmlBody\" and \"bodyStructure\".",
+                                ));
                         } else if value.len() > 1 {
-                            return Err(SetError::invalid_property(
-                                Property::HtmlBody,
-                                "Only one \"htmlBody\" part is allowed.",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(Property::HtmlBody)
+                                .with_description("Only one \"htmlBody\" part is allowed."));
                         }
 
                         if let Some(body_part) = value.first() {
@@ -303,13 +308,12 @@ where
                             if max_size_attachments > 0 {
                                 size_attachments += html_body.size();
                                 if size_attachments > max_size_attachments {
-                                    return Err(SetError::invalid_property(
-                                        Property::HtmlBody,
-                                        format!(
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::HtmlBody)
+                                        .with_description(format!(
                                             "Message exceeds maximum size of {} bytes.",
                                             max_size_attachments
-                                        ),
-                                    ));
+                                        )));
                                 }
                             }
                             builder.html_body = html_body.into();
@@ -317,10 +321,11 @@ where
                     }
                     (Property::Attachments, Value::BodyPartList { value }) => {
                         if item.properties.contains_key(&Property::BodyStructure) {
-                            return Err(SetError::invalid_properties(
-                                [Property::Attachments, Property::BodyStructure],
-                                "Cannot set both \"attachments\" and \"bodyStructure\".",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_properties([Property::Attachments, Property::BodyStructure])
+                                .with_description(
+                                    "Cannot set both \"attachments\" and \"bodyStructure\".",
+                                ));
                         }
 
                         let mut attachments = Vec::with_capacity(value.len());
@@ -331,13 +336,12 @@ where
                             if max_size_attachments > 0 {
                                 size_attachments += attachment.size();
                                 if size_attachments > max_size_attachments {
-                                    return Err(SetError::invalid_property(
-                                        Property::Attachments,
-                                        format!(
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::Attachments)
+                                        .with_description(format!(
                                             "Message exceeds maximum size of {} bytes.",
                                             max_size_attachments
-                                        ),
-                                    ));
+                                        )));
                                 }
                             }
                             attachments.push(attachment);
@@ -365,13 +369,12 @@ where
                                     if max_size_attachments > 0 {
                                         size_attachments += sub_mime_part.size();
                                         if size_attachments > max_size_attachments {
-                                            return Err(SetError::invalid_property(
-                                                Property::BodyStructure,
-                                                format!(
+                                            return Err(SetError::invalid_properties()
+                                                .with_property(Property::BodyStructure)
+                                                .with_description(format!(
                                                     "Message exceeds maximum size of {} bytes.",
                                                     max_size_attachments
-                                                ),
-                                            ));
+                                                )));
                                         }
                                     }
 
@@ -476,10 +479,9 @@ where
 
             // Make sure the message is at least in one mailbox
             if !fields.has_tags(&Property::MailboxIds) {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
-                    "Message has to belong to at least one mailbox.",
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::MailboxIds)
+                    .with_description("Message has to belong to at least one mailbox."));
             }
 
             // Check ACLs
@@ -493,7 +495,7 @@ where
                 for mailbox in fields.get_tags(&Property::MailboxIds).unwrap() {
                     let mailbox_id = mailbox.as_id();
                     if !allowed_folders.has_access(mailbox_id) {
-                        return Err(SetError::forbidden(format!(
+                        return Err(SetError::forbidden().with_description(format!(
                             "You are not allowed to add messages to folder {}.",
                             JMAPId::from(mailbox_id)
                         )));
@@ -508,10 +510,8 @@ where
                 && builder.text_body.is_none()
                 && builder.attachments.is_none()
             {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
-                    "Message has to have at least one header or body part.",
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_description("Message has to have at least one header or body part."));
             }
 
             // In test, sort headers to avoid randomness
@@ -546,7 +546,7 @@ where
                 document,
                 blob_id.clone(),
                 Message::parse(&blob).ok_or_else(|| {
-                    SetError::new(SetErrorType::InvalidProperties, "Failed to parse e-mail.")
+                    SetError::invalid_properties().with_description("Failed to parse e-mail.")
                 })?,
                 received_at,
             )?;
@@ -574,7 +574,7 @@ where
         helper.update(|id, item, helper, document| {
             let current_fields = self
                 .get_orm::<Email>(account_id, id.get_document_id())?
-                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+                .ok_or_else(|| SetError::new(SetErrorType::NotFound))?;
             let mut fields = TinyORM::track_changes(&current_fields);
 
             for (property, value) in item.properties {
@@ -593,10 +593,12 @@ where
                                             .tag(Property::MailboxIds, Tag::Id(mailbox_id.into()));
                                     }
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        Property::MailboxIds,
-                                        format!("mailboxId {} does not exist.", mailbox_id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description(format!(
+                                            "mailboxId {} does not exist.",
+                                            mailbox_id
+                                        )));
                                 }
                             }
                         } else {
@@ -615,10 +617,12 @@ where
                                         );
                                     }
                                 } else {
-                                    return Err(SetError::invalid_property(
-                                        Property::MailboxIds,
-                                        format!("mailboxId {} does not exist.", mailbox_id),
-                                    ));
+                                    return Err(SetError::invalid_properties()
+                                        .with_property(Property::MailboxIds)
+                                        .with_description(format!(
+                                            "mailboxId {} does not exist.",
+                                            mailbox_id
+                                        )));
                                 }
                             }
                         }
@@ -648,10 +652,9 @@ where
 
             // Make sure the message is at least in one mailbox
             if !fields.has_tags(&Property::MailboxIds) {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
-                    "Message has to belong to at least one mailbox.",
-                ));
+                return Err(SetError::invalid_properties()
+                    .with_property(Property::MailboxIds)
+                    .with_description("Message has to belong to at least one mailbox."));
             }
             let changed_tags = current_fields.get_changed_tags(&fields, &Property::Keywords);
 
@@ -668,7 +671,7 @@ where
                     for mailbox in added_mailboxes {
                         let mailbox_id = mailbox.as_id();
                         if !allowed_folders.has_access(mailbox_id) {
-                            return Err(SetError::forbidden(format!(
+                            return Err(SetError::forbidden().with_description(format!(
                                 "You are not allowed to add messages to folder {}.",
                                 JMAPId::from(mailbox_id)
                             )));
@@ -688,7 +691,7 @@ where
                     for mailbox in added_mailboxes {
                         let mailbox_id = mailbox.as_id();
                         if !allowed_folders.has_access(mailbox_id) {
-                            return Err(SetError::forbidden(format!(
+                            return Err(SetError::forbidden().with_description(format!(
                                 "You are not allowed to delete messages from folder {}.",
                                 JMAPId::from(mailbox_id)
                             )));
@@ -707,9 +710,8 @@ where
                         )?
                         .has_access(document.document_id)
                 {
-                    return Err(SetError::forbidden(
-                        "You are not allowed to change keywords.",
-                    ));
+                    return Err(SetError::forbidden()
+                        .with_description("You are not allowed to change keywords."));
                 }
             }
 
@@ -758,9 +760,8 @@ where
                     )?
                     .has_access(document.document_id)
             {
-                return Err(SetError::forbidden(
-                    "You are not allowed to delete this message.",
-                ));
+                return Err(SetError::forbidden()
+                    .with_description("You are not allowed to delete this message."));
             }
 
             self.mail_delete(account_id, Some(&mut helper.changes), document)?;
@@ -894,13 +895,10 @@ impl EmailBodyPart {
             .unwrap_or_else(|| "text/plain".to_string());
 
         if matches!(strict_type, Some(strict_type) if strict_type != content_type) {
-            return Err(SetError::new(
-                SetErrorType::InvalidProperties,
-                format!(
-                    "Expected one body part of type \"{}\"",
-                    strict_type.unwrap()
-                ),
-            ));
+            return Err(SetError::invalid_properties().with_description(format!(
+                "Expected one body part of type \"{}\"",
+                strict_type.unwrap()
+            )));
         }
 
         let is_multipart = content_type.starts_with("multipart/");
@@ -910,13 +908,11 @@ impl EmailBodyPart {
                 BodyPart::Multipart(vec![])
             } else if let Some(part_id) = self.get_text(BodyProperty::PartId) {
                 if self.properties.contains_key(&BodyProperty::BlobId) {
-                    return Err(SetError::new(
-                        SetErrorType::InvalidProperties,
+                    return Err(SetError::invalid_properties().with_description(
                         "Cannot specify both \"partId\" and \"bodyValues\".".to_string(),
                     ));
                 } else if self.properties.contains_key(&BodyProperty::Charset) {
-                    return Err(SetError::new(
-                        SetErrorType::InvalidProperties,
+                    return Err(SetError::invalid_properties().with_description(
                         "Cannot specify a character set when providing a \"partId\".".to_string(),
                     ));
                 }
@@ -924,17 +920,16 @@ impl EmailBodyPart {
                     body_values
                         .as_ref()
                         .ok_or_else(|| {
-                            SetError::new(
-                                SetErrorType::InvalidProperties,
+                            SetError::invalid_properties().with_description(
                                 "Missing \"bodyValues\" object containing partId.".to_string(),
                             )
                         })?
                         .get(part_id)
                         .ok_or_else(|| {
-                            SetError::new(
-                                SetErrorType::InvalidProperties,
-                                format!("Missing body value for partId \"{}\"", part_id),
-                            )
+                            SetError::invalid_properties().with_description(format!(
+                                "Missing body value for partId \"{}\"",
+                                part_id
+                            ))
                         })?
                         .value
                         .as_str()
@@ -944,28 +939,24 @@ impl EmailBodyPart {
                 BodyPart::Binary(match store.mail_blob_get(account_id, acl, blob_id) {
                     Ok(BlobResult::Blob(bytes)) => bytes.into(),
                     Ok(BlobResult::NotFound) => {
-                        return Err(SetError::new(
-                            SetErrorType::BlobNotFound,
+                        return Err(SetError::new(SetErrorType::BlobNotFound).with_description(
                             format!("blob {} does not exist on this server.", blob_id),
                         ));
                     }
                     Ok(BlobResult::Unauthorized) => {
-                        return Err(SetError::new(
-                            SetErrorType::Forbidden,
-                            format!("You do not have access to blob {}.", blob_id),
-                        ));
+                        return Err(SetError::forbidden().with_description(format!(
+                            "You do not have access to blob {}.",
+                            blob_id
+                        )));
                     }
                     Err(err) => {
                         error!("Failed to retrieve blob: {}", err);
-                        return Err(SetError::new(
-                            SetErrorType::BlobNotFound,
-                            format!("Failed to retrieve blob {}.", blob_id),
-                        ));
+                        return Err(SetError::new(SetErrorType::BlobNotFound)
+                            .with_description(format!("Failed to retrieve blob {}.", blob_id)));
                     }
                 })
             } else {
-                return Err(SetError::new(
-                    SetErrorType::InvalidProperties,
+                return Err(SetError::invalid_properties().with_description(
                     "Expected a \"partId\" or \"blobId\" field in body part.".to_string(),
                 ));
             },
@@ -1037,10 +1028,8 @@ impl EmailBodyPart {
                         .push(("Content-Location".into(), Text::new(value).into()));
                 }
                 (BodyProperty::Headers, Value::Headers { .. }) => {
-                    return Err(SetError::new(
-                        SetErrorType::InvalidProperties,
-                        "Headers have to be set individually.",
-                    ));
+                    return Err(SetError::invalid_properties()
+                        .with_description("Headers have to be set individually."));
                 }
                 (BodyProperty::Header(header), value) => {
                     if header.header != HeaderName::Rfc(RfcHeader::ContentTransferEncoding) {
@@ -1061,16 +1050,13 @@ impl EmailBodyPart {
                             _ => (),
                         }
                     } else {
-                        return Err(SetError::new(
-                            SetErrorType::InvalidProperties,
-                            "Cannot specify Content-Transfer-Encoding header.",
-                        ));
+                        return Err(SetError::invalid_properties()
+                            .with_description("Cannot specify Content-Transfer-Encoding header."));
                     }
                 }
                 (BodyProperty::Size, _) => {
                     if self.properties.contains_key(&BodyProperty::PartId) {
-                        return Err(SetError::new(
-                            SetErrorType::InvalidProperties,
+                        return Err(SetError::invalid_properties().with_description(
                             "Cannot specify \"size\" when providing a \"partId\".",
                         ));
                     }

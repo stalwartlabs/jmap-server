@@ -52,6 +52,10 @@ use jmap_sharing::principal::{
     account::JMAPAccountStore, get::JMAPGetPrincipal, query::JMAPPrincipalQuery,
     set::JMAPSetPrincipal,
 };
+use jmap_sieve::sieve_script::{
+    get::JMAPGetSieveScript, query::JMAPSieveScriptQuery, set::JMAPSetSieveScript,
+    validate::JMAPMailSieveScriptValidate,
+};
 use store::{core::collection::Collection, tracing::error, AccountId, Store};
 
 pub async fn handle_method_calls<T>(
@@ -414,6 +418,34 @@ where
                     .assert_is_member(request.account_id.get_document_id())?
                     .into();
                 method::Response::SetVacationResponse(store.vacation_response_set(request)?)
+            }
+            method::Request::GetSieveScript(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
+                method::Response::GetSieveScript(store.sieve_script_get(request)?)
+            }
+            method::Request::QuerySieveScript(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
+                method::Response::QuerySieveScript(store.sieve_script_query(request)?)
+            }
+            method::Request::SetSieveScript(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
+                method::Response::SetSieveScript(store.sieve_script_set(request)?)
+            }
+            method::Request::ValidateSieveScript(mut request) => {
+                request.acl = store
+                    .get_acl_token(account_id)?
+                    .assert_is_member(request.account_id.get_document_id())?
+                    .into();
+                method::Response::ValidateSieveScript(store.sieve_script_validate(request)?)
             }
             method::Request::GetPrincipal(mut request) => {
                 request.acl = store

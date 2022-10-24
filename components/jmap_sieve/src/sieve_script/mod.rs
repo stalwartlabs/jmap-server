@@ -21,24 +21,26 @@
  * for more details.
 */
 
-use jmap::{jmap_store::Object, types::jmap::JMAPId};
-use store::core::collection::Collection;
-
-use self::schema::{Property, VacationResponse, Value};
-
 pub mod get;
+pub mod query;
 pub mod raft;
 pub mod schema;
 pub mod serialize;
 pub mod set;
+pub mod validate;
 
-impl Object for VacationResponse {
+use jmap::{jmap_store::Object, types::jmap::JMAPId};
+use store::{core::collection::Collection, write::options::Options};
+
+use self::schema::{Property, SieveScript, Value};
+
+impl Object for SieveScript {
     type Property = Property;
 
     type Value = Value;
 
     fn new(id: JMAPId) -> Self {
-        let mut item = VacationResponse::default();
+        let mut item = SieveScript::default();
         item.properties
             .append(Property::Id, Value::Id { value: id });
         item
@@ -52,22 +54,24 @@ impl Object for VacationResponse {
     }
 
     fn required() -> &'static [Self::Property] {
-        &[]
+        &[Property::BlobId]
     }
 
     fn indexed() -> &'static [(Self::Property, u64)] {
-        &[]
-    }
-
-    fn max_len() -> &'static [(Self::Property, usize)] {
         &[
-            (Property::Subject, 512),
-            (Property::HtmlBody, 4096),
-            (Property::TextBody, 4096),
+            (Property::IsActive, <u64 as Options>::F_KEYWORD),
+            (
+                Property::Name,
+                <u64 as Options>::F_TOKENIZE | <u64 as Options>::F_INDEX,
+            ),
         ]
     }
 
-    fn collection() -> store::core::collection::Collection {
+    fn max_len() -> &'static [(Self::Property, usize)] {
+        &[(Property::Name, 255)]
+    }
+
+    fn collection() -> Collection {
         Collection::SieveScript
     }
 }

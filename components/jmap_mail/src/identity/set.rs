@@ -49,6 +49,9 @@ impl SetObject for Identity {
 
     fn eval_id_references(&mut self, _fnc: impl FnMut(&str) -> Option<JMAPId>) {}
     fn eval_result_references(&mut self, _fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>) {}
+    fn set_property(&mut self, property: Self::Property, value: Self::Value) {
+        self.properties.set(property, value);
+    }
 }
 
 pub trait JMAPSetIdentity<T>
@@ -81,10 +84,9 @@ where
 
                         (Property::Email, Value::Text { value }) => {
                             let value = sanitize_email(&value).ok_or_else(|| {
-                                SetError::invalid_property(
-                                    Property::Email,
-                                    "Invalid e-mail address.".to_string(),
-                                )
+                                SetError::invalid_properties()
+                                    .with_property(Property::Email)
+                                    .with_description("Invalid e-mail address.")
                             })?;
                             if !helper
                                 .store
@@ -106,10 +108,12 @@ where
                                 .into_iter()
                                 .any(|id| id.get_document_id() == helper.account_id)
                             {
-                                return Err(SetError::invalid_property(
-                                    Property::Email,
-                                    "E-mail address not configured for this account.".to_string(),
-                                ));
+                                return Err(SetError::invalid_properties()
+                                    .with_property(Property::Email)
+                                    .with_description(
+                                        "E-mail address not configured for this account."
+                                            .to_string(),
+                                    ));
                             }
                             Value::Text { value }
                         }
@@ -125,10 +129,9 @@ where
                             Value::Null,
                         ) => Value::Null,
                         (property, _) => {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Field could not be set.",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("Field could not be set."));
                         }
                     },
                 );
@@ -143,7 +146,7 @@ where
         helper.update(|id, item, helper, document| {
             let current_fields = self
                 .get_orm::<Identity>(helper.account_id, id.get_document_id())?
-                .ok_or_else(|| SetError::new_err(SetErrorType::NotFound))?;
+                .ok_or_else(|| SetError::new(SetErrorType::NotFound))?;
             let mut fields = TinyORM::track_changes(&current_fields);
 
             for (property, value) in item.properties {
@@ -167,10 +170,9 @@ where
                             Value::Null,
                         ) => Value::Null,
                         (property, _) => {
-                            return Err(SetError::invalid_property(
-                                property,
-                                "Field could not be set.",
-                            ));
+                            return Err(SetError::invalid_properties()
+                                .with_property(property)
+                                .with_description("Field could not be set."));
                         }
                     },
                 );

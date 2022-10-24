@@ -34,7 +34,6 @@ use jmap_mail::{
         schema::{Email, Property},
     },
     mail_parser::Message,
-    vacation_response::get::{JMAPGetVacationResponse, VacationMessage},
     INBOX_ID,
 };
 use jmap_sharing::principal::account::JMAPAccountStore;
@@ -254,7 +253,7 @@ where
                 Status::Success {
                     account_id,
                     changes,
-                    vacation_response,
+                    //vacation_response,
                 } => {
                     // Publish state change
                     let mut types = changes
@@ -272,7 +271,7 @@ where
                     }
 
                     // Send vacation response
-                    if let Some(vacation_response) = vacation_response {
+                    /*if let Some(vacation_response) = vacation_response {
                         if let Err(err) = self
                             .notify_email_delivery(email_delivery::Event::vacation_response(
                                 vacation_response.from,
@@ -286,7 +285,7 @@ where
                                 err
                             );
                         }
-                    }
+                    }*/
 
                     delivery_status.insert(account_id, DeliveryStatus::Success);
                 }
@@ -420,7 +419,7 @@ where
         document.document_id = document_id;
 
         // Build vacation response
-        let vacation_response = if let Some(return_address) = &return_address {
+        /*let vacation_response = if let Some(return_address) = &return_address {
             match self.get_account_details(account_id) {
                 Ok(Some((email, from_name, _))) => {
                     match self.build_vacation_response(
@@ -450,7 +449,7 @@ where
             }
         } else {
             None
-        };
+        };*/
 
         // Lock account while threads are merged
         let _lock = self.lock_collection(account_id, Collection::Mail);
@@ -465,7 +464,7 @@ where
                     Ok(Some(changes)) => Status::Success {
                         account_id,
                         changes,
-                        vacation_response,
+                        //vacation_response,
                     },
                     Ok(None) => {
                         error!("Unexpected error during ingestion.");
@@ -489,7 +488,7 @@ pub enum Status {
     Success {
         account_id: AccountId,
         changes: Changes,
-        vacation_response: Option<VacationMessage>,
+        //vacation_response: Option<VacationMessage>,
     },
     TemporaryFailure {
         account_id: AccountId,

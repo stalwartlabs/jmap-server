@@ -21,23 +21,23 @@
  * for more details.
 */
 
-use std::time::SystemTime;
-
-use jmap::jmap_store::get::{GetHelper, GetObject, IdMapper, SharedDocsFnc};
-use jmap::orm::{serialize::JMAPOrm, TinyORM};
+use jmap::jmap_store::changes::JMAPChanges;
+use jmap::jmap_store::get::GetObject;
+use jmap::orm::serialize::JMAPOrm;
 use jmap::request::get::{GetRequest, GetResponse};
+use jmap::request::MaybeResultReference;
 use jmap::types::jmap::JMAPId;
-use store::ahash::AHashSet;
-
-use mail_builder::headers::address::Address;
-use mail_builder::MessageBuilder;
+use jmap_sieve::sieve_script::schema::SieveScript;
+use mail_parser::decoders::base64::decode_base64;
+use store::blob::BlobId;
 use store::core::collection::Collection;
-use store::core::document::Document;
 use store::core::error::StoreError;
-use store::core::vec_map::VecMap;
-use store::write::batch::WriteBatch;
-use store::Store;
-use store::{AccountId, JMAPStore};
+use store::core::JMAPIdPrefix;
+use store::read::comparator::Comparator;
+use store::read::filter::{ComparisonOperator, Filter, Query};
+use store::read::FilterMapper;
+use store::{bincode, AccountId, JMAPStore};
+use store::{DocumentId, Store};
 
 use super::schema::{Property, VacationResponse, Value};
 
@@ -64,13 +64,6 @@ impl GetObject for VacationResponse {
     }
 }
 
-#[derive(Debug)]
-pub struct VacationMessage {
-    pub from: String,
-    pub to: String,
-    pub message: Vec<u8>,
-}
-
 pub trait JMAPGetVacationResponse<T>
 where
     T: for<'x> Store<'x> + 'static,
@@ -80,13 +73,15 @@ where
         request: GetRequest<VacationResponse>,
     ) -> jmap::Result<GetResponse<VacationResponse>>;
 
-    fn build_vacation_response(
+    fn get_vacation_sieve_script_id(
         &self,
         account_id: AccountId,
-        from_name: Option<&str>,
-        from_addr: &str,
-        to: &str,
-    ) -> store::Result<Option<VacationMessage>>;
+    ) -> store::Result<Option<DocumentId>>;
+
+    fn deserialize_vacation_sieve_script(
+        &self,
+        blob_id: &BlobId,
+    ) -> store::Result<Option<VacationResponse>>;
 }
 
 impl<T> JMAPGetVacationResponse<T> for JMAPStore<T>
@@ -97,141 +92,129 @@ where
         &self,
         request: GetRequest<VacationResponse>,
     ) -> jmap::Result<GetResponse<VacationResponse>> {
-        let helper = GetHelper::new(self, request, None::<IdMapper>, None::<SharedDocsFnc>)?;
-        let account_id = helper.account_id;
+        let account_id = request.account_id.get_document_id();
+        let properties = request
+            .properties
+            .and_then(|p| p.unwrap_value())
+            .unwrap_or_else(VacationResponse::default_properties);
 
-        helper.get(|_id, properties| {
-            let mut fields = self
-                .get_orm::<VacationResponse>(account_id, JMAPId::singleton().get_document_id())?
-                .ok_or_else(|| {
-                    StoreError::NotFound("VacationResponse data not found".to_string())
-                })?;
-            let mut vacation_response = VecMap::with_capacity(properties.len());
+        let mut response = GetResponse {
+            account_id: request.account_id.into(),
+            state: self.get_state(account_id, Collection::SieveScript)?,
+            list: Vec::with_capacity(1),
+            not_found: Vec::new(),
+        };
 
-            for property in properties {
-                vacation_response.append(
-                    *property,
-                    if let Property::Id = property {
-                        Value::Id {
-                            value: JMAPId::singleton(),
-                        }
-                    } else if let Some(value) = fields.remove(property) {
-                        value
-                    } else {
-                        Value::Null
-                    },
-                );
+        let do_get = if let Some(MaybeResultReference::Value(ids)) = request.ids {
+            let mut do_get = false;
+            for id in ids {
+                if id.is_singleton() {
+                    do_get = true;
+                } else {
+                    response.not_found.push(id);
+                }
             }
-            Ok(Some(VacationResponse {
-                properties: vacation_response,
-            }))
-        })
+            do_get
+        } else {
+            true
+        };
+
+        if do_get {
+            let mut vacation_response = VacationResponse::default();
+
+            if let Some(document_id) = self.get_vacation_sieve_script_id(account_id)? {
+                let script = self
+                    .get_orm::<SieveScript>(account_id, document_id)?
+                    .ok_or_else(|| {
+                        StoreError::NotFound(format!(
+                            "SieveScript ORM data for {}:{} not found.",
+                            account_id, document_id
+                        ))
+                    })?;
+
+                // Deserialize VacationResponse object, stored in base64 as a comment.
+                if let Some(jmap_sieve::sieve_script::schema::Value::BlobId { value }) =
+                    script.get(&jmap_sieve::sieve_script::schema::Property::BlobId)
+                {
+                    if let Some(vacation_response_) =
+                        self.deserialize_vacation_sieve_script(&value.id)?
+                    {
+                        vacation_response = vacation_response_;
+                    }
+                }
+            }
+
+            if !vacation_response.properties.is_empty() {
+                let mut result = VacationResponse::default();
+
+                for property in properties {
+                    result.properties.append(
+                        property,
+                        if let Property::Id = property {
+                            Value::Id {
+                                value: JMAPId::singleton(),
+                            }
+                        } else if let Some(value) = vacation_response.properties.remove(&property) {
+                            value
+                        } else {
+                            Value::Null
+                        },
+                    );
+                }
+
+                response.list.push(result);
+            } else {
+                response.not_found.push(JMAPId::singleton());
+            }
+        }
+
+        Ok(response)
     }
 
-    fn build_vacation_response(
+    fn get_vacation_sieve_script_id(
         &self,
         account_id: AccountId,
-        from_name: Option<&str>,
-        from_addr: &str,
-        to: &str,
-    ) -> store::Result<Option<VacationMessage>> {
-        let id = JMAPId::singleton();
-        let document_id = id.get_document_id();
-        if let Some(mut vr) = self.get_orm::<VacationResponse>(account_id, document_id)? {
-            if matches!(
-                vr.get(&Property::IsEnabled),
-                Some(Value::Bool { value: true })
-            ) {
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0) as i64;
-                if !matches!(vr.get(&Property::FromDate), Some(Value::DateTime { value: from_date })
-                        if from_date.timestamp() > now)
-                    && !matches!(vr.get(&Property::ToDate), Some(Value::DateTime { value: to_date })
-                        if to_date.timestamp() < now)
-                {
-                    let address = to.to_string();
+    ) -> store::Result<Option<DocumentId>> {
+        self.query_store::<FilterMapper>(
+            account_id,
+            Collection::SieveScript,
+            Filter::new_condition(
+                jmap_sieve::sieve_script::schema::Property::Name.into(),
+                ComparisonOperator::Equal,
+                Query::Keyword("vacation".to_string()),
+            ),
+            Comparator::None,
+        )
+        .map(|mut it| it.next().map(|id| id.get_document_id()))
+    }
 
-                    // Make sure we havent emailed this address before
-                    let addresses = if let Some(Value::SentResponses {
-                        value: mut addresses,
-                    }) = vr.remove(&Property::SentResponses_)
-                    {
-                        if !addresses.insert(address.clone()) {
-                            return Ok(None);
-                        }
-                        addresses
+    fn deserialize_vacation_sieve_script(
+        &self,
+        blob_id: &BlobId,
+    ) -> store::Result<Option<VacationResponse>> {
+        if let Some(blob) = self.blob_get(blob_id)? {
+            let mut start_pos = 0;
+            let mut end_pos = 0;
+            for (pos, &ch) in blob.iter().enumerate() {
+                if ch == b'*' {
+                    if start_pos == 0 {
+                        start_pos = pos;
                     } else {
-                        AHashSet::from_iter([address.clone()])
-                    };
-
-                    // Update the vacation response object with the new addresses
-                    let mut new_vr = TinyORM::track_changes(&vr);
-                    new_vr.set(
-                        Property::SentResponses_,
-                        Value::SentResponses { value: addresses },
-                    );
-
-                    // Build vacation response
-                    let mut message = MessageBuilder::new()
-                        .from(
-                            from_name
-                                .map(|from_name| Address::from((from_name, from_addr)))
-                                .unwrap_or_else(|| Address::from(from_addr)),
-                        )
-                        .to(address.as_str())
-                        .subject(
-                            vr.get(&Property::Subject)
-                                .and_then(|s| {
-                                    if let Value::Text { value } = s {
-                                        Some(value.as_str())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .unwrap_or("Recipient is away"),
-                        );
-
-                    let mut has_body = false;
-                    match vr.get(&Property::TextBody) {
-                        Some(Value::Text { value }) if !value.is_empty() => {
-                            message = message.text_body(value);
-                            has_body = true;
-                        }
-                        _ => (),
+                        end_pos = pos;
+                        break;
                     }
-
-                    match vr.get(&Property::HtmlBody) {
-                        Some(Value::Text { value }) if !value.is_empty() => {
-                            message = message.html_body(value);
-                            has_body = true;
-                        }
-                        _ => (),
-                    }
-
-                    if !has_body {
-                        message =
-                            message.text_body("The requested recipient is away at the moment.");
-                    }
-                    let message = message.write_to_vec().unwrap_or_default();
-
-                    // Save changes
-                    let mut batch = WriteBatch::new(account_id);
-                    let mut document = Document::new(Collection::VacationResponse, document_id);
-                    vr.merge(&mut document, new_vr)?;
-                    batch.update_document(document);
-                    batch.log_update(Collection::VacationResponse, id);
-                    self.write(batch)?;
-
-                    return Ok(Some(VacationMessage {
-                        from: from_addr.to_string(),
-                        to: address,
-                        message,
-                    }));
+                }
+            }
+            if start_pos > 0 && end_pos > start_pos {
+                if let Some(vacation_response) =
+                    decode_base64(blob.get(start_pos + 1..end_pos).unwrap_or(&b""[..]))
+                        .and_then(|bytes| bincode::deserialize(&bytes).ok())
+                {
+                    return Ok(Some(vacation_response));
                 }
             }
         }
+
         Ok(None)
     }
 }

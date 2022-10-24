@@ -23,11 +23,14 @@
 
 use std::{borrow::Cow, fmt};
 
-use jmap::types::date::JMAPDate;
-use serde::{ser::SerializeMap, Deserialize, Serialize};
+use jmap::request::{query::FilterDeserializer, ArgumentDeserializer, MaybeIdReference};
+use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
 use store::core::vec_map::VecMap;
 
-use super::schema::{Property, VacationResponse, Value};
+use super::{
+    schema::{Filter, Property, SieveScript, Value},
+    set::{ActivateScript, SetArguments},
+};
 
 // Property de/serialization
 impl Serialize for Property {
@@ -44,7 +47,7 @@ impl<'de> serde::de::Visitor<'de> for PropertyVisitor {
     type Value = Property;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP VacationResponse property")
+        formatter.write_str("a valid JMAP SieveScript property")
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -64,8 +67,8 @@ impl<'de> Deserialize<'de> for Property {
     }
 }
 
-// VacationResponse de/serialization
-impl Serialize for VacationResponse {
+// SieveScript de/serialization
+impl Serialize for SieveScript {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -76,9 +79,10 @@ impl Serialize for VacationResponse {
             match value {
                 Value::Id { value } => map.serialize_entry(name, value)?,
                 Value::Text { value } => map.serialize_entry(name, value)?,
-                Value::Null => map.serialize_entry(name, &None::<&str>)?,
-                Value::DateTime { value } => map.serialize_entry(name, value)?,
                 Value::Bool { value } => map.serialize_entry(name, value)?,
+                Value::BlobId { value } => map.serialize_entry(name, value)?,
+                Value::Null => map.serialize_entry(name, &None::<&str>)?,
+                Value::CompiledScript { .. } => (),
             }
         }
 
@@ -86,13 +90,13 @@ impl Serialize for VacationResponse {
     }
 }
 
-struct VacationResponseVisitor;
+struct SieveScriptVisitor;
 
-impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
-    type Value = VacationResponse;
+impl<'de> serde::de::Visitor<'de> for SieveScriptVisitor {
+    type Value = SieveScript;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid JMAP VacationResponse object")
+        formatter.write_str("a valid JMAP SieveScript object")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -103,9 +107,9 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
 
         while let Some(key) = map.next_key::<Cow<str>>()? {
             match key.as_ref() {
-                "subject" => {
+                "name" => {
                     properties.append(
-                        Property::Subject,
+                        Property::Name,
                         if let Some(value) = map.next_value::<Option<String>>()? {
                             Value::Text { value }
                         } else {
@@ -113,67 +117,82 @@ impl<'de> serde::de::Visitor<'de> for VacationResponseVisitor {
                         },
                     );
                 }
-                "textBody" => {
+                "blobId" => {
                     properties.append(
-                        Property::TextBody,
-                        if let Some(value) = map.next_value::<Option<String>>()? {
-                            Value::Text { value }
-                        } else {
-                            Value::Null
+                        Property::BlobId,
+                        Value::BlobId {
+                            value: map.next_value()?,
                         },
                     );
                 }
-                "htmlBody" => {
+                "isActive" => {
                     properties.append(
-                        Property::HtmlBody,
-                        if let Some(value) = map.next_value::<Option<String>>()? {
-                            Value::Text { value }
-                        } else {
-                            Value::Null
-                        },
-                    );
-                }
-                "isEnabled" => {
-                    properties.append(
-                        Property::IsEnabled,
+                        Property::IsActive,
                         Value::Bool {
                             value: map.next_value::<Option<bool>>()?.unwrap_or(false),
                         },
                     );
                 }
-                "fromDate" => {
-                    properties.append(
-                        Property::FromDate,
-                        if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
-                            Value::DateTime { value }
-                        } else {
-                            Value::Null
-                        },
-                    );
+                _ => {
+                    map.next_value::<IgnoredAny>()?;
                 }
-                "toDate" => {
-                    properties.append(
-                        Property::ToDate,
-                        if let Some(value) = map.next_value::<Option<JMAPDate>>()? {
-                            Value::DateTime { value }
-                        } else {
-                            Value::Null
-                        },
-                    );
-                }
-                _ => (),
             }
         }
 
-        Ok(VacationResponse { properties })
+        Ok(SieveScript { properties })
     }
 }
 
-impl<'de> Deserialize<'de> for VacationResponse {
+impl<'de> Deserialize<'de> for SieveScript {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_map(VacationResponseVisitor)
+        deserializer.deserialize_map(SieveScriptVisitor)
+    }
+}
+
+// Argument serializer
+impl ArgumentDeserializer for SetArguments {
+    fn deserialize<'x: 'y, 'y, 'z>(
+        &'y mut self,
+        property: &'z str,
+        value: &mut impl serde::de::MapAccess<'x>,
+    ) -> Result<(), String> {
+        if property == "onSuccessActivateScript" {
+            self.on_success_activate_script = match value
+                .next_value::<Option<MaybeIdReference>>()
+                .map_err(|err| err.to_string())?
+            {
+                Some(id_ref) => ActivateScript::Activate(id_ref),
+                None => ActivateScript::None,
+            };
+        } else {
+            value
+                .next_value::<IgnoredAny>()
+                .map_err(|err| err.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+// Filter deserializer
+impl FilterDeserializer for Filter {
+    fn deserialize<'x>(property: &str, map: &mut impl serde::de::MapAccess<'x>) -> Option<Self> {
+        match property {
+            "name" => Filter::Name {
+                value: map.next_value().ok()?,
+            },
+            "isActive" => Filter::IsActive {
+                value: map.next_value().ok()?,
+            },
+            unsupported => {
+                map.next_value::<IgnoredAny>().ok()?;
+                Filter::Unsupported {
+                    value: unsupported.to_string(),
+                }
+            }
+        }
+        .into()
     }
 }

@@ -38,7 +38,7 @@ pub mod query;
 pub mod query_changes;
 pub mod set;
 
-pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize {
+pub trait Object: Sized + for<'de> serde::Deserialize<'de> + serde::Serialize + Default {
     type Property: for<'de> serde::Deserialize<'de>
         + serde::Serialize
         + for<'x> TryFrom<&'x str>

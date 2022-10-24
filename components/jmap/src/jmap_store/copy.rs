@@ -131,13 +131,10 @@ where
             if !self.document_ids.contains(create_id.get_document_id()) {
                 self.response.not_created.append(
                     create_id,
-                    SetError::new(
-                        SetErrorType::NotFound,
-                        format!(
-                            "Item {} not found not found in account {}.",
-                            create_id, self.response.from_account_id
-                        ),
-                    ),
+                    SetError::new(SetErrorType::NotFound).with_description(format!(
+                        "Item {} not found not found in account {}.",
+                        create_id, self.response.from_account_id
+                    )),
                 );
                 continue;
             }

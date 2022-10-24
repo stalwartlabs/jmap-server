@@ -304,7 +304,7 @@ impl orm::Value for Value {
                 acc + x.len() + std::mem::size_of::<DeliveryStatus>()
             }),
             Value::Envelope { value } => value.len(),
-            Value::BlobIds { value } => value.len() * std::mem::size_of::<JMAPDate>(),
+            Value::BlobIds { value } => value.len() * std::mem::size_of::<JMAPBlob>(),
             Value::IdReference { value } => value.len(),
             Value::ResultReference { .. } => std::mem::size_of::<ResultReference>(),
             Value::Null => 0,

@@ -51,6 +51,7 @@ pub trait SetObject: Object {
     type SetArguments: Default + ArgumentDeserializer;
     type NextCall;
 
+    fn set_property(&mut self, property: Self::Property, value: Self::Value);
     fn eval_id_references(&mut self, fnc: impl FnMut(&str) -> Option<JMAPId>);
     fn eval_result_references(&mut self, fnc: impl FnMut(&ResultReference) -> Option<Vec<u64>>);
 }
@@ -133,7 +134,7 @@ where
         self.batch_writes = false;
     }
 
-    fn map_id_reference(&self, create_id: &str) -> Option<JMAPId> {
+    pub fn map_id_reference(&self, create_id: &str) -> Option<JMAPId> {
         self.response
             .created
             .get(create_id)
@@ -150,10 +151,9 @@ where
             MaybeIdReference::Value(id) => *id,
             MaybeIdReference::Reference(create_id) => {
                 self.map_id_reference(create_id).ok_or_else(|| {
-                    SetError::invalid_property(
-                        property,
-                        format!("Could not find id '{}'.", create_id),
-                    )
+                    SetError::invalid_properties()
+                        .with_property(property)
+                        .with_description(format!("Could not find id '{}'.", create_id))
                 })?
             }
         })
@@ -165,7 +165,9 @@ where
         id: &str,
     ) -> crate::error::set::Result<JMAPId, O::Property> {
         self.map_id_reference(id).ok_or_else(|| {
-            SetError::invalid_property(property, format!("Could not find id '{}'.", id))
+            SetError::invalid_properties()
+                .with_property(property)
+                .with_description(format!("Could not find id '{}'.", id))
         })
     }
 
@@ -216,14 +218,16 @@ where
         for (id, item) in self.request.update.take().unwrap_or_default() {
             let document_id = id.get_document_id();
             if !self.document_ids.contains(document_id) {
-                self.response
-                    .not_updated
-                    .append(id, SetError::new(SetErrorType::NotFound, "ID not found."));
+                self.response.not_updated.append(
+                    id,
+                    SetError::new(SetErrorType::NotFound).with_description("ID not found."),
+                );
                 continue;
             } else if self.will_destroy.contains(&id) {
                 self.response.not_updated.append(
                     id,
-                    SetError::new(SetErrorType::WillDestroy, "ID will be destroyed."),
+                    SetError::new(SetErrorType::WillDestroy)
+                        .with_description("ID will be destroyed."),
                 );
                 continue;
             }
@@ -268,9 +272,10 @@ where
                     }
                 };
             } else {
-                self.response
-                    .not_destroyed
-                    .append(id, SetError::new(SetErrorType::NotFound, "ID not found."));
+                self.response.not_destroyed.append(
+                    id,
+                    SetError::new(SetErrorType::NotFound).with_description("ID not found."),
+                );
             }
         }
         Ok(())
@@ -292,6 +297,14 @@ where
         Ok(())
     }
 
+    pub fn commit_changes(&mut self) -> crate::Result<()> {
+        if !self.changes.is_empty() {
+            self.write()?;
+            self.changes = WriteBatch::new(self.account_id);
+        }
+        Ok(())
+    }
+
     pub fn into_response(mut self) -> crate::Result<SetResponse<O>> {
         if !self.changes.is_empty() {
             self.write()?;
@@ -305,5 +318,34 @@ where
         }
 
         Ok(self.response)
+    }
+
+    pub fn set_created_property(
+        &mut self,
+        create_id: &str,
+        property: O::Property,
+        value: O::Value,
+    ) {
+        for (id, response) in &mut self.response.created {
+            if id == create_id {
+                response.set_property(property, value);
+                return;
+            }
+        }
+    }
+
+    pub fn set_updated_property(&mut self, set_id: JMAPId, property: O::Property, value: O::Value) {
+        for (id, response) in self.response.updated.iter_mut() {
+            if id == &set_id {
+                response
+                    .get_or_insert_with(O::default)
+                    .set_property(property, value);
+                return;
+            }
+        }
+
+        let mut response = O::default();
+        response.set_property(property, value);
+        self.response.updated.set(set_id, response.into());
     }
 }

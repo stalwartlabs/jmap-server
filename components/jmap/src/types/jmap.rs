@@ -145,6 +145,10 @@ impl JMAPId {
     pub fn get_prefix_id(&self) -> DocumentId {
         (self.id >> 32) as DocumentId
     }
+
+    pub fn is_singleton(&self) -> bool {
+        self.id == u64::MAX
+    }
 }
 
 impl From<u64> for JMAPId {

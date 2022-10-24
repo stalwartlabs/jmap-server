@@ -28,7 +28,7 @@ use jmap::{
     types::{date::JMAPDate, jmap::JMAPId},
 };
 use serde::{Deserialize, Serialize};
-use store::{ahash::AHashSet, core::vec_map::VecMap, FieldId};
+use store::{core::vec_map::VecMap, FieldId};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VacationResponse {
@@ -41,7 +41,6 @@ pub enum Value {
     Text { value: String },
     Bool { value: bool },
     DateTime { value: JMAPDate },
-    SentResponses { value: AHashSet<String> },
     Null,
 }
 
@@ -70,7 +69,6 @@ impl orm::Value for Value {
             Value::Text { value } => value.len(),
             Value::Bool { .. } => std::mem::size_of::<bool>(),
             Value::DateTime { .. } => std::mem::size_of::<JMAPDate>(),
-            Value::SentResponses { value } => value.iter().fold(0, |acc, x| acc + x.len()),
             Value::Null => 0,
         }
     }
@@ -86,7 +84,7 @@ pub enum Property {
     Subject = 4,
     TextBody = 5,
     HtmlBody = 6,
-    SentResponses_ = 7,
+    Invalid = 7,
 }
 
 impl Property {
@@ -99,7 +97,7 @@ impl Property {
             "subject" => Property::Subject,
             "textBody" => Property::TextBody,
             "htmlBody" => Property::HtmlBody,
-            _ => Property::SentResponses_,
+            _ => Property::Invalid,
         }
     }
 }
@@ -114,7 +112,7 @@ impl Display for Property {
             Property::Subject => write!(f, "subject"),
             Property::TextBody => write!(f, "textBody"),
             Property::HtmlBody => write!(f, "htmlBody"),
-            Property::SentResponses_ => Ok(()),
+            Property::Invalid => Ok(()),
         }
     }
 }
@@ -135,7 +133,7 @@ impl From<FieldId> for Property {
             4 => Property::Subject,
             5 => Property::TextBody,
             6 => Property::HtmlBody,
-            _ => Property::SentResponses_,
+            _ => Property::Invalid,
         }
     }
 }
@@ -145,7 +143,7 @@ impl TryFrom<&str> for Property {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match Property::parse(value) {
-            Property::SentResponses_ => Err(()),
+            Property::Invalid => Err(()),
             property => Ok(property),
         }
     }

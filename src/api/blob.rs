@@ -224,14 +224,16 @@ where
                     )? {
                         not_copied.append(
                             blob_id,
-                            SetError::forbidden("You do not have access to this blobId."),
+                            SetError::forbidden()
+                                .with_description("You do not have access to this blobId."),
                         );
                         continue;
                     }
                 } else {
                     not_copied.append(
                         blob_id,
-                        SetError::forbidden("You do not have access to this blobId."),
+                        SetError::forbidden()
+                            .with_description("You do not have access to this blobId."),
                     );
                     continue;
                 }

@@ -29,8 +29,6 @@ pub mod push_subscription;
 pub mod request;
 pub mod types;
 
-pub use base64;
-
 use error::method::MethodError;
 use store::AccountId;
 

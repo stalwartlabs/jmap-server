@@ -25,7 +25,7 @@ use jmap::types::jmap::JMAPId;
 use serde::{Deserialize, Serialize};
 use store::FieldId;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Thread {
     pub id: JMAPId,
     #[serde(rename = "emailIds")]
