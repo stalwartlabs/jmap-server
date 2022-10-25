@@ -31,18 +31,23 @@ use jmap::{
 use jmap_mail::{
     mail::{
         import::JMAPMailImport,
-        schema::{Email, Property},
+        schema::{Email, Keyword, Property},
     },
     mail_parser::Message,
     INBOX_ID,
 };
 use jmap_sharing::principal::account::JMAPAccountStore;
+use jmap_sieve::{
+    sieve_script::{get::JMAPGetSieveScript, schema::Value},
+    SeenIdHash,
+};
 use serde::{Deserialize, Serialize};
 use store::{
     ahash::{AHashMap, AHashSet},
     blob::BlobId,
     core::{collection::Collection, document::Document, tag::Tag},
     log::changes::ChangeId,
+    sieve::{Event, Input},
     tracing::{debug, error},
     write::{batch::WriteBatch, update::Changes},
     AccountId, DocumentId, JMAPStore, RecipientType, Store,
@@ -54,7 +59,10 @@ use crate::{
     JMAPServer,
 };
 
-use super::session::{RcptType, Session};
+use super::{
+    session::{RcptType, Session},
+    OutgoingMessage,
+};
 
 impl<T> Session<T>
 where
@@ -75,20 +83,20 @@ where
         } else {
             return self.write_bytes(b"503 5.5.1 Missing MAIL FROM.\r\n").await;
         };
-        let rcpt_to = std::mem::take(&mut self.rcpt_to);
-        let rcpt_to_ids = std::mem::take(&mut self.rcpt_to_ids);
         let message = std::mem::take(&mut self.message);
 
         // Ingest
         let result = if self.core.is_leader() {
-            self.core.mail_ingest(mail_from, rcpt_to_ids, message).await
+            self.core
+                .mail_ingest(mail_from, std::mem::take(&mut self.rcpt_to), message)
+                .await
         } else {
             // Send request to leader
             match self
                 .core
                 .rpc_command(Command::IngestMessage {
                     mail_from,
-                    rcpt_to: rcpt_to_ids,
+                    rcpt_to: std::mem::take(&mut self.rcpt_to),
                     raw_message: message,
                 })
                 .await
@@ -104,8 +112,8 @@ where
             }
         };
 
-        let delivery_status = match result {
-            Ok(delivery_status) => delivery_status,
+        let rcpt_to = match result {
+            Ok(rcpt_to) => rcpt_to,
             Err(err) => {
                 return self.write_bytes(err.as_bytes()).await;
             }
@@ -114,49 +122,25 @@ where
         // Build response
         let mut buf = Vec::with_capacity(128);
         for rcpt in &rcpt_to {
-            let (code, mailbox, message) = match rcpt {
-                RcptType::Mailbox { id, name } => match delivery_status.get(id).unwrap() {
-                    DeliveryStatus::Success => (b"250 2.1.5", name.as_bytes(), &b"delivered."[..]),
-                    DeliveryStatus::TemporaryFailure { reason } => {
-                        (b"451 4.3.0", name.as_bytes(), reason.as_bytes())
-                    }
-                    DeliveryStatus::PermanentFailure { reason } => {
-                        (b"550 5.5.0", name.as_bytes(), reason.as_bytes())
-                    }
-                },
-                RcptType::List { ids, name } => {
-                    // Count number of successes and failures
-                    let mut success = 0;
-                    let mut temp_failures = 0;
-
-                    for id in ids {
-                        match delivery_status.get(id).unwrap() {
-                            DeliveryStatus::Success => {
-                                success += 1;
-                            }
-                            DeliveryStatus::TemporaryFailure { .. } => {
-                                temp_failures += 1;
-                            }
-                            _ => (),
-                        }
-                    }
-
-                    if success > 0 {
-                        (b"250 2.1.5", name.as_bytes(), &b"delivered."[..])
-                    } else if temp_failures > 0 {
-                        (b"451 4.3.0", name.as_bytes(), &b"temporary failure."[..])
-                    } else {
-                        (b"550 5.5.0", name.as_bytes(), &b"permanent failure."[..])
-                    }
-                }
-            };
-
-            buf.extend_from_slice(code);
-            buf.extend_from_slice(b" <");
-            buf.extend_from_slice(mailbox);
-            buf.extend_from_slice(b"> ");
-            buf.extend_from_slice(message);
-            buf.extend_from_slice(b"\r\n");
+            if let RcptType::Mailbox { name, status, .. } | RcptType::List { name, status, .. } =
+                rcpt
+            {
+                buf.extend_from_slice(match status {
+                    DeliveryStatus::Success => b"250 2.1.5 <",
+                    DeliveryStatus::TemporaryFailure { .. } => b"451 4.3.0 <",
+                    DeliveryStatus::PermanentFailure { .. } => b"550 5.5.0 <",
+                    DeliveryStatus::Duplicated => continue,
+                });
+                buf.extend_from_slice(name.as_bytes());
+                buf.extend_from_slice(b"> ");
+                buf.extend_from_slice(match status {
+                    DeliveryStatus::Success => b"delivered",
+                    DeliveryStatus::TemporaryFailure { reason }
+                    | DeliveryStatus::PermanentFailure { reason } => reason.as_bytes(),
+                    DeliveryStatus::Duplicated => continue,
+                });
+                buf.extend_from_slice(b"\r\n");
+            }
         }
 
         self.write_bytes(&buf).await
@@ -210,95 +194,70 @@ where
     pub async fn mail_ingest(
         &self,
         mail_from: String,
-        rcpt_to: AHashSet<AccountId>,
+        rcpt_to: Vec<RcptType>,
         raw_message: Vec<u8>,
-    ) -> Result<AHashMap<AccountId, DeliveryStatus>, String> {
+    ) -> Result<Vec<RcptType>, String> {
         // Ingest message
         let store = self.store.clone();
-        let (change_id, status) = match self
+        let status = match self
             .spawn_worker(move || Ok(store.mail_ingest(mail_from, rcpt_to, raw_message)))
             .await
             .unwrap()
         {
-            Ok(status) => {
-                let mut change_id = ChangeId::MAX;
-
-                for rcpt_status in &status {
-                    if let Status::Success { changes, .. } = rcpt_status {
-                        change_id = changes.change_id;
-                    }
-                }
-
-                (change_id, status)
-            }
-            Err(Status::TemporaryFailure { reason, .. }) => {
-                return Err(format!("450 4.3.2 {}.\r\n", reason));
-            }
-            Err(Status::PermanentFailure { reason, .. }) => {
+            Ok(status) => status,
+            Err(Some(reason)) => {
                 return Err(format!("554 5.7.7 {}.\r\n", reason));
+            }
+            Err(None) => {
+                return Err("450 4.3.2 Temporary server failure.\r\n".to_string());
             }
             _ => unreachable!(),
         };
 
         // Wait for message to be committed
-        if change_id != ChangeId::MAX && self.is_in_cluster() && !self.commit_index(change_id).await
+        if status.last_change_id != ChangeId::MAX
+            && self.is_in_cluster()
+            && !self.commit_index(status.last_change_id).await
         {
             return Err("450 4.3.2 Temporary cluster failure.\r\n".to_string());
         }
 
-        // Process delivery status
-        let mut delivery_status = AHashMap::with_capacity(status.len());
-        for rcpt_status in status {
-            match rcpt_status {
-                Status::Success {
-                    account_id,
-                    changes,
-                    //vacation_response,
-                } => {
-                    // Publish state change
-                    let mut types = changes
-                        .collections
-                        .into_iter()
-                        .filter_map(|c| Some((TypeState::try_from(c).ok()?, change_id)))
-                        .collect::<Vec<_>>();
-                    types.push((TypeState::EmailDelivery, change_id));
+        // Publish state changes
+        for (account_id, changes) in status.changes {
+            let mut types = changes
+                .collections
+                .into_iter()
+                .filter_map(|c| Some((TypeState::try_from(c).ok()?, changes.change_id)))
+                .collect::<Vec<_>>();
+            types.push((TypeState::EmailDelivery, changes.change_id));
 
-                    if let Err(err) = self
-                        .publish_state_change(StateChange::new(account_id, types))
-                        .await
-                    {
-                        error!("Failed to publish state change: {}", err);
-                    }
-
-                    // Send vacation response
-                    /*if let Some(vacation_response) = vacation_response {
-                        if let Err(err) = self
-                            .notify_email_delivery(email_delivery::Event::vacation_response(
-                                vacation_response.from,
-                                vacation_response.to,
-                                vacation_response.message,
-                            ))
-                            .await
-                        {
-                            error!(
-                                "No e-mail delivery configured or something else happened: {}",
-                                err
-                            );
-                        }
-                    }*/
-
-                    delivery_status.insert(account_id, DeliveryStatus::Success);
-                }
-                Status::TemporaryFailure { account_id, reason } => {
-                    delivery_status.insert(account_id, DeliveryStatus::TemporaryFailure { reason });
-                }
-                Status::PermanentFailure { account_id, reason } => {
-                    delivery_status.insert(account_id, DeliveryStatus::PermanentFailure { reason });
-                }
+            if let Err(err) = self
+                .publish_state_change(StateChange::new(account_id, types))
+                .await
+            {
+                error!("Failed to publish state change: {}", err);
             }
         }
 
-        Ok(delivery_status)
+        // Send any outgoing messages
+        for message in status.messages {
+            if let Err(err) = self
+                .notify_email_delivery(email_delivery::Event::outgoing_message(
+                    message.mail_from,
+                    message.rcpt_to,
+                    message.message,
+                ))
+                .await
+            {
+                error!(
+                    "No e-mail delivery configured or something else happened: {}",
+                    err
+                );
+                break;
+            }
+        }
+
+        Ok(status.rcpt_to)
     }
 }
 
@@ -306,15 +265,30 @@ pub trait JMAPMailIngest {
     fn mail_ingest(
         &self,
         mail_from: String,
-        rcpt_to: AHashSet<AccountId>,
+        rcpt_to: Vec<RcptType>,
         raw_message: Vec<u8>,
-    ) -> Result<Vec<Status>, Status>;
+    ) -> Result<IngestResult, Option<&'static str>>;
+
     fn mail_deliver_rcpt(
         &self,
+        result: &mut IngestResult,
         account_id: AccountId,
-        document: &Document,
-        return_address: Option<&str>,
-    ) -> Status;
+        raw_message: &[u8],
+        blob_id: &BlobId,
+        envelope_from: &str,
+        envelope_to: &str,
+    ) -> Result<(), Option<String>>;
+
+    #[allow(clippy::result_unit_err)]
+    fn mail_deliver_mailbox(
+        &self,
+        result: &mut IngestResult,
+        account_id: AccountId,
+        message: Message,
+        blob_id: &BlobId,
+        mailbox_ids: &[DocumentId],
+        flags: Vec<String>,
+    ) -> Result<(), ()>;
 }
 
 impl<T> JMAPMailIngest for JMAPStore<T>
@@ -324,55 +298,128 @@ where
     fn mail_ingest(
         &self,
         mail_from: String,
-        rcpt_to: AHashSet<AccountId>,
+        rcpt_to: Vec<RcptType>,
         raw_message: Vec<u8>,
-    ) -> Result<Vec<Status>, Status> {
-        // Parse message
-        let message = if let Some(message) = Message::parse(&raw_message) {
-            message
-        } else {
-            return Err(Status::perm_fail(
-                AccountId::MAX,
-                "Failed to parse message.",
-            ));
-        };
-
-        // Obtain return path for vacation response
-        let return_address = sanitize_email(
-            message
-                .get_return_address()
-                .unwrap_or_else(|| mail_from.as_ref()),
-        )
-        .and_then(|r| {
-            // As per RFC3834
-            if !r.starts_with("owner-")
-                && !r.contains("-request@")
-                && !r.starts_with("mailer-daemon")
-            {
-                Some(r)
-            } else {
-                None
-            }
-        });
-
-        // Build message document
-        let mut document = Document::new(Collection::Mail, DocumentId::MAX);
-        let blob_id = BlobId::new_external(&raw_message);
-        if let Err(err) = self.mail_parse_item(&mut document, blob_id.clone(), message, None) {
-            error!("Failed to parse message during ingestion: {}", err);
-            return Err(Status::internal_error(AccountId::MAX));
-        }
-
+    ) -> Result<IngestResult, Option<&'static str>> {
         // Store raw message as a blob
-        if let Err(err) = self.blob_store(&blob_id, raw_message) {
+        let blob_id = BlobId::new_external(&raw_message);
+        let raw_message = self.blob_store(&blob_id, raw_message).map_err(|err| {
             error!("Failed to store blob during message ingestion: {}", err);
-            return Err(Status::internal_error(AccountId::MAX));
-        }
+            None
+        })?;
 
         // Deliver message to recipients
-        let mut result = Vec::with_capacity(rcpt_to.len());
-        for account_id in rcpt_to {
-            result.push(self.mail_deliver_rcpt(account_id, &document, return_address.as_deref()));
+        let mut result = IngestResult {
+            rcpt_to: Vec::with_capacity(rcpt_to.len()),
+            changes: AHashMap::with_capacity(rcpt_to.len()),
+            messages: Vec::new(),
+            last_change_id: ChangeId::MAX,
+        };
+        let mut prev_status = if rcpt_to.iter().any(|s| {
+            matches!(
+                s,
+                RcptType::Mailbox {
+                    status: DeliveryStatus::Duplicated,
+                    ..
+                } | RcptType::List {
+                    status: DeliveryStatus::Duplicated,
+                    ..
+                }
+            )
+        }) {
+            AHashMap::new().into()
+        } else {
+            None
+        };
+        for mut recipient in rcpt_to {
+            match &mut recipient {
+                RcptType::Mailbox { id, name, status } => {
+                    if !matches!(status, DeliveryStatus::Duplicated) {
+                        match self.mail_deliver_rcpt(
+                            &mut result,
+                            *id,
+                            &raw_message,
+                            &blob_id,
+                            &mail_from,
+                            &*name,
+                        ) {
+                            Ok(_) => {
+                                *status = DeliveryStatus::Success;
+                            }
+                            Err(Some(err)) => {
+                                *status = DeliveryStatus::PermanentFailure { reason: err.into() };
+                            }
+                            Err(None) => {
+                                *status = DeliveryStatus::TemporaryFailure {
+                                    reason: "Temporary sever failure".into(),
+                                };
+                            }
+                        }
+                        if let Some(prev_status) = &mut prev_status {
+                            prev_status.insert(*id, status.clone());
+                        }
+                    } else {
+                        *status = prev_status
+                            .as_ref()
+                            .unwrap()
+                            .get(id)
+                            .unwrap_or(&DeliveryStatus::Success)
+                            .clone();
+                    }
+                }
+                RcptType::List { ids, name, status } => {
+                    if !matches!(status, DeliveryStatus::Duplicated) {
+                        // Count number of successes and failures
+                        let mut success = 0;
+                        let mut temp_failures = 0;
+
+                        for &account_id in ids.iter() {
+                            let status = match self.mail_deliver_rcpt(
+                                &mut result,
+                                account_id,
+                                &raw_message,
+                                &blob_id,
+                                &mail_from,
+                                &*name,
+                            ) {
+                                Ok(_) => {
+                                    success += 1;
+                                    DeliveryStatus::Success
+                                }
+                                Err(Some(err)) => {
+                                    DeliveryStatus::PermanentFailure { reason: err.into() }
+                                }
+                                Err(None) => {
+                                    temp_failures += 1;
+                                    DeliveryStatus::TemporaryFailure {
+                                        reason: "Temporary sever failure".into(),
+                                    }
+                                }
+                            };
+
+                            if let Some(prev_status) = &mut prev_status {
+                                prev_status.insert(account_id, status);
+                            }
+                        }
+
+                        *status = if success > 0 {
+                            DeliveryStatus::Success
+                        } else if temp_failures > 0 {
+                            DeliveryStatus::TemporaryFailure {
+                                reason: "temporary failure".into(),
+                            }
+                        } else {
+                            DeliveryStatus::PermanentFailure {
+                                reason: "permanent failure".into(),
+                            }
+                        };
+                    } else {
+                        *status = DeliveryStatus::Success;
+                    }
+                }
+            }
+
+            result.rcpt_to.push(recipient);
         }
 
         Ok(result)
@@ -380,76 +427,158 @@ where
 
     fn mail_deliver_rcpt(
         &self,
+        result: &mut IngestResult,
         account_id: AccountId,
-        document: &Document,
-        return_address: Option<&str>,
-    ) -> Status {
+        raw_message: &[u8],
+        blob_id: &BlobId,
+        envelope_from: &str,
+        envelope_to: &str,
+    ) -> Result<(), Option<String>> {
+        // Verify that this account has an Inbox mailbox
+        if !matches!(self.get_document_ids(account_id, Collection::Mailbox), Ok(Some(mailbox_ids)) if mailbox_ids.contains(INBOX_ID))
+        {
+            error!("Account {} does not have an Inbox configured.", account_id);
+            return Err("Account does not have an inbox configured."
+                .to_string()
+                .into());
+        }
+
+        // Parse message
+        let message = if let Some(message) = Message::parse(raw_message) {
+            message
+        } else {
+            return Err("Failed to parse message.".to_string().into());
+        };
+
+        if let Some(active_script) = self.sieve_script_get_active(account_id).map_err(|err| {
+            error!("Failed to get SieveScript for {}: {}", account_id, err);
+            None
+        })? {
+            let mut instance = self.sieve_runtime.filter_parsed(message);
+            let mut input = Input::script(
+                if let Some(Value::Text { value }) = active_script
+                    .orm
+                    .get(&jmap_sieve::sieve_script::schema::Property::Name)
+                {
+                    value.to_string()
+                } else {
+                    account_id.to_string()
+                },
+                active_script.script,
+            );
+            let mut new_ids = AHashSet::new();
+
+            while let Some(event) = instance.run(input) {
+                match event {
+                    Ok(event) => match event {
+                        Event::IncludeScript { name, optional } => todo!(),
+                        Event::MailboxExists {
+                            mailboxes,
+                            special_use,
+                        } => todo!(),
+                        Event::DuplicateId { id, expiry, last } => {
+                            let id_hash = SeenIdHash::new(&id, expiry);
+                            let seen_id = active_script.seen_ids.contains(&id_hash);
+                            if !seen_id || last {
+                                new_ids.insert(id_hash);
+                            }
+
+                            input = seen_id.into();
+                        }
+                        Event::Discard => {
+                            input = true.into();
+                        }
+                        Event::Reject { extended, reason } => todo!(),
+                        Event::Keep { flags, message_id } => todo!(),
+                        Event::FileInto {
+                            folder,
+                            flags,
+                            mailbox_id,
+                            special_use,
+                            create,
+                            message_id,
+                        } => todo!(),
+                        Event::SendMessage {
+                            recipient,
+                            notify,
+                            return_of_content,
+                            by_time,
+                            message_id,
+                        } => todo!(),
+                        Event::ListContains { .. }
+                        | Event::Execute { .. }
+                        | Event::Notify { .. } => {
+                            // Not allowed
+                            input = false.into();
+                        }
+                        Event::CreatedMessage {
+                            message_id,
+                            message,
+                        } => todo!(),
+
+                        _ => unreachable!(),
+                    },
+                    Err(err) => todo!(),
+                }
+            }
+
+            Ok(())
+        } else {
+            self.mail_deliver_mailbox(
+                result,
+                account_id,
+                message,
+                blob_id,
+                &[INBOX_ID],
+                Vec::new(),
+            )
+            .map_err(|_| None)
+        }
+    }
+
+    fn mail_deliver_mailbox(
+        &self,
+        result: &mut IngestResult,
+        account_id: AccountId,
+        message: Message,
+        blob_id: &BlobId,
+        mailbox_ids: &[DocumentId],
+        flags: Vec<String>,
+    ) -> Result<(), ()> {
         // Prepare batch
         let mut batch = WriteBatch::new(account_id);
-        let mut document = document.clone();
-
-        // Verify that this account has an Inbox mailbox
-        match self.get_document_ids(account_id, Collection::Mailbox) {
-            Ok(Some(mailbox_ids)) if mailbox_ids.contains(INBOX_ID) => (),
-            _ => {
-                error!("Account {} does not have an Inbox configured.", account_id);
-                return Status::perm_fail(account_id, "Account does not have an inbox configured.");
-            }
-        }
-
-        // Add mailbox tags
-        let mut orm = TinyORM::<Email>::new();
-        batch.log_child_update(Collection::Mailbox, JMAPId::new(INBOX_ID.into()));
-        orm.tag(Property::MailboxIds, Tag::Id(INBOX_ID));
-
-        // Serialize ORM
-        if let Err(err) = orm.insert(&mut document) {
-            error!("Failed to update ORM during ingestion: {}", err);
-            return Status::internal_error(account_id);
-        }
 
         // Obtain document id
         let document_id = match self.assign_document_id(account_id, Collection::Mail) {
             Ok(document_id) => document_id,
             Err(err) => {
                 error!("Failed to assign document id during ingestion: {}", err);
-                return Status::internal_error(account_id);
+                return Err(());
             }
         };
-        document.document_id = document_id;
+        let mut document = Document::new(Collection::Mail, document_id);
 
-        // Build vacation response
-        /*let vacation_response = if let Some(return_address) = &return_address {
-            match self.get_account_details(account_id) {
-                Ok(Some((email, from_name, _))) => {
-                    match self.build_vacation_response(
-                        account_id,
-                        from_name.as_str().into(),
-                        &email,
-                        return_address,
-                    ) {
-                        Ok(vr) => vr,
-                        Err(err) => {
-                            error!(
-                                "Failed to build vacation response during ingestion: {}",
-                                err
-                            );
-                            None
-                        }
-                    }
-                }
-                Ok(None) => None,
-                Err(err) => {
-                    error!(
-                        "Failed to build vacation response during ingestion: {}",
-                        err
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };*/
+        // Add mailbox tags
+        let mut orm = TinyORM::<Email>::new();
+        for mailbox_id in mailbox_ids {
+            batch.log_child_update(Collection::Mailbox, *mailbox_id);
+            orm.tag(Property::MailboxIds, Tag::Id(*mailbox_id));
+        }
+        for flag in flags {
+            orm.tag(Property::Keywords, Keyword::parse(&flag).tag);
+        }
+
+        // Serialize ORM
+        if let Err(err) = orm.insert(&mut document) {
+            error!("Failed to update ORM during ingestion: {}", err);
+            return Err(());
+        }
+
+        // Build message document
+        if let Err(err) = self.mail_parse_item(&mut document, blob_id.clone(), message, None) {
+            error!("Failed to parse message during ingestion: {}", err);
+            return Err(());
+        }
 
         // Lock account while threads are merged
         let _lock = self.lock_collection(account_id, Collection::Mail);
@@ -461,71 +590,40 @@ where
                 batch.log_insert(Collection::Mail, JMAPId::from_parts(thread_id, document_id));
                 batch.insert_document(document);
                 match self.write(batch) {
-                    Ok(Some(changes)) => Status::Success {
-                        account_id,
-                        changes,
-                        //vacation_response,
-                    },
+                    Ok(Some(changes)) => {
+                        result.last_change_id = changes.change_id;
+                        result.changes.insert(account_id, changes);
+                        Ok(())
+                    }
                     Ok(None) => {
                         error!("Unexpected error during ingestion.");
-                        Status::internal_error(account_id)
+                        Err(())
                     }
                     Err(err) => {
                         error!("Failed to write document during ingestion: {}", err);
-                        Status::internal_error(account_id)
+                        Err(())
                     }
                 }
             }
             Err(err) => {
                 error!("Failed to set threadId during ingestion: {}", err);
-                Status::internal_error(account_id)
+                Err(())
             }
         }
     }
 }
 
-pub enum Status {
-    Success {
-        account_id: AccountId,
-        changes: Changes,
-        //vacation_response: Option<VacationMessage>,
-    },
-    TemporaryFailure {
-        account_id: AccountId,
-        reason: Cow<'static, str>,
-    },
-    PermanentFailure {
-        account_id: AccountId,
-        reason: Cow<'static, str>,
-    },
+pub struct IngestResult {
+    pub rcpt_to: Vec<RcptType>,
+    pub changes: AHashMap<AccountId, Changes>,
+    pub last_change_id: ChangeId,
+    pub messages: Vec<OutgoingMessage>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DeliveryStatus {
     Success,
     TemporaryFailure { reason: Cow<'static, str> },
     PermanentFailure { reason: Cow<'static, str> },
-}
-
-impl Status {
-    pub fn internal_error(account_id: AccountId) -> Status {
-        Status::TemporaryFailure {
-            account_id,
-            reason: "Internal error, please try again later.".into(),
-        }
-    }
-
-    pub fn temp_fail(account_id: AccountId, reason: impl Into<Cow<'static, str>>) -> Status {
-        Status::TemporaryFailure {
-            account_id,
-            reason: reason.into(),
-        }
-    }
-
-    pub fn perm_fail(account_id: AccountId, reason: impl Into<Cow<'static, str>>) -> Status {
-        Status::PermanentFailure {
-            account_id,
-            reason: reason.into(),
-        }
-    }
+    Duplicated,
 }

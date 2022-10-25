@@ -24,6 +24,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use actix_web::web;
+use serde::{Deserialize, Serialize};
 use store::{ahash::AHashSet, chrono::Local, tracing::debug, AccountId, RecipientType, Store};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -34,6 +35,7 @@ use tokio_rustls::{server::TlsStream, TlsAcceptor};
 use crate::JMAPServer;
 
 use super::{
+    ingest::DeliveryStatus,
     request::{Event, Param, Request, RequestParser},
     response::{Extension, Response},
 };
@@ -56,13 +58,22 @@ where
     pub mail_from: Option<String>,
     pub mail_size: Option<usize>,
     pub rcpt_to: Vec<RcptType>,
-    pub rcpt_to_ids: AHashSet<AccountId>,
+    pub rcpt_to_dup: AHashSet<AccountId>,
     pub message: Vec<u8>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum RcptType {
-    Mailbox { id: AccountId, name: String },
-    List { ids: Vec<AccountId>, name: String },
+    Mailbox {
+        id: AccountId,
+        name: String,
+        status: DeliveryStatus,
+    },
+    List {
+        ids: Vec<AccountId>,
+        name: String,
+        status: DeliveryStatus,
+    },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -93,7 +104,7 @@ where
             mail_from: None,
             mail_size: None,
             rcpt_to: Vec::new(),
-            rcpt_to_ids: AHashSet::new(),
+            rcpt_to_dup: AHashSet::new(),
             message: Vec::new(),
             hostname,
         }
@@ -154,10 +165,14 @@ where
                                 )
                                 .await?;
 
-                                self.rcpt_to_ids.insert(*account_id);
                                 self.rcpt_to.push(RcptType::Mailbox {
                                     id: *account_id,
                                     name: recipient,
+                                    status: if self.rcpt_to_dup.insert(*account_id) {
+                                        DeliveryStatus::Success
+                                    } else {
+                                        DeliveryStatus::Duplicated
+                                    },
                                 });
                             }
                             RecipientType::List(account_ids) => {
@@ -169,10 +184,16 @@ where
 
                                 let mut ids = Vec::with_capacity(account_ids.len());
                                 for (account_id, _) in account_ids {
-                                    self.rcpt_to_ids.insert(*account_id);
-                                    ids.push(*account_id);
+                                    if self.rcpt_to_dup.insert(*account_id) {
+                                        ids.push(*account_id);
+                                    }
                                 }
                                 self.rcpt_to.push(RcptType::List {
+                                    status: if !ids.is_empty() {
+                                        DeliveryStatus::Success
+                                    } else {
+                                        DeliveryStatus::Duplicated
+                                    },
                                     ids,
                                     name: recipient,
                                 });
@@ -310,7 +331,7 @@ where
                         self.mail_from = None;
                         self.mail_size = None;
                         self.rcpt_to.clear();
-                        self.rcpt_to_ids.clear();
+                        self.rcpt_to_dup.clear();
                         self.message = Vec::new();
                         self.write_bytes(b"250 2.0.0 OK\r\n").await?;
                     }
@@ -326,7 +347,7 @@ where
                     break;
                 }
                 Err(Event::Data) => {
-                    if !self.rcpt_to_ids.is_empty() {
+                    if !self.rcpt_to_dup.is_empty() {
                         let rp = self.build_return_path();
                         self.parser.buf =
                             Vec::with_capacity(self.mail_size.unwrap_or(1024) + rp.len());

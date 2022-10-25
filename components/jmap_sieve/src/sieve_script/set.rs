@@ -21,7 +21,7 @@
  * for more details.
 */
 
-use super::schema::{Property, SieveScript, Value};
+use super::schema::{CompiledScript, Property, SieveScript, Value};
 use jmap::error::set::{SetError, SetErrorType};
 use jmap::jmap_store::set::SetHelper;
 use jmap::jmap_store::Object;
@@ -40,7 +40,7 @@ use store::read::FilterMapper;
 use store::sieve::Compiler;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
-use store::{bincode, AccountId, DocumentId, JMAPStore, Store};
+use store::{AccountId, DocumentId, JMAPStore, Store};
 
 #[derive(Debug, Clone, Default)]
 pub struct SetArguments {
@@ -451,18 +451,18 @@ where
                 self.set(
                     Property::CompiledScript,
                     Value::CompiledScript {
-                        version: Compiler::VERSION,
-                        bytes: bincode::serialize(
-                            &helper
+                        value: CompiledScript {
+                            version: Compiler::VERSION,
+                            script: helper
                                 .store
                                 .sieve_compiler
                                 .compile(&script)
                                 .map_err(|err| {
                                     SetError::new(SetErrorType::InvalidScript)
                                         .with_description(err.to_string())
-                                })?,
-                        )
-                        .map_err(|err| StoreError::InternalError(err.to_string()))?,
+                                })?
+                                .into(),
+                        },
                     },
                 );
             }

@@ -40,7 +40,7 @@ impl<T> JMAPStore<T>
 where
     T: for<'x> Store<'x> + 'static,
 {
-    pub fn blob_store(&self, blob_id: &BlobId, bytes: Vec<u8>) -> crate::Result<()> {
+    pub fn blob_store(&self, blob_id: &BlobId, bytes: Vec<u8>) -> crate::Result<Vec<u8>> {
         let key = BlobKey::serialize(blob_id);
 
         // Lock blob hash
@@ -48,15 +48,15 @@ where
 
         // Blob already exists, return.
         if self.db.exists(ColumnFamily::Blobs, &key)? {
-            return Ok(());
+            return Ok(bytes);
         }
 
         // Write blob
-        let value = if blob_id.is_external() {
+        let (result, value) = if blob_id.is_external() {
             self.blob_store.put(blob_id, &bytes)?;
-            Vec::new()
+            (bytes, Vec::new())
         } else {
-            bytes
+            (Vec::new(), bytes)
         };
 
         // Write blob or blob reference to database
@@ -88,7 +88,7 @@ where
             return Err(err);
         }
 
-        Ok(())
+        Ok(result)
     }
 
     pub fn blob_exists(&self, blob_id: &BlobId) -> crate::Result<bool> {

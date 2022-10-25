@@ -21,14 +21,20 @@
  * for more details.
 */
 
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, time::SystemTime};
 
 use jmap::request::{query::FilterDeserializer, ArgumentDeserializer, MaybeIdReference};
-use serde::{de::IgnoredAny, ser::SerializeMap, Deserialize, Serialize};
-use store::core::vec_map::VecMap;
+use serde::{
+    de::{IgnoredAny, Visitor},
+    ser::{SerializeMap, SerializeSeq},
+    Deserialize, Serialize,
+};
+use store::{ahash::AHashSet, core::vec_map::VecMap, sieve::Compiler};
+
+use crate::{SeenIdHash, SeenIds};
 
 use super::{
-    schema::{Filter, Property, SieveScript, Value},
+    schema::{CompiledScript, Filter, Property, SieveScript, Value},
     set::{ActivateScript, SetArguments},
 };
 
@@ -81,8 +87,9 @@ impl Serialize for SieveScript {
                 Value::Text { value } => map.serialize_entry(name, value)?,
                 Value::Bool { value } => map.serialize_entry(name, value)?,
                 Value::BlobId { value } => map.serialize_entry(name, value)?,
+                Value::CompiledScript { value } => map.serialize_entry(name, value)?,
+                Value::SeenIds { value } => map.serialize_entry(name, value)?,
                 Value::Null => map.serialize_entry(name, &None::<&str>)?,
-                Value::CompiledScript { .. } => (),
             }
         }
 
@@ -194,5 +201,131 @@ impl FilterDeserializer for Filter {
             }
         }
         .into()
+    }
+}
+
+// CompiledScript serializer
+impl Serialize for CompiledScript {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(2.into())?;
+        seq.serialize_element(&self.version)?;
+        seq.serialize_element(&self.script)?;
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for CompiledScript {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(CompiledScriptVisitor)
+    }
+}
+
+struct CompiledScriptVisitor;
+
+impl<'de> Visitor<'de> for CompiledScriptVisitor {
+    type Value = CompiledScript;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("invalid SeenIds")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let version = seq
+            .next_element::<u32>()?
+            .ok_or_else(|| serde::de::Error::custom("Expected compiler version."))?;
+        if version == Compiler::VERSION {
+            Ok(CompiledScript {
+                version,
+                script: seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::custom("Expected compiled script."))?,
+            })
+        } else {
+            seq.next_element::<IgnoredAny>()?
+                .ok_or_else(|| serde::de::Error::custom("Expected compiled script."))?;
+            Ok(CompiledScript {
+                version,
+                script: None,
+            })
+        }
+    }
+}
+
+// SeenIds serializer
+impl Serialize for SeenIds {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq((self.ids.len() * 2).into())?;
+        for id in &self.ids {
+            seq.serialize_element(&id.expiry)?;
+            seq.serialize_element(&id.hash)?;
+        }
+
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SeenIds {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(SeenIdsVisitor)
+    }
+}
+
+struct SeenIdsVisitor;
+
+impl<'de> Visitor<'de> for SeenIdsVisitor {
+    type Value = SeenIds;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("invalid SeenIds")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let num_entries = seq.size_hint().unwrap_or(0) / 2;
+        let mut seen_ids = SeenIds {
+            ids: AHashSet::with_capacity(num_entries),
+            has_changes: false,
+        };
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        for _ in 0..num_entries {
+            let expiry = seq
+                .next_element::<u64>()?
+                .ok_or_else(|| serde::de::Error::custom("Expected expiry."))?;
+            if expiry > now {
+                seen_ids.ids.insert(SeenIdHash {
+                    hash: seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::custom("Expected hash."))?,
+                    expiry,
+                });
+            } else {
+                seq.next_element::<IgnoredAny>()?
+                    .ok_or_else(|| serde::de::Error::custom("Expected hash."))?;
+                seen_ids.has_changes = true;
+            }
+        }
+
+        Ok(seen_ids)
     }
 }

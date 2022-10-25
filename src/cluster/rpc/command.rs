@@ -23,16 +23,12 @@
 
 use jmap_sharing::principal::account::JMAPAccountStore;
 use serde::{Deserialize, Serialize};
-use store::{
-    ahash::{AHashMap, AHashSet},
-    tracing::error,
-    AccountId, RecipientType, Store,
-};
+use store::{tracing::error, RecipientType, Store};
 use tokio::sync::oneshot;
 
 use crate::{
     cluster::{self, Cluster},
-    lmtp::ingest::DeliveryStatus,
+    lmtp::session::RcptType,
     JMAPServer,
 };
 
@@ -45,7 +41,7 @@ pub enum Command {
     },
     IngestMessage {
         mail_from: String,
-        rcpt_to: AHashSet<AccountId>,
+        rcpt_to: Vec<RcptType>,
         raw_message: Vec<u8>,
     },
 }
@@ -56,7 +52,7 @@ pub enum CommandResponse {
         rt: RecipientType,
     },
     IngestMessage {
-        result: Result<AHashMap<AccountId, DeliveryStatus>, String>,
+        result: Result<Vec<RcptType>, String>,
     },
     Error {
         message: String,

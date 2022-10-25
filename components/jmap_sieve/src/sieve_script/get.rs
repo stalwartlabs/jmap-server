@@ -23,15 +23,33 @@
 
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
+use jmap::orm::TinyORM;
 use jmap::request::get::{GetRequest, GetResponse};
 use jmap::types::jmap::JMAPId;
 
+use store::ahash::AHashSet;
+use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::vec_map::VecMap;
-use store::JMAPStore;
-use store::Store;
+use store::read::comparator::Comparator;
+use store::read::filter::{ComparisonOperator, Filter, Query};
+use store::read::FilterMapper;
+use store::sieve::Sieve;
+use store::tracing::error;
+use store::{AccountId, Store};
+use store::{DocumentId, JMAPStore};
+
+use crate::SeenIdHash;
 
 use super::schema::{Property, SieveScript, Value};
+
+pub struct ActiveScript {
+    pub document_id: DocumentId,
+    pub orm: TinyORM<SieveScript>,
+    pub script: Sieve,
+    pub seen_ids: AHashSet<SeenIdHash>,
+    pub has_changes: bool,
+}
 
 impl GetObject for SieveScript {
     type GetArguments = ();
@@ -56,6 +74,15 @@ where
         &self,
         request: GetRequest<SieveScript>,
     ) -> jmap::Result<GetResponse<SieveScript>>;
+
+    fn sieve_script_get_active(&self, account_id: AccountId)
+        -> store::Result<Option<ActiveScript>>;
+
+    fn sieve_script_get_by_name(
+        &self,
+        account_id: AccountId,
+        name: String,
+    ) -> store::Result<Option<Sieve>>;
 }
 
 impl<T> JMAPGetSieveScript<T> for JMAPStore<T>
@@ -98,5 +125,161 @@ where
                 properties: sieve_script,
             }))
         })
+    }
+
+    fn sieve_script_get_active(
+        &self,
+        account_id: AccountId,
+    ) -> store::Result<Option<ActiveScript>> {
+        if let Some(document_id) = self
+            .query_store::<FilterMapper>(
+                account_id,
+                Collection::SieveScript,
+                Filter::new_condition(
+                    Property::IsActive.into(),
+                    ComparisonOperator::Equal,
+                    Query::Keyword("1".to_string()),
+                ),
+                Comparator::None,
+            )?
+            .into_bitmap()
+            .min()
+        {
+            // Fetch ORM
+            let mut orm = self
+                .get_orm::<SieveScript>(account_id, document_id)?
+                .ok_or_else(|| {
+                    StoreError::NotFound(format!(
+                        "SieveScript ORM data for {}:{} not found.",
+                        account_id, document_id
+                    ))
+                })?;
+
+            // Get seenIds
+            let (seen_ids, has_changes) =
+                if let Some(Value::SeenIds { value }) = orm.get_mut(&Property::CompiledScript) {
+                    (
+                        std::mem::take(&mut value.ids),
+                        if value.has_changes {
+                            value.has_changes = false;
+                            true
+                        } else {
+                            false
+                        },
+                    )
+                } else {
+                    (AHashSet::new(), false)
+                };
+
+            // Get compiled script
+            if let Some(script) = orm.get_mut(&Property::CompiledScript).and_then(|f| {
+                if let Value::CompiledScript { value } = f {
+                    value.script.take()
+                } else {
+                    None
+                }
+            }) {
+                return Ok(Some(ActiveScript {
+                    document_id,
+                    orm,
+                    script,
+                    seen_ids,
+                    has_changes,
+                }));
+            } else if let Some(Value::BlobId { value }) = orm.get(&Property::BlobId) {
+                if let Some(blob) = self.blob_get(&value.id)? {
+                    match self.sieve_compiler.compile(&blob) {
+                        Ok(script) => {
+                            return Ok(Some(ActiveScript {
+                                document_id,
+                                orm,
+                                script,
+                                seen_ids,
+                                has_changes: true,
+                            }))
+                        }
+                        Err(err) => {
+                            error!(
+                                "Failed to compile SieveScript {}/{}: {}",
+                                account_id, document_id, err
+                            );
+                        }
+                    }
+                } else {
+                    error!(
+                        "Blob {} found for SieveScript {}/{} ",
+                        value, account_id, document_id
+                    );
+                }
+            } else {
+                error!(
+                    "No blobId entry found for SieveScript {}/{}",
+                    account_id, document_id
+                );
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn sieve_script_get_by_name(
+        &self,
+        account_id: AccountId,
+        name: String,
+    ) -> store::Result<Option<Sieve>> {
+        if let Some(document_id) = self
+            .query_store::<FilterMapper>(
+                account_id,
+                Collection::SieveScript,
+                Filter::new_condition(
+                    Property::Name.into(),
+                    ComparisonOperator::Equal,
+                    Query::Keyword(name),
+                ),
+                Comparator::None,
+            )?
+            .into_bitmap()
+            .min()
+        {
+            // Fetch ORM
+            let mut orm = self
+                .get_orm::<SieveScript>(account_id, document_id)?
+                .ok_or_else(|| {
+                    StoreError::NotFound(format!(
+                        "SieveScript ORM data for {}:{} not found.",
+                        account_id, document_id
+                    ))
+                })?;
+
+            // Get compiled script
+            if let Some(script) = orm.remove(&Property::CompiledScript).and_then(|f| {
+                if let Value::CompiledScript { value } = f {
+                    value.script
+                } else {
+                    None
+                }
+            }) {
+                return Ok(Some(script));
+            } else if let Some(Value::BlobId { value }) = orm.get(&Property::BlobId) {
+                if let Some(blob) = self.blob_get(&value.id)? {
+                    match self.sieve_compiler.compile(&blob) {
+                        Ok(script) => return Ok(Some(script)),
+                        Err(err) => {
+                            error!(
+                                "Failed to compile SieveScript {}/{}: {}",
+                                account_id, document_id, err
+                            );
+                        }
+                    }
+                } else {
+                    error!(
+                        "Blob {} found for SieveScript {}/{} ",
+                        value, account_id, document_id
+                    );
+                }
+            }
+        }
+
+        Ok(None)
     }
 }

@@ -28,7 +28,9 @@ use jmap::{
     types::{blob::JMAPBlob, jmap::JMAPId},
 };
 use serde::{Deserialize, Serialize};
-use store::{core::vec_map::VecMap, FieldId};
+use store::{core::vec_map::VecMap, sieve::Sieve, FieldId};
+
+use crate::{SeenIdHash, SeenIds};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SieveScript {
@@ -52,8 +54,15 @@ pub enum Value {
     Text { value: String },
     BlobId { value: JMAPBlob },
     Bool { value: bool },
-    CompiledScript { version: u32, bytes: Vec<u8> },
+    CompiledScript { value: CompiledScript },
+    SeenIds { value: SeenIds },
     Null,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledScript {
+    pub version: u32,
+    pub script: Option<Sieve>,
 }
 
 impl Property {
@@ -149,7 +158,8 @@ impl orm::Value for Value {
             Value::Text { value } => value.len(),
             Value::BlobId { .. } => std::mem::size_of::<JMAPBlob>(),
             Value::Bool { .. } => std::mem::size_of::<bool>(),
-            Value::CompiledScript { bytes, .. } => bytes.len(),
+            Value::CompiledScript { .. } => std::mem::size_of::<CompiledScript>(),
+            Value::SeenIds { value } => std::mem::size_of::<SeenIdHash>() * value.ids.len(),
             Value::Null => 0,
         }
     }

@@ -21,4 +21,68 @@
  * for more details.
 */
 
+use std::hash::Hash;
+
+use store::{
+    ahash::AHashSet,
+    sha2::{Digest, Sha256},
+};
+
 pub mod sieve_script;
+
+#[derive(Debug, Clone)]
+pub struct SeenIds {
+    pub ids: AHashSet<SeenIdHash>,
+    pub has_changes: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SeenIdHash {
+    hash: [u8; 32],
+    expiry: u64,
+}
+
+impl PartialEq for SeenIds {
+    fn eq(&self, other: &Self) -> bool {
+        self.ids.len() == other.ids.len() && self.has_changes == other.has_changes
+    }
+}
+
+impl Eq for SeenIds {}
+
+impl SeenIdHash {
+    pub fn new(id: &str, expiry: u64) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(id.as_bytes());
+        SeenIdHash {
+            hash: hasher.finalize().into(),
+            expiry,
+        }
+    }
+}
+
+impl PartialOrd for SeenIdHash {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.expiry.partial_cmp(&other.expiry)
+    }
+}
+
+impl Ord for SeenIdHash {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.expiry.cmp(&other.expiry)
+    }
+}
+
+impl Hash for SeenIdHash {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl PartialEq for SeenIdHash {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+impl Eq for SeenIdHash {}

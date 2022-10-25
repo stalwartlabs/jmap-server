@@ -26,3 +26,9 @@ pub mod listener;
 pub mod request;
 pub mod response;
 pub mod session;
+
+pub struct OutgoingMessage {
+    pub mail_from: String,
+    pub rcpt_to: Vec<String>,
+    pub message: Vec<u8>,
+}

@@ -56,9 +56,9 @@ pub enum Event {
         created_ids: Vec<DocumentId>,
         updated_ids: Vec<DocumentId>,
     },
-    VacationResponse {
+    OutgoingMessage {
         from: String,
-        to: String,
+        to: Vec<String>,
         message: Vec<u8>,
     },
     RelayReady,
@@ -80,8 +80,8 @@ impl Event {
         }
     }
 
-    pub fn vacation_response(from: String, to: String, message: Vec<u8>) -> Self {
-        Event::VacationResponse { from, to, message }
+    pub fn outgoing_message(from: String, to: Vec<String>, message: Vec<u8>) -> Self {
+        Event::OutgoingMessage { from, to, message }
     }
 }
 
@@ -523,17 +523,14 @@ where
                         }
                     }
                 }
-                Event::VacationResponse { from, to, message } => {
+                Event::OutgoingMessage { from, to, message } => {
                     match if is_tls {
                         client.clone().connect_tls().await
                     } else {
                         client.clone().connect().await
                     } {
                         Ok(mut client) => {
-                            if let Err(err) = client
-                                .send(Message::empty().from(from).to(to).body(&message))
-                                .await
-                            {
+                            if let Err(err) = client.send(Message::new(from, to, message)).await {
                                 debug!("Failed to send vacation response: {}", err);
                             }
                             client.quit().await.ok();

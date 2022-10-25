@@ -35,7 +35,7 @@ use jmap::request::ResultReference;
 use jmap::types::jmap::JMAPId;
 use jmap::types::state::JMAPState;
 use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
-use jmap_sieve::sieve_script::schema::SieveScript;
+use jmap_sieve::sieve_script::schema::{CompiledScript, SieveScript};
 use jmap_sieve::sieve_script::set::JMAPSetSieveScript;
 use mail_builder::encoders::base64::base64_encode_mime;
 use mail_builder::MessageBuilder;
@@ -420,8 +420,10 @@ where
                 fields.set(
                     jmap_sieve::sieve_script::schema::Property::CompiledScript,
                     jmap_sieve::sieve_script::schema::Value::CompiledScript {
-                        version: Compiler::VERSION,
-                        bytes: bincode::serialize(&compiled_script).unwrap_or_default(),
+                        value: CompiledScript {
+                            version: Compiler::VERSION,
+                            script: compiled_script.into(),
+                        },
                     },
                 );
                 fields.set(
