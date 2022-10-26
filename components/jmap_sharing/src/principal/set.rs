@@ -170,7 +170,9 @@ where
         helper.destroy(|id, helper, document| {
             #[cfg(not(feature = "debug"))]
             if [SUPERUSER_ID].contains(&document.document_id) {
-                return Err(SetError::forbidden("Cannot delete system accounts."));
+                return Err(
+                    SetError::forbidden().with_description("Cannot delete system accounts.")
+                );
             }
 
             if let Some(fields) = self.get_orm::<Principal>(SUPERUSER_ID, document.document_id)? {

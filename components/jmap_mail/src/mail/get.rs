@@ -53,6 +53,7 @@ use store::{
         acl::{ACLToken, ACL},
         vec_map::VecMap,
     },
+    tracing::error,
     AccountId, JMAPStore,
 };
 use store::{
@@ -433,15 +434,14 @@ where
                                 &message_data.html_body
                             };
 
-                            let mime_part = parts
-                                .first()
-                                .and_then(|p| message_data.mime_parts.get(*p))
-                                .ok_or_else(|| {
-                                    StoreError::DataCorruption(format!(
-                                        "Missing message part for {}/{}",
-                                        account_id, document_id
-                                    ))
-                                })?;
+                            let mime_part = if let Some(mime_part) =
+                                parts.first().and_then(|p| message_data.mime_parts.get(*p))
+                            {
+                                mime_part
+                            } else {
+                                error!("Missing message part for {}/{}", account_id, document_id);
+                                continue;
+                            };
 
                             #[allow(clippy::type_complexity)]
                             let (preview_fnc, part): (
@@ -466,12 +466,13 @@ where
                                         mime_part.charset.as_deref(),
                                         true,
                                     )
-                                    .ok_or_else(|| {
-                                        StoreError::DataCorruption(format!(
+                                    .unwrap_or_else(|| {
+                                        error!(
                                             "Failed to decode part for {}/{}.",
                                             account_id, document_id
-                                        ))
-                                    })?
+                                        );
+                                        "".to_string()
+                                    })
                                     .into(),
                                     256,
                                 )
@@ -504,12 +505,13 @@ where
                                         mime_part.charset.as_deref(),
                                         true,
                                     )
-                                    .ok_or_else(|| {
-                                        StoreError::DataCorruption(format!(
+                                    .unwrap_or_else(|| {
+                                        error!(
                                             "Failed to decode BodyValue for {}/{}.",
                                             account_id, document_id
-                                        ))
-                                    })?;
+                                        );
+                                        "".to_string()
+                                    });
 
                                 body_values.append(
                                     part_id.to_string(),

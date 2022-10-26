@@ -59,6 +59,14 @@ serde_yaml = "0.9.9"
 ece = "2.2"
 cargo-deb = "1.28.2"
 
+[[bin]]
+name = "stalwart-jmap"
+path = "src/main.rs"
+
+[[bin]]
+name = "export"
+path = "src/utils/export.rs"
+
 [workspace]
 members = [
     "components/store",

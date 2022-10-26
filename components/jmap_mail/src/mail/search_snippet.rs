@@ -326,12 +326,13 @@ where
                     if let Some(message_part) = part.mime_type.part() {
                         let mut text = message_part
                             .decode_text(&raw_message, part.charset.as_deref(), false)
-                            .ok_or_else(|| {
-                                StoreError::DataCorruption(format!(
+                            .unwrap_or_else(|| {
+                                error!(
                                     "Failed to decode message part {:?} for blob {:?}.",
                                     message_part, message_data.raw_message
-                                ))
-                            })?;
+                                );
+                                "".to_string()
+                            });
                         if part.mime_type.is_html() {
                             text = html_to_text(&text);
                         }
@@ -352,18 +353,21 @@ where
                             message_data.mime_parts[part_id as usize].mime_type.part()
                         {
                             let nested_raw_message =
-                                message_part.decode(&raw_message).ok_or_else(|| {
-                                    StoreError::DataCorruption(format!(
+                                message_part.decode(&raw_message).unwrap_or_else(|| {
+                                    error!(
                                         "Failed to decode message part {:?} for blob {:?}.",
                                         message_part, message_data.raw_message
-                                    ))
-                                })?;
-                            let message = Message::parse(&nested_raw_message).ok_or_else(|| {
-                                StoreError::DataCorruption(format!(
-                                    "Failed to parse nested message in blob {:?}.",
-                                    message_data.raw_message
-                                ))
-                            })?;
+                                    );
+                                    Vec::new()
+                                });
+                            let message =
+                                Message::parse(&nested_raw_message).unwrap_or_else(|| {
+                                    error!(
+                                        "Failed to parse nested message in blob {:?}.",
+                                        message_data.raw_message
+                                    );
+                                    Message::default()
+                                });
                             if subpart_id == 0 {
                                 preview = generate_snippet(
                                     &term_group.terms,
@@ -372,12 +376,13 @@ where
                             } else if let Some(sub_part) =
                                 message.parts.get((subpart_id - 1) as usize)
                             {
-                                let text = sub_part.get_text_contents().ok_or_else(|| {
-                                    StoreError::DataCorruption(format!(
+                                let text = sub_part.get_text_contents().unwrap_or_else(|| {
+                                    error!(
                                         "Failed to fetch text part for nested message in blob {:?}.",
                                         message_data.raw_message
-                                    ))
-                                })?;
+                                    );
+                                    ""
+                                });
 
                                 preview = if !sub_part.is_text_html() {
                                     generate_snippet(&term_group.terms, text)

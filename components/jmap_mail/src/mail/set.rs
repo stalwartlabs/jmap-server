@@ -841,7 +841,7 @@ where
         let fields = self
             .get_orm::<Email>(account_id, document_id)?
             .ok_or_else(|| {
-                StoreError::DataCorruption(format!(
+                StoreError::NotFound(format!(
                     "Failed to fetch Email ORM for {}:{}.",
                     account_id, document_id
                 ))
