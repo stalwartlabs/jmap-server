@@ -21,6 +21,8 @@
  * for more details.
 */
 
+use std::sync::Arc;
+
 use jmap::jmap_store::get::{default_mapper, GetHelper, GetObject, SharedDocsFnc};
 use jmap::orm::serialize::JMAPOrm;
 use jmap::orm::TinyORM;
@@ -35,7 +37,7 @@ use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
 use store::sieve::Sieve;
-use store::tracing::error;
+use store::tracing::{debug, error};
 use store::{AccountId, Store};
 use store::{DocumentId, JMAPStore};
 
@@ -46,7 +48,7 @@ use super::schema::{Property, SieveScript, Value};
 pub struct ActiveScript {
     pub document_id: DocumentId,
     pub orm: TinyORM<SieveScript>,
-    pub script: Sieve,
+    pub script: Arc<Sieve>,
     pub seen_ids: AHashSet<SeenIdHash>,
     pub has_changes: bool,
 }
@@ -157,7 +159,7 @@ where
 
             // Get seenIds
             let (seen_ids, has_changes) =
-                if let Some(Value::SeenIds { value }) = orm.get_mut(&Property::CompiledScript) {
+                if let Some(Value::SeenIds { value }) = orm.get_mut(&Property::SeenIds) {
                     (
                         std::mem::take(&mut value.ids),
                         if value.has_changes {
@@ -182,18 +184,22 @@ where
                 return Ok(Some(ActiveScript {
                     document_id,
                     orm,
-                    script,
+                    script: script.into(),
                     seen_ids,
                     has_changes,
                 }));
             } else if let Some(Value::BlobId { value }) = orm.get(&Property::BlobId) {
+                debug!(
+                    "Recompiling missing Sieve script for {}/{}",
+                    account_id, document_id
+                );
                 if let Some(blob) = self.blob_get(&value.id)? {
                     match self.sieve_compiler.compile(&blob) {
                         Ok(script) => {
                             return Ok(Some(ActiveScript {
                                 document_id,
                                 orm,
-                                script,
+                                script: script.into(),
                                 seen_ids,
                                 has_changes: true,
                             }))

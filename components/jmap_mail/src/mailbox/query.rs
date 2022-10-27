@@ -100,7 +100,7 @@ where
                     if let Some(value) = value {
                         filter::Filter::eq(
                             Property::Role.into(),
-                            Query::Tokenize(value.to_lowercase()),
+                            Query::Keyword(value.to_lowercase()),
                         )
                     } else {
                         filter::Filter::not(vec![filter::Filter::eq(

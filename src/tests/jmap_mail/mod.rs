@@ -38,6 +38,7 @@ pub mod email_thread_merge;
 pub mod lmtp;
 pub mod mailbox;
 pub mod search_snippet;
+pub mod sieve;
 pub mod vacation_response;
 
 #[actix_web::test]
@@ -60,6 +61,7 @@ async fn jmap_mail_tests() {
     vacation_response::test(server.clone(), &mut client).await;
     mailbox::test(server.clone(), &mut client).await;
     search_snippet::test(server.clone(), &mut client).await;
+    sieve::test(server.clone(), &mut client).await;
 
     destroy_temp_dir(&temp_dir);
 }

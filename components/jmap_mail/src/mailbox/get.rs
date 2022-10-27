@@ -37,6 +37,9 @@ use store::core::collection::Collection;
 use store::core::error::StoreError;
 use store::core::tag::Tag;
 use store::core::vec_map::VecMap;
+use store::read::comparator::Comparator;
+use store::read::filter::{ComparisonOperator, Filter, Query};
+use store::read::FilterMapper;
 use store::roaring::RoaringBitmap;
 use store::{AccountId, JMAPStore, SharedBitmap};
 use store::{DocumentId, Store};
@@ -89,6 +92,16 @@ where
         document_id: DocumentId,
         mail_document_ids: Option<&RoaringBitmap>,
     ) -> store::Result<Option<RoaringBitmap>>;
+    fn mailbox_get_by_name(
+        &self,
+        account_id: AccountId,
+        name: &str,
+    ) -> store::Result<Option<DocumentId>>;
+    fn mailbox_get_by_role(
+        &self,
+        account_id: AccountId,
+        role: &str,
+    ) -> store::Result<Option<DocumentId>>;
 }
 
 impl<T> JMAPGetMailbox<T> for JMAPStore<T>
@@ -313,5 +326,100 @@ where
         } else {
             Ok(None)
         }
+    }
+
+    fn mailbox_get_by_name(
+        &self,
+        account_id: AccountId,
+        path: &str,
+    ) -> store::Result<Option<DocumentId>> {
+        let path = path
+            .split('/')
+            .filter_map(|p| {
+                let p = p.trim();
+                if !p.is_empty() {
+                    p.into()
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if path.is_empty() || path.len() > self.config.mailbox_max_depth {
+            return Ok(None);
+        }
+        let document_ids = self
+            .query_store::<FilterMapper>(
+                account_id,
+                Collection::Mailbox,
+                Filter::or(
+                    path.iter()
+                        .map(|n| {
+                            Filter::new_condition(
+                                Property::Name.into(),
+                                ComparisonOperator::Equal,
+                                Query::Index(n.to_string()),
+                            )
+                        })
+                        .collect(),
+                ),
+                Comparator::None,
+            )?
+            .into_bitmap();
+
+        if (document_ids.len() as usize) < path.len() {
+            return Ok(None);
+        }
+
+        let mut found_names = Vec::new();
+        for document_id in document_ids {
+            if let Some(mut orm) = self.get_orm::<Mailbox>(account_id, document_id)? {
+                if let Some(Value::Text { value }) = orm.remove(&Property::Name) {
+                    found_names.push((
+                        value,
+                        if let Some(Value::Id { value }) = orm.remove(&Property::ParentId) {
+                            value.get_document_id()
+                        } else {
+                            0
+                        },
+                        document_id + 1,
+                    ));
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                return Ok(None);
+            }
+        }
+
+        let mut next_parent_id = 0;
+        'outer: for name in path {
+            for (part, parent_id, document_id) in &found_names {
+                if part.eq(name) && *parent_id == next_parent_id {
+                    next_parent_id = *document_id;
+                    continue 'outer;
+                }
+            }
+            return Ok(None);
+        }
+
+        Ok(Some(next_parent_id - 1))
+    }
+
+    fn mailbox_get_by_role(
+        &self,
+        account_id: AccountId,
+        role: &str,
+    ) -> store::Result<Option<DocumentId>> {
+        self.query_store::<FilterMapper>(
+            account_id,
+            Collection::Mailbox,
+            Filter::new_condition(
+                Property::Role.into(),
+                ComparisonOperator::Equal,
+                Query::Keyword(role.to_string()),
+            ),
+            Comparator::None,
+        )
+        .map(|r| r.into_bitmap().min())
     }
 }

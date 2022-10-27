@@ -271,7 +271,7 @@ where
                 let mut script = Vec::with_capacity(1024);
                 script.extend_from_slice(b"/*");
                 base64_encode_mime(
-                    &bincode::serialize(&vacation_response).unwrap_or_default(),
+                    &bincode::serialize(&vacation_response.properties).unwrap_or_default(),
                     &mut script,
                     false,
                 )
@@ -354,7 +354,7 @@ where
                 }
                 if let Some(text_body) = text_body {
                     body_len += text_body.len();
-                    builder = builder.html_body(text_body);
+                    builder = builder.text_body(text_body);
                 }
                 let mut message_body = Vec::with_capacity(body_len + 128);
                 builder.write_body(&mut message_body).ok();

@@ -21,7 +21,7 @@
  * for more details.
 */
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use actix_cors::Cors;
 use actix_web::{
@@ -86,12 +86,17 @@ where
     // Build the JMAP server.
     let config = JMAPConfig::from(settings);
     let base_session = Session::new(settings, &config);
-    let store: Arc<JMAPStore<T>> = JMAPStore::new(
+    let mut store = JMAPStore::new(
         T::open(settings).failed_to("open database"),
         config,
         settings,
-    )
-    .into();
+    );
+    store.sieve_runtime.set_env_variable(
+        "host",
+        gethostname::gethostname()
+            .into_string()
+            .unwrap_or_else(|_| "localhost".to_string()),
+    );
 
     // Create admin user on first run.
     if store
@@ -181,7 +186,7 @@ where
     }
 
     let server = web::Data::new(JMAPServer {
-        store,
+        store: store.into(),
         worker_pool: rayon::ThreadPoolBuilder::new()
             .num_threads(
                 settings

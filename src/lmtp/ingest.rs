@@ -21,7 +21,7 @@
  * for more details.
 */
 
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, sync::Arc, time::SystemTime};
 
 use jmap::{
     orm::TinyORM,
@@ -34,12 +34,16 @@ use jmap_mail::{
         schema::{Email, Keyword, Property},
     },
     mail_parser::Message,
-    INBOX_ID,
+    mailbox::{get::JMAPGetMailbox, is_valid_role, set::JMAPSetMailbox},
+    INBOX_ID, TRASH_ID,
 };
 use jmap_sharing::principal::account::JMAPAccountStore;
 use jmap_sieve::{
-    sieve_script::{get::JMAPGetSieveScript, schema::Value},
-    SeenIdHash,
+    sieve_script::{
+        get::JMAPGetSieveScript,
+        schema::{CompiledScript, Value},
+    },
+    SeenIdHash, SeenIds,
 };
 use serde::{Deserialize, Serialize};
 use store::{
@@ -47,7 +51,7 @@ use store::{
     blob::BlobId,
     core::{collection::Collection, document::Document, tag::Tag},
     log::changes::ChangeId,
-    sieve::{Event, Input},
+    sieve::{Compiler, Envelope, Event, Input, Mailbox, Recipient},
     tracing::{debug, error},
     write::{batch::WriteBatch, update::Changes},
     AccountId, DocumentId, JMAPStore, RecipientType, Store,
@@ -84,6 +88,7 @@ where
             return self.write_bytes(b"503 5.5.1 Missing MAIL FROM.\r\n").await;
         };
         let message = std::mem::take(&mut self.message);
+        self.rcpt_to_dup.clear();
 
         // Ingest
         let result = if self.core.is_leader() {
@@ -122,25 +127,23 @@ where
         // Build response
         let mut buf = Vec::with_capacity(128);
         for rcpt in &rcpt_to {
-            if let RcptType::Mailbox { name, status, .. } | RcptType::List { name, status, .. } =
-                rcpt
-            {
-                buf.extend_from_slice(match status {
-                    DeliveryStatus::Success => b"250 2.1.5 <",
-                    DeliveryStatus::TemporaryFailure { .. } => b"451 4.3.0 <",
-                    DeliveryStatus::PermanentFailure { .. } => b"550 5.5.0 <",
-                    DeliveryStatus::Duplicated => continue,
-                });
-                buf.extend_from_slice(name.as_bytes());
-                buf.extend_from_slice(b"> ");
-                buf.extend_from_slice(match status {
-                    DeliveryStatus::Success => b"delivered",
-                    DeliveryStatus::TemporaryFailure { reason }
-                    | DeliveryStatus::PermanentFailure { reason } => reason.as_bytes(),
-                    DeliveryStatus::Duplicated => continue,
-                });
-                buf.extend_from_slice(b"\r\n");
-            }
+            let (RcptType::Mailbox { name, status, .. } | RcptType::List { name, status, .. }) =
+                rcpt;
+            buf.extend_from_slice(match status {
+                DeliveryStatus::Success => b"250 2.1.5 <",
+                DeliveryStatus::TemporaryFailure { .. } => b"451 4.3.0 <",
+                DeliveryStatus::PermanentFailure { .. } => b"550 5.5.0 <",
+                DeliveryStatus::Duplicated => continue,
+            });
+            buf.extend_from_slice(name.as_bytes());
+            buf.extend_from_slice(b"> ");
+            buf.extend_from_slice(match status {
+                DeliveryStatus::Success => b"delivered",
+                DeliveryStatus::TemporaryFailure { reason }
+                | DeliveryStatus::PermanentFailure { reason } => reason.as_bytes(),
+                DeliveryStatus::Duplicated => continue,
+            });
+            buf.extend_from_slice(b"\r\n");
         }
 
         self.write_bytes(&buf).await
@@ -211,7 +214,6 @@ where
             Err(None) => {
                 return Err("450 4.3.2 Temporary server failure.\r\n".to_string());
             }
-            _ => unreachable!(),
         };
 
         // Wait for message to be committed
@@ -287,7 +289,7 @@ pub trait JMAPMailIngest {
         message: Message,
         blob_id: &BlobId,
         mailbox_ids: &[DocumentId],
-        flags: Vec<String>,
+        flags: Vec<Tag>,
     ) -> Result<(), ()>;
 }
 
@@ -331,6 +333,7 @@ where
         } else {
             None
         };
+
         for mut recipient in rcpt_to {
             match &mut recipient {
                 RcptType::Mailbox { id, name, status } => {
@@ -435,13 +438,15 @@ where
         envelope_to: &str,
     ) -> Result<(), Option<String>> {
         // Verify that this account has an Inbox mailbox
-        if !matches!(self.get_document_ids(account_id, Collection::Mailbox), Ok(Some(mailbox_ids)) if mailbox_ids.contains(INBOX_ID))
-        {
-            error!("Account {} does not have an Inbox configured.", account_id);
-            return Err("Account does not have an inbox configured."
-                .to_string()
-                .into());
-        }
+        let mailbox_ids = match self.get_document_ids(account_id, Collection::Mailbox) {
+            Ok(Some(mailbox_ids)) if mailbox_ids.contains(INBOX_ID) => mailbox_ids,
+            _ => {
+                error!("Account {} does not have an Inbox configured.", account_id);
+                return Err("Account does not have an inbox configured."
+                    .to_string()
+                    .into());
+            }
+        };
 
         // Parse message
         let message = if let Some(message) = Message::parse(raw_message) {
@@ -450,89 +455,435 @@ where
             return Err("Failed to parse message.".to_string().into());
         };
 
-        if let Some(active_script) = self.sieve_script_get_active(account_id).map_err(|err| {
-            error!("Failed to get SieveScript for {}: {}", account_id, err);
-            None
-        })? {
-            let mut instance = self.sieve_runtime.filter_parsed(message);
-            let mut input = Input::script(
-                if let Some(Value::Text { value }) = active_script
-                    .orm
-                    .get(&jmap_sieve::sieve_script::schema::Property::Name)
-                {
-                    value.to_string()
-                } else {
-                    account_id.to_string()
-                },
-                active_script.script,
-            );
-            let mut new_ids = AHashSet::new();
+        let mut active_script = match self.sieve_script_get_active(account_id) {
+            Ok(None) => {
+                return self
+                    .mail_deliver_mailbox(
+                        result,
+                        account_id,
+                        message,
+                        blob_id,
+                        &[INBOX_ID],
+                        Vec::new(),
+                    )
+                    .map_err(|_| None);
+            }
+            Ok(Some(active_script)) => active_script,
+            Err(err) => {
+                error!("Failed to get SieveScript for {}: {}", account_id, err);
+                return self
+                    .mail_deliver_mailbox(
+                        result,
+                        account_id,
+                        message,
+                        blob_id,
+                        &[INBOX_ID],
+                        Vec::new(),
+                    )
+                    .map_err(|_| None);
+            }
+        };
 
-            while let Some(event) = instance.run(input) {
-                match event {
-                    Ok(event) => match event {
-                        Event::IncludeScript { name, optional } => todo!(),
-                        Event::MailboxExists {
-                            mailboxes,
-                            special_use,
-                        } => todo!(),
-                        Event::DuplicateId { id, expiry, last } => {
-                            let id_hash = SeenIdHash::new(&id, expiry);
-                            let seen_id = active_script.seen_ids.contains(&id_hash);
-                            if !seen_id || last {
-                                new_ids.insert(id_hash);
-                            }
+        let mut instance = self.sieve_runtime.filter_parsed(message);
 
-                            input = seen_id.into();
-                        }
-                        Event::Discard => {
-                            input = true.into();
-                        }
-                        Event::Reject { extended, reason } => todo!(),
-                        Event::Keep { flags, message_id } => todo!(),
-                        Event::FileInto {
-                            folder,
-                            flags,
-                            mailbox_id,
-                            special_use,
-                            create,
-                            message_id,
-                        } => todo!(),
-                        Event::SendMessage {
-                            recipient,
-                            notify,
-                            return_of_content,
-                            by_time,
-                            message_id,
-                        } => todo!(),
-                        Event::ListContains { .. }
-                        | Event::Execute { .. }
-                        | Event::Notify { .. } => {
-                            // Not allowed
+        // Set account details
+        let mail_from = match self.get_account_details(account_id) {
+            Ok(Some((email, name, _))) => {
+                let mail_from = email.clone();
+                instance.set_user_address(email);
+                instance.set_user_full_name(&name);
+                mail_from
+            }
+            _ => {
+                error!("Failed to obtain account details for {}.", account_id);
+                instance.set_user_address(envelope_to.to_string());
+                envelope_to.to_string()
+            }
+        };
+
+        // Set envelope
+        instance.set_envelope(Envelope::From, envelope_from);
+        instance.set_envelope(Envelope::To, envelope_to);
+
+        let mut input = Input::script(
+            if let Some(Value::Text { value }) = active_script
+                .orm
+                .get(&jmap_sieve::sieve_script::schema::Property::Name)
+            {
+                value.to_string()
+            } else {
+                account_id.to_string()
+            },
+            active_script.script.clone(),
+        );
+
+        let mut do_discard = false;
+        let mut do_deliver = false;
+
+        let mut new_ids = AHashSet::new();
+        let mut reject_reason = None;
+        let mut messages: Vec<SieveMessage> = vec![SieveMessage {
+            raw_message: raw_message.into(),
+            file_into: Vec::new(),
+            flags: Vec::new(),
+        }];
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        while let Some(event) = instance.run(input) {
+            match event {
+                Ok(event) => match event {
+                    Event::IncludeScript { name, .. } => {
+                        if let Ok(Some(script)) =
+                            self.sieve_script_get_by_name(account_id, name.as_str().to_string())
+                        {
+                            input = Input::script(name, script);
+                        } else {
                             input = false.into();
                         }
-                        Event::CreatedMessage {
-                            message_id,
-                            message,
-                        } => todo!(),
+                    }
+                    Event::MailboxExists {
+                        mailboxes,
+                        special_use,
+                    } => {
+                        if !mailboxes.is_empty() {
+                            let special_use = special_use
+                                .into_iter()
+                                .map(|role| {
+                                    if role.eq_ignore_ascii_case("inbox") {
+                                        INBOX_ID
+                                    } else if role.eq_ignore_ascii_case("trash") {
+                                        TRASH_ID
+                                    } else {
+                                        let mut mailbox_id = DocumentId::MAX;
+                                        let role = role.to_ascii_lowercase();
+                                        if is_valid_role(&role) {
+                                            if let Ok(Some(mailbox_id_)) =
+                                                self.mailbox_get_by_role(account_id, &role)
+                                            {
+                                                mailbox_id = mailbox_id_;
+                                            }
+                                        }
+                                        mailbox_id
+                                    }
+                                })
+                                .collect::<Vec<_>>();
 
-                        _ => unreachable!(),
-                    },
-                    Err(err) => todo!(),
+                            let mut result = true;
+                            for mailbox in mailboxes {
+                                match mailbox {
+                                    Mailbox::Name(name) => {
+                                        if !matches!(
+                                            self.mailbox_get_by_name(account_id, &name),
+                                            Ok(Some(document_id)) if special_use.is_empty() ||
+                                                        special_use.contains(&document_id)
+                                        ) {
+                                            result = false;
+                                            break;
+                                        }
+                                    }
+                                    Mailbox::Id(id) => {
+                                        if !matches!(JMAPId::parse(&id), Some(id) if
+                                                            mailbox_ids.contains(id.get_document_id()) &&
+                                                            (special_use.is_empty() ||
+                                                             special_use.contains(&id.get_document_id())))
+                                        {
+                                            result = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            input = result.into();
+                        } else if !special_use.is_empty() {
+                            let mut result = true;
+
+                            for role in special_use {
+                                if !role.eq_ignore_ascii_case("inbox")
+                                    && !role.eq_ignore_ascii_case("trash")
+                                {
+                                    let role = role.to_ascii_lowercase();
+                                    if !is_valid_role(&role)
+                                        || !matches!(
+                                            self.mailbox_get_by_role(account_id, &role),
+                                            Ok(Some(_))
+                                        )
+                                    {
+                                        result = false;
+                                        break;
+                                    }
+                                }
+                            }
+                            input = result.into();
+                        } else {
+                            input = false.into();
+                        }
+                    }
+                    Event::DuplicateId { id, expiry, last } => {
+                        let id_hash = SeenIdHash::new(&id, expiry + now);
+                        let seen_id = active_script.seen_ids.contains(&id_hash);
+                        if !seen_id || last {
+                            new_ids.insert(id_hash);
+                        }
+
+                        input = seen_id.into();
+                    }
+                    Event::Discard => {
+                        do_discard = true;
+                        input = true.into();
+                    }
+                    Event::Reject { reason, .. } => {
+                        reject_reason = reason.into();
+                        do_discard = true;
+                        input = true.into();
+                    }
+                    Event::Keep { flags, message_id } => {
+                        if let Some(message) = messages.get_mut(message_id) {
+                            message.flags =
+                                flags.into_iter().map(|f| Keyword::parse(&f).tag).collect();
+                            if !message.file_into.contains(&INBOX_ID) {
+                                message.file_into.push(INBOX_ID);
+                            }
+                            do_deliver = true;
+                        } else {
+                            error!("Sieve filter failed: Unknown message id {}.", message_id);
+                        }
+                        input = true.into();
+                    }
+                    Event::FileInto {
+                        folder,
+                        flags,
+                        mailbox_id,
+                        special_use,
+                        create,
+                        message_id,
+                    } => {
+                        let mut target_id = DocumentId::MAX;
+
+                        // Find mailbox by Id
+                        if let Some(mailbox_id) = mailbox_id.and_then(|m| JMAPId::parse(&m)) {
+                            let mailbox_id = mailbox_id.get_document_id();
+                            if mailbox_ids.contains(mailbox_id) {
+                                target_id = mailbox_id;
+                            }
+                        }
+
+                        // Find mailbox by role
+                        if let Some(special_use) = special_use {
+                            if target_id == DocumentId::MAX {
+                                if special_use.eq_ignore_ascii_case("inbox") {
+                                    target_id = INBOX_ID;
+                                } else if special_use.eq_ignore_ascii_case("trash") {
+                                    target_id = TRASH_ID;
+                                } else {
+                                    let role = special_use.to_ascii_lowercase();
+                                    if is_valid_role(&role) {
+                                        if let Ok(Some(mailbox_id_)) =
+                                            self.mailbox_get_by_role(account_id, &role)
+                                        {
+                                            target_id = mailbox_id_;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Find mailbox by name
+                        if target_id == DocumentId::MAX {
+                            if !create {
+                                if let Ok(Some(document_id)) =
+                                    self.mailbox_get_by_name(account_id, &folder)
+                                {
+                                    target_id = document_id;
+                                }
+                            } else if let Ok(Some((document_id, changes))) =
+                                self.mailbox_create_path(account_id, &folder)
+                            {
+                                target_id = document_id;
+                                if let Some(changes) = changes {
+                                    result.last_change_id = changes.change_id;
+                                    result.changes.insert(account_id, changes);
+                                }
+                            }
+                        }
+
+                        // Default to Inbox
+                        if target_id == DocumentId::MAX {
+                            target_id = INBOX_ID;
+                        }
+
+                        if let Some(message) = messages.get_mut(message_id) {
+                            message.flags =
+                                flags.into_iter().map(|f| Keyword::parse(&f).tag).collect();
+                            if !message.file_into.contains(&target_id) {
+                                message.file_into.push(target_id);
+                            }
+                            do_deliver = true;
+                        } else {
+                            error!("Sieve filter failed: Unknown message id {}.", message_id);
+                        }
+                        input = true.into();
+                    }
+                    Event::SendMessage {
+                        recipient,
+                        message_id,
+                        ..
+                    } => {
+                        input = true.into();
+
+                        result.messages.push(OutgoingMessage {
+                            mail_from: mail_from.clone(),
+                            rcpt_to: match recipient {
+                                Recipient::Address(rcpt) => vec![rcpt],
+                                Recipient::Group(rcpts) => rcpts,
+                                Recipient::List(_) => {
+                                    // Not yet implemented
+                                    continue;
+                                }
+                            },
+                            message: if let Some(message) = messages.get(message_id) {
+                                message.raw_message.to_vec()
+                            } else {
+                                error!("Sieve filter failed: Unknown message id {}.", message_id);
+                                continue;
+                            },
+                        });
+                    }
+                    Event::ListContains { .. } | Event::Execute { .. } | Event::Notify { .. } => {
+                        // Not allowed
+                        input = false.into();
+                    }
+                    Event::CreatedMessage { message, .. } => {
+                        messages.push(SieveMessage {
+                            raw_message: message.into(),
+                            file_into: Vec::new(),
+                            flags: Vec::new(),
+                        });
+                        input = true.into();
+                    }
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!(),
+                },
+                Err(err) => {
+                    debug!("Sieve script runtime error: {}", err);
+                    input = true.into();
                 }
             }
+        }
 
-            Ok(())
+        // Fail-safe, no discard and no keep seen, assume that something went wrong and file anyway.
+        if !do_deliver && !do_discard {
+            messages[0].file_into.push(INBOX_ID);
+        }
+
+        // Deliver messages
+        let mut has_temp_errors = false;
+        let mut has_delivered = false;
+        for (message_id, sieve_message) in messages.into_iter().enumerate() {
+            if !sieve_message.file_into.is_empty() {
+                // Store newly generated message
+                let (raw_message, blob_id) = if message_id > 0 {
+                    let blob_id = BlobId::new_external(sieve_message.raw_message.as_ref());
+                    match self.blob_store(&blob_id, sieve_message.raw_message.into_owned()) {
+                        Ok(raw_message) => (raw_message.into(), blob_id),
+                        Err(err) => {
+                            error!("Failed to store blob: {}", err);
+                            has_temp_errors = true;
+                            continue;
+                        }
+                    }
+                } else {
+                    (sieve_message.raw_message, blob_id.clone())
+                };
+
+                // Parse message if needed
+                let message = if message_id == 0 && !instance.has_message_changed() {
+                    instance.take_message()
+                } else if let Some(message) = Message::parse(raw_message.as_ref()) {
+                    message
+                } else {
+                    debug!("Failed to parse Sieve generated message.");
+                    continue;
+                };
+
+                // Deliver message
+                if self
+                    .mail_deliver_mailbox(
+                        result,
+                        account_id,
+                        message,
+                        &blob_id,
+                        &sieve_message.file_into,
+                        sieve_message.flags,
+                    )
+                    .is_ok()
+                {
+                    has_delivered = true;
+                } else {
+                    has_temp_errors = true;
+                }
+            }
+        }
+
+        // Save Sieve script changes
+        if active_script.has_changes || !new_ids.is_empty() {
+            drop(instance);
+            active_script.seen_ids.extend(new_ids);
+            let mut changes = TinyORM::track_changes(&active_script.orm);
+            changes.set(
+                jmap_sieve::sieve_script::schema::Property::SeenIds,
+                jmap_sieve::sieve_script::schema::Value::SeenIds {
+                    value: SeenIds {
+                        ids: active_script.seen_ids,
+                        has_changes: true,
+                    },
+                },
+            );
+            changes.set(
+                jmap_sieve::sieve_script::schema::Property::CompiledScript,
+                jmap_sieve::sieve_script::schema::Value::CompiledScript {
+                    value: CompiledScript {
+                        version: Compiler::VERSION,
+                        script: match Arc::try_unwrap(active_script.script) {
+                            Ok(script) => script,
+                            #[cfg(test)]
+                            Err(_) => {
+                                panic!("Failed to unwrap Arc<Sieve>");
+                            }
+                            #[cfg(not(test))]
+                            Err(script) => script.as_ref().clone(),
+                        }
+                        .into(),
+                    },
+                },
+            );
+            let mut document = Document::new(Collection::SieveScript, active_script.document_id);
+            active_script.orm.merge(&mut document, changes).ok();
+            let mut batch = WriteBatch::new(account_id);
+            batch.update_document(document);
+            batch.log_update(Collection::SieveScript, active_script.document_id);
+            match self.write(batch) {
+                Ok(Some(changes)) => {
+                    result.last_change_id = changes.change_id;
+                }
+                Ok(None) => (),
+                Err(err) => {
+                    error!("Failed to write Sieve filter: {}", err);
+                }
+            }
+        }
+
+        if reject_reason.is_none() {
+            if has_delivered || !has_temp_errors {
+                Ok(())
+            } else {
+                // There were problems during delivery
+                Err(None)
+            }
         } else {
-            self.mail_deliver_mailbox(
-                result,
-                account_id,
-                message,
-                blob_id,
-                &[INBOX_ID],
-                Vec::new(),
-            )
-            .map_err(|_| None)
+            Err(reject_reason)
         }
     }
 
@@ -543,7 +894,7 @@ where
         message: Message,
         blob_id: &BlobId,
         mailbox_ids: &[DocumentId],
-        flags: Vec<String>,
+        flags: Vec<Tag>,
     ) -> Result<(), ()> {
         // Prepare batch
         let mut batch = WriteBatch::new(account_id);
@@ -565,7 +916,7 @@ where
             orm.tag(Property::MailboxIds, Tag::Id(*mailbox_id));
         }
         for flag in flags {
-            orm.tag(Property::Keywords, Keyword::parse(&flag).tag);
+            orm.tag(Property::Keywords, flag);
         }
 
         // Serialize ORM
@@ -611,6 +962,12 @@ where
             }
         }
     }
+}
+
+struct SieveMessage<'x> {
+    pub raw_message: Cow<'x, [u8]>,
+    pub file_into: Vec<DocumentId>,
+    pub flags: Vec<Tag>,
 }
 
 pub struct IngestResult {

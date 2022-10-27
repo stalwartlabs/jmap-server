@@ -48,6 +48,8 @@ pub enum URI {
     Calendars,
     #[serde(rename(serialize = "urn:ietf:params:jmap:websocket"))]
     WebSocket,
+    #[serde(rename(serialize = "urn:ietf:params:jmap:sieve"))]
+    Sieve,
 }
 
 pub type Result<T> = std::result::Result<T, MethodError>;

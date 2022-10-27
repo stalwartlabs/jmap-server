@@ -52,6 +52,9 @@ pub struct JMAPConfig {
     pub mail_import_max_items: usize,
     pub mail_parse_max_items: usize,
 
+    pub sieve_max_scripts: usize,
+    pub sieve_max_script_name: usize,
+
     pub push_max_total: usize,
     pub ws_heartbeat_interval: u64,
     pub ws_client_timeout: u64,
@@ -83,6 +86,8 @@ impl From<&EnvSettings> for JMAPConfig {
             mail_max_size: settings.parse("mail-max-size").unwrap_or(104857600),
             mail_import_max_items: settings.parse("mail-import-max-items").unwrap_or(5),
             mail_parse_max_items: settings.parse("mail-parse-max-items").unwrap_or(5),
+            sieve_max_script_name: settings.parse("sieve-max-script-name").unwrap_or(512),
+            sieve_max_scripts: settings.parse("sieve-max-scripts").unwrap_or(256),
             push_max_total: settings.parse("push-max-total").unwrap_or(100),
             ws_client_timeout: settings.parse("ws-client-timeout").unwrap_or(10 * 1000),
             ws_heartbeat_interval: settings.parse("ws-heartbeat-interval").unwrap_or(5 * 1000),

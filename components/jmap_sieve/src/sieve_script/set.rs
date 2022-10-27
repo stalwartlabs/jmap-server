@@ -34,9 +34,12 @@ use jmap::{jmap_store::set::SetObject, request::set::SetRequest};
 use store::core::collection::Collection;
 use store::core::document::Document;
 use store::core::error::StoreError;
+use store::rand::distributions::Alphanumeric;
+use store::rand::{thread_rng, Rng};
 use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
+use store::sieve::compiler::ErrorType;
 use store::sieve::Compiler;
 use store::write::batch::WriteBatch;
 use store::write::options::{IndexOptions, Options};
@@ -101,8 +104,23 @@ where
         let mut helper = SetHelper::new(self, request)?;
 
         helper.create(|_create_id, item, helper, document| {
+            if (helper.document_ids.len() as usize) >= helper.store.config.sieve_max_scripts {
+                return Err(SetError::new(SetErrorType::OverQuota).with_description(
+                    "Maximum number of stored scripts exceeded, please delete some and try again",
+                ));
+            }
+
             let mut fields =
                 TinyORM::<SieveScript>::new().sieve_script_set(helper, item, document, None)?;
+
+            // Add name if missing
+            if !matches!(fields.get(&Property::Name), Some(Value::Text { value }) if !value.is_empty()) {
+                fields.set(Property::Name, Value::Text { value: thread_rng()
+                    .sample_iter(Alphanumeric)
+                    .take(15)
+                    .map(char::from)
+                    .collect::<String>() });
+            }
 
             // Set script as inactive
             fields.set(Property::IsActive, Value::Bool { value: false });
@@ -364,7 +382,11 @@ where
         for (property, value) in sieve_script.properties {
             let value = match (property, value) {
                 (Property::Name, Value::Text { value }) => {
-                    if value.eq_ignore_ascii_case("vacation") {
+                    if value.len() > helper.store.config.sieve_max_script_name {
+                        return Err(SetError::invalid_properties()
+                        .with_property(property)
+                        .with_description("Script name is too long."));
+                    } else if value.eq_ignore_ascii_case("vacation") {
                         return Err(SetError::invalid_properties()
                         .with_property(property)
                         .with_description("The 'vacation' name is reserved, please use a different name."));
@@ -458,8 +480,14 @@ where
                                 .sieve_compiler
                                 .compile(&script)
                                 .map_err(|err| {
-                                    SetError::new(SetErrorType::InvalidScript)
-                                        .with_description(err.to_string())
+                                    SetError::new(
+                                        if let ErrorType::ScriptTooLong = &err.error_type() {
+                                            SetErrorType::TooLarge
+                                        } else {
+                                            SetErrorType::InvalidScript
+                                        },
+                                    )
+                                    .with_description(err.to_string())
                                 })?
                                 .into(),
                         },

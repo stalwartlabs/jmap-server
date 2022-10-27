@@ -23,6 +23,7 @@
 
 use std::time::Duration;
 
+use super::is_valid_role;
 use super::schema::{Mailbox, Property, Value};
 use crate::mail::schema::Email;
 use crate::mail::set::JMAPSetMail;
@@ -49,6 +50,8 @@ use store::read::comparator::Comparator;
 use store::read::filter::{ComparisonOperator, Filter, Query};
 use store::read::FilterMapper;
 use store::tracing::debug;
+use store::write::batch::WriteBatch;
+use store::write::update::Changes;
 use store::{AccountId, DocumentId, JMAPStore, LongInteger, SharedResource};
 use store::{SharedBitmap, Store};
 
@@ -98,6 +101,11 @@ where
 {
     fn mailbox_set(&self, request: SetRequest<Mailbox>) -> jmap::Result<SetResponse<Mailbox>>;
     fn mailbox_delete(&self, account_id: AccountId, document: &mut Document) -> store::Result<()>;
+    fn mailbox_create_path(
+        &self,
+        account_id: AccountId,
+        path: &str,
+    ) -> store::Result<Option<(DocumentId, Option<Changes>)>>;
 }
 
 impl<T> JMAPSetMailbox<T> for JMAPStore<T>
@@ -372,6 +380,124 @@ where
 
         Ok(())
     }
+
+    fn mailbox_create_path(
+        &self,
+        account_id: AccountId,
+        path: &str,
+    ) -> store::Result<Option<(DocumentId, Option<Changes>)>> {
+        let path = path
+            .split('/')
+            .filter_map(|p| {
+                let p = p.trim();
+                if !p.is_empty() {
+                    p.into()
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if path.is_empty() || path.len() > self.config.mailbox_max_depth {
+            return Ok(None);
+        }
+
+        // Lock collection
+        let _lock = self
+            .try_lock_collection(account_id, Collection::Mailbox, Duration::from_millis(200))
+            .ok_or_else(|| StoreError::InternalError("Failed to obtain lock".to_string()))?;
+
+        let document_ids = self
+            .query_store::<FilterMapper>(
+                account_id,
+                Collection::Mailbox,
+                Filter::or(
+                    path.iter()
+                        .map(|n| {
+                            Filter::new_condition(
+                                Property::Name.into(),
+                                ComparisonOperator::Equal,
+                                Query::Index(n.to_string()),
+                            )
+                        })
+                        .collect(),
+                ),
+                Comparator::None,
+            )?
+            .into_bitmap();
+
+        if (document_ids.len() as usize) < path.len() {
+            return Ok(None);
+        }
+
+        let mut found_names = Vec::new();
+        for document_id in document_ids {
+            if let Some(mut orm) = self.get_orm::<Mailbox>(account_id, document_id)? {
+                if let Some(Value::Text { value }) = orm.remove(&Property::Name) {
+                    found_names.push((
+                        value,
+                        if let Some(Value::Id { value }) = orm.remove(&Property::ParentId) {
+                            value.get_document_id()
+                        } else {
+                            0
+                        },
+                        document_id + 1,
+                    ));
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                return Ok(None);
+            }
+        }
+
+        let mut next_parent_id = 0;
+        let mut path = path.into_iter().peekable();
+        'outer: while let Some(name) = path.peek() {
+            for (part, parent_id, document_id) in &found_names {
+                if part.eq(name) && *parent_id == next_parent_id {
+                    next_parent_id = *document_id;
+                    path.next();
+                    continue 'outer;
+                }
+            }
+            break;
+        }
+
+        // Create missing folders
+        if path.peek().is_some() {
+            let mut batch = WriteBatch::new(account_id);
+
+            for name in path {
+                if name.len() > self.config.mailbox_name_max_len {
+                    return Ok(None);
+                }
+
+                let document_id = self.assign_document_id(account_id, Collection::Mailbox)?;
+                let mut document = Document::new(Collection::Mailbox, document_id);
+                let mut orm = TinyORM::<Mailbox>::new();
+                orm.set(
+                    Property::Name,
+                    Value::Text {
+                        value: name.to_string(),
+                    },
+                );
+                orm.set(
+                    Property::ParentId,
+                    Value::Id {
+                        value: next_parent_id.into(),
+                    },
+                );
+                next_parent_id = document_id + 1;
+                orm.insert(&mut document)?;
+                batch.insert_document(document);
+                batch.log_insert(Collection::Mailbox, document_id);
+            }
+
+            Ok(Some((next_parent_id - 1, self.write(batch)?)))
+        } else {
+            Ok(Some((next_parent_id - 1, None)))
+        }
+    }
 }
 
 trait MailboxSet<T>: Sized
@@ -477,11 +603,7 @@ where
                 (Property::ParentId, Value::Null) => Value::Id { value: 0u64.into() },
                 (Property::Role, Value::Text { value }) => {
                     let role = value.to_lowercase();
-                    if [
-                        "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
-                    ]
-                    .contains(&role.as_str())
-                    {
+                    if is_valid_role(&role) {
                         self.tag(property, Tag::Default);
                         Value::Text { value: role }
                     } else {
@@ -629,7 +751,35 @@ where
             } else {
                 0.into()
             } {
-                for jmap_id in helper.store.query_store::<FilterMapper>(
+                if !helper
+                    .store
+                    .query_store::<FilterMapper>(
+                        helper.account_id,
+                        Collection::Mailbox,
+                        Filter::and(vec![
+                            Filter::new_condition(
+                                Property::ParentId.into(),
+                                ComparisonOperator::Equal,
+                                Query::LongInteger(parent_mailbox_id),
+                            ),
+                            Filter::new_condition(
+                                Property::Name.into(),
+                                ComparisonOperator::Equal,
+                                Query::Index(mailbox_name.to_string()),
+                            ),
+                        ]),
+                        Comparator::None,
+                    )?
+                    .into_bitmap()
+                    .is_empty()
+                {
+                    return Err(SetError::invalid_properties().with_description(format!(
+                        "A mailbox with name '{}' already exists.",
+                        mailbox_name
+                    )));
+                }
+
+                /*for jmap_id in helper.store.query_store::<FilterMapper>(
                     helper.account_id,
                     Collection::Mailbox,
                     Filter::new_condition(
@@ -652,7 +802,7 @@ where
                             mailbox_name
                         )));
                     }
-                }
+                }*/
             }
         }
 

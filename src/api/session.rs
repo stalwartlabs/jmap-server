@@ -32,8 +32,10 @@ use jmap::{principal::schema::Type, request::ACLEnforce, types::jmap::JMAPId, UR
 use jmap_mail::mail::sharing::JMAPShareMail;
 use jmap_sharing::principal::account::JMAPAccountStore;
 use store::{
+    ahash::AHashSet,
     config::{env_settings::EnvSettings, jmap::JMAPConfig},
     core::{acl::ACL, vec_map::VecMap},
+    sieve::compiler::grammar::Capability,
     Store,
 };
 
@@ -87,6 +89,7 @@ enum Capabilities {
     Submission(SubmissionCapabilities),
     VacationResponse(VacationResponseCapabilities),
     WebSocket(WebSocketCapabilities),
+    Sieve(SieveCapabilities),
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -115,6 +118,24 @@ struct WebSocketCapabilities {
     url: String,
     #[serde(rename(serialize = "supportsPush"))]
     supports_push: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct SieveCapabilities {
+    #[serde(rename(serialize = "maxSizeScriptName"))]
+    max_script_name: usize,
+    #[serde(rename(serialize = "maxSizeScript"))]
+    max_script_size: usize,
+    #[serde(rename(serialize = "maxNumberScripts"))]
+    max_scripts: usize,
+    #[serde(rename(serialize = "maxNumberRedirects"))]
+    max_redirects: usize,
+    #[serde(rename(serialize = "sieveExtensions"))]
+    extensions: Vec<String>,
+    #[serde(rename(serialize = "notificationMethods"))]
+    notification_methods: Option<Vec<String>>,
+    #[serde(rename(serialize = "externalLists"))]
+    ext_lists: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -155,6 +176,10 @@ impl Session {
                 (
                     URI::WebSocket,
                     Capabilities::WebSocket(WebSocketCapabilities::new(&base_url)),
+                ),
+                (
+                    URI::Sieve,
+                    Capabilities::Sieve(SieveCapabilities::new(settings, config)),
                 ),
             ]),
             accounts: VecMap::new(),
@@ -281,6 +306,50 @@ impl WebSocketCapabilities {
         WebSocketCapabilities {
             url: format!("ws{}/jmap/ws", base_url.strip_prefix("http").unwrap()),
             supports_push: true,
+        }
+    }
+}
+
+impl SieveCapabilities {
+    pub fn new(settings: &EnvSettings, config: &JMAPConfig) -> Self {
+        let mut notification_methods = Vec::new();
+        for part in settings
+            .get("sieve-notification-uris")
+            .unwrap_or_else(|| "mailto".to_string())
+            .split_ascii_whitespace()
+        {
+            if !part.is_empty() {
+                notification_methods.push(part.to_string());
+            }
+        }
+
+        let mut capabilities: AHashSet<Capability> =
+            AHashSet::from_iter(Capability::all().iter().cloned());
+        if let Some(disable) = settings.get("sieve-disable-capabilities") {
+            for item in disable.split_ascii_whitespace() {
+                capabilities.remove(&Capability::parse(item));
+            }
+        }
+        let mut extensions = capabilities
+            .into_iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<String>>();
+        extensions.sort_unstable();
+
+        SieveCapabilities {
+            max_script_name: config.sieve_max_script_name,
+            max_script_size: settings
+                .parse("sieve-max-script-size")
+                .unwrap_or(1024 * 1024),
+            max_scripts: config.sieve_max_scripts,
+            max_redirects: settings.parse("sieve-max-redirects").unwrap_or(1),
+            extensions,
+            notification_methods: if !notification_methods.is_empty() {
+                notification_methods.into()
+            } else {
+                None
+            },
+            ext_lists: None,
         }
     }
 }

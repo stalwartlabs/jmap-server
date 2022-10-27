@@ -29,7 +29,12 @@ use serde::{
     ser::{SerializeMap, SerializeSeq},
     Deserialize, Serialize,
 };
-use store::{ahash::AHashSet, core::vec_map::VecMap, sieve::Compiler};
+use store::{
+    ahash::AHashSet,
+    bincode,
+    core::vec_map::VecMap,
+    sieve::{Compiler, Sieve},
+};
 
 use crate::{SeenIdHash, SeenIds};
 
@@ -212,7 +217,13 @@ impl Serialize for CompiledScript {
     {
         let mut seq = serializer.serialize_seq(2.into())?;
         seq.serialize_element(&self.version)?;
-        seq.serialize_element(&self.script)?;
+        seq.serialize_element(
+            &self
+                .script
+                .as_ref()
+                .and_then(|s| bincode::serialize(s).ok())
+                .unwrap_or_default(),
+        )?;
         seq.end()
     }
 }
@@ -242,16 +253,24 @@ impl<'de> Visitor<'de> for CompiledScriptVisitor {
         let version = seq
             .next_element::<u32>()?
             .ok_or_else(|| serde::de::Error::custom("Expected compiler version."))?;
-        if version == Compiler::VERSION {
+        let script_bytes = seq
+            .next_element::<&[u8]>()?
+            .ok_or_else(|| serde::de::Error::custom("Expected compiled script."))?;
+
+        if version == Compiler::VERSION && !script_bytes.is_empty() {
             Ok(CompiledScript {
                 version,
-                script: seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::custom("Expected compiled script."))?,
+                script: match bincode::deserialize::<Sieve>(script_bytes) {
+                    Ok(script) => script.into(),
+                    #[cfg(test)]
+                    Err(err) => {
+                        panic!("Failed to deserialize compiled Sieve script: {}", err);
+                    }
+                    #[cfg(not(test))]
+                    Err(_) => None,
+                },
             })
         } else {
-            seq.next_element::<IgnoredAny>()?
-                .ok_or_else(|| serde::de::Error::custom("Expected compiled script."))?;
             Ok(CompiledScript {
                 version,
                 script: None,
@@ -320,7 +339,7 @@ impl<'de> Visitor<'de> for SeenIdsVisitor {
                     expiry,
                 });
             } else {
-                seq.next_element::<IgnoredAny>()?
+                seq.next_element::<[u8; 32]>()?
                     .ok_or_else(|| serde::de::Error::custom("Expected hash."))?;
                 seen_ids.has_changes = true;
             }

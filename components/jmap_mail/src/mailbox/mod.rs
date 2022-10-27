@@ -107,3 +107,11 @@ impl CreateMailbox for TinyORM<Mailbox> {
         mailbox
     }
 }
+
+#[inline(always)]
+pub fn is_valid_role(role: &str) -> bool {
+    [
+        "inbox", "trash", "spam", "junk", "drafts", "archive", "sent",
+    ]
+    .contains(&role)
+}

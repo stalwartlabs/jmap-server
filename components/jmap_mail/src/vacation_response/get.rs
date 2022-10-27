@@ -206,11 +206,11 @@ where
                 }
             }
             if start_pos > 0 && end_pos > start_pos {
-                if let Some(vacation_response) =
+                if let Some(properties) =
                     decode_base64(blob.get(start_pos + 1..end_pos).unwrap_or(&b""[..]))
                         .and_then(|bytes| bincode::deserialize(&bytes).ok())
                 {
-                    return Ok(Some(vacation_response));
+                    return Ok(Some(VacationResponse { properties }));
                 }
             }
         }

@@ -194,8 +194,96 @@ where
             raft_index: 0.into(),
             raft_term: 0.into(),
             tombstone_deletions: false.into(),
-            sieve_compiler: Compiler::new(),
-            sieve_runtime: Runtime::new(),
+            sieve_compiler: Compiler::new()
+                .with_max_script_size(
+                    settings
+                        .parse("sieve-max-script-size")
+                        .unwrap_or(1024 * 1024),
+                )
+                .with_max_string_size(settings.parse("sieve-max-string-size").unwrap_or(4096))
+                .with_max_variable_name_size(
+                    settings.parse("sieve-max-variable-name-size").unwrap_or(32),
+                )
+                .with_max_nested_blocks(settings.parse("sieve-max-nested-blocks").unwrap_or(15))
+                .with_max_nested_tests(settings.parse("sieve-max-nested-tests").unwrap_or(15))
+                .with_max_nested_foreverypart(
+                    settings.parse("sieve-max-nested-foreverypart").unwrap_or(3),
+                )
+                .with_max_match_variables(settings.parse("sieve-max-match-variables").unwrap_or(30))
+                .with_max_local_variables(
+                    settings.parse("sieve-max-local-variables").unwrap_or(128),
+                )
+                .with_max_header_size(settings.parse("sieve-max-header-size").unwrap_or(1024))
+                .with_max_includes(settings.parse("sieve-max-includes").unwrap_or(3)),
+            sieve_runtime: Runtime::new()
+                .with_max_nested_includes(settings.parse("sieve-max-nested-includes").unwrap_or(3))
+                .with_cpu_limit(settings.parse("sieve-cpu-limit").unwrap_or(5000))
+                .with_max_variable_size(settings.parse("sieve-max-variable-size").unwrap_or(4096))
+                .with_max_redirects(settings.parse("sieve-max-redirects").unwrap_or(1))
+                .with_max_received_headers(
+                    settings.parse("sieve-max-received-headers").unwrap_or(10),
+                )
+                .with_max_header_size(settings.parse("sieve-max-header-size").unwrap_or(1024))
+                .with_max_out_messages(settings.parse("sieve-max-outgoing-messages").unwrap_or(3))
+                .with_default_vacation_expiry(
+                    settings
+                        .parse("sieve-default-vacation-expiry")
+                        .unwrap_or(30 * 86400),
+                )
+                .with_default_duplicate_expiry(
+                    settings
+                        .parse("sieve-default-duplicate-expiry")
+                        .unwrap_or(7 * 86400),
+                )
+                .without_capabilities(
+                    settings
+                        .get("sieve-disable-capabilities")
+                        .unwrap_or_default()
+                        .split_ascii_whitespace()
+                        .filter(|c| !c.is_empty()),
+                )
+                .with_valid_notification_uris(
+                    settings
+                        .get("sieve-notification-uris")
+                        .unwrap_or_else(|| "mailto".to_string())
+                        .split_ascii_whitespace()
+                        .filter_map(|c| {
+                            if !c.is_empty() {
+                                c.to_string().into()
+                            } else {
+                                None
+                            }
+                        }),
+                )
+                .with_protected_headers(
+                    settings
+                        .get("sieve-protected-headers")
+                        .unwrap_or_else(|| {
+                            "Original-Subject Original-From Received Auto-Submitted".to_string()
+                        })
+                        .split_ascii_whitespace()
+                        .filter_map(|c| {
+                            if !c.is_empty() {
+                                c.to_string().into()
+                            } else {
+                                None
+                            }
+                        }),
+                )
+                .with_vacation_default_subject(
+                    settings
+                        .get("sieve-vacation-default-subject")
+                        .unwrap_or_else(|| "Automated reply".to_string()),
+                )
+                .with_vacation_subject_prefix(
+                    settings
+                        .get("sieve-vacation-subject-prefix")
+                        .unwrap_or_else(|| "Auto: ".to_string()),
+                )
+                .with_env_variable("name", "Stalwart JMAP")
+                .with_env_variable("version", env!("CARGO_PKG_VERSION"))
+                .with_env_variable("location", "MS")
+                .with_env_variable("phase", "during"),
             db,
         };
 

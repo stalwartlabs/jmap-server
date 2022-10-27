@@ -72,6 +72,7 @@ impl Property {
             "name" => Property::Name,
             "blobId" => Property::BlobId,
             "isActive" => Property::IsActive,
+            "seenIds" => Property::SeenIds,
             _ => Property::CompiledScript,
         }
     }
@@ -84,7 +85,8 @@ impl Display for Property {
             Property::Name => write!(f, "name"),
             Property::BlobId => write!(f, "blobId"),
             Property::IsActive => write!(f, "isActive"),
-            Property::CompiledScript | Property::SeenIds => Ok(()),
+            Property::CompiledScript => write!(f, "compiledScript"),
+            Property::SeenIds => write!(f, "seenIds"),
         }
     }
 }
@@ -102,7 +104,8 @@ impl From<FieldId> for Property {
             1 => Property::Name,
             2 => Property::BlobId,
             3 => Property::IsActive,
-            _ => Property::CompiledScript,
+            4 => Property::CompiledScript,
+            _ => Property::SeenIds,
         }
     }
 }
@@ -112,7 +115,7 @@ impl TryFrom<&str> for Property {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match Property::parse(value) {
-            Property::CompiledScript => Err(()),
+            Property::CompiledScript | Property::SeenIds => Err(()),
             property => Ok(property),
         }
     }
