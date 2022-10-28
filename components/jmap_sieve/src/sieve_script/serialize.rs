@@ -177,7 +177,7 @@ impl ArgumentDeserializer for SetArguments {
                 .map_err(|err| err.to_string())?
             {
                 Some(id_ref) => ActivateScript::Activate(id_ref),
-                None => ActivateScript::None,
+                None => ActivateScript::Deactivate,
             };
         } else {
             value

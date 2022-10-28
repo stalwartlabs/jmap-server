@@ -326,13 +326,23 @@ pub struct SmtpConnection {
 }
 
 impl SmtpConnection {
-    pub async fn ingest(&mut self, from: &str, recipients: &[&str], message: &str) {
+    pub async fn ingest_with_code(
+        &mut self,
+        from: &str,
+        recipients: &[&str],
+        message: &str,
+        code: u8,
+    ) -> Vec<String> {
         self.mail_from(from, 2).await;
         for recipient in recipients {
             self.rcpt_to(recipient, 2).await;
         }
         self.data(3).await;
-        self.data_bytes(message, recipients.len(), 2).await;
+        self.data_bytes(message, recipients.len(), code).await
+    }
+
+    pub async fn ingest(&mut self, from: &str, recipients: &[&str], message: &str) {
+        self.ingest_with_code(from, recipients, message, 2).await;
     }
 
     pub async fn ingest_chunked(

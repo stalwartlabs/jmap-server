@@ -289,7 +289,7 @@ where
                 Filter::new_condition(
                     Property::IsActive.into(),
                     ComparisonOperator::Equal,
-                    Query::Keyword("1".to_string()),
+                    Query::Index("1".to_string()),
                 ),
                 Comparator::None,
             )?

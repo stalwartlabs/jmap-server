@@ -5,7 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-#sieve-rs = { path = "/home/vagrant/code/sieve-rs" }
 sieve-rs = { git = "https://github.com/stalwartlabs/sieve" }
 ahash = { version = "0.8.0", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"]}

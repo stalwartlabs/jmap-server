@@ -67,7 +67,7 @@ where
                 }
                 Filter::IsActive { value } => filter::Filter::eq(
                     Property::IsActive.into(),
-                    Query::Keyword((if value { "1" } else { "0" }).to_string()),
+                    Query::Index((if value { "1" } else { "0" }).to_string()),
                 ),
                 Filter::Unsupported { value } => {
                     return Err(MethodError::UnsupportedFilter(value));

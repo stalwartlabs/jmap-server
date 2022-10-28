@@ -16,14 +16,16 @@ Key features:
   - JMAP Core ([RFC 8620](https://datatracker.ietf.org/doc/html/rfc8620))
   - JMAP Mail ([RFC 8621](https://datatracker.ietf.org/doc/html/rfc8621))
   - JMAP over WebSocket ([RFC 8887](https://datatracker.ietf.org/doc/html/rfc8887))
+  - JMAP for Sieve Scripts ([DRAFT-SIEVE-12](https://www.ietf.org/archive/id/draft-ietf-jmap-sieve-12.html)).
 - **IMAP4** full compliance:
   - IMAP4rev2 ([RFC 9051](https://datatracker.ietf.org/doc/html/rfc9051))
   - IMAP4rev1 ([RFC 3501](https://datatracker.ietf.org/doc/html/rfc3501)) 
   - Numerous [extensions](https://stalw.art/imap/development/rfc/#imap4-extensions) supported.
-- **Robust** storage:
-  - [RocksDB](http://rocksdb.org/) backend.
+- **Flexible and robust** message storage:
+  - Sieve Script message filtering with support for [all extensions](https://www.iana.org/assignments/sieve-extensions/sieve-extensions.xhtml).
   - Full-text search support available in 17 languages.
-  - Blob storage for raw e-mail messages.
+  - Local Mail Transfer Protocol ([LMTP](https://datatracker.ietf.org/doc/html/rfc2033)) message ingestion.
+  - [RocksDB](http://rocksdb.org/) backend.
 - **Secure**:
   - OAuth 2.0 [authorization code](https://www.rfc-editor.org/rfc/rfc8628) and [device authorization](https://www.rfc-editor.org/rfc/rfc8628) flows.
   - Domain Keys Identified Mail ([DKIM](https://www.rfc-editor.org/rfc/rfc6376)) message signing.
@@ -35,7 +37,6 @@ Key features:
   - Replication and cluster consensus over the [Raft](https://raft.github.io/) protocol.
   - Read-only replicas.
   - No third-party replication or cluster coordination software required.
-- Local Mail Transfer Protocol ([LMTP](https://datatracker.ietf.org/doc/html/rfc2033)) message ingestion.
 
 ## Get Started
 

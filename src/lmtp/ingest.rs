@@ -129,18 +129,22 @@ where
         for rcpt in &rcpt_to {
             let (RcptType::Mailbox { name, status, .. } | RcptType::List { name, status, .. }) =
                 rcpt;
-            buf.extend_from_slice(match status {
-                DeliveryStatus::Success => b"250 2.1.5 <",
-                DeliveryStatus::TemporaryFailure { .. } => b"451 4.3.0 <",
-                DeliveryStatus::PermanentFailure { .. } => b"550 5.5.0 <",
+            match status {
+                DeliveryStatus::Success => buf.extend_from_slice(b"250 2.1.5 <"),
+                DeliveryStatus::TemporaryFailure { .. } => buf.extend_from_slice(b"451 4.3.0 <"),
+                DeliveryStatus::PermanentFailure { code, .. } => {
+                    buf.extend_from_slice(b"550 ");
+                    buf.extend_from_slice(code.as_bytes());
+                    buf.extend_from_slice(b" <");
+                }
                 DeliveryStatus::Duplicated => continue,
-            });
+            }
             buf.extend_from_slice(name.as_bytes());
             buf.extend_from_slice(b"> ");
             buf.extend_from_slice(match status {
                 DeliveryStatus::Success => b"delivered",
                 DeliveryStatus::TemporaryFailure { reason }
-                | DeliveryStatus::PermanentFailure { reason } => reason.as_bytes(),
+                | DeliveryStatus::PermanentFailure { reason, .. } => reason.as_bytes(),
                 DeliveryStatus::Duplicated => continue,
             });
             buf.extend_from_slice(b"\r\n");
@@ -279,7 +283,7 @@ pub trait JMAPMailIngest {
         blob_id: &BlobId,
         envelope_from: &str,
         envelope_to: &str,
-    ) -> Result<(), Option<String>>;
+    ) -> DeliveryStatus;
 
     #[allow(clippy::result_unit_err)]
     fn mail_deliver_mailbox(
@@ -338,26 +342,14 @@ where
             match &mut recipient {
                 RcptType::Mailbox { id, name, status } => {
                     if !matches!(status, DeliveryStatus::Duplicated) {
-                        match self.mail_deliver_rcpt(
+                        *status = self.mail_deliver_rcpt(
                             &mut result,
                             *id,
                             &raw_message,
                             &blob_id,
                             &mail_from,
                             &*name,
-                        ) {
-                            Ok(_) => {
-                                *status = DeliveryStatus::Success;
-                            }
-                            Err(Some(err)) => {
-                                *status = DeliveryStatus::PermanentFailure { reason: err.into() };
-                            }
-                            Err(None) => {
-                                *status = DeliveryStatus::TemporaryFailure {
-                                    reason: "Temporary sever failure".into(),
-                                };
-                            }
-                        }
+                        );
                         if let Some(prev_status) = &mut prev_status {
                             prev_status.insert(*id, status.clone());
                         }
@@ -377,28 +369,24 @@ where
                         let mut temp_failures = 0;
 
                         for &account_id in ids.iter() {
-                            let status = match self.mail_deliver_rcpt(
+                            let status = self.mail_deliver_rcpt(
                                 &mut result,
                                 account_id,
                                 &raw_message,
                                 &blob_id,
                                 &mail_from,
                                 &*name,
-                            ) {
-                                Ok(_) => {
+                            );
+
+                            match &status {
+                                DeliveryStatus::Success => {
                                     success += 1;
-                                    DeliveryStatus::Success
                                 }
-                                Err(Some(err)) => {
-                                    DeliveryStatus::PermanentFailure { reason: err.into() }
-                                }
-                                Err(None) => {
+                                DeliveryStatus::TemporaryFailure { .. } => {
                                     temp_failures += 1;
-                                    DeliveryStatus::TemporaryFailure {
-                                        reason: "Temporary sever failure".into(),
-                                    }
                                 }
-                            };
+                                _ => (),
+                            }
 
                             if let Some(prev_status) = &mut prev_status {
                                 prev_status.insert(account_id, status);
@@ -413,6 +401,7 @@ where
                             }
                         } else {
                             DeliveryStatus::PermanentFailure {
+                                code: "5.5.0".into(),
                                 reason: "permanent failure".into(),
                             }
                         };
@@ -436,15 +425,13 @@ where
         blob_id: &BlobId,
         envelope_from: &str,
         envelope_to: &str,
-    ) -> Result<(), Option<String>> {
+    ) -> DeliveryStatus {
         // Verify that this account has an Inbox mailbox
         let mailbox_ids = match self.get_document_ids(account_id, Collection::Mailbox) {
             Ok(Some(mailbox_ids)) if mailbox_ids.contains(INBOX_ID) => mailbox_ids,
             _ => {
                 error!("Account {} does not have an Inbox configured.", account_id);
-                return Err("Account does not have an inbox configured."
-                    .to_string()
-                    .into());
+                return DeliveryStatus::perm_failure("Account does not have an inbox configured.");
             }
         };
 
@@ -452,12 +439,12 @@ where
         let message = if let Some(message) = Message::parse(raw_message) {
             message
         } else {
-            return Err("Failed to parse message.".to_string().into());
+            return DeliveryStatus::perm_failure("Failed to parse message.");
         };
 
         let mut active_script = match self.sieve_script_get_active(account_id) {
             Ok(None) => {
-                return self
+                return if self
                     .mail_deliver_mailbox(
                         result,
                         account_id,
@@ -466,12 +453,17 @@ where
                         &[INBOX_ID],
                         Vec::new(),
                     )
-                    .map_err(|_| None);
+                    .is_ok()
+                {
+                    DeliveryStatus::Success
+                } else {
+                    DeliveryStatus::internal_error()
+                };
             }
             Ok(Some(active_script)) => active_script,
             Err(err) => {
                 error!("Failed to get SieveScript for {}: {}", account_id, err);
-                return self
+                return if self
                     .mail_deliver_mailbox(
                         result,
                         account_id,
@@ -480,7 +472,12 @@ where
                         &[INBOX_ID],
                         Vec::new(),
                     )
-                    .map_err(|_| None);
+                    .is_ok()
+                {
+                    DeliveryStatus::Success
+                } else {
+                    DeliveryStatus::internal_error()
+                };
             }
         };
 
@@ -766,11 +763,24 @@ where
                     #[allow(unreachable_patterns)]
                     _ => unreachable!(),
                 },
+
+                #[cfg(test)]
+                Err(store::sieve::runtime::RuntimeError::ScriptErrorMessage(err)) => {
+                    panic!("Sieve test failed: {}", err);
+                }
+
                 Err(err) => {
                     debug!("Sieve script runtime error: {}", err);
                     input = true.into();
                 }
             }
+        }
+
+        for (pos, message) in messages.iter().enumerate() {
+            println!(
+                "----- message {} {:?} {:?}",
+                pos, message.file_into, message.flags
+            );
         }
 
         // Fail-safe, no discard and no keep seen, assume that something went wrong and file anyway.
@@ -875,15 +885,16 @@ where
             }
         }
 
-        if reject_reason.is_none() {
-            if has_delivered || !has_temp_errors {
-                Ok(())
-            } else {
-                // There were problems during delivery
-                Err(None)
+        if let Some(reject_reason) = reject_reason {
+            DeliveryStatus::PermanentFailure {
+                code: "5.7.1".into(),
+                reason: reject_reason.into(),
             }
+        } else if has_delivered || !has_temp_errors {
+            DeliveryStatus::Success
         } else {
-            Err(reject_reason)
+            // There were problems during delivery
+            DeliveryStatus::internal_error()
         }
     }
 
@@ -980,7 +991,27 @@ pub struct IngestResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DeliveryStatus {
     Success,
-    TemporaryFailure { reason: Cow<'static, str> },
-    PermanentFailure { reason: Cow<'static, str> },
+    TemporaryFailure {
+        reason: Cow<'static, str>,
+    },
+    PermanentFailure {
+        code: Cow<'static, str>,
+        reason: Cow<'static, str>,
+    },
     Duplicated,
+}
+
+impl DeliveryStatus {
+    pub fn internal_error() -> Self {
+        DeliveryStatus::TemporaryFailure {
+            reason: "Temporary sever failure".into(),
+        }
+    }
+
+    pub fn perm_failure(reason: impl Into<Cow<'static, str>>) -> Self {
+        DeliveryStatus::PermanentFailure {
+            code: "5.5.0".into(),
+            reason: reason.into(),
+        }
+    }
 }

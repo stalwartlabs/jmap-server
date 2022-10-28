@@ -425,10 +425,6 @@ where
             )?
             .into_bitmap();
 
-        if (document_ids.len() as usize) < path.len() {
-            return Ok(None);
-        }
-
         let mut found_names = Vec::new();
         for document_id in document_ids {
             if let Some(mut orm) = self.get_orm::<Mailbox>(account_id, document_id)? {

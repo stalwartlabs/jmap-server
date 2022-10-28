@@ -610,7 +610,7 @@ pub async fn assert_message_delivery(
             assert_eq!(message.mail_from, expected_message.mail_from);
             assert_eq!(message.rcpt_to, expected_message.rcpt_to);
 
-            //println!("Got message [{}]", message.message);
+            println!("Got message [{}]", message.message);
 
             if let Some(needle) = expected_message.message.strip_prefix('@') {
                 assert!(

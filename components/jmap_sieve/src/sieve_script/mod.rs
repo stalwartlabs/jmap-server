@@ -59,7 +59,7 @@ impl Object for SieveScript {
 
     fn indexed() -> &'static [(Self::Property, u64)] {
         &[
-            (Property::IsActive, <u64 as Options>::F_KEYWORD),
+            (Property::IsActive, <u64 as Options>::F_INDEX),
             (
                 Property::Name,
                 <u64 as Options>::F_TOKENIZE | <u64 as Options>::F_INDEX,
