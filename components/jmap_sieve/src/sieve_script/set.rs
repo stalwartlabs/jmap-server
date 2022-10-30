@@ -181,6 +181,7 @@ where
             && helper.response.not_updated.is_empty()
             && helper.response.not_destroyed.is_empty()
         {
+            
             match &helper.request.arguments.on_success_activate_script {
                 ActivateScript::Activate(maybe_reference) => {
                     let activate_id = match maybe_reference {
@@ -190,42 +191,46 @@ where
                         }
                     };
 
-                    if let Some(activate_id) = activate_id {
-                        helper.commit_changes()?;
+                    match activate_id {
+                        Some(activate_id) if helper.document_ids.contains(activate_id.get_document_id()) => {
+                            helper.commit_changes()?;
 
-                        let (did_activate, deactivated_ids) = self.sieve_script_activate_id(
-                            &mut helper.changes,
-                            activate_id.get_document_id().into(),
-                        )?;
-
-                        if did_activate {
-                            if let ActivateScript::Activate(MaybeIdReference::Reference(
-                                create_id,
-                            )) = std::mem::take(
-                                &mut helper.request.arguments.on_success_activate_script,
-                            ) {
-                                helper.set_created_property(
-                                    &create_id,
-                                    Property::IsActive,
-                                    Value::Bool { value: true },
-                                );
-                            } else {
+                            let (did_activate, deactivated_ids) = self.sieve_script_activate_id(
+                                &mut helper.changes,
+                                activate_id.get_document_id().into(),
+                            )?;
+    
+                            if did_activate {
+                                if let ActivateScript::Activate(MaybeIdReference::Reference(
+                                    create_id,
+                                )) = std::mem::take(
+                                    &mut helper.request.arguments.on_success_activate_script,
+                                ) {
+                                    helper.set_created_property(
+                                        &create_id,
+                                        Property::IsActive,
+                                        Value::Bool { value: true },
+                                    );
+                                } else {
+                                    helper.set_updated_property(
+                                        activate_id,
+                                        Property::IsActive,
+                                        Value::Bool { value: true },
+                                    );
+                                }
+                            }
+    
+                            for id in deactivated_ids {
                                 helper.set_updated_property(
-                                    activate_id,
+                                    id.into(),
                                     Property::IsActive,
-                                    Value::Bool { value: true },
+                                    Value::Bool { value: false },
                                 );
                             }
                         }
-
-                        for id in deactivated_ids {
-                            helper.set_updated_property(
-                                id.into(),
-                                Property::IsActive,
-                                Value::Bool { value: false },
-                            );
-                        }
+                        _=> (),
                     }
+
                 }
                 ActivateScript::Deactivate => {
                     helper.commit_changes()?;
@@ -387,7 +392,7 @@ where
                         .with_property(property)
                         .with_description("Script name is too long."));
                     } else if value.eq_ignore_ascii_case("vacation") {
-                        return Err(SetError::invalid_properties()
+                        return Err(SetError::forbidden()
                         .with_property(property)
                         .with_description("The 'vacation' name is reserved, please use a different name."));
                     } else if fields
@@ -403,7 +408,7 @@ where
                                 Filter::new_condition(
                                     Property::Name.into(),
                                     ComparisonOperator::Equal,
-                                    Query::Keyword(value.clone()),
+                                    Query::Index(value.clone()),
                                 ),
                                 Comparator::None,
                             )?
@@ -415,7 +420,7 @@ where
                                     "A sieve script with name '{}' already exists.",
                                     value
                                 )));
-                        }
+                        } 
                     }
 
                     Value::Text { value }

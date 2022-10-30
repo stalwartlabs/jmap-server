@@ -169,7 +169,7 @@ impl<U> SetError<U> {
     }
 
     pub fn already_exists() -> Self {
-        Self::new(SetErrorType::Forbidden)
+        Self::new(SetErrorType::AlreadyExists)
     }
 }
 
