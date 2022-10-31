@@ -181,7 +181,6 @@ where
             && helper.response.not_updated.is_empty()
             && helper.response.not_destroyed.is_empty()
         {
-            
             match &helper.request.arguments.on_success_activate_script {
                 ActivateScript::Activate(maybe_reference) => {
                     let activate_id = match maybe_reference {
@@ -192,14 +191,16 @@ where
                     };
 
                     match activate_id {
-                        Some(activate_id) if helper.document_ids.contains(activate_id.get_document_id()) => {
+                        Some(activate_id)
+                            if helper.document_ids.contains(activate_id.get_document_id()) =>
+                        {
                             helper.commit_changes()?;
 
                             let (did_activate, deactivated_ids) = self.sieve_script_activate_id(
                                 &mut helper.changes,
                                 activate_id.get_document_id().into(),
                             )?;
-    
+
                             if did_activate {
                                 if let ActivateScript::Activate(MaybeIdReference::Reference(
                                     create_id,
@@ -219,7 +220,7 @@ where
                                     );
                                 }
                             }
-    
+
                             for id in deactivated_ids {
                                 helper.set_updated_property(
                                     id.into(),
@@ -228,9 +229,8 @@ where
                                 );
                             }
                         }
-                        _=> (),
+                        _ => (),
                     }
-
                 }
                 ActivateScript::Deactivate => {
                     helper.commit_changes()?;
@@ -420,7 +420,7 @@ where
                                     "A sieve script with name '{}' already exists.",
                                     value
                                 )));
-                        } 
+                        }
                     }
 
                     Value::Text { value }
