@@ -22,7 +22,7 @@ Key features:
   - IMAP4rev1 ([RFC 3501](https://datatracker.ietf.org/doc/html/rfc3501)) 
   - Numerous [extensions](https://stalw.art/imap/development/rfc/#imap4-extensions) supported.
 - **Flexible and robust** message storage:
-  - Sieve Script message filtering with support for [all extensions](https://www.iana.org/assignments/sieve-extensions/sieve-extensions.xhtml).
+  - Sieve Script message filtering with support for [all extensions](https://stalw.art/jmap/configure/sieve/#conformed-rfcs).
   - Full-text search support available in 17 languages.
   - Local Mail Transfer Protocol ([LMTP](https://datatracker.ietf.org/doc/html/rfc2033)) message ingestion.
   - [RocksDB](http://rocksdb.org/) backend.

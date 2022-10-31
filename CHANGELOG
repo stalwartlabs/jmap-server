@@ -1,0 +1,8 @@
+stalwart-jmap 0.2.0
+================================
+- JMAP for Sieve support.
+- Faster parsing of e-mail messages.
+
+stalwart-jmap 0.1.0
+================================
+- Initial release.
