@@ -1843,7 +1843,7 @@ version = "0.1.0"
 dependencies = [
  "jmap",
  "jmap_sieve",
- "mail-builder 0.2.3 (git+https://github.com/stalwartlabs/mail-builder)",
+ "mail-builder 0.2.4",
  "mail-parser",
  "mail-send",
  "serde",
@@ -2075,10 +2075,10 @@ dependencies = [
 
 [[package]]
 name = "mail-builder"
-version = "0.2.3"
-source = "git+https://github.com/stalwartlabs/mail-builder#fd401b75fdafc3c98e096d992e6d3dc352838983"
+version = "0.2.4"
+source = "git+https://github.com/stalwartlabs/mail-builder#c226ae550f15fbc86e0b7b4f2d8b93df2e2390ef"
 dependencies = [
- "gethostname 0.3.0",
+ "gethostname 0.4.0",
 ]
 
 [[package]]
@@ -2097,7 +2097,7 @@ source = "git+https://github.com/stalwartlabs/mail-send#1d157d43a2a4c7b34258f460
 dependencies = [
  "base64",
  "gethostname 0.2.3",
- "mail-builder 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mail-builder 0.2.3",
  "md5",
  "rand",
  "rsa",
@@ -3167,7 +3167,7 @@ source = "git+https://github.com/stalwartlabs/sieve#cc7a44cc7a9db7f316e4a49a4b4c
 dependencies = [
  "ahash 0.8.0",
  "bincode",
- "mail-builder 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mail-builder 0.2.3",
  "mail-parser",
  "phf",
  "regex",
