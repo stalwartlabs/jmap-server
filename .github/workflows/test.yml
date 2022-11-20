@@ -29,6 +29,11 @@ jobs:
           command: fmt
           args: --all -- --check
 
+      - name: Ensure cargo vendor works
+        run: |
+          cargo vendor
+          rm -R vendor
+
   test:
     name: Test
     needs: [style]
