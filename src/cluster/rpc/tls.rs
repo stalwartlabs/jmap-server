@@ -73,7 +73,7 @@ pub fn load_tls_server_config(cert_path: &str, key_path: &str) -> ServerConfig {
         .map(Certificate)
         .collect();
     let mut keys: Vec<PrivateKey> = pkcs8_private_keys(key_file)
-        .failed_to("parse jey file")
+        .failed_to("parse key file")
         .into_iter()
         .map(PrivateKey)
         .collect();

@@ -144,7 +144,7 @@ impl JMAPDate {
         let (h, mn, s) = (seconds / 3600, (seconds / 60) % 60, seconds % 60);
 
         JMAPDate {
-            year: (y + (if m <= 2 { 1 } else { 0 })) as u16,
+            year: (y + i64::from(m <= 2)) as u16,
             month: m as u8,
             day: d as u8,
             hour: h as u8,
@@ -172,7 +172,7 @@ impl JMAPDate {
         let month = self.month as u32;
         let year_base = 4800; /* Before min year, multiple of 400. */
         let m_adj = month.wrapping_sub(3); /* March-based month. */
-        let carry = if m_adj > month { 1 } else { 0 };
+        let carry = i64::from(m_adj > month);
         let adjust = if carry > 0 { 12 } else { 0 };
         let y_adj = self.year as i64 + year_base - carry;
         let month_days = ((m_adj.wrapping_add(adjust)) * 62719 + 769) / 2048;

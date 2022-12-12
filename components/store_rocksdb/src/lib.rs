@@ -79,7 +79,7 @@ impl<'x> Store<'x> for RocksDB {
     {
         if let Some(bytes) = self
             .db
-            .get_pinned_cf(&self.cf_handle(cf)?, &key)
+            .get_pinned_cf(&self.cf_handle(cf)?, key)
             .map_err(|err| StoreError::InternalError(format!("get_cf failed: {}", err)))?
         {
             Ok(Some(U::deserialize(&bytes).ok_or_else(|| {
@@ -157,7 +157,7 @@ impl<'x> Store<'x> for RocksDB {
     fn exists(&self, cf: store::ColumnFamily, key: &[u8]) -> Result<bool> {
         Ok(self
             .db
-            .get_pinned_cf(&self.cf_handle(cf)?, &key)
+            .get_pinned_cf(&self.cf_handle(cf)?, key)
             .map_err(|err| StoreError::InternalError(format!("get_cf failed: {}", err)))?
             .is_some())
     }
