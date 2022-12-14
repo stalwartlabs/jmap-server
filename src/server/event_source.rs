@@ -82,7 +82,7 @@ where
     }
     let mut ping = if params.ping > 0 {
         #[cfg(not(test))]
-        let interval = std::cmp::max(params.ping, 30);
+        let interval = std::cmp::max(params.ping, 30) * 1000;
         #[cfg(test)]
         let interval = params.ping * 1000;
 
