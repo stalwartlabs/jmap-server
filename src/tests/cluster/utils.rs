@@ -656,7 +656,7 @@ pub async fn assert_mirrored_stores<T>(
                         );
                         let keys_follower = follower.store.compare_with(&leader.store);
                         assert!(
-                            keys_leader.iter().map(|(_, v)| *v).sum::<usize>() > 0,
+                            keys_leader.values().copied().sum::<usize>() > 0,
                             "{:?}",
                             keys_leader
                         );

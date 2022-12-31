@@ -322,7 +322,7 @@ impl StoreSerialize for TermIndexBuilder {
             for term in &term_index.terms {
                 ids.push(term.id);
                 ids.push(term.id_stemmed);
-                offsets.push(term.offset as u32);
+                offsets.push(term.offset);
                 lengths.push(term.len);
             }
 
@@ -340,7 +340,7 @@ impl StoreSerialize for TermIndexBuilder {
                     };
 
                     if block_len > 0 {
-                        let chunk = &chunk[pos..pos + block_len as usize];
+                        let chunk = &chunk[pos..pos + block_len];
                         bitpacker.block_len(block_len);
                         if is_sorted {
                             let num_bits: u8 = bitpacker.num_bits_sorted(initial_value, chunk);

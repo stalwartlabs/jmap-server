@@ -111,7 +111,7 @@ where
             let account_id = store
                 .assign_document_id(SUPERUSER_ID, Collection::Principal)
                 .failed_to("generate account id.");
-            if account_id != SUPERUSER_ID as u32 {
+            if account_id != SUPERUSER_ID {
                 super::failed_to(&format!(
                     "generate account id, expected id {} but got {}.",
                     SUPERUSER_ID, account_id
