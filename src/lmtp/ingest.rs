@@ -776,12 +776,12 @@ where
             }
         }
 
-        for (pos, message) in messages.iter().enumerate() {
+        /*for (pos, message) in messages.iter().enumerate() {
             println!(
                 "----- message {} {:?} {:?}",
                 pos, message.file_into, message.flags
             );
-        }
+        }*/
 
         // Fail-safe, no discard and no keep seen, assume that something went wrong and file anyway.
         if !do_deliver && !do_discard {

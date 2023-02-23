@@ -16,7 +16,7 @@ readonly CONFIG_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/
 readonly SYSTEMD_SVC_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/systemd/stalwart-jmap.service"
 readonly LAUNCHCTL_SVC_URL="https://raw.githubusercontent.com/stalwartlabs/jmap-server/main/resources/systemd/stalwart.jmap.plist"
 
-readonly CLI_URL="https://github.com/stalwartlabs/jmap-server-cli/releases/latest/download"
+readonly CLI_URL="https://github.com/stalwartlabs/cli/releases/latest/download"
 
 main() {
     downloader --check
