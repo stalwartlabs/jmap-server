@@ -102,7 +102,6 @@ message here!".into(),
 References: <t2-msg1>
 From: test2@example.com
 To: test1@example.com
-In-Reply-To: <t1-msg1>
 Subject: my thread
 
 reply here!".into(),
@@ -116,7 +115,6 @@ reply here!".into(),
 References: <t2-msg1>
 From: test1@example.com
 To: test2@example.com
-In-Reply-To: <t1-msg1>
 Subject: my thread
 
 reply here!".into(),
