@@ -21,8 +21,8 @@ WORKDIR /app
 FROM chef AS planner
 COPY Cargo.toml .
 COPY Cargo.lock .
-COPY crates/ crates/
-COPY resources/ resources/
+COPY main/ main/
+COPY src/ src/
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder 
@@ -30,15 +30,15 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml .
 COPY Cargo.lock .
-COPY crates/ crates/
-COPY resources/ resources/
-RUN cargo build --manifest-path=crates/main/Cargo.toml --release
-RUN cargo build --manifest-path=crates/install/Cargo.toml --release
+COPY main/ main/
+COPY src/ src/
+RUN cargo build --release
+RUN cargo build --manifest-path=main/crates/install/Cargo.toml --release
 
 FROM debian:buster-slim AS runtime
 
 COPY --from=builder /app/target/release/stalwart-jmap /usr/local/bin/stalwart-jmap
-COPY --from=builder /app/target/release/stalwart-install /usr/local/bin/stalwart-install
+COPY --from=builder /app/main/target/release/stalwart-install /usr/local/bin/stalwart-install
 RUN echo "#\!/bin/sh\n\n/usr/local/bin/stalwart-install -c jmap -p /opt/stalwart-jmap -d" > /usr/local/bin/configure.sh && \
     chmod +x /usr/local/bin/configure.sh
 RUN useradd stalwart-jmap -s /sbin/nologin -M

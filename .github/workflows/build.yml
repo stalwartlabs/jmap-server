@@ -86,92 +86,18 @@ jobs:
       - name: Building binary (Unix version)
         if: ${{ !contains(matrix.host_os, 'windows') }}
         run: |
-          cargo build --manifest-path=crates/main/Cargo.toml --target=${{ matrix.target }} --no-default-features --features foundationdb --release
+          cargo build --target=${{ matrix.target }} --no-default-features --features foundationdb --release
           cd target/${{ matrix.target }}/release && tar czvf ../../../stalwart-jmap-foundationdb-${{ matrix.target }}.tar.gz stalwart-jmap && cd -
-          cargo build --manifest-path=crates/main/Cargo.toml --target=${{ matrix.target }} --release
-          cargo build --manifest-path=crates/cli/Cargo.toml --target=${{ matrix.target }} --release
-          cargo build --manifest-path=crates/install/Cargo.toml --target=${{ matrix.target }} --release
-          cd target/${{ matrix.target }}/release
-          tar czvf ../../../stalwart-jmap-sqlite-${{ matrix.target }}.tar.gz stalwart-jmap
-          tar czvf ../../../stalwart-cli-${{ matrix.target }}.tar.gz stalwart-cli
-          tar czvf ../../../stalwart-install-${{ matrix.target }}.tar.gz stalwart-install
-          cd -
+          cargo build --target=${{ matrix.target }} --release
+          cd target/${{ matrix.target }}/release && tar czvf ../../../stalwart-jmap-sqlite-${{ matrix.target }}.tar.gz stalwart-jmap && cd -
 
       - name: Building binary (Windows version)
         if: ${{ contains(matrix.host_os, 'windows') }}
         run: |
-          cargo build --manifest-path=crates/main/Cargo.toml --target=${{ matrix.target }} --release
-          cargo build --manifest-path=crates/cli/Cargo.toml --target=${{ matrix.target }} --release
-          cargo build --manifest-path=crates/install/Cargo.toml --target=${{ matrix.target }} --release
+          cargo build --target=${{ matrix.target }} --release
           cd target/${{ matrix.target }}/release
           7z a ../../../stalwart-jmap-sqlite-${{ matrix.target }}.zip stalwart-jmap.exe
-          7z a ../../../stalwart-cli-${{ matrix.target }}.zip stalwart-cli.exe
-          7z a ../../../stalwart-install-${{ matrix.target }}.zip stalwart-install.exe
           cd -
-
-      - name: Publish Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-            files: 'stalwart-*'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  cross_build_tools:
-    runs-on: ubuntu-latest
-    name: Building tools for ${{ matrix.target }} on ${{ matrix.distro }}
-    if: '!cancelled()'
-
-    strategy:
-      matrix:
-        include:
-          - arch: aarch64
-            distro: ubuntu20.04
-            target: aarch64-unknown-linux-gnu
-    steps:
-      - uses: actions/checkout@v3
-      - uses: uraimo/run-on-arch-action@v2
-        name: Build artifact
-        id: build
-        with:
-          arch: ${{ matrix.arch }}
-          distro: ${{ matrix.distro }}
-
-          # Not required, but speeds up builds
-          githubToken: ${{ github.token }}
-
-          # Create an artifacts directory
-          setup: |
-            mkdir -p "${PWD}/artifacts"
-
-          # Mount the artifacts directory as /artifacts in the container
-          dockerRunArgs: |
-            --volume "${PWD}/artifacts:/artifacts"
-
-          # Pass some environment variables to the container
-          env: | 
-            target: ${{ matrix.target }}
-
-          # The shell to run commands with in the container
-          shell: /bin/sh
-
-          install: |
-            apt-get update -yq
-            apt-get install -yq build-essential cmake wget curl
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-
-          run: |
-            export PATH="$HOME/.cargo/bin:$PATH"
-            cargo build --manifest-path=crates/cli/Cargo.toml --target=${target} --release
-            cargo build --manifest-path=crates/install/Cargo.toml --target=${target} --release
-            cd target/${target}/release
-            tar czvf /artifacts/stalwart-cli-${target}.tar.gz stalwart-cli
-            tar czvf /artifacts/stalwart-install-${target}.tar.gz stalwart-install
-            cd -
-
-      - name: Move packages
-        run: |
-          mv ${PWD}/artifacts/* .
 
       - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -226,7 +152,7 @@ jobs:
 
           run: |
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo build --manifest-path=crates/main/Cargo.toml --target=${target} --release
+            cargo build --target=${target} --release
             cd target/${target}/release
             tar czvf /artifacts/stalwart-jmap-sqlite-${target}.tar.gz stalwart-jmap
             cd -
