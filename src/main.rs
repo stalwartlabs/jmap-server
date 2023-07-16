@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ * Copyright (c) 2023 Stalwart Labs Ltd.
  *
  * This file is part of the Stalwart JMAP Server.
  *
@@ -21,120 +21,89 @@
  * for more details.
 */
 
-#![warn(clippy::disallowed_types)]
+use std::time::Duration;
 
-/*
-Disabled until cross-compile is fixed.
+use directory::config::ConfigDirectory;
+use jmap::{api::JmapSessionManager, services::IPC_CHANNEL_BUFFER, JMAP};
+use smtp::core::{SmtpSessionManager, SMTP};
+use tokio::sync::mpsc;
+use utils::{
+    config::{Config, ServerProtocol},
+    enable_tracing, wait_for_shutdown, UnwrapFailure,
+};
 
 #[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
+use jemallocator::Jemalloc;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;*/
+static GLOBAL: Jemalloc = Jemalloc;
 
-use stalwart_jmap::{
-    cluster::init::{init_cluster, start_cluster},
-    server::{
-        http::{build_jmap_server, init_jmap_server},
-        UnwrapFailure,
-    },
-};
-
-use std::time::Duration;
-
-use store::{
-    config::env_settings::EnvSettings,
-    tracing::{self, debug, info, warn, Level},
-    Store,
-};
-use store_rocksdb::RocksDB;
-
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
-    // Read configuration parameters
-    let mut settings = EnvSettings::new();
+    let config = Config::init();
+    let servers = config.parse_servers().failed("Invalid configuration");
+    let directory = config.parse_directory().failed("Invalid configuration");
 
-    // Enable logging
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(settings.parse("log-level").unwrap_or(Level::INFO))
-            .finish(),
+    // Bind ports and drop privileges
+    servers.bind(&config);
+
+    // Enable tracing
+    let _tracer = enable_tracing(
+        &config,
+        &format!(
+            "Starting Stalwart JMAP Server v{}...",
+            env!("CARGO_PKG_VERSION"),
+        ),
     )
-    .failed_to("set default subscriber");
+    .failed("Failed to enable tracing");
 
-    // Set base URL if missing
-    if !settings.contains_key("jmap-url") {
-        let jmap_url = if settings.contains_key("jmap-cert-path") {
-            "https://localhost:8080"
-        } else {
-            "http://localhost:8080"
-        }
-        .to_string();
-        warn!(
-            "Warning: Hostname parameter 'jmap-url' was not specified, using '{}'.",
-            jmap_url
-        );
-        settings.set_value("jmap-url".to_string(), jmap_url);
-    }
-
-    // Init JMAP server
-    let core = if let Some((cluster_ipc, cluster_init)) = init_cluster(&settings) {
-        let core = init_jmap_server::<RocksDB>(&settings, cluster_ipc.into());
-        start_cluster(cluster_init, core.clone(), &settings).await;
-        core
-    } else {
-        init_jmap_server::<RocksDB>(&settings, None)
-    };
-    let server = build_jmap_server(core.clone(), settings)
+    // Init servers
+    let (delivery_tx, delivery_rx) = mpsc::channel(IPC_CHANNEL_BUFFER);
+    let smtp = SMTP::init(&config, &servers, &directory, delivery_tx)
         .await
-        .failed_to("start JMAP server");
-    let server_handle = server.handle();
+        .failed("Invalid configuration file");
+    let jmap = JMAP::init(&config, &directory, delivery_rx, smtp.clone())
+        .await
+        .failed("Invalid configuration file");
 
-    // Start web server
-    actix_web::rt::spawn(async move { server.await });
+    // Spawn servers
+    let shutdown_tx = servers.spawn(|server, shutdown_rx| {
+        match &server.protocol {
+            ServerProtocol::Smtp | ServerProtocol::Lmtp => {
+                server.spawn(SmtpSessionManager::new(smtp.clone()), shutdown_rx)
+            }
+            ServerProtocol::Http => {
+                tracing::debug!("Ignoring HTTP server listener, using JMAP port instead.");
+            }
+            ServerProtocol::Jmap => {
+                server.spawn(JmapSessionManager::new(jmap.clone()), shutdown_rx)
+            }
+            ServerProtocol::Imap => {
+                tracing::debug!(
+                    "Ignoring IMAP server listener, not supported by JMAP-only release."
+                );
+            }
+            ServerProtocol::ManageSieve => {
+                tracing::debug!(
+                    "Ignoring ManageSieve server listener, not supported by JMAP-only release."
+                );
+            }
+        };
+    });
 
     // Wait for shutdown signal
-    #[cfg(not(target_env = "msvc"))]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-
-        let mut h_term = signal(SignalKind::terminate()).failed_to("start signal handler");
-        let mut h_int = signal(SignalKind::interrupt()).failed_to("start signal handler");
-
-        tokio::select! {
-            _ = h_term.recv() => debug!("Received SIGTERM."),
-            _ = h_int.recv() => debug!("Received SIGINT."),
-        };
-    }
-
-    #[cfg(target_env = "msvc")]
-    {
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => {}
-            Err(err) => {
-                eprintln!("Unable to listen for shutdown signal: {}", err);
-            }
-        }
-    }
-
-    // Shutdown the system
-    info!(
-        "Shutting down Stalwart JMAP server v{}...",
+    wait_for_shutdown(&format!(
+        "Shutting down Stalwart JMAP Server v{}...",
         env!("CARGO_PKG_VERSION")
-    );
-
-    // Stop web server
-    server_handle.stop(true).await;
+    ))
+    .await;
 
     // Stop services
-    core.shutdown().await;
+    let _ = shutdown_tx.send(true);
 
     // Wait for services to finish
     tokio::time::sleep(Duration::from_secs(1)).await;
-
-    // Flush DB
-    core.store.db.close().failed_to("close database");
 
     Ok(())
 }

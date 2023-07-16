@@ -1,8 +1,20 @@
-stalwart-jmap 0.2.0
+stalwart-jmap 0.3.0
+================================
+- Added support for **LDAP** and **SQL** authentication.
+- Added support for **subaddressing** and **catch-all** addresses.
+- Added support for **S3-compatible** storage.
+- Added support for **disk quotas**.
+- Removed clustering module and replaced it with a **FoundationDB** backend option.
+- Integrated Stalwart SMTP into Stalwart JMAP.
+- Rewritten JMAP protocol parser.
+- Rewritten store backend.
+- Replaced `actix` with `hyper`.
+
+stalwart-jmap v0.2.0
 ================================
 - JMAP for Sieve support.
 - Faster parsing of e-mail messages.
 
-stalwart-jmap 0.1.0
+stalwart-jmap v0.1.0
 ================================
 - Initial release.

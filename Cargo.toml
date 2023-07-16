@@ -7,74 +7,45 @@ homepage = "https://stalw.art/jmap"
 keywords = ["jmap", "email", "mail", "server"]
 categories = ["email"]
 license = "AGPL-3.0-only"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 resolver = "2"
-
-[dependencies]
-store = { path = "components/store" }
-store_rocksdb = { path = "components/store_rocksdb" }
-jmap = { path = "components/jmap" }
-jmap_mail = { path = "components/jmap_mail" }
-jmap_sharing = { path = "components/jmap_sharing" }
-jmap_sieve = { path = "components/jmap_sieve" }
-tracing-subscriber = "0.3.15"
-actix = "0.13"
-actix-web = { version = "4", features = ["rustls"] }
-actix-web-actors = "4"
-actix-cors = "0.6.1"
-rustls = "0.20"
-rustls-pemfile = "1.0"
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-gethostname = "0.4.0"
-tokio = { version = "1.16.1", features = ["full"] }
-tokio-rustls = { version = "0.23.4"}
-tokio-util = "0.7.0"
-webpki-roots = { version = "0.22.3"}
-futures-util = "0.3.21"
-async-stream = "0.3.3"
-num_cpus = "1.13.1"
-futures = "0.3"
-rayon = "1.5.1"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"]}
-p256 = { version = "0.11.1", features = ["ecdh"] }
-hkdf = "0.12.3"
-aes-gcm-siv = "0.11.1"
-aes-gcm = "0.10.1"
-base64 = "0.13"
-
-#[target.'cfg(not(target_env = "msvc"))'.dependencies]
-#tikv-jemallocator = "0.5"
-
-[dev-dependencies]
-jmap_mail = { path = "components/jmap_mail", features = ["debug"] }
-jmap_sharing = { path = "components/jmap_sharing", features = ["debug"] }
-jmap-client = { git = "https://github.com/stalwartlabs/jmap-client", features = ["websockets", "debug", "follow-trusted"] } 
-csv = "1.1"
-flate2 = { version = "1.0.17", features = ["zlib"], default-features = false }
-serde = { version = "1.0", features = ["derive"]}
-serde_json = "1.0"
-serde_yaml = "0.9.9"
-ece = "2.2"
-cargo-deb = "1.28.2"
 
 [[bin]]
 name = "stalwart-jmap"
 path = "src/main.rs"
 
-[[bin]]
-name = "export"
-path = "src/utils/export.rs"
+[dependencies]
+store = { path = "main/crates/store" }
+jmap = { path = "main/crates/jmap" }
+jmap_proto = { path = "main/crates/jmap-proto" }
+smtp = { path = "main/crates/smtp", features = ["local_delivery"] }
+directory = { path = "main/crates/directory" }
+utils = { path = "main/crates/utils" }
+tokio = { version = "1.23", features = ["full"] }
+tracing = "0.1"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+jemallocator = "0.5.0"
+
+[features]
+default = ["sqlite"]
+#default = ["foundationdb"]
+sqlite = ["store/sqlite"]
+foundationdb = ["store/foundation"]
+test_mode = []
 
 [workspace]
 members = [
-    "components/store",
-    "components/store_rocksdb",
-    "components/jmap",
-    "components/jmap_mail",
-    "components/jmap_sharing",
-    "components/jmap_sieve",
+    "main/crates/jmap",
+    "main/crates/jmap-proto",
+    "main/crates/smtp",
+    "main/crates/store",
+    "main/crates/directory",
+    "main/crates/utils",
+    "main/crates/maybe-async",
+    "main/crates/install",
+    "main/tests",
 ]
 
 [profile.dev]
@@ -120,19 +91,3 @@ debug-assertions = false
 overflow-checks = false
 rpath = false
 
-[package.metadata.deb]
-name = "stalwart-jmap"
-maintainer = "Stalwart Labs Ltd. <hello@stalw.art>"
-copyright = "2022, Stalwart Labs Ltd. <hello@stalw.art>"
-depends = "$auto"
-section = "mail"
-license-file = ["LICENSE"]
-maintainer-scripts = "resources/scripts-deb"
-assets = [
-    ["target/release/jmap-server", "usr/bin/stalwart-jmap", "755"],
-    ["resources/config/config.yml", "etc/stalwart-jmap/", "600"],
-    ["resources/systemd/stalwart-jmap.service", "lib/systemd/system/", "644"],
-]
-conf-files = [
-    "/etc/stalwart-jmap/config.yml"
-]
