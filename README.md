@@ -42,7 +42,7 @@ Install Stalwart JMAP Server on your server by following the instructions for yo
 - [Windows](https://stalw.art/docs/install/windows)
 - [Docker](https://stalw.art/docs/install/docker)
 
-All documentation is available at [stalw.art/docs](https://stalw.art/docs).
+All documentation is available at [stalw.art/docs](https://stalw.art/docs/get-started).
 
 > **Note**
 > If you need a more comprehensive solution that includes support for IMAP (Internet Message Access Protocol), you should consider installing the [Stalwart Mail Server](https://github.com/stalwartlabs/mail-server) instead.
