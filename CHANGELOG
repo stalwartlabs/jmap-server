@@ -1,6 +1,5 @@
 stalwart-jmap v0.3.1
 ================================
-- Added: Match IP address type using /0 mask (#16).
 - Fix: Support for OpenLDAP password hashing schemes between curly brackets (#8). 
 - Fix: Add CA certificates to Docker runtime (#5).
 

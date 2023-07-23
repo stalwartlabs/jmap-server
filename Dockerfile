@@ -1,11 +1,17 @@
 FROM debian:bullseye-slim 
 
-RUN apt-get update -y && apt-get install -yq ca-certificates curl tar
+RUN apt-get update -y && apt-get install -yq ca-certificates curl
 
 COPY main/resources/docker/configure.sh /usr/local/bin/configure.sh
 COPY main/resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+RUN sed -i -e 's/__C__/jmap/g' /usr/local/bin/configure.sh && \
+    sed -i -e 's/__R__/jmap-server/g' /usr/local/bin/configure.sh && \
+    sed -i -e 's/__N__/jmap/g' /usr/local/bin/configure.sh
+
 RUN chmod a+rx /usr/local/bin/*.sh
+
+RUN /usr/local/bin/configure.sh --download
 
 RUN useradd stalwart-mail -s /sbin/nologin -M
 RUN mkdir -p /opt/stalwart-mail
