@@ -1,0 +1,65 @@
+# Change Log
+
+All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
+
+## [0.3.2] - 2023-07-28
+
+### Added
+- Sender and recipient address rewriting using regular expressions and sieve scripts.
+- Subaddressing and catch-all addresses using regular expressions (#10).
+- Dynamic variables in SMTP rules.
+ 
+### Changed
+- Added CLI to Docker container (#19).
+ 
+### Fixed
+- Workaround for a bug in `sqlx` that caused SQL time-outs (#15).
+- Support for ED25519 certificates in PEM files (#20). 
+- Better handling of concurrent IMAP UID map modifications (#17).
+- LDAP domain lookups from SMTP rules.
+
+## [0.3.1] - 2023-07-22
+
+### Added
+- Milter filter support.
+- Match IP address type using /0 mask (#16).
+ 
+### Changed
+ 
+### Fixed
+- Support for OpenLDAP password hashing schemes between curly brackets (#8). 
+- Add CA certificates to Docker runtime (#5).
+
+## [0.3.0] - 2023-07-16
+
+### Added
+- **LDAP** and **SQL** authentication.
+- **subaddressing** and **catch-all** addresses.
+- **S3-compatible** storage.
+
+### Changed
+- Merged the `stalwart-jmap`, `stalwart-imap` and `stalwart-smtp` repositories into
+  `stalwart-mail`.
+- Removed clustering module and replaced it with a **FoundationDB** backend option.
+- Integrated Stalwart SMTP into Stalwart JMAP.
+- Rewritten JMAP protocol parser.
+- Rewritten store backend.
+- Rewritten IMAP server to have direct access to the message store (no more IMAP proxy).
+- Replaced `actix` with `hyper`.
+ 
+### Fixed
+
+## [0.2.0] - 2022-10-31
+
+### Added
+- JMAP for Sieve support.
+
+### Changed
+ 
+### Fixed
+- Faster parsing of e-mail messages.
+
+## [0.1.0] - 2022-09-17
+
+Initial release.
+
