@@ -7,7 +7,7 @@ COPY main/resources/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN sed -i -e 's/__C__/jmap/g' /usr/local/bin/configure.sh && \
     sed -i -e 's/__R__/jmap-server/g' /usr/local/bin/configure.sh && \
-    sed -i -e 's/__N__/jmap/g' /usr/local/bin/configure.sh
+    sed -i -e 's/__N__/jmap-sqlite/g' /usr/local/bin/configure.sh
 
 RUN chmod a+rx /usr/local/bin/*.sh
 
