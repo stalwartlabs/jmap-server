@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "imap"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "ahash 0.8.3",
  "dashmap",
@@ -2333,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "jmap"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4501,7 +4501,7 @@ checksum = "62bb4feee49fdd9f707ef802e22365a35de4b7b299de4763d44bfea899442ff9"
 
 [[package]]
 name = "smtp"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "ahash 0.8.3",
  "blake3",
@@ -4824,7 +4824,7 @@ dependencies = [
 
 [[package]]
 name = "stalwart-install"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "base64 0.21.2",
  "clap",
@@ -4844,7 +4844,7 @@ dependencies = [
 
 [[package]]
 name = "stalwart-jmap"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "directory",
  "jemallocator",
