@@ -867,6 +867,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28c122c3980598d243d63d9a704629a2d748d101f278052ff068be5a4423ab6f"
 
 [[package]]
+name = "const_panic"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6051f239ecec86fde3410901ab7860d458d160371533842974fc61f96d15879b"
+
+[[package]]
 name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2168,7 +2174,7 @@ dependencies = [
 
 [[package]]
 name = "imap"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "ahash 0.8.3",
  "dashmap",
@@ -2333,7 +2339,7 @@ dependencies = [
 
 [[package]]
 name = "jmap"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2446,18 +2452,23 @@ dependencies = [
 
 [[package]]
 name = "konst"
-version = "0.2.19"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330f0e13e6483b8c34885f7e6c9f19b1a7bd449c673fbb948a51c99d66ef74f4"
+checksum = "030400e39b2dff8beaa55986a17e0014ad657f569ca92426aafcb5e8e71faee7"
 dependencies = [
- "konst_macro_rules",
+ "const_panic",
+ "konst_kernel",
+ "typewit",
 ]
 
 [[package]]
-name = "konst_macro_rules"
-version = "0.2.19"
+name = "konst_kernel"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
+checksum = "3376133edc39f027d551eb77b077c2865a0ef252b2e7d0dd6b6dc303db95d8b5"
+dependencies = [
+ "typewit",
+]
 
 [[package]]
 name = "lazy_static"
@@ -3694,9 +3705,9 @@ dependencies = [
 
 [[package]]
 name = "rasn"
-version = "0.8.2"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b8d6d2a0e8ed2c702de8b7bcc6c867faa8fe662d5fa87d6dbcae945fe276004"
+checksum = "fbe5ce12835340cdd47a8abf36aabc02ce2d2a1d88e29d6c5126b5e7bf95eb53"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -3716,9 +3727,9 @@ dependencies = [
 
 [[package]]
 name = "rasn-cms"
-version = "0.8.2"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a7d66ec2276b9a8cee3bf3dc2d051895f009f1bffabd114871d44d3b215702b"
+checksum = "8ae05ee5eb8b58bcbbb7d5d28270281b9aa305b9a6aa271cac54f3a967f11fa2"
 dependencies = [
  "rasn",
  "rasn-pkix",
@@ -3726,9 +3737,9 @@ dependencies = [
 
 [[package]]
 name = "rasn-derive"
-version = "0.8.2"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52573d02ccf5e01c7d42b6009365728046a58202ec4001724b034815c9c35d3f"
+checksum = "43c8ad6b5a6cd2f18516cde588b72797c56b884f0bd2dfdd82eb392781b85507"
 dependencies = [
  "either",
  "itertools",
@@ -3741,9 +3752,9 @@ dependencies = [
 
 [[package]]
 name = "rasn-pkix"
-version = "0.8.2"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95ff08da0c6502e4d4e961450e3d291f47c2e2896b788436f294e5cacef57dc1"
+checksum = "57b82b75a434efa7dbb6ff898c9504586e3adffa9e445336edd9c0431c27b4c2"
 dependencies = [
  "rasn",
 ]
@@ -4501,7 +4512,7 @@ checksum = "62bb4feee49fdd9f707ef802e22365a35de4b7b299de4763d44bfea899442ff9"
 
 [[package]]
 name = "smtp"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "ahash 0.8.3",
  "blake3",
@@ -4824,7 +4835,7 @@ dependencies = [
 
 [[package]]
 name = "stalwart-install"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "base64 0.21.2",
  "clap",
@@ -4844,7 +4855,7 @@ dependencies = [
 
 [[package]]
 name = "stalwart-jmap"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "directory",
  "jemallocator",
@@ -5540,6 +5551,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 
 [[package]]
+name = "typewit"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e5cee357cc77d1e02f10a3e6c4e13b8462fafab05998b62d331b7d9485589ff"
+
+[[package]]
 name = "unicase"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5634,7 +5651,7 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "utils"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "ahash 0.8.3",
  "dashmap",
