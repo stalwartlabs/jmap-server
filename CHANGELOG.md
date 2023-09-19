@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.3.8] - 2023-09-19
+
+## Added
+- Journal logging support
+
+### Changed
+- Replaced `rpgp` with `sequoia-pgp` due to rpgp bug.
+
+### Fixed
+
 ## [0.3.7] - 2023-09-05
 
 ## Added
