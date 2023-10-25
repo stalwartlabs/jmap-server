@@ -68,7 +68,7 @@ async fn main() -> std::io::Result<()> {
         .failed("Invalid configuration file");
 
     // Spawn servers
-    let shutdown_tx = servers.spawn(|server, shutdown_rx| {
+    let (shutdown_tx, shutdown_rx) = servers.spawn(|server, shutdown_rx| {
         match &server.protocol {
             ServerProtocol::Smtp | ServerProtocol::Lmtp => {
                 server.spawn(SmtpSessionManager::new(smtp.clone()), shutdown_rx)
@@ -91,6 +91,11 @@ async fn main() -> std::io::Result<()> {
             }
         };
     });
+
+    // Spawn scheduled directory queries
+    for schedule in directory.schedules {
+        schedule.spawn(shutdown_rx.clone());
+    }
 
     // Wait for shutdown signal
     wait_for_shutdown(&format!(
