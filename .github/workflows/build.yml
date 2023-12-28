@@ -90,14 +90,14 @@ jobs:
           cargo build --target=${{ matrix.target }} --no-default-features --features foundationdb --release
           cd target/${{ matrix.target }}/release && tar czvf ../../../stalwart-jmap-foundationdb-${{ matrix.target }}.tar.gz stalwart-jmap && cd -
           cargo build --target=${{ matrix.target }} --release
-          cd target/${{ matrix.target }}/release && tar czvf ../../../stalwart-jmap-sqlite-${{ matrix.target }}.tar.gz stalwart-jmap && cd -
+          cd target/${{ matrix.target }}/release && tar czvf ../../../stalwart-jmap-${{ matrix.target }}.tar.gz stalwart-jmap && cd -
 
       - name: Building binary (Windows version)
         if: ${{ contains(matrix.host_os, 'windows') }}
         run: |
           cargo build --target=${{ matrix.target }} --release
           cd target/${{ matrix.target }}/release
-          7z a ../../../stalwart-jmap-sqlite-${{ matrix.target }}.zip stalwart-jmap.exe
+          7z a ../../../stalwart-jmap-${{ matrix.target }}.zip stalwart-jmap.exe
           cd -
 
       - name: Publish Release
@@ -158,7 +158,7 @@ jobs:
             export PATH="$HOME/.cargo/bin:$PATH"
             cargo build --target=${target} --release
             cd target/${target}/release
-            tar czvf /artifacts/stalwart-jmap-sqlite-${target}.tar.gz stalwart-jmap
+            tar czvf /artifacts/stalwart-jmap-${target}.tar.gz stalwart-jmap
             cd -
 
       - name: Move packages
