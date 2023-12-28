@@ -35,8 +35,7 @@ body:
       options:
         - v0.5.x
         - v0.4.x
-        - v0.3.x
-        - v0.2.0 or lower
+        - v0.3.0 or lower
     validations:
       required: true
   - type: dropdown

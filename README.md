@@ -1,10 +1,40 @@
-# Stalwart JMAP Server
+<h2 align="center">
+    <a href="https://stalw.art">
+    <img src="https://stalw.art/home/apple-touch-icon.png" height="60">
+    </a>
+    <br>
+    Stalwart JMAP Server
+</h1>
 
-[![Build](https://github.com/stalwartlabs/jmap-server/actions/workflows/build.yml/badge.svg)](https://github.com/stalwartlabs/jmap-server/actions/workflows/build.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![](https://img.shields.io/discord/923615863037390889?label=Chat)](https://discord.gg/jtgtCNj66U)
-[![](https://img.shields.io/twitter/follow/stalwartlabs)](https://twitter.com/stalwartlabs)
-[![](https://img.shields.io/mastodon/follow/109929667531941122)](https://mastodon.social/@stalwartlabs)
+<p align="center">
+  <i align="center">Secure & Modern JMAP Server</i> 🛡️
+</p>
+
+<h4 align="center">
+  <a href="https://github.com/stalwartlabs/mail-server/actions/workflows/build.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/stalwartlabs/mail-server/build.yml?style=flat-square" alt="continuous integration">
+  </a>
+  <a href="https://www.gnu.org/licenses/agpl-3.0">
+    <img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?label=license&style=flat-square" alt="License: AGPL v3">
+  </a>
+  <a href="https://stalw.art/docs/get-started/">
+    <img src="https://img.shields.io/badge/read_the-docs-red?style=flat-square" alt="Documentation">
+  </a>
+  <br>
+  <a href="https://mastodon.social/@stalwartlabs">
+    <img src="https://img.shields.io/mastodon/follow/109929667531941122?style=flat-square&logo=mastodon&color=%236364ff" alt="Mastodon">
+  </a>
+  <a href="https://twitter.com/stalwartlabs">
+    <img src="https://img.shields.io/twitter/follow/stalwartlabs?style=flat-square&logo=twitter" alt="Twitter">
+  </a>
+  <br>
+  <a href="https://discord.gg/jtgtCNj66U">
+    <img src="https://img.shields.io/discord/923615863037390889?label=discord&style=flat-square" alt="Discord">
+  </a>
+  <a href="https://matrix.to/#/#stalwart:matrix.org">
+    <img src="https://img.shields.io/matrix/stalwartmail%3Amatrix.org?label=matrix&style=flat-square" alt="Matrix">
+  </a>
+</h4>
 
 **Stalwart JMAP** is an open-source JSON Meta Application Protocol server designed to be secure, fast, robust and scalable.
 JMAP is a modern protocol for synchronising data such as mail, calendars, or contacts that makes much more efficient use of network resources.
@@ -16,24 +46,22 @@ Key features:
   - JMAP Mail ([RFC 8621](https://datatracker.ietf.org/doc/html/rfc8621))
   - JMAP over WebSocket ([RFC 8887](https://datatracker.ietf.org/doc/html/rfc8887))
   - JMAP for Sieve Scripts ([DRAFT-SIEVE-13](https://www.ietf.org/archive/id/draft-ietf-jmap-sieve-13.html)).
-- **Flexible**:
-  - **LDAP** directory and **SQL** database authentication.
+- **Flexible and scalable**:
+  - Pluggable storage backends with **RocksDB**, **FoundationDB**, **PostgreSQL**, **mySQL**, **SQLite**, **S3-Compatible**, **Redis** and **ElasticSearch** support.
+  - **Internal**, **LDAP** and **SQL** database authentication.
   - Built-in [SMTP](https://github.com/stalwartlabs/smtp-server) server for local delivery and JMAP Email Submissions.
   - Full-text search available in 17 languages.
   - Disk quotas.
   - Sieve scripting language with support for all [registered extensions](https://www.iana.org/assignments/sieve-extensions/sieve-extensions.xhtml).
   - Email aliases, mailing lists, subaddressing and catch-all addresses support.
   - Integration with **OpenTelemetry** to enable monitoring, tracing, and performance analysis.
-- **Secure**:
+- **Secure and robust**:
   - Encryption at rest with **S/MIME** or **OpenPGP**.
   - Built-in Spam and Phishing filter.
   - OAuth 2.0 [authorization code](https://www.rfc-editor.org/rfc/rfc8628) and [device authorization](https://www.rfc-editor.org/rfc/rfc8628) flows.
   - Access Control Lists (ACLs).
   - Rate limiting.
-- **Robust and scalable**:
-  - **FoundationDB** or **SQLite** database backends.
-  - **S3-compatible** blob storage support.
-  - Memory safe (thanks to Rust).
+ - Memory safe (thanks to Rust).
 
 ## Get Started
 
