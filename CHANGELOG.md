@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file. This projec
 
 ## [0.5.0] - 2023-12-27
 
-This version requires a database migration and introduces breaking changes in the configuration file. Please read the [UPGRADING.md](UPGRADING.md) file for more information.
+This version requires a database migration and introduces breaking changes in the configuration file. Please read the [UPGRADING.md](https://github.com/stalwartlabs/mail-server/blob/main/UPGRADING.md) file for more information.
 
 ## Added
 - Performance enhancements:
