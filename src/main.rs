@@ -42,7 +42,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let config = Config::init();
+    let mut config = Config::init();
     // Enable tracing
     let _tracer = enable_tracing(
         &config,
@@ -54,20 +54,28 @@ async fn main() -> std::io::Result<()> {
     .failed("Failed to enable tracing");
 
     // Bind ports and drop privileges
-    let servers = config.parse_servers().failed("Invalid configuration");
+    let mut servers = config.parse_servers().failed("Invalid configuration");
     servers.bind(&config);
 
-    // Parse stores and directories
+    // Parse stores
     let stores = config.parse_stores().await.failed("Invalid configuration");
+    let data_store = stores
+        .get_store(&config, "storage.data")
+        .failed("Invalid configuration");
+
+    // Update configuration
+    config.update(data_store.config_list("").await.failed("Storage error"));
+
+    // Parse directories
     let directory = config
-        .parse_directory(&stores, config.value("jmap.store.data"))
+        .parse_directory(&stores, data_store)
         .await
         .failed("Invalid configuration");
     let schedulers = config
         .parse_purge_schedules(
             &stores,
-            config.value("jmap.store.data"),
-            config.value("jmap.store.blob"),
+            config.value("storage.data"),
+            config.value("storage.blob"),
         )
         .await
         .failed("Invalid configuration");
@@ -77,9 +85,16 @@ async fn main() -> std::io::Result<()> {
     let smtp = SMTP::init(&config, &servers, &stores, &directory, delivery_tx)
         .await
         .failed("Invalid configuration file");
-    let jmap = JMAP::init(&config, &stores, &directory, delivery_rx, smtp.clone())
-        .await
-        .failed("Invalid configuration file");
+    let jmap = JMAP::init(
+        &config,
+        &stores,
+        &directory,
+        &mut servers,
+        delivery_rx,
+        smtp.clone(),
+    )
+    .await
+    .failed("Invalid configuration file");
 
     // Spawn servers
     let (shutdown_tx, shutdown_rx) = servers.spawn(|server, shutdown_rx| {
